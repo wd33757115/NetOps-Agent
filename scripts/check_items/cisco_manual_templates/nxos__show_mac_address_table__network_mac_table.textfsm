@@ -1,0 +1,10 @@
+Value vlan_id (\S+)
+Value mac_address ([0-9a-fA-F.]+)
+Value entry_type (\S+)
+Value age (\S+)
+Value secure ([TF])
+Value notify ([TF])
+Value interface (.+?)
+
+Start
+  ^\s*[*+GCOR~]*\s+${vlan_id}\s+${mac_address}\s+${entry_type}\s+${age}\s+${secure}\s+${notify}\s+${interface}\s*$$ -> Record

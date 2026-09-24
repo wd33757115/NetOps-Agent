@@ -23,7 +23,6 @@ from src.core.check_items.command_adapter import (
     execute_adapter,
     is_direct_projection_adapter,
 )
-from src.core.observation import ObservationContractRepository
 from src.core.observation.record_set_relations import (
     materialize_record_set_references,
 )
@@ -57,13 +56,6 @@ class LegacyObservationRuntimeRetiredError(ValueError):
     """Raised when production attempts to use the retired V1 semantic bridge."""
 
 
-def _legacy_contract_runtime_retired(mode: str) -> bool:
-    """Keep legacy contracts readable for replay, never as post-cutover runtime."""
-
-    return bool(
-        str(mode).strip().casefold() == "production"
-        and get_settings().ADAPTER_PROJECTION_CUTOVER_ENFORCED
-    )
 
 
 def _adapter_record_sets(structured: Any) -> dict[str, list[dict[str, Any]]]:
@@ -85,68 +77,6 @@ def _adapter_record_sets(structured: Any) -> dict[str, list[dict[str, Any]]]:
     return {"default": _records(structured)}
 
 
-def _adapter_contract(check_item: CheckItemDefinition) -> dict[str, Any]:
-    """Compile one check-item definition into the legacy normalizer shape."""
-
-    canonical = dict(check_item.canonical_contract or {})
-    observations = [
-        dict(item)
-        for item in canonical.get("observations") or []
-        if isinstance(item, dict)
-    ]
-    state_semantics: dict[str, dict[str, Any]] = {}
-    validators: dict[str, dict[str, Any]] = {}
-    for observation in observations:
-        field = str(observation.get("canonical_field") or "").strip()
-        if not field:
-            continue
-        semantics = {
-            key: value
-            for key, value in observation.items()
-            if key not in {"canonical_field", "required", "mapping_guidance"}
-        }
-        explicit_thresholds = observation.get("threshold_references")
-        if isinstance(explicit_thresholds, dict):
-            semantics["threshold_references"] = dict(explicit_thresholds)
-        state_semantics[field] = semantics
-        semantic_type = str(observation.get("semantic_type") or "").strip()
-        value_type = str(observation.get("value_type") or "").strip()
-        if value_type:
-            validators[field] = {"type": value_type}
-        elif semantic_type in {"gauge", "counter", "number", "percentage"}:
-            validators[field] = {"type": "number"}
-
-    primary_keys = [
-        str(item)
-        for item in (
-            canonical.get("primary_keys")
-            or canonical.get("identity_dimensions")
-            or []
-        )
-        if str(item) and str(item) != "device_id"
-    ]
-    observable_fields = set(state_semantics)
-    known_fields = set(dict(canonical.get("parser_field_vocabulary") or {}))
-    ignored_fields = sorted(known_fields - observable_fields - set(primary_keys))
-    return {
-        "contract_id": check_item.version_id,
-        "contract_version": check_item.version,
-        "contract_sha256": check_item.digest,
-        "schema_id": check_item.version_id,
-        "source_type": "cli",
-        "entity_type": str(canonical.get("entity_type") or check_item.id),
-        "canonical_entity_type": str(
-            canonical.get("canonical_entity_type")
-            or canonical.get("entity_type")
-            or check_item.id
-        ),
-        "primary_keys": primary_keys,
-        "entity_identity_fields": primary_keys,
-        "state_semantics": state_semantics,
-        "validators": validators,
-        "ignore_fields": ignored_fields,
-        "record_sets": [],
-    }
 
 
 def _adapter_projection(
@@ -179,11 +109,8 @@ def _adapter_projection(
 
     items_by_id = {item.id: item for item in check_items}
     direct_projection = is_direct_projection_adapter(implementation.adapter_spec)
-    if not direct_projection and _legacy_contract_runtime_retired(mode):
-        raise LegacyObservationRuntimeRetiredError(
-            "legacy CommandAdapter/ObservationContract projection is retired "
-            "for production; use a pinned command-adapter/v2 projection"
-        )
+    if not direct_projection:
+        raise LegacyObservationRuntimeRetiredError("旧语义投影已退役，请使用检查项 V2 命令适配器")
     batches = execute_adapter(
         implementation.adapter_spec,
         record_sets=_adapter_record_sets(snapshot.get("structured_json")),
@@ -217,39 +144,6 @@ def _adapter_projection(
             command_adapter_version_id=implementation.version_id,
         )
         return _reconcile_snapshot_observations(observations), batches
-
-    # Historical v1 adapters retain the legacy contract bridge only for replay.
-    # New production adapters are always handled by the direct branch above.
-    observations: list[StateObservation] = []
-    for batch in batches:
-        if not batch.records:
-            continue
-        check_item = items_by_id[batch.check_item_id]
-        child_snapshot = dict(snapshot)
-        child_snapshot["structured_json"] = list(batch.records)
-        projected = observations_from_snapshot(
-            child_snapshot,
-            mode=mode,
-            source=source,
-            dataset_id=dataset_id,
-            _contract_override=_adapter_contract(check_item),
-        )
-        for observation in projected:
-            observations.append(
-                replace(
-                    observation,
-                    metadata={
-                        **dict(observation.metadata or {}),
-                        "check_item_id": check_item.id,
-                        "check_item_version_id": check_item.version_id,
-                        "command_adapter_id": implementation.id,
-                        "command_adapter_version_id": implementation.version_id,
-                        "observation_batch_quality": batch.quality_status,
-                    },
-                )
-            )
-    return _reconcile_snapshot_observations(observations), batches
-
 
 def _records(value: Any) -> list[dict[str, Any]]:
     if value is None:
@@ -322,110 +216,8 @@ def _digest(parts: list[Any]) -> str:
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
-def _template_contract(
-    template_id: str | None,
-    *,
-    contract_version: int | None = None,
-) -> dict[str, Any]:
-    if not template_id:
-        return {}
-    contract_repository = ObservationContractRepository()
-    contract = (
-        contract_repository.get_validation_dict(
-            source_type="cli",
-            schema_id=template_id,
-            version=int(contract_version),
-        )
-        if contract_version is not None
-        else contract_repository.get_active_validation_dict(
-            source_type="cli",
-            schema_id=template_id,
-        )
-    )
-    if contract:
-        return contract
-    template = ParserTemplateRepository().get_template(template_id)
-    if not template:
-        if contract_version is not None:
-            raise ObservationContractVersionError(
-                f"ObservationContract not found: cli:{template_id} v{contract_version}"
-            )
-        return {}
-    if (
-        template.status == "active"
-        and not get_settings().ADAPTER_PROJECTION_CUTOVER_ENFORCED
-    ):
-        synced = ObservationContractRepository().upsert_from_parser_template(
-            template_id,
-            status="active",
-        )
-        if synced:
-            synced_validation = synced.to_validation_dict()
-            if contract_version is None or int(
-                synced_validation.get("contract_version") or 0
-            ) == int(contract_version):
-                return synced_validation
-    if contract_version is not None:
-        raise ObservationContractVersionError(
-            f"ObservationContract not found: cli:{template_id} v{contract_version}"
-        )
-    validation = dict(template.validation_json or {})
-    validation.setdefault("entity_type", template.category)
-    validation.setdefault("contract_version", template.contract_version)
-    validation.setdefault("schema_id", template.id)
-    validation.setdefault("source_type", "cli")
-    return validation
 
 
-def _frozen_snapshot_contract(
-    snapshot: dict[str, Any],
-) -> dict[str, Any] | None:
-    metadata = dict(snapshot.get("metadata_json") or {})
-    refs = [
-        dict(item)
-        for item in metadata.get("observation_contract_refs") or []
-        if isinstance(item, dict)
-    ]
-    if not refs:
-        return None
-    template_id = str(snapshot.get("parser_template_id") or "").strip()
-    matches = [
-        item
-        for item in refs
-        if str(item.get("schema_id") or "").strip() == template_id
-    ]
-    identities = {
-        (
-            str(item.get("contract_id") or "").strip(),
-            str(item.get("digest") or "").strip(),
-        )
-        for item in matches
-    }
-    if len(identities) != 1:
-        raise ObservationContractVersionError(
-            "frozen RuntimeBundle does not identify exactly one "
-            f"ObservationContract for Parser {template_id or '<missing>'}"
-        )
-    contract_id, expected_digest = next(iter(identities))
-    if not contract_id or len(expected_digest) != 64:
-        raise ObservationContractVersionError(
-            "frozen ObservationContract identity is incomplete"
-        )
-    contract = ObservationContractRepository().get_by_id(contract_id)
-    if contract is None:
-        raise ObservationContractVersionError(
-            f"frozen ObservationContract not found: {contract_id}"
-        )
-    validation = contract.to_validation_dict()
-    if (
-        str(validation.get("schema_id") or "") != template_id
-        or str(validation.get("contract_sha256") or "")
-        != expected_digest
-    ):
-        raise ObservationContractVersionError(
-            "frozen ObservationContract digest or Parser binding changed"
-        )
-    return validation
 
 
 def _looks_like_header_artifact(
@@ -523,36 +315,8 @@ def observations_from_snapshot(
             )
             if adapter_projection is not None:
                 return adapter_projection[0]
-            if _legacy_contract_runtime_retired(mode):
-                raise LegacyObservationRuntimeRetiredError(
-                    "ObservationContract runtime projection is retired for "
-                    "production; use a pinned command-adapter/v2 projection"
-                )
-        frozen_contract_version = (
-            int(observation_contract_version)
-            if observation_contract_version is not None
-            else None
-        )
-        frozen_contract = (
-            None
-            if _contract_override is not None
-            or frozen_contract_version is not None
-            else _frozen_snapshot_contract(snapshot)
-        )
-        contract = (
-            dict(_contract_override)
-            if _contract_override is not None
-            else dict(frozen_contract)
-            if frozen_contract is not None
-            else (
-                _template_contract(
-                    snapshot.get("parser_template_id"),
-                    contract_version=frozen_contract_version,
-                )
-                if frozen_contract_version is not None
-                else _template_contract(snapshot.get("parser_template_id"))
-            )
-        )
+            raise LegacyObservationRuntimeRetiredError("缺少检查项 command-adapter/v2 命令适配器，无法生成标准数据")
+        contract = dict(_contract_override)
         record_sets = [
             dict(item)
             for item in contract.get("record_sets") or ()
@@ -601,7 +365,7 @@ def observations_from_snapshot(
                         mode=mode,
                         source=source,
                         dataset_id=dataset_id,
-                        observation_contract_version=frozen_contract_version,
+
                         _contract_override=child_contract,
                         _record_set_name=name,
                     )
@@ -1390,6 +1154,7 @@ def normalize_run(
     *,
     update_current_state: bool | None = None,
     device_ids: list[str] | None = None,
+    include_observations: bool = True,
 ) -> dict[str, Any]:
     repository = StateRepository()
     from src.core.patrol.repository import (
@@ -1446,6 +1211,7 @@ def normalize_run(
             device_ids=device_ids,
             update_run_status=updates_run_status,
             heartbeat=heartbeat,
+            include_observations=include_observations,
         )
         heartbeat.stop()
         patrol_repository.complete_analysis_attempt(
@@ -1490,6 +1256,7 @@ def _normalize_run_impl(
     device_ids: list[str] | None,
     update_run_status: bool = True,
     heartbeat: Any | None = None,
+    include_observations: bool = True,
 ) -> dict[str, Any]:
     repository = StateRepository()
     from src.core.patrol.repository import PatrolRepository
@@ -1497,6 +1264,8 @@ def _normalize_run_impl(
     results: list[dict[str, Any]] = []
     evidence_only_observations: list[StateObservation] = []
     current_state_observations: list[StateObservation] = []
+    created = 0
+    current_updates = 0
     patrol_repository = PatrolRepository()
     for index, snapshot_id in enumerate(snapshot_ids):
         if heartbeat is not None:
@@ -1506,6 +1275,8 @@ def _normalize_run_impl(
             snapshot_id,
             update_current_state=update_current_state,
         )
+        if not include_observations:
+            snapshot_result.pop("observations", None)
         results.append(snapshot_result)
         update_status = getattr(
             patrol_repository,
@@ -1534,7 +1305,18 @@ def _normalize_run_impl(
                 else None,
             )
         if observations:
-            if snapshot_result["success"] and update_current:
+            if not include_observations:
+                # Offline tasks consume only counts. Flush each command's facts
+                # instead of keeping every device's observations in memory.
+                count, updates = repository.save_observations(
+                    observations,
+                    update_current_state=bool(snapshot_result["success"] and update_current),
+                )
+                created += count
+                current_updates += updates
+                snapshot_result["created_count"] = count
+                snapshot_result["current_state_updates"] = updates
+            elif snapshot_result["success"] and update_current:
                 current_state_observations.extend(observations)
             else:
                 evidence_only_observations.extend(observations)
@@ -1545,8 +1327,6 @@ def _normalize_run_impl(
                 failure_code=str(snapshot_result.get("failure_code") or "normalize_failed"),
                 error=str(snapshot_result.get("error") or "normalization failed"),
             )
-    created = 0
-    current_updates = 0
     if evidence_only_observations:
         created, _ = repository.save_observations(
             evidence_only_observations,
@@ -1563,7 +1343,7 @@ def _normalize_run_impl(
         for snapshot_result in results:
             if (
                 not snapshot_result["success"]
-                and not snapshot_result.get("observations")
+                and not snapshot_result.get("observation_count")
             ):
                 continue
             count = int(snapshot_result["observation_count"])
@@ -1654,5 +1434,6 @@ def normalize_state_from_params(params: dict[str, Any]) -> dict[str, Any]:
             str(params["run_id"]),
             update_current_state=params.get("update_current_state"),
             device_ids=params.get("device_ids"),
+            include_observations=params.get("include_observations", True),
         )
     raise ValueError("provide snapshot_id or run_id")

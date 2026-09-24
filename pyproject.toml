@@ -88,7 +88,6 @@ structlog = ">=24.0.*"
 prometheus-client = ">=0.20.*"
 alembic = ">=1.13.*"
 textfsm = "2.1.0"
-ntc-templates = "9.1.0"
 
 [tool.poetry.group.ai]
 optional = true

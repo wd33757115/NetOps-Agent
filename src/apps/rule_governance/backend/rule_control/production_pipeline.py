@@ -97,6 +97,7 @@ class RuleAssetProductionPipelineService:
             )
             job_status = str(job.status)
             preview = dict(job.preview_json or {})
+            preparation = dict((job.result_json or {}).get("preparation") or {})
 
         command_units = RuleAssetCommandUnitService().summary(offline_job_id)
         command_count = int(command_units.get("total") or 0)
@@ -161,14 +162,17 @@ class RuleAssetProductionPipelineService:
             ),
             _step(
                 "ingest",
-                "写入样本证据与 Snapshot",
+                "分割与脱敏 CLI 输出",
                 import_status,
-                detail=f"已形成 {len(run_ids)} 个样本 Run、{len(snapshot_rows)} 条 Snapshot",
+                detail=(f"已分割并脱敏 {preparation.get('sample_count', 0)} 条 CLI 输出"
+                        if preparation.get("status") == "completed"
+                        else f"已分割 {len(snapshot_rows)} 条 CLI 输出；旧任务的脱敏状态请在样本中核对"
+                        if import_status == "completed" else "按命令分割输出并在本地脱敏，完成后进入待归类检查项。"),
                 counts={"runs": len(run_ids), "snapshots": len(snapshot_rows)},
             ),
             _step(
                 "catalog",
-                "命令进入检查项目录",
+                "待归类检查项",
                 catalog_status,
                 detail=catalog_detail,
                 counts={"commands": command_count, **dict(parse_counts)},

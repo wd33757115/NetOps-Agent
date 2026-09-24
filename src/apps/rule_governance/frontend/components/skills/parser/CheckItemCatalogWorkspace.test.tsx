@@ -1,6 +1,7 @@
 import React from 'react'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { message } from 'antd'
 import { QueryClient, QueryClientProvider } from 'react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -232,7 +233,10 @@ describe('CheckItemCatalogWorkspace', () => {
     })
   })
 
-  afterEach(() => vi.restoreAllMocks())
+  afterEach(() => {
+    act(() => message.destroy())
+    vi.restoreAllMocks()
+  })
 
   it('maintains device compatibility and command adapters in one flow', async () => {
     renderWorkspace()

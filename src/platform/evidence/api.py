@@ -136,8 +136,14 @@ def build_workspace_router(
         if not job_id:
             return
         try:
-            OfflinePatrolJobService().get_job(
-                job_id, owner_id=(None if purpose == "offline_patrol" and "/current-authority" in request.url.path else user.user_id), is_admin=user.is_admin(), purpose=purpose,
+            OfflinePatrolJobService().check_access(
+                job_id,
+                owner_id=(
+                    None if purpose == "offline_patrol"
+                    and "/current-authority" in request.url.path else user.user_id
+                ),
+                is_admin=user.is_admin(),
+                purpose=purpose,
             )
         except KeyError as exc:
             raise HTTPException(404, str(exc)) from exc
@@ -231,10 +237,13 @@ def build_workspace_router(
         analysis_attempt_id: str | None = None,
         user: CurrentUser = Depends(read_user),
     ):
-        _detail_or_http(job_id, user)
+        detail = _detail_or_http(job_id, user)
         try:
+            if detail.get("status") != "completed":
+                raise ValueError("任务完成后才能生成分析摘要")
             return OfflinePatrolJobService().build_leadership_report_data(
                 job_id,
+                detail=detail,
                 analysis_attempt_id=analysis_attempt_id,
             )
         except ValueError as exc:

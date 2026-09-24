@@ -27,6 +27,12 @@ export default function CommandAutopilotPanel({ jobId, unitId, associated }: {
   const query = useQuery(key, () => commandAutopilotApi.get(jobId, unitId), {
     refetchInterval: (data) => data && ['queued', 'running', 'paused'].includes(data.status) ? 3000 : false,
     retry: false,
+    onSuccess: () => {
+      // The child may start after the control request returns. Keep its cached
+      // detail in sync with the existing bounded autopilot polling lifecycle.
+      void client.invalidateQueries(['offline-command-asset-unit', jobId, unitId])
+      void client.invalidateQueries('parser-job-inline')
+    },
   })
   const update = () => {
     void client.invalidateQueries(key)
@@ -68,7 +74,9 @@ export default function CommandAutopilotPanel({ jobId, unitId, associated }: {
         </Typography.Text>
         {data.status !== 'idle' && <Steps size="small" current={Math.max(0, stages.findIndex(([id]) => id === data.stage))}
           status={data.status === 'needs_attention' ? 'error' : data.status === 'completed' ? 'finish' : 'process'} items={stages.map(([, title]) => ({ title }))} />}
-        {data.error && <Alert type="warning" showIcon message={data.error} />}
+        {data.error && <Alert type="warning" showIcon message={data.error === "应用已停用"
+          ? "上次 Parser 任务在应用停用或升级时被取消。点击继续自动制作，将保留已有产物并恢复处理。"
+          : data.error} />}
         {data.status === 'paused' && !data.can_edit && <Typography.Text type="secondary">正在结束当前步骤；结束前请勿编辑，后台不会继续下一步。</Typography.Text>}
         {data.outputs.parser?.sample_count != null && <Typography.Text type="secondary">解析已验证 {data.outputs.parser.sample_count} 份正样本</Typography.Text>}
         {data.publish_grant && <Typography.Text type="secondary">自动发布授权：{data.publish_grant.by} · 有效至 {new Date(data.publish_grant.expires_at).toLocaleString()}</Typography.Text>}

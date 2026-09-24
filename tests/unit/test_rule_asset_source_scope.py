@@ -220,7 +220,8 @@ def _cleanup(ids: dict[str, str]) -> None:
         ).delete(synchronize_session=False)
 
 
-def test_completed_verified_scope_is_dispatchable_and_digest_is_stable() -> None:
+def test_completed_verified_scope_is_dispatchable_and_digest_is_stable(monkeypatch) -> None:
+    _confirmed_semantics(monkeypatch)
     ids = _ids()
     _insert_scope(ids)
     try:
@@ -252,7 +253,8 @@ def test_completed_verified_scope_is_dispatchable_and_digest_is_stable() -> None
         _cleanup(ids)
 
 
-def test_source_mutation_between_readiness_and_dispatch_fails_closed() -> None:
+def test_source_mutation_between_readiness_and_dispatch_fails_closed(monkeypatch) -> None:
+    _confirmed_semantics(monkeypatch)
     ids = _ids()
     _insert_scope(ids)
     try:
@@ -295,3 +297,9 @@ def test_non_asset_source_dataset_is_rejected_even_when_sample_is_sanitized() ->
         assert "rule_asset_source_source_job_wrong_purpose" in readiness["blockers"]
     finally:
         _cleanup(ids)
+
+
+def _confirmed_semantics(monkeypatch):
+    # These tests isolate immutable source provenance from the separately tested association gate.
+    from src.apps.rule_governance.backend.parser import repository
+    monkeypatch.setattr(repository, "require_parser_check_item", lambda *args, **kwargs: None)

@@ -53,6 +53,27 @@ OUTPUT_STATUSES = {
 }
 
 
+def _collection_diagnostics(text: str, command: str) -> str:
+    """Comware syslog messages describe past events, not this CLI invocation.
+
+    Keep standalone diagnostics and paging markers visible. Only skip a
+    timestamped log record and its indented message continuation lines.
+    """
+    if not re.fullmatch(r"display logbuffer(?:\s+.*)?", command, re.I):
+        return text
+    lines = []
+    in_record = False
+    for line in text.splitlines():
+        if re.match(r"^%[A-Za-z]{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}:\d+\s+\d{4}\s+\S+\s+[^/\s]+/[0-7]/[^:]+:", line):
+            in_record = True
+            continue
+        if in_record and line[:1].isspace() and not re.match(r"\s*[%^]", line):
+            continue
+        in_record = False
+        lines.append(line)
+    return "\n".join(lines)
+
+
 @dataclass(frozen=True)
 class OutputClassification:
     status: str
@@ -69,6 +90,7 @@ class OutputClassifier:
         profile: dict[str, Any] | None = None,
     ) -> OutputClassification:
         text = str(raw_text or "")
+        diagnostics = _collection_diagnostics(text, str(getattr(decision, "canonical_command", "")))
         profile_policy = dict(profile or {})
         if isinstance(profile_policy.get("policy"), dict):
             profile_policy = dict(profile_policy["policy"])
@@ -78,14 +100,14 @@ class OutputClassifier:
             "unsupported_patterns",
             UNSUPPORTED_PATTERNS,
         ):
-            if re.search(pattern, text, re.IGNORECASE | re.DOTALL):
+            if re.search(pattern, diagnostics, re.IGNORECASE | re.DOTALL):
                 return OutputClassification("unsupported_command", 1.0, pattern)
         for pattern in self._patterns(
             profile_policy,
             "command_error_patterns",
             COMMAND_ERROR_PATTERNS,
         ):
-            if re.search(pattern, text, re.IGNORECASE | re.DOTALL):
+            if re.search(pattern, diagnostics, re.IGNORECASE | re.DOTALL):
                 return OutputClassification("command_error", 1.0, pattern)
         for pattern in self._patterns(
             profile_policy,

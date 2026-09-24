@@ -1,60 +1,5 @@
-import type {
-  ParserChangePolicy,
-  ParserEventRule,
-  ParserObservationContract,
-  ParserRuleGenerationJob,
-} from '@netops/services/api'
-import {
-  buildRuleAssetChainRows,
-  ruleJobApprovalBlockers,
-} from './parserWorkspaceModel'
-
-const contract = (overrides: Partial<ParserObservationContract> = {}) => ({
-  id: 'contract-1',
-  source_type: 'textfsm',
-  schema_id: 'interface-status',
-  entity_type: 'interface_l2',
-  primary_keys_json: ['interface'],
-  required_fields_json: ['interface', 'status'],
-  allow_empty: false,
-  state_semantics_json: {
-    status: { observation_type: 'interface.oper_status' },
-  },
-  version: 1,
-  contract_sha256: 'contract-digest',
-  status: 'active',
-  ...overrides,
-}) as ParserObservationContract
-
-const policy = (overrides: Partial<ParserChangePolicy> = {}) => ({
-  id: 'policy-1',
-  policy_id: 'interface-status-policy',
-  policy_name: 'Interface status',
-  version_id: 'policy-version-1',
-  version: 1,
-  observation_type: 'interface.oper_status',
-  semantic_type: 'enum',
-  compare_mode: 'transition',
-  policy: {},
-  version_status: 'active',
-  status: 'active',
-  digest: 'policy-digest',
-  ...overrides,
-}) as ParserChangePolicy
-
-const eventRule = (overrides: Partial<ParserEventRule> = {}) => ({
-  rule_id: 'interface-down',
-  rule_name: 'Interface down',
-  status: 'active',
-  current_version: 1,
-  version_id: 'rule-version-1',
-  version: 1,
-  event_type: 'InterfaceDown',
-  severity: 'warning',
-  condition: { observation_types: ['interface.oper_status'] },
-  version_status: 'active',
-  ...overrides,
-}) as ParserEventRule
+import type { ParserRuleGenerationJob } from '@netops/services/api'
+import { ruleJobApprovalBlockers } from './parserWorkspaceModel'
 
 const generationJob = (overrides: Partial<ParserRuleGenerationJob> = {}) => ({
   id: 'job-1',
@@ -70,51 +15,6 @@ const generationJob = (overrides: Partial<ParserRuleGenerationJob> = {}) => ({
   ...overrides,
 }) as ParserRuleGenerationJob
 
-describe('buildRuleAssetChainRows', () => {
-  it('marks a complete active asset chain as ready', () => {
-    const rows = buildRuleAssetChainRows([contract()], [policy()], [eventRule()])
-
-    expect(rows).toHaveLength(1)
-    expect(rows[0]).toMatchObject({
-      observationType: 'interface.oper_status',
-      status: 'ready',
-      entityTypes: ['interface_l2'],
-    })
-    expect(rows[0].activeRules).toHaveLength(1)
-  })
-
-  it('does not associate an unscoped event rule by name alone', () => {
-    const rule = eventRule({
-      rule_name: 'interface.oper_status fallback',
-      condition: {},
-    })
-    const [row] = buildRuleAssetChainRows([contract()], [policy()], [rule])
-
-    expect(row.status).toBe('warning')
-    expect(row.rules).toEqual([])
-  })
-
-  it('marks a chain without an active change policy as blocked', () => {
-    const [row] = buildRuleAssetChainRows(
-      [contract()],
-      [policy({ version_status: 'draft', status: 'draft' })],
-      [eventRule()],
-    )
-
-    expect(row.status).toBe('blocked')
-  })
-
-  it('does not treat broad entity scope as observation coverage', () => {
-    const [row] = buildRuleAssetChainRows(
-      [contract()],
-      [policy()],
-      [eventRule({ condition: { entity_types: ['interface_l2'] } })],
-    )
-
-    expect(row.status).toBe('warning')
-    expect(row.rules).toEqual([])
-  })
-})
 
 describe('ruleJobApprovalBlockers', () => {
   it('allows a validated collision-free candidate', () => {

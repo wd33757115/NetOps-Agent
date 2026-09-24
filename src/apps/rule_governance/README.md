@@ -1,7 +1,22 @@
 # 规则治理业务包
 
+1.4.0：删除独立 ObservationContract 数据契约表、生成器、旧生成任务链及接口。新运行统一使用检查项 Value / 语义与 V2 命令适配器；历史报告与执行事实保留。
+
+1.3.4：自动制作在人工启动或继续时恢复已取消的 Parser；重试保留检查项语义绑定，页面区分历史停用记录。
+
+样本导入 → 本地分割与脱敏 → 待归类检查项 → 确认关联 → TextFSM / Projection。
+生成入口使用关联检查项的当前语义，检查项版本变化后必须重新确认。
+导入详情的旧 production 链接进入待归类页，生成接口不再隐式修改关联。
+
+1.3.0：新增规则包导入与导出，支持依赖闭包、冲突预检、原子草稿导入、样本回放和迁移记录。
+检查项与已发布资产目录可多选进入导出；导入产生本地待验证版本，Parser 复核和目录发布沿用原有服务。
+格式、使用与限制见 [规则包使用说明](../../../docs/rule-package-transfer-guide.md)。
+规则制作、样本详情、目录、资产、覆盖回填和审计共用独立应用布局；设备管理已拆为独立 App。
+宽屏展开工作区，手机使用横向导航和纵向制作任务列表；导入、编辑、复核和详情抽屉统一样式。
+沿用既有接口、App 使用权限、生成/审批/发布流程和历史链接；不引入新执行器或数据库迁移。
+
 `app.yaml` 是装配入口，登记前端、API、Agent 工具、Celery 队列、Beat 和生命周期。
-前端入口为 `/apps/rule-governance`，设备维护为 `/apps/rule-governance/devices`，
+前端入口为 `/apps/rule-governance`；设备维护迁至 `/apps/device-management`，
 API 为 `/api/apps/rule-governance`；旧规则 URL 转入同一 App 授权。
 
 ## 业务与执行
@@ -9,12 +24,9 @@ API 为 `/api/apps/rule-governance`；旧规则 URL 转入同一 App 授权。
 - `backend/parser`、`parser_generation`、`rule_control`：解析、规则生成、校验、复核、发布与自动推进。
 - `backend/check_items`：目录治理、评估策略资产、运行包装配、灰度验证和反馈。
 - `backend/source_api.py`、`source_tasks.py`：规则源样本与直接导入任务。
-- `backend/generators`：10 组生成、规划、验证、回放及资产操作的真实实现和元数据。
-- `backend/rule_control/generation.py`：明确的 Python 固定业务顺序；按样本冻结的资产要求执行
-  Observation、规划、Policy、Event、校验、历史回放及候选持久化。
-- `backend/rule_control/generation_jobs.py`：复用控制表保存请求、身份、各步结果和生成产物。
-  同种子串行提交；提交与种子历史同一事务。只重派未开始的任务，中断写入进入待核查，
-  查询页可查看候选并填写核查说明结案；结案不会批准资产或自动重跑。
+- `backend/generators`：TextFSM、变化/事件候选、验证与回放的固定实现。
+- `backend/check_items/canonical_rule_context.py`：依据检查项的标准语义生成规则草稿。
+- `backend/rule_control/command_autopilot.py`：命令制作检查点、Parser / Projection 验证与发布。
 - `backend/rollout_tasks.py`：灰度任务。采集直接交给共享 inventory 的固定巡检任务，
   读取 PatrolRun 和快照，不创建或轮询 Workflow。
 
@@ -70,3 +82,21 @@ parser_bundle = ParserRuntimeBundle.from_dict(saved_parser_bundle)
 5. 停用须等待 drain 完成；排空前不能删除代码或让旧版本 Worker 继续消费旧队列。
 
 实施、验收证据与本地启用状态见 `docs/netops-capability-packages-p4.md`。
+
+自动制作根据已关联检查项和脱敏 CLI 样本生成 ParserSpec 与 TextFSM，不再自动检索或优先复用 NTC 模板，也不再执行 NTC 专用 Value 改名与字段裁剪。需要复用外部模板时，由工程师通过人工模板入口上传；模板须满足当前方案并通过样本执行、运行时兼容性和正常复核发布流程。历史模板及来源记录保留，旧自动 NTC 候选不再用于新一轮生成的自动复用。自动制作状态轮询同步刷新 Parser 详情。
+
+人工提交 Parser 候选同样绑定当前登录用户与执行标识，保存时重新验证 App 授权，避免沿用旧身份或误报历史任务缺少执行用户。
+
+设备版本与资产信息的新字段定义见 `backend/check_items/assets/device_version_values.yaml`：13 个大小写精确匹配的 Value、7 项必填，每槽位一条记录，子槽位用配对列表保留。版本切换仍经目录治理，旧运行包引用不能绕过。定义与验证说明见 `docs/device-version-values.md`。
+
+## 命令适配器删除
+
+删除命令适配器会在同一事务内停用其活动运行包、撤下适配器各版本并取消未完成的目录变更，不再因 Active RuntimeBundle 引用返回 409。检查项、TextFSM 模板、历史执行结果及冻结运行包内容保留，其他适配器不受影响。审计事件记录此次停用的运行包版本 ID；重复请求保持幂等。已删除适配器的运行包不能通过激活或回滚重新启用。
+
+## 已发布资产批量操作
+
+生产资产目录支持 Parser 模板、变化策略和事件规则的单项或批量停用、删除。跨页勾选，每次最多 100 项；切换资产类型、状态或搜索条件时清空选择。操作前确认范围，完成后刷新列表和数量，逐项显示失败原因并保留失败项供重试。
+
+停用使用 deprecated 状态，可在“已停用”列表查看；删除使用 deleted 状态，退出目录、不提供恢复，保留内容和历史引用。每项操作独立事务，失败时其资产和关联运行包状态一起回滚，不影响其他成功项。关联活动运行包同步停用，不自动退回旧规则。审计记录操作者、原因、操作前后状态和受影响运行包。
+
+API：POST /parser/published-assets/bulk-action，参数 kind（parser/policy/event）、action（deprecate/delete）、ids 和可选 reason，沿用应用使用权限。返回逐项 results 与 succeeded/failed 数量。该功能不改变 TextFSM 模板的发布版本机制。

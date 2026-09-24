@@ -11,6 +11,8 @@
 | `test/start.ps1` / `test/stop.ps1` | 本地中间件、核心/AI Worker、Beat、API、BFF 和前端 |
 | `prod/` | Compose 预检、启动、停止、冒烟和备份 |
 | `assistant/` | 本地资料提取、DSH 执行器与工具验证 |
+| `check_items/cisco_manual_batch.py` | Cisco 样本本地脱敏、排除空输出与手工 TextFSM 回放；不写库、不调用生成器 |
+| `check_items/h3c_manual_batch.py` | H3C 样本本地脱敏、识别文件编码、去重、排除空输出与手工 TextFSM 回放；不写库、不调用生成器 |
 | `migrate_db.py` | Alembic 业务 schema 升级；`--check` 只验证版本 |
 | `init_db.py` | 业务 schema 初始化 |
 | `migrate_sqlite_data.py` / `migrate_django_sqlite.py` | 历史 SQLite 数据迁入；保留用于旧部署升级 |
@@ -72,6 +74,10 @@
 原知识库及 `KNOWLEDGE_TOOL_QA_ENABLED` 桥接开关已删除；正式问答与旧 REST/SSE 聊天已统一使用 DSH。
 
 ## 测试与生产
+
+检查项语义变化后的规则重建使用 `check_items/refresh_semantic_rules.py`。
+`plan` 只读生成候选并验证执行器行为；`apply` 会停用旧规则、发布新规则，依赖运行包需要重新装配。
+操作边界、当前结果与命令见[规则重建记录](../docs/check-item-semantic-rule-refresh.md)。
 
 完整测试应使用独立测试数据库、队列和对象存储。`test/` 下的业务回放脚本可能创建样本、任务或资产，文件位于测试目录不代表没有数据副作用。
 

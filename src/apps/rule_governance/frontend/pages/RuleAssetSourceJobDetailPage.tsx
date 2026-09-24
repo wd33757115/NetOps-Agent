@@ -8,7 +8,7 @@ import { Button } from 'antd'
 import { Navigate, useParams } from 'react-router-dom'
 
 import { RuleAssetSourceWorkbench } from '../components/RuleAssetSourceWorkbench'
-import GrokShellLayout from '@netops/components/Layout/GrokShellLayout'
+import RuleWorkspaceLayout from '../RuleWorkspaceLayout'
 import '../components/skills/parser/parser-workspace.css'
 
 const RuleAssetSourceJobDetailPage: React.FC = () => {
@@ -20,15 +20,15 @@ const RuleAssetSourceJobDetailPage: React.FC = () => {
   }
 
   return (
-    <GrokShellLayout
-      title="巡检规则工作台"
-      toolbar={<Button onClick={() => navigate(businessHref('/skills/parser'))}>返回巡检规则工作台</Button>}
+    <RuleWorkspaceLayout activeKey="sources"
+      title="样本任务详情"
+      toolbar={<Button onClick={() => navigate(businessHref('/skills/parser'))}>返回制作任务</Button>}
       subtitle="样本、检查项、结果校对与发布进度"
     >
       <div className="parser-detail-shell">
         <RuleAssetSourceWorkbench detailPageJobId={jobId} />
       </div>
-    </GrokShellLayout>
+    </RuleWorkspaceLayout>
   )
 }
 

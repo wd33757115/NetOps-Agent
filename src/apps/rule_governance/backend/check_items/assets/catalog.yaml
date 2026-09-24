@@ -2486,36 +2486,6 @@ implementations:
   template_scope: family
   selection_priority: 100
   status: active
-- id: cisco-device-version
-  version: 2
-  name: Cisco device version
-  check_item_ids:
-  - device.version
-  match:
-    vendor: Cisco
-  commands:
-  - command: show version
-    priority: 100
-  collector: cli
-  parser_requirement: structured
-  template_scope: family
-  selection_priority: 100
-  status: active
-- id: h3c-cpu-usage
-  version: 3
-  name: H3C CPU utilization
-  check_item_ids:
-  - system.cpu_usage
-  match:
-    vendor: H3C
-  commands:
-  - command: display cpu-usage
-    priority: 100
-  collector: cli
-  parser_requirement: structured
-  template_scope: family
-  selection_priority: 100
-  status: active
 - id: huawei-cpu-usage
   version: 2
   name: Huawei CPU utilization
@@ -2525,58 +2495,6 @@ implementations:
     vendor: Huawei
   commands:
   - command: display cpu-usage
-    priority: 100
-  collector: cli
-  parser_requirement: structured
-  template_scope: family
-  selection_priority: 100
-  status: active
-- id: cisco-ios-cpu-usage
-  version: 2
-  name: Cisco IOS CPU utilization
-  check_item_ids:
-  - system.cpu_usage
-  match:
-    vendor: Cisco
-    families:
-    - IOS
-    - IOS-XE
-  commands:
-  - command: show processes cpu
-    priority: 100
-  collector: cli
-  parser_requirement: structured
-  template_scope: family
-  selection_priority: 100
-  status: active
-- id: cisco-nxos-system-resources
-  version: 2
-  name: Cisco NX-OS system resources
-  check_item_ids:
-  - system.cpu_usage
-  - system.memory_usage
-  match:
-    vendor: Cisco
-    families:
-    - NXOS
-    - NXOS9K
-  commands:
-  - command: show system resources
-    priority: 100
-  collector: cli
-  parser_requirement: structured
-  template_scope: family
-  selection_priority: 100
-  status: active
-- id: h3c-memory-usage
-  version: 2
-  name: H3C memory utilization
-  check_item_ids:
-  - system.memory_usage
-  match:
-    vendor: H3C
-  commands:
-  - command: display memory
     priority: 100
   collector: cli
   parser_requirement: structured
@@ -2598,39 +2516,6 @@ implementations:
   template_scope: family
   selection_priority: 100
   status: active
-- id: cisco-ios-memory-usage
-  version: 2
-  name: Cisco IOS memory utilization
-  check_item_ids:
-  - system.memory_usage
-  match:
-    vendor: Cisco
-    families:
-    - IOS
-    - IOS-XE
-  commands:
-  - command: show processes memory
-    priority: 100
-  collector: cli
-  parser_requirement: structured
-  template_scope: family
-  selection_priority: 100
-  status: active
-- id: h3c-optical-power
-  version: 2
-  name: H3C optical diagnostics
-  check_item_ids:
-  - interface.optical_power
-  match:
-    vendor: H3C
-  commands:
-  - command: display transceiver diagnosis interface
-    priority: 100
-  collector: cli
-  parser_requirement: structured
-  template_scope: family
-  selection_priority: 100
-  status: active
 - id: huawei-optical-power
   version: 2
   name: Huawei optical diagnostics
@@ -2640,36 +2525,6 @@ implementations:
     vendor: Huawei
   commands:
   - command: display transceiver diagnosis interface
-    priority: 100
-  collector: cli
-  parser_requirement: structured
-  template_scope: family
-  selection_priority: 100
-  status: active
-- id: cisco-optical-power
-  version: 2
-  name: Cisco optical diagnostics
-  check_item_ids:
-  - interface.optical_power
-  match:
-    vendor: Cisco
-  commands:
-  - command: show interface transceiver detail
-    priority: 100
-  collector: cli
-  parser_requirement: structured
-  template_scope: family
-  selection_priority: 100
-  status: active
-- id: h3c-fan-health
-  version: 2
-  name: H3C fan health
-  check_item_ids:
-  - environment.fan
-  match:
-    vendor: H3C
-  commands:
-  - command: display fan
     priority: 100
   collector: cli
   parser_requirement: structured
@@ -2691,36 +2546,6 @@ implementations:
   template_scope: family
   selection_priority: 100
   status: active
-- id: cisco-fan-health
-  version: 3
-  name: Cisco fan health
-  check_item_ids:
-  - environment.fan
-  match:
-    vendor: Cisco
-  commands:
-  - command: show environment fan
-    priority: 100
-  collector: cli
-  parser_requirement: structured
-  template_scope: family
-  selection_priority: 100
-  status: active
-- id: h3c-power-health
-  version: 2
-  name: H3C power supply health
-  check_item_ids:
-  - environment.power
-  match:
-    vendor: H3C
-  commands:
-  - command: display power
-    priority: 100
-  collector: cli
-  parser_requirement: structured
-  template_scope: family
-  selection_priority: 100
-  status: active
 - id: huawei-power-health
   version: 2
   name: Huawei power supply health
@@ -2730,21 +2555,6 @@ implementations:
     vendor: Huawei
   commands:
   - command: display power
-    priority: 100
-  collector: cli
-  parser_requirement: structured
-  template_scope: family
-  selection_priority: 100
-  status: active
-- id: cisco-power-health
-  version: 3
-  name: Cisco power supply health
-  check_item_ids:
-  - environment.power
-  match:
-    vendor: Cisco
-  commands:
-  - command: show environment power
     priority: 100
   collector: cli
   parser_requirement: structured
@@ -2781,21 +2591,6 @@ implementations:
   template_scope: null
   selection_priority: 100
   status: active
-- id: cisco-running-configuration
-  version: 2
-  name: Cisco running configuration
-  check_item_ids:
-  - configuration.running
-  match:
-    vendor: Cisco
-  commands:
-  - command: show running-config
-    priority: 100
-  collector: cli
-  parser_requirement: normalized_diff
-  template_scope: null
-  selection_priority: 100
-  status: active
 - id: h3c-device-inventory
   version: 1
   name: H3C hardware component inventory
@@ -2811,81 +2606,6 @@ implementations:
   template_scope: family
   selection_priority: 100
   status: active
-- id: h3c-temperature
-  version: 1
-  name: H3C temperature sensors
-  check_item_ids:
-  - environment.temperature
-  match:
-    vendor: H3C
-  commands:
-  - command: display environment
-    priority: 100
-  collector: cli
-  parser_requirement: structured
-  template_scope: family
-  selection_priority: 100
-  status: active
-- id: h3c-interface-ip-assignment
-  version: 1
-  name: H3C interface IP assignments
-  check_item_ids:
-  - interface.ip_assignment
-  match:
-    vendor: H3C
-  commands:
-  - command: display ip interface brief
-    priority: 100
-  collector: cli
-  parser_requirement: structured
-  template_scope: family
-  selection_priority: 100
-  status: active
-- id: h3c-vrrp
-  version: 1
-  name: H3C VRRP state
-  check_item_ids:
-  - redundancy.vrrp
-  match:
-    vendor: H3C
-  commands:
-  - command: display vrrp statistics
-    priority: 100
-  collector: cli
-  parser_requirement: structured
-  template_scope: family
-  selection_priority: 100
-  status: active
-- id: h3c-irf
-  version: 1
-  name: H3C IRF member state
-  check_item_ids:
-  - redundancy.stack
-  match:
-    vendor: H3C
-  commands:
-  - command: display irf
-    priority: 100
-  collector: cli
-  parser_requirement: structured
-  template_scope: family
-  selection_priority: 100
-  status: active
-- id: h3c-mlag
-  version: 1
-  name: H3C M-LAG state
-  check_item_ids:
-  - redundancy.mlag
-  match:
-    vendor: H3C
-  commands:
-  - command: display m-lag system
-    priority: 100
-  collector: cli
-  parser_requirement: structured
-  template_scope: family
-  selection_priority: 100
-  status: active
 - id: h3c-vrf-inventory
   version: 1
   name: H3C VRF inventory
@@ -2895,36 +2615,6 @@ implementations:
     vendor: H3C
   commands:
   - command: display vrf
-    priority: 100
-  collector: cli
-  parser_requirement: structured
-  template_scope: family
-  selection_priority: 100
-  status: active
-- id: h3c-arp-table
-  version: 1
-  name: H3C ARP table
-  check_item_ids:
-  - network.arp_table
-  match:
-    vendor: H3C
-  commands:
-  - command: display arp
-    priority: 100
-  collector: cli
-  parser_requirement: structured
-  template_scope: family
-  selection_priority: 100
-  status: active
-- id: h3c-mac-table
-  version: 1
-  name: H3C MAC address table
-  check_item_ids:
-  - network.mac_table
-  match:
-    vendor: H3C
-  commands:
-  - command: display mac-address
     priority: 100
   collector: cli
   parser_requirement: structured
@@ -2961,108 +2651,6 @@ implementations:
   template_scope: null
   selection_priority: 100
   status: active
-- id: h3c-interface-values
-  version: 3
-  name: H3C display interface 同名字段
-  description: ''
-  check_item_ids:
-  - interface.runtime_statistics
-  match:
-    vendors:
-    - H3C
-    model_patterns:
-    - ^S6850\-56HF$
-  commands:
-  - command: display interface
-    priority: 100
-  collector: cli
-  parser_requirement: structured
-  template_scope: model
-  adapter_spec:
-    schema_version: command-adapter/v2
-    parser:
-      template_id: 9ce4a079-1121-5d93-bf11-a0027e9e3977
-    outputs:
-    - check_item_id: interface.runtime_statistics
-      source_record_set: default
-      empty_status: unavailable
-      check_item_version_id: 5ae03063-2121-550b-8ccf-873197de9012
-      projection:
-        fields:
-          bandwidth_kbps:
-            source: bandwidth_kbps
-          description:
-            source: description
-          duplex:
-            source: duplex
-          hw_address:
-            source: hw_address
-          input_bytes:
-            source: input_bytes
-          input_crc_errors:
-            source: input_crc_errors
-          input_errors:
-            source: input_errors
-          input_packets:
-            source: input_packets
-          interface:
-            source: interface
-          l2mtu:
-            source: l2mtu
-          last_physical_down_time:
-            source: last_physical_down_time
-          last_physical_up_time:
-            source: last_physical_up_time
-          line_status:
-            source: line_status
-          loopback:
-            source: loopback
-          mtu:
-            source: mtu
-          negotiation:
-            source: negotiation
-          output_bytes:
-            source: output_bytes
-          output_errors:
-            source: output_errors
-          output_packets:
-            source: output_packets
-          port_link_type:
-            source: port_link_type
-          port_mode:
-            source: port_mode
-          protocol_status:
-            source: protocol_status
-          speed:
-            source: speed
-          vlan_native:
-            source: vlan_native
-  output_quality_policy:
-    profile_version: 1
-    minimum_non_whitespace_chars: 1
-    unsupported_patterns:
-    - '%\s*(?:invalid input|unrecognized command)'
-    - error:\s*unrecognized command
-    - (?:wrong|invalid) parameter found
-    - unrecognized command found
-    - incomplete command found
-    command_error_patterns:
-    - permission denied
-    - authorization failed
-    - insufficient privilege
-    - command execution failed
-    truncation_patterns:
-    - (?im)^\s*(?:%|\[)?\s*output\s+(?:was\s+)?truncated\b
-    - (?im)^\s*\[\s*truncated\s*\]\s*$
-    - (?im)^\s*\.\.\.\s+(?:output\s+)?omitted\s+\.\.\.\s*$
-    paging_patterns:
-    - (?im)(?:--|----)\s*more\s*(?:--|----)
-    - (?im)^\s*press\s+(?:any\s+key|space|enter)\s+to\s+continue
-    - (?im)^\s*more:\s*<space>
-  selection_priority: 200
-  status: active
-  digest: d6b4adf81eddab9cf41593f6444065670a40e0318de3b0700cb587df81d64aa3
-  version_id: eac8f68b-0eec-58c7-ab38-1ffb3a7935c7
 - id: huawei-interface-values
   version: 3
   name: Huawei display interface 同名字段

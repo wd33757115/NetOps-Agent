@@ -45,12 +45,16 @@ def test_projection_catalog_covers_every_current_check_item_reference():
     check_item_catalog = load_catalog()
     projection_catalog = load_report_projection_catalog()
 
-    assert len(projection_catalog.profiles) == len(check_item_catalog.check_items)
+    # CheckItems using auto projection do not need a separately registered profile.
+    assert projection_catalog.profiles
     snapshot = build_report_projection_snapshot(
         {
             item.version_id: {
                 "check_item_id": item.id,
                 "report_projection": item.report_projection,
+                "version": item.version,
+                "result_mode": item.result_mode,
+                "canonical_contract": item.canonical_contract,
             }
             for item in check_item_catalog.check_items
         }

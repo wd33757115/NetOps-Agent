@@ -1,0 +1,13 @@
+Value Required slot (\d+)
+Value Required cpu (\d+)
+Value cpu_5s_percent (\d+)
+Value cpu_1m_percent (\d+)
+Value cpu_usage_percent (\d+)
+
+Start
+  ^\s*Slot ${slot} CPU ${cpu} CPU usage:
+  ^\s*${cpu_5s_percent}% in last 5 seconds
+  ^\s*${cpu_1m_percent}% in last 1 minute
+  ^\s*${cpu_usage_percent}% in last 5 minutes -> Record
+
+EOF

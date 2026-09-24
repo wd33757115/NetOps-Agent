@@ -84,35 +84,6 @@ def _refresh_rule_asset_projection(parser_job_id: str) -> None:
         )
 
 
-def _refresh_rule_asset_projection_from_skill_result(
-    skill_name: str,
-    result: dict | None,
-) -> None:
-    """Refresh command-unit state after a rule bundle becomes durable."""
-
-    if skill_name != "rule-asset-persister" or not isinstance(result, dict):
-        return
-    bundle = result.get("bundle")
-    if not isinstance(bundle, dict):
-        return
-    payload = bundle.get("payload_json")
-    if not isinstance(payload, dict):
-        payload = {}
-    offline_job_id = str(payload.get("offline_job_id") or "").strip()
-    if not offline_job_id:
-        return
-    try:
-        from src.apps.rule_governance.backend.rule_control.command_asset_units import (
-            RuleAssetCommandUnitService,
-        )
-
-        RuleAssetCommandUnitService().reconcile(offline_job_id)
-    except Exception:
-        logger.exception(
-            "Rule asset projection refresh failed offline_job_id=%s bundle_id=%s",
-            offline_job_id,
-            bundle.get("id"),
-        )
 
 
 def execute_parser_delivery(*, task_id: str, params: dict) -> dict:

@@ -1,5 +1,6 @@
 import json
 import os
+import hashlib
 
 import jwt
 from django.contrib.auth import get_user_model
@@ -10,9 +11,22 @@ from django.views.decorators.csrf import csrf_exempt
 from src.platform.kernel.registry import discover
 
 from ..app_access import available_apps, decision, identity, deployment_decision
-from ..decorators import require_jwt, require_role
+from ..decorators import require_jwt, require_app_grants_manager
 from ..models import AppGrant, AppInstallation
 from ..response import bff_error, bff_success
+from ..audit import log_auth_event
+from ..roles import get_user_role
+from ..group_admin import protected_group
+
+
+def grant_revision(grants):
+    values = sorted((g['user_id'] or 0, g['group_id'] or 0) for g in grants)
+    return hashlib.sha256(json.dumps(values).encode()).hexdigest()
+
+
+def grant_data(app_id):
+    grants = list(AppGrant.objects.filter(app_id=app_id).values('id', 'user_id', 'group_id'))
+    return {'grants': grants, 'revision': grant_revision(grants)}
 
 
 @csrf_exempt
@@ -24,11 +38,12 @@ def runtime_admission(request):
     try:
         authenticate(request.headers.get("Authorization", ""))
         body = json.loads(request.body)
-        manifest = discover().get(body["app_id"])
+        manifests = discover()
+        manifest = manifests.get(body["app_id"])
         ready = (
             manifest
             and manifest.digest == body["digest"]
-            and deployment_decision(manifest.id) == 200
+            and deployment_decision(manifest.id, manifests) == 200
         )
     except (ValueError, KeyError, TypeError, jwt.InvalidTokenError):
         return bff_error("Invalid runtime credential or payload", 401)
@@ -94,7 +109,7 @@ def worker_authorize(request, app_id):
 
 @csrf_exempt
 @require_jwt(strict=True)
-@require_role("admin")
+@require_app_grants_manager
 def administration(request, app_id=None):
     manifests = discover()
     if request.method == "GET" and app_id is None:
@@ -106,22 +121,24 @@ def administration(request, app_id=None):
                         **m.public(),
                         "enabled": bool(records.get(m.id) and records[m.id].desired_enabled),
                         "state": records[m.id].state if m.id in records else "discovered",
-                        "grants": list(
-                            AppGrant.objects.filter(app_id=m.id).values("id", "user_id", "group_id")
-                        ),
+                        **grant_data(m.id),
                     }
                     for m in manifests.values()
                 ],
-                "users": list(
-                    get_user_model().objects.filter(is_active=True).values("id", "username")
-                ),
-                "groups": list(Group.objects.values("id", "name")),
+                "users": [] if request.GET.get("compact") == "1" else [
+                    {'id': u.pk, 'username': u.username, 'is_active': u.is_active,
+                     'role': get_user_role(u), 'group_ids': [g.pk for g in u.groups.all()]}
+                    for u in get_user_model().objects.prefetch_related('groups').order_by('username')
+                ],
+                "groups": [{'id': g.pk, 'name': g.name, 'protected': protected_group(g)} for g in Group.objects.order_by('name')],
             }
         )
     if request.method != "PUT" or app_id not in manifests:
         return bff_error("Method or application not found", 404)
     try:
         body = json.loads(request.body)
+        if not isinstance(body, dict):
+            raise ValueError('请求必须为 JSON 对象')
         user_ids, group_ids = body["user_ids"], body["group_ids"]
         if (
             not isinstance(user_ids, list)
@@ -135,11 +152,17 @@ def administration(request, app_id=None):
             raise ValueError("授权对象不存在")
         with transaction.atomic():
             app = AppInstallation.objects.select_for_update().get(pk=app_id)
+            before = grant_data(app_id)
+            if 'revision' in body and body['revision'] != before['revision']:
+                return bff_error('应用授权已发生变化，请重新加载后再保存', 409)
             AppGrant.objects.filter(app=app).delete()
             AppGrant.objects.bulk_create(
                 [AppGrant(app=app, user_id=x, granted_by=request.user) for x in set(user_ids)]
                 + [AppGrant(app=app, group_id=x, granted_by=request.user) for x in set(group_ids)]
             )
+            after = grant_data(app_id)
+            transaction.on_commit(lambda: log_auth_event('app_grants_update', request.user, request,
+                detail={'app_id': app_id, 'before': before, 'after': after}))
     except AppInstallation.DoesNotExist:
         return bff_error("请先安装应用", 409)
     except (ValueError, KeyError, TypeError) as exc:

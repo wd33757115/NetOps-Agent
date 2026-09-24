@@ -1,0 +1,9 @@
+Value Filldown SCOPE (.+?)
+Value DEBUG_STATUS ((?:Debug level is set to|Conditional Debug Global State:).*|.*debugging is on|default for new sessions logging level: \d+)
+
+Start
+  ^slot\s+${SCOPE}\s*$$
+  ^${SCOPE}:\s*$$
+  ^\s*${DEBUG_STATUS}\s*$$ -> Record
+
+EOF

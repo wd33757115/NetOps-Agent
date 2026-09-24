@@ -21,11 +21,8 @@ GENERATORS = frozenset(
     {
         "textfsm-generator",
         "rule-target-planner",
-        "observation-contract-generator",
         "change-policy-generator",
         "event-rule-generator",
-        "rule-asset-persister",
-        "rule-asset-submitter",
         "rule-asset-approver",
         "event-rule-validator",
         "event-rule-replay",

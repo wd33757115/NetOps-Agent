@@ -56,6 +56,17 @@ class AppPackageTests(TestCase):
         )
         self.assertEqual(self.call(apps).status_code, 200)
 
+    def test_app_listing_discovers_once_and_does_not_cache_grants(self):
+        with patch("bff.app_access.discover", wraps=discover) as scanned:
+            self.assertEqual(available_apps(self.user), [])
+            self.assertEqual(scanned.call_count, 1)
+            grant = AppGrant.objects.create(app=self.app, user=self.user)
+            self.assertEqual([m["id"] for m in available_apps(self.user)], [self.app.pk])
+            self.assertEqual(scanned.call_count, 2)
+            grant.delete()
+            self.assertEqual(available_apps(self.user), [])
+            self.assertEqual(scanned.call_count, 3)
+
     def test_direct_and_group_grants_and_revocation(self):
         group = Group.objects.create(name="document-team")
         AppGrant.objects.create(app=self.app, group=group)

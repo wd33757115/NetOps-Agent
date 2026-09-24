@@ -49,17 +49,14 @@ import type {
   ParserIdentitySignature,
   ParserImportPreview,
   ParserJobItem,
-  ParserObservationContract,
   ParserPage,
   ParserPageParams,
   ParserReplayReport,
   ParserRuleAssetBundle,
   ParserRuleAssetBundlePage,
   ParserRuleAssetEngineeringDraft,
-  ParserRuleGenerationContextPreview,
   ParserRuleGenerationJob,
   ParserRuleGenerationJobPreview,
-  ParserRuntimeRuleAssetBundle,
   ParserTemplateComparison,
   ParserTemplateExport,
   ParserTemplateItem,
@@ -77,6 +74,14 @@ import type {
 } from '@netops/services/api'
 
 export const parserApi = {
+  publishedAssetAction: async (data: {
+    kind: 'parser' | 'policy' | 'event'
+    action: 'deprecate' | 'delete'
+    ids: string[]
+    reason?: string
+  }): Promise<{ succeeded: number; failed: number; results: Array<{ id: string; success: boolean; error?: string }> }> => (
+    await api.post('/parser/published-assets/bulk-action/', data)
+  ).data,
   getValueMappings: async (): Promise<ParserValueMappingConfig> => {
     const response = await api.get<ParserValueMappingConfig>('/parser/value-mappings/')
     return response.data
@@ -143,55 +148,6 @@ export const parserApi = {
     id: string,
     data: { decision: 'accepted' | 'revision_requested'; reason?: string },
   ) => (await api.post(`/parser/rule-asset-bundles/${id}/engineering-review/`, data)).data,
-  reviseRuleAssetBundle: async (
-    id: string,
-    data: {
-      contract: Record<string, unknown>
-      change_policies: Array<Record<string, unknown>>
-      event_rules: Array<Record<string, unknown>>
-      reason: string
-      idempotency_key: string
-    },
-    options: { asyncMode?: boolean } = {},
-  ) => (await api.post(
-    `/parser/rule-asset-bundles/${id}/engineering-revision/`,
-    data,
-    { params: options.asyncMode ? { async_mode: true } : undefined },
-  )).data,
-  engineeringRevisionTask: async (taskId: string) => (
-    await api.get<{
-      task_id: string
-      status: string
-      ready: boolean
-      state?: string
-      phase?: string
-      dispatch_error?: string | null
-      successful?: boolean | null
-      result?: Record<string, unknown> | null
-      error?: string | null
-    }>(`/parser/engineering-revision-tasks/${taskId}/`)
-  ).data,
-  engineeringRevisionTasks: async (bundleId: string) => (
-    await api.get<{ items: Array<{
-        task_id: string; status: string; state: string; ready: boolean; error?: string | null
-        resolution?: { note: string; actor: string; reviewed_at: string } | null
-    }> }>(`/parser/rule-asset-bundles/${bundleId}/engineering-revisions/`)
-  ).data,
-  inspectEngineeringRevision: async (taskId: string) => (
-    await api.get<{
-      task_id: string; state: string; can_resolve: boolean; blocked_reason?: string | null
-      digest: string
-      records: Array<{ id: string; job_type: string; status: string; asset_ref?: string | null; validation?: Record<string, unknown> | null }>
-    }>(`/parser/engineering-revision-tasks/${taskId}/inspection/`)
-  ).data,
-  resolveEngineeringRevision: async (taskId: string, data: { evidence_digest: string; note: string }) => (
-    await api.post(`/parser/engineering-revision-tasks/${taskId}/resolve/`, data)
-  ).data,
-  autoBuildRuleGenerationContext: async (jobId: string, datasetIds: string[]) => (
-    await api.post(`/parser/rule-generation-jobs/${jobId}/auto-context/`, {
-      dataset_ids: datasetIds,
-    })
-  ).data,
   assetGaps: async (params: ParserPageParams = {}): Promise<ParserPage<ParserAssetGap>> => (
     await api.get<ParserPage<ParserAssetGap>>('/parser/asset-gaps/', { params })
   ).data,
@@ -210,24 +166,8 @@ export const parserApi = {
       [key: string]: unknown
     }>('/parser/rule-gaps/from-changes/', { params })
   ).data,
-  observationContracts: async (params: ParserPageParams = {}): Promise<ParserPage<ParserObservationContract>> => {
-    const response = await api.get<ParserPage<ParserObservationContract>>('/parser/observation-contracts/', { params })
-    return response.data
-  },
   changePolicies: async (params: ParserPageParams = {}): Promise<ParserPage<ParserChangePolicy>> => {
     const response = await api.get<ParserPage<ParserChangePolicy>>('/parser/change-policies/', { params })
-    return response.data
-  },
-  resolveRuntimeAssets: async (data: {
-    observation_schemas?: Array<[string, string]>
-    observation_types?: string[]
-    include_event_rules?: boolean
-  }): Promise<ParserRuntimeRuleAssetBundle> => {
-    const response = await api.post<ParserRuntimeRuleAssetBundle>('/parser/runtime-assets/resolve/', data)
-    return response.data
-  },
-  runtimeAssetHealth: async (): Promise<ParserRuntimeRuleAssetBundle> => {
-    const response = await api.get<ParserRuntimeRuleAssetBundle>('/parser/runtime-assets/health/')
     return response.data
   },
   checkItemRuntimeBundleHealth: async (params: {
@@ -436,49 +376,6 @@ export const parserApi = {
   ).data,
   deprecateRuleGenerationJob: async (id: string, data: { reason: string }) => (
     await api.post(`/parser/rule-generation-jobs/${id}/deprecate/`, data)
-  ).data,
-  reviseRuleGenerationJob: async (id: string) => (
-    await api.post(`/parser/rule-generation-jobs/${id}/revise/`, {})
-  ).data,
-  executeRuleGenerationRevisionJob: async (id: string) => (
-    await api.post(`/parser/rule-generation-jobs/${id}/execute-revision/`, {})
-  ).data,
-  submitRuleGenerationJobCandidate: async (id: string) => (
-    await api.post(`/parser/rule-generation-jobs/${id}/submit/`, {})
-  ).data,
-  previewRuleGenerationContext: async (
-    id: string,
-    data: {
-      context_overrides?: Record<string, unknown>
-      context_id?: string
-      dataset_ids?: string[]
-      max_records?: number
-      field_name?: string
-      observation_type?: string
-    } = {},
-  ): Promise<ParserRuleGenerationContextPreview> => {
-    const response = await api.post<ParserRuleGenerationContextPreview>(
-      `/parser/rule-generation-jobs/${id}/generation-context/`,
-      data,
-    )
-    return response.data
-  },
-  latestGeneration: async (seedId: string): Promise<{
-    run_id: string; status: string; phase?: string; error?: string;
-    assets: Array<{ id: string; status: string }>;
-  } | null> => (await api.get(`/apps/rule-governance/generation-runs/latest/${seedId}/`)).data,
-  resolveGeneration: async (runId: string, note: string) => (
-    await api.post(`/apps/rule-governance/generation-runs/${runId}/resolve/`, { note })
-  ).data,
-  startRuleAssetGeneration: async (
-    id: string,
-    data: {
-      context_overrides?: Record<string, unknown>
-      context_id?: string
-      dataset_ids?: string[]
-    } = {},
-  ) => (
-    await api.post(`/parser/rule-generation-jobs/${id}/start-generation/`, data)
   ).data,
   previewRuleGenerationJob: async (id: string) => {
     const response = await api.get<ParserRuleGenerationJobPreview>(`/parser/rule-generation-jobs/${id}/preview/`)

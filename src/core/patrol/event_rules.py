@@ -929,6 +929,11 @@ class EventRuleRepository:
     def snapshot_active_rules(self) -> list[dict[str, Any]]:
         rows = self.list_versions(status="active", limit=None)
         if not rows:
+            # An intentionally empty catalog must stay empty after disabling or
+            # deleting the last rule; built-ins are only for an uninitialized DB.
+            with get_db_session() as db:
+                if db.query(EventRuleVersionRecord.id).first() is not None:
+                    return []
             from src.common.config import get_settings
 
             if get_settings().EVENT_RULE_ALLOW_BUILTIN_FALLBACK:
@@ -1247,6 +1252,8 @@ class EventRuleRepository:
             )
             if version is None:
                 raise ValueError("event rule version not found")
+            if version.status == "deleted":
+                raise ValueError("事件规则已删除，不能变更状态")
             rule = db.query(EventRuleRecord).filter(EventRuleRecord.id == version.rule_id).first()
             if rule is None:
                 raise ValueError("event rule not found")
@@ -1322,6 +1329,8 @@ class EventRuleRepository:
             )
             if version is None:
                 raise ValueError("event rule version not found")
+            if version.status == "deleted":
+                raise ValueError("事件规则已删除，不能变更状态")
             rule = db.query(EventRuleRecord).filter(EventRuleRecord.id == version.rule_id).first()
             if rule is None:
                 raise ValueError("event rule not found")

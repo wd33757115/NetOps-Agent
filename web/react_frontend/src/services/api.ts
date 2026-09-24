@@ -384,6 +384,7 @@ export interface ParserJobItem {
   generation_attempts?: ParserGenerationAttempt[]
   model_call_ledger?: ParserModelCallLedger[]
   generation_readiness?: {
+    check_item_binding?: { check_item_id: string; version_id: string; digest: string }
     ready: boolean
     blockers: string[]
     warnings?: string[]
@@ -1418,32 +1419,6 @@ export interface ParserAgentLoopAttempt {
   created_by?: string | null
   created_at?: string | null
   updated_at?: string | null
-}
-
-export interface ParserObservationContract {
-  id: string
-  source_type: string
-  schema_id: string
-  schema_ref?: string | null
-  source_template_id?: string | null
-  entity_type: string
-  primary_keys_json: string[]
-  required_fields_json: string[]
-  optional_fields_json?: string[] | null
-  validators_json?: Record<string, unknown> | null
-  ignore_fields_json?: string[] | null
-  allow_empty: boolean
-  empty_patterns_json?: string[] | null
-  state_semantics_json?: Record<string, unknown> | null
-  version: number
-  contract_sha256: string
-  status: string
-  source_job_id?: string | null
-  approval_json?: Record<string, unknown> | null
-  created_at?: string
-  updated_at?: string
-  activated_at?: string | null
-  deprecated_at?: string | null
 }
 
 export interface ParserChangePolicy {
@@ -2961,7 +2936,7 @@ export interface DeviceEffectivePlanPreview {
     command: string
     template_id?: string | null
     parser_status: string
-    contract_status: string
+    projection_status: string
     policy_status: string
     event_rule_status: string
     next_action: string
@@ -3472,186 +3447,7 @@ export { parserApi, ruleAssetSourceApi } from '../../../../src/apps/rule_governa
 
 export { offlinePatrolApi } from '../../../../src/apps/inspection/frontend/api'
 
-export const deviceApi = {
-  list: async (params: Record<string, string | number | undefined> = {}) => {
-    const response = await api.get<DeviceListResponse>('/devices/', { params })
-    return response.data
-  },
-  upsert: async (data: DeviceUpsertPayload) => {
-    const response = await api.post<DeviceMutationResponse>('/devices/', data)
-    return response.data
-  },
-  detail: async (deviceId: string) => {
-    const response = await api.get<ManagedDevice>(`/devices/${deviceId}/`)
-    return response.data
-  },
-  update: async (deviceId: string, data: Partial<DeviceUpsertPayload>) => {
-    const response = await api.patch<DeviceMutationResponse>(`/devices/${deviceId}/`, data)
-    return response.data
-  },
-  delete: async (deviceId: string) => {
-    const response = await api.delete<DeviceMutationResponse>(`/devices/${deviceId}/`)
-    return response.data
-  },
-  setStatus: async (deviceId: string, status: string) => {
-    const response = await api.post<DeviceMutationResponse>(`/devices/${deviceId}/status/`, { status })
-    return response.data
-  },
-  setGroups: async (deviceId: string, groups: string[]) => {
-    const response = await api.post<DeviceMutationResponse>(`/devices/${deviceId}/groups/`, { groups })
-    return response.data
-  },
-  previewImport: async (input: string | DeviceImportPayload) => {
-    const payload = typeof input === 'string'
-      ? { content: input, format: 'csv', dry_run: true }
-      : { ...input, dry_run: true }
-    const response = await api.post<DeviceImportPreview>('/devices/import/preview/', {
-      ...payload,
-    })
-    return response.data
-  },
-  applyImport: async (input: string | DeviceImportPayload) => {
-    const payload = typeof input === 'string'
-      ? { content: input, format: 'csv', dry_run: false }
-      : { ...input, dry_run: false }
-    const response = await api.post<DeviceImportApplyResult>('/devices/import/apply/', {
-      ...payload,
-    })
-    return response.data
-  },
-  importTemplate: async () => {
-    const response = await api.get<DeviceImportTemplate>('/devices/import/template/')
-    return response.data
-  },
-  groups: async () => {
-    const response = await api.get<{ items: string[] }>('/devices/groups/')
-    return response.data.items
-  },
-  previewBulk: async (data: DeviceBulkRequest) => {
-    const response = await api.post<DeviceBulkPreview>('/devices/bulk/preview/', data)
-    return response.data
-  },
-  applyBulk: async (data: DeviceBulkRequest) => {
-    const response = await api.post<DeviceBulkApplyResult>('/devices/bulk/apply/', data)
-    return response.data
-  },
-  previewBulkDelete: async (data: Omit<DeviceBulkRequest, 'update'>) => {
-    const response = await api.post<DeviceBulkDeletePreview>('/devices/bulk/delete/preview/', data)
-    return response.data
-  },
-  bulkDelete: async (data: Omit<DeviceBulkRequest, 'update'>) => {
-    const response = await api.post<DeviceBulkDeleteResult>('/devices/bulk/delete/', data)
-    return response.data
-  },
-  previewPatrol: inspectionDeviceApi.previewPatrol,
-  patrolReadiness: inspectionDeviceApi.patrolReadiness,
-  launchPatrol: inspectionDeviceApi.launchPatrol,
-  getPatrolBatchLiveEventsUrl: inspectionDeviceApi.getPatrolBatchLiveEventsUrl,
-  effectivePlan: async (
-    deviceId: string,
-    data: { action?: string; mode?: string } = {},
-  ) => {
-    const response = await api.post<DeviceEffectivePlanPreview>(
-      `/devices/${deviceId}/effective-plan/`,
-      data,
-    )
-    return response.data
-  },
-  testConnectivity: async (deviceId: string) => {
-    const response = await api.post<DeviceConnectivityTestResult>(
-      `/devices/${deviceId}/connectivity-test/`,
-      {},
-    )
-    return response.data
-  },
-  discoverIdentity: async (deviceId: string) => {
-    const response = await api.post<DeviceIdentityDiscoveryResult>(
-      `/devices/${deviceId}/identity-discovery/`,
-      {},
-    )
-    return response.data
-  },
-  connectionHealth: async (deviceId: string, params: { limit?: number } = {}) => {
-    const response = await api.get<DeviceConnectionHealthResponse>(
-      `/devices/${deviceId}/connection-health/`,
-      { params },
-    )
-    return response.data
-  },
-  executionPlans: async (deviceId: string, params: { limit?: number } = {}) => {
-    const response = await api.get<DeviceExecutionPlanResponse>(
-      `/devices/${deviceId}/execution-plans/`,
-      { params },
-    )
-    return response.data
-  },
-  evidenceTimeline: async (
-    deviceId: string,
-    params: { limit?: number; workflow_run_id?: string; patrol_batch_id?: string } = {},
-  ) => {
-    const response = await api.get<DeviceEvidenceTimelineResponse>(
-      `/devices/${deviceId}/evidence-timeline/`,
-      { params },
-    )
-    return response.data
-  },
-  dynamicGroups: async (params: { status?: string } = {}) => {
-    const response = await api.get<{ items: DeviceDynamicGroup[] }>('/devices/dynamic-groups/', { params })
-    return response.data.items
-  },
-  saveDynamicGroup: async (data: {
-    name: string
-    description?: string
-    selector: Record<string, unknown>
-    status?: string
-  }, groupId?: string) => {
-    const response = groupId
-      ? await api.patch<{ success: boolean; group: DeviceDynamicGroup }>(`/devices/dynamic-groups/${groupId}/`, data)
-      : await api.post<{ success: boolean; group: DeviceDynamicGroup }>('/devices/dynamic-groups/', data)
-    return response.data
-  },
-  setDynamicGroupStatus: async (groupId: string, status: string) => {
-    const response = await api.post<{ success: boolean; group: DeviceDynamicGroup }>(
-      `/devices/dynamic-groups/${groupId}/status/`,
-      { status },
-    )
-    return response.data
-  },
-  previewDynamicGroup: async (groupId: string, params: { limit?: number } = {}) => {
-    const response = await api.get<DeviceDynamicGroupPreview>(
-      `/devices/dynamic-groups/${groupId}/preview/`,
-      { params },
-    )
-    return response.data
-  },
-  credentials: async () => {
-    const response = await api.get<{ items: DeviceCredentialReference[] }>('/devices/credentials/')
-    return response.data.items
-  },
-  inspectCredential: async (credential_ref?: string) => {
-    const response = await api.post<DeviceCredentialInspection>('/devices/credentials/inspect/', { credential_ref })
-    return response.data
-  },
-  agentModuleHealth: async () => {
-    const response = await api.get<DeviceAgentModuleHealthResponse>('/devices/agent-modules/health/')
-    return response.data
-  },
-  updateAgentModuleControl: async (
-    moduleId: string,
-    payload: {
-      status: string
-      maintenance_reason?: string | null
-      maintenance_starts_at?: string | null
-      maintenance_ends_at?: string | null
-    },
-  ) => {
-    const response = await api.patch<{ success: boolean; control: DeviceAgentModuleControl }>(
-      `/devices/agent-modules/${moduleId}/control/`,
-      payload,
-    )
-    return response.data
-  },
-}
+export { deviceApi } from '../../../../src/apps/device_management/frontend/api'
 
 export const maintenanceApi = {
   previewDatabaseReset: async () => {

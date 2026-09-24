@@ -23,7 +23,7 @@ from src.apps.rule_governance.backend.rule_control.source_scope import (
     require_immutable_rule_asset_source_datasets,
     rule_generation_context_digest,
 )
-from src.core.check_items.canonical import load_canonical_catalog
+from src.core.check_items.canonical import rule_semantics_catalog
 from src.core.check_items.command_adapter import is_direct_projection_adapter
 from src.infrastructure.db.models import (
     CheckItemVersionRecord,
@@ -507,7 +507,6 @@ def _check_item_generation_governance(
         )
         .all()
     )
-    canonical_catalog = load_canonical_catalog()
     targets: list[dict[str, Any]] = []
     seen_links: set[tuple[str, str]] = set()
     for link, version, implementation_version in rows:
@@ -519,6 +518,7 @@ def _check_item_generation_governance(
             continue
         seen_links.add(key)
         canonical_contract = dict(version.canonical_contract_json or {})
+        canonical_catalog = rule_semantics_catalog(canonical_contract)
         asset_requirement_profile = derive_asset_requirement_profile(
             result_mode=str(version.result_mode),
             assessment_mode=str(version.assessment_mode),

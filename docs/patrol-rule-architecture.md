@@ -54,7 +54,7 @@
 
 默认流程是 `command_autopilot.py`，详见[自动制作指南](patrol-rule-autopilot-guide-2026-09-05.md)。人工可暂停、修改解析方案或 Projection，再继续验证。输入摘要、检查项版本或作用域变化后必须重新检查下游结果及发布授权。发布记录保留授权人和任务身份。
 
-旧 ObservationContract 路径及 Adapter v1 仍用于兼容已有资产和历史回放。它们不是新检查项必须逐一手工配置的默认层级。旧候选协调器与手工审批 Workflow 的边界见[资产治理指南](rule-asset-control-plane-guide.md)。历史读取代码须结合持久化数据验证后退出，不能按名称批量删除。
+独立 ObservationContract 与旧语义回退链已于 1.4.0 删除。新运行仅使用 V2 命令适配器；历史报告继续读取已保存的执行事实与审计，不重新执行旧契约。详见[资产治理指南](rule-asset-control-plane-guide.md)。
 
 ## 代码与验证入口
 

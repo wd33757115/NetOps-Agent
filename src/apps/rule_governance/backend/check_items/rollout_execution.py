@@ -67,7 +67,6 @@ from src.infrastructure.db.models import (
     EventRuleRecord,
     EventRuleVersionRecord,
     NetworkDevice,
-    ObservationContractRecord,
     ProductionFeedbackRecord,
     RolloutCampaignRecord,
     RolloutComparisonEvidenceRecord,
@@ -109,32 +108,6 @@ def _iso(value: datetime | str | None) -> str:
     return str(value or "")
 
 
-def _contract_payload(row: ObservationContractRecord) -> dict[str, Any]:
-    return {
-        "contract_id": str(row.id),
-        "source_type": str(row.source_type),
-        "schema_id": str(row.schema_id),
-        "schema_ref": row.schema_ref,
-        "source_template_id": row.source_template_id,
-        "entity_type": str(row.entity_type),
-        "primary_keys": list(row.primary_keys_json or []),
-        "canonical_entity_type": row.canonical_entity_type,
-        "entity_identity_fields": list(
-            row.entity_identity_fields_json or []
-        ),
-        "entity_dimensions": dict(row.entity_dimensions_json or {}),
-        "required_fields": list(row.required_fields_json or []),
-        "optional_fields": list(row.optional_fields_json or []),
-        "validators": dict(row.validators_json or {}),
-        "ignore_fields": list(row.ignore_fields_json or []),
-        "allow_empty": bool(row.allow_empty),
-        "empty_patterns": list(row.empty_patterns_json or []),
-        "state_semantics": dict(row.state_semantics_json or {}),
-        "record_sets": list(row.record_sets_json or []),
-        "contract_version": int(row.version),
-        "contract_sha256": str(row.contract_sha256),
-        "status": str(row.status),
-    }
 
 
 def _observation_payload(item: Any) -> dict[str, Any]:
@@ -1156,24 +1129,9 @@ class RolloutProjectionEngine:
                     "check_item_version_missing",
                     "frozen CheckItem version is missing",
                 )
-            contracts = (
-                db.query(ObservationContractRecord)
-                .filter(ObservationContractRecord.id.in_(sorted(contract_ids)))
-                .all()
-                if contract_ids
-                else []
-            )
-            if len(contracts) != len(contract_ids):
-                raise RolloutStageExecutionError(
-                    "observation_contract_missing",
-                    "one or more frozen ObservationContracts are missing",
-                )
-            contract_by_parser = {
-                str(item.source_template_id or item.schema_id): (
-                    _contract_payload(item)
-                )
-                for item in contracts
-            }
+            if contract_ids:
+                raise RolloutStageExecutionError("legacy_bundle_retired", "旧数据契约运行包已退役，请重新装配 V2 运行包")
+            contract_by_parser = {}
 
             policy_rows = (
                 db.query(

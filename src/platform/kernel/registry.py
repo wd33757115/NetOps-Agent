@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,25 +21,27 @@ PLATFORM_VERSION = "1.0.0"
 def package_digest(directory):
     """Fingerprint shipped code/resources; ignore development output, not migrations."""
     result = hashlib.sha256()
-    for path in sorted(directory.rglob("*")):
+    ignored = {"__pycache__", "node_modules", ".pytest_cache", ".ruff_cache", "tests", "test-results"}
+    files = []
+
+    def collect(folder):
+        # scandir reuses directory metadata on Windows and prunes excluded trees.
+        # Still read every shipped file on every discovery: no stale digest cache.
+        with os.scandir(folder) as entries:
+            for entry in entries:
+                if entry.name in ignored:
+                    continue
+                path = Path(entry.path)
+                if entry.is_symlink():
+                    raise ValueError(f"Package symlinks are not supported: {path.relative_to(directory)}")
+                if entry.is_dir(follow_symlinks=False):
+                    collect(path)
+                elif entry.is_file(follow_symlinks=False) and path.suffix not in {".pyc", ".pyo"} and ".test." not in path.name:
+                    files.append(path)
+
+    collect(directory)
+    for path in sorted(files):
         relative = path.relative_to(directory)
-        if any(
-            p
-            in {
-                "__pycache__",
-                "node_modules",
-                ".pytest_cache",
-                ".ruff_cache",
-                "tests",
-                "test-results",
-            }
-            for p in relative.parts
-        ):
-            continue
-        if path.is_symlink():
-            raise ValueError(f"Package symlinks are not supported: {relative}")
-        if not path.is_file() or path.suffix in {".pyc", ".pyo"} or ".test." in path.name:
-            continue
         content = path.read_bytes()
         # Git autocrlf must not change release identity between Windows and Linux.
         if path.suffix in {

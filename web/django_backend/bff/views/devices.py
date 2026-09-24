@@ -16,7 +16,7 @@ async def _proxy(request: HttpRequest, path: str) -> JsonResponse:
     from src.auth.netops_access import requires_netops_configuration
     if requires_netops_configuration(request.method, "/devices/" + path):
         from .app_proxy import proxy_app
-        return await proxy_app(request, "rule-governance", "devices/" + path.split("?", 1)[0])
+        return await proxy_app(request, "device-management", "devices/" + path.split("?", 1)[0])
     if path.startswith("?"):
         fastapi_path = f"/api/v1/devices{path}"
     elif path:

@@ -16,6 +16,8 @@ ROLE_PRIORITY = {
 }
 
 ALL_ROLES = (ROLE_ADMIN, ROLE_OPERATOR, ROLE_VIEWER)
+APP_GRANTS_MANAGE = "apps.manage"
+SYSTEM_GROUPS = ("admin", "netops-config")
 
 
 def get_user_role(user) -> str:
@@ -45,11 +47,11 @@ def assign_user_role(user, role: str) -> None:
     role = (role or ROLE_OPERATOR).lower()
     if role not in ALL_ROLES:
         raise ValueError(f"invalid role: {role}")
-    for group_name in ALL_ROLES:
+    for group_name in SYSTEM_GROUPS:
         Group.objects.get_or_create(name=group_name)
-    group = Group.objects.get(name=role)
     user.groups.remove(*user.groups.filter(name__in=ALL_ROLES))
-    user.groups.add(group)
+    if role == ROLE_ADMIN:
+        user.groups.add(Group.objects.get(name=ROLE_ADMIN))
     user.is_staff = role == ROLE_ADMIN
     user.is_superuser = role == ROLE_ADMIN
 
@@ -69,8 +71,10 @@ def get_user_permissions(user) -> list[str]:
     from src.auth.netops_access import NETOPS_CONFIGURE, NETOPS_CONFIG_GROUP
     if not user or not getattr(user, "is_authenticated", False):
         return []
-    if get_user_role(user) == ROLE_ADMIN or user.groups.filter(name=NETOPS_CONFIG_GROUP).exists():
-        return [NETOPS_CONFIGURE]
+    if get_user_role(user) == ROLE_ADMIN:
+        return [NETOPS_CONFIGURE, APP_GRANTS_MANAGE]
+    if user.groups.filter(name=NETOPS_CONFIG_GROUP).exists():
+        return [APP_GRANTS_MANAGE]
     return []
 
 
@@ -82,3 +86,7 @@ def assign_netops_configuration(user, enabled: bool) -> None:
         user.groups.add(group)
     else:
         user.groups.remove(group)
+
+
+def can_manage_app_grants(user):
+    return bool(user and user.is_authenticated and user.is_active and APP_GRANTS_MANAGE in get_user_permissions(user))

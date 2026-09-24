@@ -1,0 +1,11 @@
+Value PROCESS_ID (\d+)
+Value PROCESS_TTY (\d+)
+Value PROCESS_ALLOCATED (\d+)
+Value PROCESS_FREED (\d+)
+Value PROCESS_HOLDING (\d+)
+Value GETBUFS (\d+)
+Value RETBUFS (\d+)
+Value PROCESS (.+?)
+
+Start
+  ^\s*${PROCESS_ID}\s+${PROCESS_TTY}\s+${PROCESS_ALLOCATED}\s+${PROCESS_FREED}\s+${PROCESS_HOLDING}\s+${GETBUFS}\s+${RETBUFS}\s+${PROCESS}\s*$$ -> Record

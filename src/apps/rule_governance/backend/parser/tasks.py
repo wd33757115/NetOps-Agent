@@ -18,7 +18,6 @@ from src.apps.rule_governance.backend.parser.worker import (
     PARSER_EXECUTION_TASK,
     execute_parser_delivery,
 )
-from src.apps.rule_governance.backend.rule_control import RuleAssetTemplateActivationService
 from src.common.config import get_settings
 from src.core.celery_tasks.celery_app import celery
 from src.core.events.bus import EventBus
@@ -138,7 +137,6 @@ def publish_parser_outbox():
     parser_repository = ParserTemplateRepository()
     outbox_repository = ParserOutboxRepository()
     published: list[str] = []
-    rule_asset_seeds: list[dict] = []
     for row in outbox_repository.claim_pending():
         claim_token = str(row.claim_token or "")
         try:
@@ -156,48 +154,6 @@ def publish_parser_outbox():
             outbox_repository.release(row.id, claim_token=claim_token, error=str(exc))
             continue
         if message_id:
-            if (
-                row.event_type == "parser.template.activated"
-                and get_settings().RULE_ASSET_AUTO_SEED_ENABLED
-            ):
-                try:
-                    template_id = str((row.payload_json or {}).get("template_id") or "")
-                    if template_id:
-                        seed_result = RuleAssetTemplateActivationService(
-                            parser_repository=parser_repository,
-                        ).seed_from_template(template_id)
-                        if seed_result.get("reason") in {
-                            "parser_template_not_active",
-                            "parser_template_not_found",
-                        }:
-                            seed_result = {
-                                **seed_result,
-                                "skipped": True,
-                                "terminal": True,
-                            }
-                        rule_asset_seeds.append(seed_result)
-                        if not seed_result.get("success") and not seed_result.get("terminal"):
-                            raise RuntimeError(
-                                str(seed_result.get("reason") or "rule asset seed failed")
-                            )
-                        if (seed_result.get("job") or {}).get("id"):
-                            seed_result["next_action"] = "attach_offline_asset_source_dataset"
-                except Exception as exc:
-                    failure = {
-                        "success": False,
-                        "created": False,
-                        "event_id": row.id,
-                        "reason": "rule_asset_seed_failed",
-                        "error": str(exc),
-                    }
-                    if not rule_asset_seeds or rule_asset_seeds[-1].get("success"):
-                        rule_asset_seeds.append(failure)
-                    outbox_repository.release(
-                        row.id,
-                        claim_token=claim_token,
-                        error=str(exc),
-                    )
-                    continue
             outbox_repository.mark_published(row.id, claim_token=claim_token)
             published.append(row.id)
         else:
@@ -206,4 +162,4 @@ def publish_parser_outbox():
                 claim_token=claim_token,
                 error="event_bus_publish_returned_none",
             )
-    return {"published": published, "rule_asset_seeds": rule_asset_seeds}
+    return {"published": published}

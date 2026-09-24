@@ -119,9 +119,9 @@ const OfflineRuleAssetPipeline: React.FC<{ jobId: string }> = ({ jobId }) => {
       <Alert
         showIcon
         type="info"
-        message="样本导入是制作任务的第一步"
-        description="继续确认检查项、校对标准结果并验证发布。每条命令独立保存进度，可以稍后返回。"
-        action={<Button onClick={() => navigate(`/apps/patrol-rules/source-jobs/${encodeURIComponent(jobId)}?tab=production`)}>继续制作与验证</Button>}
+        message="下一步：关联检查项"
+        description="先在待归类检查项中确认关联。TextFSM 与 Projection 使用该检查项的语义和字段要求，随后校对结果并验证发布。"
+        action={pipeline.status === 'completed' ? <Button onClick={() => navigate(`/apps/patrol-rules/source-jobs/${encodeURIComponent(jobId)}?tab=classification`)}>关联检查项</Button> : undefined}
       />
     </Space>
   )

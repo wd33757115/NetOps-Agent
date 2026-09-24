@@ -138,28 +138,6 @@ def _review_is_unavailable(report: ParserReviewReport | None) -> bool:
     )
 
 
-def _review_requires_parser_spec_revision(
-    report: ParserReviewReport | None,
-) -> bool:
-    """Return whether a faithful parser is blocked only by editable spec guidance."""
-
-    if report is None or report.passed:
-        return False
-    actionable = tuple(
-        item
-        for item in report.diagnostics
-        if str(item.get("code") or "").strip().casefold()
-        != "review_record_set_assessment_missing"
-    )
-    return bool(
-        actionable
-        and all(
-            str(item.get("target") or "").strip().casefold() == "parser_spec"
-            for item in actionable
-        )
-    )
-
-
 class ParserCandidateReviewer(Protocol):
     def review(
         self,
@@ -661,11 +639,7 @@ class SimpleParserGenerationService:
             )
             append_attempt(
                 GenerationAttempt(
-                    (
-                        "seed:ntc_templates"
-                        if candidate.provider == "ntc_templates"
-                        else "llm_revalidate_persisted"
-                    ),
+                    "llm_revalidate_persisted",
                     candidate,
                     generation_report,
                     acceptance_report,
@@ -680,11 +654,7 @@ class SimpleParserGenerationService:
             ):
                 return finish(
                     "candidate_ready",
-                    (
-                        "ntc_candidate_reviewed"
-                        if candidate.provider == "ntc_templates"
-                        else "persisted_candidate_revalidated"
-                    ),
+                    "persisted_candidate_revalidated",
                     candidate,
                     candidate.protocol_version,
                 )
@@ -708,16 +678,6 @@ class SimpleParserGenerationService:
                     return finish(
                         "candidate_ready",
                         "human_review_required:semantic_review_unavailable",
-                        candidate,
-                        candidate.protocol_version,
-                    )
-                if (
-                    candidate.provider == "ntc_templates"
-                    and _review_requires_parser_spec_revision(review_report)
-                ):
-                    return finish(
-                        "candidate_ready",
-                        "human_review_required:ntc_parser_spec_revision",
                         candidate,
                         candidate.protocol_version,
                     )

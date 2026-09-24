@@ -305,7 +305,7 @@ def test_split_command_report_preserves_executed_empty_output():
     assert blocks[0].raw_output == ""
 
 
-def test_split_command_report_uses_embedded_prompt_boundaries():
+def test_split_command_report_preserves_configuration_ownership():
     blocks = split_cli_capture(
         "Command: show switch-profile\n"
         "Output:\n\n"
@@ -331,10 +331,10 @@ def test_split_command_report_uses_embedded_prompt_boundaries():
         "show running-config",
     ]
     assert blocks[0].raw_output == ""
-    assert "vPC domain id : 300" in blocks[1].raw_output
-    assert "Peer status" in blocks[1].raw_output
-    assert blocks[2].raw_output == "version 9.3(8)\nhostname N9K-1"
-    assert "vPC domain" not in blocks[2].raw_output
+    assert blocks[1].raw_output == ""
+    assert "vPC domain id : 300" in blocks[2].raw_output
+    assert "Peer status" in blocks[2].raw_output
+    assert blocks[2].raw_output.endswith("version 9.3(8)\nhostname N9K-1")
 
 
 def test_change_detector_field_changes():

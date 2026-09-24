@@ -1,0 +1,12 @@
+Value Required BOARD (MainBoard|Slot \d+)
+Value CURRENT_FILE (\S+)
+Value NEXT_MAIN_FILE (\S+)
+Value NEXT_BACKUP_FILE (\S+)
+
+Start
+  ^${BOARD}:
+  ^\s*Current startup saved-configuration file:\s*${CURRENT_FILE}
+  ^\s*Next main startup saved-configuration file:\s*${NEXT_MAIN_FILE}
+  ^\s*Next backup startup saved-configuration file:\s*${NEXT_BACKUP_FILE} -> Record
+
+EOF

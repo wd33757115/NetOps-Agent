@@ -14,7 +14,7 @@ from typing import Any
 
 import yaml
 
-from src.core.check_items.canonical import load_canonical_catalog
+from src.core.check_items.canonical import load_canonical_catalog, rule_semantics_catalog
 
 DEFAULT_PROJECTION_CATALOG_PATH = Path(__file__).parent / "assets" / "report_projections.v1.yaml"
 DEFAULT_PROJECTION_PRESENTATION_PATH = (
@@ -191,7 +191,7 @@ def _automatic_projection(
         check_item.get("canonical_contract") or {},
         label=f"{check_item_id}.canonical_contract",
     )
-    canonical_catalog = load_canonical_catalog()
+    canonical_catalog = rule_semantics_catalog(dict(contract))
     column_labels: dict[str, str] = {}
     canonical_columns: list[dict[str, Any]] = []
 

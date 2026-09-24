@@ -1,0 +1,17 @@
+Value Filldown slot (\d+)
+Value Required fan (\d+)
+Value fan_status (\S+)
+Value fan_airflow_direction (\S+)
+Value preferred_fan_airflow_direction (\S+)
+
+Start
+  ^\s*(?:Slot \d+:|Fan \d+|__NETOPS_TEXTFSM_END_OF_INPUT_7F3A9C__) -> Continue.Record
+  ^\s*Slot ${slot}:
+  ^\s*Fan ${fan} State:\s*${fan_status}
+  ^\s*Fan ${fan}:
+  ^\s*State\s*:\s*${fan_status}
+  ^\s*Airflow Direction:\s*${fan_airflow_direction}
+  ^\s*Prefer Airflow Direction:\s*${preferred_fan_airflow_direction}
+  ^\s*${fan}\s+${fan_status}\s+\d+\s*$$ -> Record
+
+EOF

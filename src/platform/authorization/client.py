@@ -14,6 +14,7 @@ import jwt
 from fastapi import HTTPException, Request
 
 from src.auth.models import CurrentUser
+from src.platform.http_tls import client_tls_context
 
 _connection: ContextVar[httpx.Client | None] = ContextVar("authority_connection", default=None)
 
@@ -25,7 +26,7 @@ async def authority_session():
     asyncio.to_thread propagates this context; HTTPX Client supports concurrent threads.
     No process-global sockets, so Celery forks and separate runs cannot share a pool.
     """
-    pending = asyncio.create_task(asyncio.to_thread(httpx.Client, timeout=5))
+    pending = asyncio.create_task(asyncio.to_thread(httpx.Client, timeout=5, verify=client_tls_context()))
     try:
         client = await asyncio.shield(pending)
     except asyncio.CancelledError:
@@ -112,7 +113,7 @@ def require_app(app_id: str):
         if not bearer.lower().startswith("bearer "):
             raise HTTPException(401, "请登录后使用应用")
         try:
-            async with httpx.AsyncClient(timeout=5) as client:
+            async with httpx.AsyncClient(timeout=5, verify=client_tls_context()) as client:
                 response = await client.post(
                     f"{authority_url()}/api/platform/apps/{app_id}/authorize/",
                     headers={

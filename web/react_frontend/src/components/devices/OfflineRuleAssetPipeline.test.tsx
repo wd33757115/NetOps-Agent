@@ -51,7 +51,9 @@ describe('OfflineRuleAssetPipeline', () => {
 
     expect(await screen.findByText('样本导入进度')).toBeVisible()
     expect(screen.getByText('查看待归类命令')).toBeVisible()
-    expect(screen.getByText('样本导入是制作任务的第一步')).toBeVisible()
+    expect(screen.getByText('下一步：关联检查项')).toBeVisible()
+    expect(screen.queryByRole('button', { name: '继续制作与验证' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '关联检查项' })).toBeVisible()
     expect(screen.queryByText('Contract')).not.toBeInTheDocument()
   })
 })

@@ -11,6 +11,7 @@ from src.core.patrol.handlers import (
 from src.core.patrol.offline_job_lock import OfflineJobBusyError, job_execution_lock
 from src.core.patrol.offline_jobs import OfflinePatrolJobService, _json_safe
 from src.core.patrol.reporting import render_run_report
+from src.core.patrol.repository import _compact_analysis_result
 from src.infrastructure.db.models import OfflinePatrolJobRecord
 from src.infrastructure.db.postgres import get_db_session
 from src.infrastructure.storage.minio_client import get_minio_storage
@@ -53,7 +54,9 @@ def _require_success(result, phase):
             else result
         )
         raise ValueError(f"{phase}: {detail}")
-    return result
+    # Full observations, changes and events already live in their evidence tables.
+    # Do not retain or rewrite those payloads at every task checkpoint.
+    return _compact_analysis_result(result)
 
 
 def _store_report(job_id, task_id, report):
@@ -137,6 +140,7 @@ def _execute(job_id, execution_key, task_id):
                     {
                         "run_id": run_id,
                         "update_current_state": False,
+                        "include_observations": False,
                     }
                 ),
                 phase,

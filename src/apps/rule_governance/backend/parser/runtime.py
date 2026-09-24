@@ -206,9 +206,8 @@ class ParserRuntime:
     ):
         """Promote catalog-managed commands when an approved Parser exists.
 
-        Explicit raw-hash policies remain authoritative. The promotion only applies
-        to the legacy catch-all ``raw_only`` result, which otherwise prevents a
-        newly governed check-item implementation from ever reaching its Parser.
+        Explicit raw-hash policies remain authoritative. Unconfigured commands
+        can use approved assets instead of the default text-only fallback.
         """
 
         decision = self.policy.decide(
@@ -220,7 +219,14 @@ class ParserRuntime:
         template = None
         if (
             not decision.enabled
-            and decision.handling == "raw_only"
+            and (
+                decision.handling == "raw_only"
+                or (
+                    decision.handling == "raw_hash_diff"
+                    and isinstance(self.policy, ParserPolicy)
+                    and not self.policy.has_explicit_policy(command)
+                )
+            )
             and identity.status == "known"
         ):
             template = self._resolve_template(

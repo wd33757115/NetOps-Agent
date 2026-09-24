@@ -16,6 +16,7 @@ export type RuleAssetWorkbenchView = 'tasks' | 'commands' | 'sources' | 'catalog
 interface RuleAssetProductionWorkbenchProps {
   view: RuleAssetWorkbenchView
   onViewChange: (view: RuleAssetWorkbenchView) => void
+  showNavigation?: boolean
   embedded?: boolean
   initialSearch?: string
   focusAction?: string
@@ -29,6 +30,7 @@ interface RuleAssetProductionWorkbenchProps {
 
 const RuleAssetProductionWorkbench: React.FC<RuleAssetProductionWorkbenchProps> = ({
   view,
+  showNavigation = true,
   onViewChange,
   focusAction,
   focusOfflineJobId,
@@ -54,7 +56,7 @@ const RuleAssetProductionWorkbench: React.FC<RuleAssetProductionWorkbenchProps> 
 
   return (
     <Space className="parser-production-workspace" direction="vertical" size={16} style={{ width: '100%' }}>
-      <nav className="rule-asset-view-switch" aria-label="巡检规则资产">
+      {showNavigation && <nav className="rule-asset-view-switch" aria-label="巡检规则资产">
         <Button type="text" className={currentView === 'tasks' ? 'is-active' : ''} onClick={() => onViewChange('tasks')}>制作任务</Button>
         <Button
           type="text"
@@ -72,7 +74,7 @@ const RuleAssetProductionWorkbench: React.FC<RuleAssetProductionWorkbenchProps> 
         >
           样本导入
         </Button>
-      </nav>
+      </nav>}
 
       {currentView === 'sources' ? (
         <RuleAssetSourceJobsWorkspace />

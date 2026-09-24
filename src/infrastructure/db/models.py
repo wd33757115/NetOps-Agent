@@ -5652,69 +5652,6 @@ class ParserTemplate(Base):
         }
 
 
-class ObservationContractRecord(Base):
-    """Versioned state semantics shared by CLI parsers and telemetry mappers."""
-
-    __tablename__ = "netops_observation_contracts"
-
-    id = Column(String(64), primary_key=True)
-    source_type = Column(String(64), nullable=False, index=True)
-    schema_id = Column(String(128), nullable=False, index=True)
-    schema_ref = Column(String(512), nullable=True)
-    source_template_id = Column(
-        String(64),
-        ForeignKey("parser_templates.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-    )
-    entity_type = Column(String(128), nullable=False, index=True)
-    primary_keys_json = Column(JSON, nullable=False)
-    canonical_entity_type = Column(String(128), nullable=True, index=True)
-    entity_identity_fields_json = Column(JSON, nullable=True)
-    entity_dimensions_json = Column(JSON, nullable=True)
-    required_fields_json = Column(JSON, nullable=False)
-    optional_fields_json = Column(JSON, nullable=True)
-    validators_json = Column(JSON, nullable=True)
-    ignore_fields_json = Column(JSON, nullable=True)
-    allow_empty = Column(Boolean, nullable=False, default=False)
-    empty_patterns_json = Column(JSON, nullable=True)
-    state_semantics_json = Column(JSON, nullable=True)
-    record_sets_json = Column(JSON, nullable=True)
-    record_set_relations_json = Column(JSON, nullable=True)
-    version = Column(Integer, nullable=False, default=1)
-    contract_sha256 = Column(String(64), nullable=False, index=True)
-    status = Column(String(32), nullable=False, default="active", index=True)
-    source_job_id = Column(String(64), nullable=True, index=True)
-    approval_json = Column(JSON, nullable=True)
-    compatibility_json = Column(JSON, nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(
-        DateTime,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
-    )
-    activated_at = Column(DateTime, nullable=True)
-    deprecated_at = Column(DateTime, nullable=True)
-
-    __table_args__ = (
-        Index(
-            "uq_observation_contract_version",
-            "source_type",
-            "schema_id",
-            "version",
-            unique=True,
-        ),
-        Index(
-            "uq_observation_contract_active",
-            "source_type",
-            "schema_id",
-            unique=True,
-            postgresql_where=text("status = 'active'"),
-        ),
-    )
-
-    def to_dict(self):
-        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
 
 
 class ChangePolicyRecord(Base):

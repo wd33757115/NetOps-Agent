@@ -1,0 +1,437 @@
+{
+  "revision": "cisco-manual-2026-09-23",
+  "entries": [
+    {
+      "platform": "nxos",
+      "command": "show inventory",
+      "check_item_id": "device.inventory",
+      "record_set": "device_inventory",
+      "path": "nxos__show_inventory__device_inventory.textfsm",
+      "reference": "cisco_nxos_show_inventory.textfsm",
+      "primary_keys": [
+        "component_id"
+      ]
+    },
+    {
+      "platform": "nxos",
+      "command": "show interface status",
+      "check_item_id": "interface.port_status",
+      "record_set": "interface_port_status",
+      "path": "nxos__show_interface_status__interface_port_status.textfsm",
+      "reference": "cisco_nxos_show_interface_status.textfsm",
+      "primary_keys": [
+        "PORT"
+      ]
+    },
+    {
+      "platform": "nxos",
+      "command": "show clock",
+      "check_item_id": "system.clock",
+      "record_set": "system_clock",
+      "path": "nxos__show_clock__system_clock.textfsm",
+      "reference": "cisco_nxos_show_clock.textfsm",
+      "primary_keys": []
+    },
+    {
+      "platform": "nxos",
+      "command": "show ip interface brief",
+      "check_item_id": "interface.ip_assignment",
+      "record_set": "interface_ip_assignment",
+      "path": "nxos__show_ip_interface_brief__interface_ip_assignment.textfsm",
+      "reference": "cisco_nxos_show_ip_interface_brief.textfsm",
+      "primary_keys": [
+        "interface"
+      ]
+    },
+    {
+      "platform": "nxos",
+      "command": "show ip arp",
+      "check_item_id": "network.arp_table",
+      "record_set": "network_arp_table",
+      "path": "nxos__show_ip_arp__network_arp_table.textfsm",
+      "reference": "cisco_nxos_show_ip_arp.textfsm",
+      "primary_keys": [
+        "ip_address",
+        "interface"
+      ]
+    },
+    {
+      "platform": "ios",
+      "command": "show inventory",
+      "check_item_id": "device.inventory",
+      "record_set": "device_inventory",
+      "path": "ios__show_inventory__device_inventory.textfsm",
+      "reference": "cisco_ios_show_inventory.textfsm",
+      "primary_keys": [
+        "component_id"
+      ]
+    },
+    {
+      "platform": "ios",
+      "command": "show interface status",
+      "check_item_id": "interface.port_status",
+      "record_set": "interface_port_status",
+      "path": "ios__show_interface_status__interface_port_status.textfsm",
+      "reference": "cisco_ios_show_interfaces_status.textfsm",
+      "primary_keys": [
+        "PORT"
+      ]
+    },
+    {
+      "platform": "ios",
+      "command": "show clock",
+      "check_item_id": "system.clock",
+      "record_set": "system_clock",
+      "path": "ios__show_clock__system_clock.textfsm",
+      "reference": "cisco_ios_show_clock.textfsm",
+      "primary_keys": []
+    },
+    {
+      "platform": "ios",
+      "command": "show ip interface brief",
+      "check_item_id": "interface.ip_assignment",
+      "record_set": "interface_ip_assignment",
+      "path": "ios__show_ip_interface_brief__interface_ip_assignment.textfsm",
+      "reference": "cisco_ios_show_ip_interface_brief.textfsm",
+      "primary_keys": [
+        "interface"
+      ]
+    },
+    {
+      "platform": "ios",
+      "command": "show ip arp",
+      "check_item_id": "network.arp_table",
+      "record_set": "network_arp_table",
+      "path": "ios__show_ip_arp__network_arp_table.textfsm",
+      "reference": "cisco_ios_show_ip_arp.textfsm",
+      "primary_keys": [
+        "ip_address",
+        "interface"
+      ]
+    },
+    {
+      "platform": "nxos",
+      "command": "show module",
+      "check_item_id": "device.module",
+      "record_set": "device_module",
+      "path": "nxos__show_module__device_module.textfsm",
+      "reference": "cisco_nxos_show_module.textfsm",
+      "primary_keys": [
+        "MODULE"
+      ]
+    },
+    {
+      "platform": "nxos",
+      "command": "show mac address-table",
+      "check_item_id": "network.mac_table",
+      "record_set": "network_mac_table",
+      "path": "nxos__show_mac_address_table__network_mac_table.textfsm",
+      "reference": "cisco_nxos_show_mac_address-table.textfsm",
+      "primary_keys": [
+        "vlan_id",
+        "mac_address"
+      ]
+    },
+    {
+      "platform": "ios",
+      "command": "show mac address-table",
+      "check_item_id": "network.mac_table",
+      "record_set": "network_mac_table",
+      "path": "ios__show_mac_address_table__network_mac_table.textfsm",
+      "reference": "cisco_ios_show_mac-address-table.textfsm",
+      "primary_keys": [
+        "vlan_id",
+        "mac_address"
+      ]
+    },
+    {
+      "platform": "nxos",
+      "command": "show environment power",
+      "check_item_id": "environment.power",
+      "record_set": "environment_power",
+      "path": "nxos__show_environment_power__environment_power.textfsm",
+      "reference": "cisco_nxos_show_environment.textfsm",
+      "primary_keys": [
+        "power_supply"
+      ]
+    },
+    {
+      "platform": "nxos",
+      "command": "show environment fan",
+      "check_item_id": "environment.fan",
+      "record_set": "environment_fan",
+      "path": "nxos__show_environment_fan__environment_fan.textfsm",
+      "reference": "cisco_nxos_show_environment.textfsm",
+      "primary_keys": [
+        "fan"
+      ]
+    },
+    {
+      "platform": "nxos",
+      "command": "show environment temperature",
+      "check_item_id": "environment.temperature",
+      "record_set": "environment_temperature",
+      "path": "nxos__show_environment_temperature__environment_temperature.textfsm",
+      "reference": "cisco_nxos_show_environment_temperature.textfsm",
+      "primary_keys": [
+        "slot",
+        "sensor"
+      ]
+    },
+    {
+      "platform": "nxos",
+      "command": "show system resources",
+      "check_item_id": "system.cpu_instant",
+      "record_set": "system_cpu_instant",
+      "path": "nxos__show_system_resources__system_cpu_instant.textfsm",
+      "reference": null,
+      "primary_keys": [
+        "CPU"
+      ]
+    },
+    {
+      "platform": "nxos",
+      "command": "show system resources",
+      "check_item_id": "system.memory_usage",
+      "record_set": "system_memory_usage",
+      "path": "nxos__show_system_resources__system_memory_usage.textfsm",
+      "reference": null,
+      "primary_keys": []
+    },
+    {
+      "platform": "ios",
+      "command": "show processes memory",
+      "check_item_id": "system.memory_pool",
+      "record_set": "system_memory_pool",
+      "path": "ios__show_processes_memory__system_memory_pool.textfsm",
+      "reference": "cisco_ios_show_processes_memory_sorted.textfsm",
+      "primary_keys": [
+        "POOL"
+      ]
+    },
+    {
+      "platform": "ios",
+      "command": "show processes memory",
+      "check_item_id": "system.memory_process",
+      "record_set": "system_memory_process",
+      "path": "ios__show_processes_memory__system_memory_process.textfsm",
+      "reference": "cisco_ios_show_processes_memory_sorted.textfsm",
+      "primary_keys": [
+        "PROCESS_ID",
+        "PROCESS"
+      ]
+    },
+    {
+      "platform": "ios",
+      "command": "show processes cpu",
+      "check_item_id": "system.cpu_process",
+      "record_set": "system_cpu_process",
+      "path": "ios__show_processes_cpu__system_cpu_process.textfsm",
+      "reference": "cisco_ios_show_processes_cpu.textfsm",
+      "primary_keys": [
+        "PROCESS_PID"
+      ]
+    },
+    {
+      "platform": "ios",
+      "command": "show processes cpu",
+      "check_item_id": "system.cpu_usage",
+      "record_set": "system_cpu_usage",
+      "path": "ios__show_processes_cpu__system_cpu_usage.textfsm",
+      "reference": "cisco_ios_show_processes_cpu.textfsm",
+      "primary_keys": []
+    },
+    {
+      "platform": "ios",
+      "command": "show switch detail",
+      "check_item_id": "redundancy.stack",
+      "record_set": "redundancy_stack",
+      "path": "ios__show_switch_detail__redundancy_stack.textfsm",
+      "reference": "cisco_ios_show_switch_detail.textfsm",
+      "primary_keys": [
+        "member_id"
+      ]
+    },
+    {
+      "platform": "ios",
+      "command": "show switch detail",
+      "check_item_id": "redundancy.stack_ports",
+      "record_set": "redundancy_stack_ports",
+      "path": "ios__show_switch_detail__redundancy_stack_ports.textfsm",
+      "reference": "cisco_ios_show_switch_detail_stack_ports.textfsm",
+      "primary_keys": [
+        "SWITCH"
+      ]
+    },
+    {
+      "platform": "nxos",
+      "command": "show vpc",
+      "check_item_id": "redundancy.mlag",
+      "record_set": "redundancy_mlag",
+      "path": "nxos__show_vpc__redundancy_mlag.textfsm",
+      "reference": null,
+      "primary_keys": [
+        "domain_id"
+      ]
+    },
+    {
+      "platform": "nxos",
+      "command": "show vpc",
+      "check_item_id": "redundancy.vpc_member",
+      "record_set": "redundancy_vpc_member",
+      "path": "nxos__show_vpc__redundancy_vpc_member.textfsm",
+      "reference": "cisco_nxos_show_vpc.textfsm",
+      "primary_keys": [
+        "ID"
+      ]
+    },
+    {
+      "platform": "ios",
+      "command": "show env all",
+      "check_item_id": "environment.fan",
+      "record_set": "environment_fan",
+      "path": "ios__show_env_all__environment_fan.textfsm",
+      "reference": null,
+      "primary_keys": [
+        "slot",
+        "fan"
+      ]
+    },
+    {
+      "platform": "ios",
+      "command": "show env all",
+      "check_item_id": "environment.temperature",
+      "record_set": "environment_temperature",
+      "path": "ios__show_env_all__environment_temperature.textfsm",
+      "reference": null,
+      "primary_keys": [
+        "slot",
+        "sensor"
+      ]
+    },
+    {
+      "platform": "ios",
+      "command": "show env all",
+      "check_item_id": "environment.power",
+      "record_set": "environment_power",
+      "path": "ios__show_env_all__environment_power.textfsm",
+      "reference": null,
+      "primary_keys": [
+        "slot",
+        "power_supply"
+      ]
+    },
+    {
+      "platform": "ios",
+      "command": "show interface stats",
+      "check_item_id": "interface.switching_statistics",
+      "record_set": "interface_switching_statistics",
+      "path": "ios__show_interface_stats__interface_switching_statistics.textfsm",
+      "reference": null,
+      "primary_keys": [
+        "INTERFACE",
+        "SWITCHING_PATH"
+      ]
+    },
+    {
+      "platform": "ios",
+      "command": "show controllers",
+      "check_item_id": "interface.controller_statistics",
+      "record_set": "interface_controller_statistics",
+      "path": "ios__show_controllers__interface_controller_statistics.textfsm",
+      "reference": null,
+      "primary_keys": [
+        "INTERFACE"
+      ]
+    },
+    {
+      "platform": "nxos",
+      "command": "show debug",
+      "check_item_id": "system.debug_status",
+      "record_set": "system_debug_status",
+      "path": "nxos__show_debug__system_debug_status.textfsm",
+      "reference": null,
+      "primary_keys": []
+    },
+    {
+      "platform": "ios",
+      "command": "show debugging",
+      "check_item_id": "system.debug_status",
+      "record_set": "system_debug_status",
+      "path": "ios__show_debugging__system_debug_status.textfsm",
+      "reference": null,
+      "primary_keys": []
+    },
+    {
+      "platform": "nxos",
+      "command": "show version",
+      "check_item_id": "device.version",
+      "record_set": "device_version",
+      "path": "nxos__show_version__device_version.textfsm",
+      "reference": "cisco_nxos_show_version.textfsm",
+      "primary_keys": []
+    },
+    {
+      "platform": "ios",
+      "command": "show version",
+      "check_item_id": "device.version",
+      "record_set": "device_version",
+      "path": "ios__show_version__device_version.textfsm",
+      "reference": "cisco_ios_show_version.textfsm",
+      "primary_keys": [],
+      "models": [
+        "ISR4451-X/K9"
+      ]
+    },
+    {
+      "platform": "ios",
+      "command": "show interface transceiver detail",
+      "check_item_id": "interface.optical_measurements",
+      "record_set": "interface_optical_measurements",
+      "path": "ios__show_interface_transceiver_detail__interface_optical_measurements.textfsm",
+      "reference": "cisco_ios_show_interface_transceiver.textfsm",
+      "primary_keys": [
+        "INTERFACE",
+        "METRIC"
+      ]
+    },
+    {
+      "platform": "nxos",
+      "command": "show interface transceiver detail",
+      "check_item_id": "interface.optical_power",
+      "record_set": "interface_optical_power",
+      "path": "nxos__show_interface_transceiver_detail__interface_optical_power.textfsm",
+      "reference": "cisco_nxos_show_interface_transceiver_details.textfsm",
+      "primary_keys": [
+        "interface",
+        "channel"
+      ]
+    },
+    {
+      "platform": "ios",
+      "command": "show env all",
+      "check_item_id": "environment.sensor_reading",
+      "record_set": "environment_sensor_reading",
+      "path": "ios__show_env_all__environment_sensor_reading.textfsm",
+      "reference": null,
+      "primary_keys": [
+        "SENSOR",
+        "LOCATION"
+      ]
+    },
+    {
+      "platform": "ios",
+      "command": "show version",
+      "check_item_id": "device.version",
+      "record_set": "device_version_stack",
+      "path": "ios__show_version__device_version_stack.textfsm",
+      "reference": "cisco_ios_show_version.textfsm",
+      "primary_keys": [
+        "SLOT"
+      ],
+      "models": [
+        "WS-C2960XR-24TS-I"
+      ]
+    }
+  ]
+}

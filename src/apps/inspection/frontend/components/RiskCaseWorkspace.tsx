@@ -1,10 +1,10 @@
+import InspectionDetailPage from '../InspectionDetailPage'
 import React, { useMemo, useState } from 'react'
 import {
   Alert,
   Button,
   DatePicker,
   Descriptions,
-  Drawer,
   Empty,
   Form,
   Input,
@@ -765,11 +765,9 @@ const RiskCaseWorkspace: React.FC<RiskCaseWorkspaceProps> = ({
         }}
       />
 
-      <Drawer
-        width={isMobile ? '100%' : 760}
+      <InspectionDetailPage
         open={Boolean(selectedRiskId)}
         title="风险事项详情"
-        destroyOnClose
         onClose={() => setSelectedRiskId(undefined)}
         extra={selected && onOpenDeviceEvidence && (
           <Button
@@ -1172,7 +1170,7 @@ const RiskCaseWorkspace: React.FC<RiskCaseWorkspaceProps> = ({
         ) : (
           <Alert type="error" showIcon message="风险详情加载失败" />
         )}
-      </Drawer>
+      </InspectionDetailPage>
 
       <Modal
         open={Boolean(action)}

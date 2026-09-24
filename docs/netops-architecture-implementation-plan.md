@@ -11,7 +11,7 @@
 - P6 已交付部分：DSH 替换问答执行器，原生文件检索与 MCP 业务证据查询、引用核对、执行过程、历史恢复及明确失败提示。原知识库 API/索引/依赖入口退役。
 - 后续产品完善：资料整份发布及修订/生命周期治理、巡检宽版 UI、工作台个人壁纸、全宽图标拖放和菜单历史会话。
 
-本地版本基线：Assistant 0.6.1、Materials 1.2.0、Inspection 1.2.0、Firewall Policy 1.0.1、Official Documents 1.1.0、Rule Governance 1.0.0。版本号不作为其他环境启用成功的证据。
+本地版本基线：Assistant 0.6.2、Materials 1.2.0、Inspection 1.2.0、Firewall Policy 1.0.1、Official Documents 1.1.0、Rule Governance 1.1.0。版本号不作为其他环境启用成功的证据。
 
 ## P6 待验收
 
@@ -26,3 +26,15 @@ P6 整体尚未宣布完成。详见[P6 验收状态](netops-capability-packages
 [架构](01_系统架构设计.md)、[能力包部署](capability-packages-guide.md)、[权限](permissions-guide.md)、[工作台](workbench-apps-guide-2026-09-05.md)、[资料](materials-guide.md)、[问答](assistant-guide.md)。
 
 阶段交付报告保留为带版本的历史证据；其中当时的停用、未部署、待切换及测试数量不是当前状态。
+
+## 2026-09-23：设备管理独立应用
+
+设备管理 1.0.0 自注册前端、API 和 App 权限；规则治理 1.2.0 移除设备管理子页与 API，巡检 1.2.1 保留只读选设备及独立固定执行流程。共享 inventory 仓储和凭据仍为平台能力，HTTP 业务实现迁入 device_management 包。旧地址跳转；BFF 0004 数据迁移一次性保留原维护授权，不复制设备或历史数据。
+
+## 2026-09-23：统一系统管理
+
+平台新增用户、用户组与应用授权三页，复用 User / Group / AppGrant。系统组保护、授权来源预览、变更审计及版本摘要冲突检查已接入，不新增业务 App 内部权限或执行流程。实施与验收见 [系统管理实施计划](system-management-plan.md)。
+
+## 2026-09-23：规则资产包迁移
+
+规则治理 1.3.0 内提供 ZIP/JSON 资产交换、依赖闭包、内容预检、冲突差异、本地 ID 映射和原子草稿导入。复用原资产与审计表、Parser 复核、目录治理及运行包装配检查；不复制来源审批、不直接启用规则、不引入 Workflow。详见 [实施计划](rule-package-transfer-plan.md)与[使用说明](rule-package-transfer-guide.md)。

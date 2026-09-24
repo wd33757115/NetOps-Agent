@@ -24,6 +24,7 @@ from src.infrastructure.db.models import (
     CheckItemVersionRecord,
     CollectionImplementationRecord,
     CollectionImplementationVersionRecord,
+    ParserTemplate,
 )
 
 
@@ -54,6 +55,7 @@ def _environment(tmp_path, *, devices=None):
             CheckItemCatalogChangeRecord.__table__,
             CheckItemRuntimeBundleRecord.__table__,
             CheckItemRuntimeBundleVersionRecord.__table__,
+            ParserTemplate.__table__,
         ],
     )
     session_factory = sessionmaker(bind=engine)
@@ -176,6 +178,29 @@ def test_create_publish_and_soft_delete_check_item(tmp_path):
     )
     assert deleted["status"] == "deprecated"
     assert repository.load_active().check_item(created.id) is None
+
+
+def test_local_semantic_draft_publishes_and_round_trips_to_rules_and_report(tmp_path):
+    from tests.unit.test_local_check_item_semantics import contract, candidates
+    from src.core.check_items.report_projection import build_report_projection_snapshot
+
+    repository, service, _ = _environment(tmp_path)
+    source = repository.load_active().check_item('device.version')
+    draft = service.create_check_item_draft(
+        _check_item_payload(source, id='custom.power', name='Custom power', assessment_mode='health',
+                            canonical_contract=contract(), report_projection='auto'),
+        actor='engineer-a', idempotency_key='local-semantic-create-test')
+    preview = service.preview_impact(draft['id'])
+    service.submit(draft['id'], actor='engineer-a', expected_impact_digest=preview['impact_digest'], idempotency_key='local-semantic-submit-test')
+    service.decide(draft['id'], decision='approved', actor='release-admin-b', expected_impact_digest=preview['impact_digest'], idempotency_key='local-semantic-approve-test')
+    created = repository.load_active().check_item('custom.power')
+    assert created.canonical_contract['observations'][0]['semantic_definition']['description'] == 'Power state'
+    assert candidates(created.canonical_contract)['success']
+    snapshot = build_report_projection_snapshot({created.version_id: {
+        'check_item_id': created.id, 'version': created.version, 'result_mode': created.result_mode,
+        'report_projection': 'auto', 'canonical_contract': created.canonical_contract,
+    }})
+    assert any(column['source'] == 'custom.power.state' for profile in snapshot['profiles'].values() for column in profile['canonical_columns'])
 
 
 def test_check_item_revision_preserves_collection_implementation_links(tmp_path):
@@ -554,7 +579,10 @@ def test_delete_implementation_allows_empty_note_and_is_idempotent(tmp_path):
         assert audit.detail["reason"] == ""
 
 
-def test_delete_implementation_is_blocked_by_active_runtime_bundle(tmp_path):
+@pytest.mark.parametrize("fail_audit", [False, True])
+def test_delete_implementation_retires_runtime_bundles_atomically(tmp_path, monkeypatch, fail_audit):
+    from src.apps.rule_governance.backend.check_items.runtime_bundle import CheckItemRuntimeBundleService, RuntimeBundleValidationError
+
     repository, service, session_factory = _environment(tmp_path)
     source = next(
         item
@@ -562,6 +590,11 @@ def test_delete_implementation_is_blocked_by_active_runtime_bundle(tmp_path):
         if item.id == "h3c-cpu-usage"
     )
     with _session_scope(session_factory) as db:
+        db.add(ParserTemplate(
+            id="shared-parser", vendor="H3C", profile="test", canonical_command="display cpu-usage",
+            category="system", version="v1", asset_path="shared.textfsm", sha256="f" * 64,
+            status="active",
+        ))
         check_version_id = (
             db.query(CheckItemImplementationLinkRecord)
             .filter(
@@ -602,16 +635,45 @@ def test_delete_implementation_is_blocked_by_active_runtime_bundle(tmp_path):
             )
         )
 
-    with pytest.raises(
-        CatalogGovernanceConflictError,
-        match="referenced by active RuntimeBundle",
-    ):
+    if fail_audit:
+        def fail(*args, **kwargs):
+            raise RuntimeError("audit unavailable")
+        monkeypatch.setattr(service, "_audit", fail)
+        with pytest.raises(RuntimeError, match="audit unavailable"):
+            service.delete_implementation(
+                source.id, actor="admin-a", idempotency_key="catalog-delete-runtime-blocked",
+            )
+    else:
         service.delete_implementation(
             source.id,
             actor="admin-a",
-            reason="Deletion must wait for bundle retirement",
+            reason="Delete adapter and retire its runtime bundles together",
             idempotency_key="catalog-delete-runtime-blocked",
         )
+        replay = service.delete_implementation(
+            source.id, actor="admin-a", idempotency_key="catalog-delete-runtime-blocked",
+        )
+        assert replay["idempotent_replay"]
+    with _session_scope(session_factory) as db:
+        expected = "active" if fail_audit else "deprecated"
+        assert db.get(CollectionImplementationRecord, source.id).status == expected
+        assert db.get(CollectionImplementationVersionRecord, source.version_id).status == expected
+        assert db.get(CheckItemRuntimeBundleRecord, "runtime-bundle-delete-blocker").status == expected
+        bundle = db.get(CheckItemRuntimeBundleVersionRecord, "runtime-bundle-delete-blocker-v1")
+        assert bundle.status == expected
+        assert bundle.digest == "d" * 64
+        assert bundle.check_item_version_id == check_version_id
+        assert db.get(CheckItemVersionRecord, check_version_id).status == "active"
+        assert db.get(CollectionImplementationRecord, "huawei-cpu-usage").status == "active"
+        assert db.get(ParserTemplate, "shared-parser").status == "active"
+        assert db.get(ParserTemplate, "shared-parser").sha256 == "f" * 64
+        if not fail_audit:
+            audit = db.query(AuditLogRecord).filter_by(action="collection_implementation_deleted").one()
+            assert audit.detail["retired_runtime_bundle_version_ids"] == [bundle.id]
+    if not fail_audit:
+        runtime = CheckItemRuntimeBundleService(lambda: _session_scope(session_factory))
+        with pytest.raises(RuntimeBundleValidationError, match="命令适配器已删除"):
+            runtime.rollback("runtime-bundle-delete-blocker-v1", actor="admin-a", reason="Cannot resurrect deleted adapter")
 
 
 def test_active_runtime_bundle_requires_rollout_and_cutover_is_atomic(

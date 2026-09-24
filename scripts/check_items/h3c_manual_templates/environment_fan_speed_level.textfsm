@@ -1,0 +1,7 @@
+Value Required FAN (\d+)
+Value SPEED_LEVEL (\d+)
+
+Start
+  ^\s*${FAN}\s+\S+\s+${SPEED_LEVEL}\s*$$ -> Record
+
+EOF

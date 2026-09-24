@@ -1,3 +1,4 @@
+import InspectionDetailPage from './InspectionDetailPage'
 import type { PatrolBatchSummary } from '@netops/services/api';
 import { inspectionDeviceApi as deviceApi, inspectionBatchApi as workflowApi } from './api';
 import { canConfigureNetOps } from '@netops/apps/permissions';
@@ -7,7 +8,7 @@ import PatrolDeviceSelector from '@netops/components/devices/PatrolDeviceSelecto
 import { businessHref } from '@netops/apps/appRoutes';
 import { appRoutes } from '@netops/apps/appRoutes';
 import React, { useMemo, useState } from 'react';
-import { Alert, Button, Collapse, Descriptions, Drawer, Dropdown, Form, Input, Modal, Progress, Row, Col, Select, Space, Switch, Table, Tabs, Tag, Tooltip, Typography, message } from 'antd';
+import { Alert, Button, Collapse, Descriptions, Dropdown, Form, Input, Modal, Progress, Row, Col, Select, Space, Switch, Table, Tabs, Tag, Tooltip, Typography, message } from 'antd';
 import { EyeOutlined, MoreOutlined, PlayCircleOutlined, ReloadOutlined, SearchOutlined, StopOutlined } from '@ant-design/icons';
 import { useMutation, useQuery } from 'react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -163,7 +164,7 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = () =
   const {
     user
   } = useAuth();
-  const canConfigure = canConfigureNetOps(user);
+  const canConfigure = Boolean(user?.app_ids?.includes('device-management'));
   const {
     draft: patrolDraft,
     saveDraft,
@@ -1135,13 +1136,13 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = () =
 
 
 
-      <Drawer title={evidenceDevice ? `巡检详情 - ${evidenceDevice.device_name}` : '巡检详情'} open={evidenceOpen} onClose={() => {
+      <InspectionDetailPage title={evidenceDevice ? `巡检详情 - ${evidenceDevice.device_name}` : '巡检详情'} open={evidenceOpen} onClose={() => {
       setEvidenceOpen(false);
       setEvidenceDevice(null);
       setEvidenceRunId(null);
       setEvidenceBatchId(null);
       setEvidenceTab('result');
-    }} width={isMobile ? '100vw' : 1200} destroyOnClose>
+    }}>
         <Tabs activeKey={evidenceTab} items={[{
         key: 'result',
         label: '巡检结果',
@@ -1157,7 +1158,7 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = () =
             return;
           }
           if (kind === 'observation-contract') {
-            navigate(businessHref(`/skills/parser?focus=${kind}&id=${encodeURIComponent(id)}&workspace=rule-assets&subtab=observation-contracts`));
+            navigate(businessHref(`/skills/parser?focus=${kind}&id=${encodeURIComponent(id)}&workspace=catalog`));
             return;
           }
           if (kind === 'change-policy' || kind === 'change') {
@@ -1178,7 +1179,7 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = () =
         disabled: !evidenceRunId,
         children: <WorkflowRunMonitor runId={evidenceRunId} plain />
       }]} />
-      </Drawer>
+      </InspectionDetailPage>
 
 
 

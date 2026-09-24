@@ -35,8 +35,8 @@ def deployment_decision(app_id, manifests=None):
     return 200
 
 
-def decision(user, app_id):
-    code = deployment_decision(app_id)
+def decision(user, app_id, *, manifests=None):
+    code = deployment_decision(app_id, manifests)
     if code != 200:
         return code
     if not user or not user.is_authenticated or not user.is_active:
@@ -57,7 +57,10 @@ def decision(user, app_id):
 
 
 def available_apps(user):
-    return [m.public() for m in discover().values() if decision(user, m.id) == 200]
+    # One request needs one filesystem snapshot, not a full rescan per App.
+    # User status, membership and grants are still read from the database.
+    manifests = discover()
+    return [m.public() for m in manifests.values() if decision(user, m.id, manifests=manifests) == 200]
 
 
 def identity(user):

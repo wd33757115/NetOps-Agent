@@ -131,12 +131,16 @@ commands:
     template_scope: family
 
   display current-configuration: {enabled: false, handling: raw_hash_diff, comparison_profile: configuration}
-  display startup: {enabled: false, handling: raw_hash_diff, comparison_profile: configuration}
+  # File selectors are structured evidence, not the saved configuration body.
+  display startup: {enabled: true, asset_mode: observation_only}
   display saved-configuration: {enabled: false, handling: raw_hash_diff, comparison_profile: configuration}
   show running-config: {enabled: false, handling: raw_hash_diff, comparison_profile: configuration}
   show startup-config: {enabled: false, handling: raw_hash_diff, comparison_profile: configuration}
   display logbuffer: {enabled: false, handling: raw_only}
+  display logbuffer level 2: {enabled: true, asset_mode: observation_only}
+  display logbuffer level 3: {enabled: true, asset_mode: observation_only}
+  display logbuffer level 4: {enabled: true, asset_mode: observation_only}
   show logging: {enabled: false, handling: raw_only}
-  display clock: {enabled: false, handling: raw_only}
+  display clock: {enabled: true, asset_mode: observation_only}
   show clock: {enabled: false, handling: raw_only}
   screen-length disable: {enabled: false, handling: not_applicable}

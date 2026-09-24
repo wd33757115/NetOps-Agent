@@ -1,0 +1,7 @@
+Value CPU (CPU\d*)
+Value USER ([-+]?\d+(?:\.\d+)?)
+Value KERNEL ([-+]?\d+(?:\.\d+)?)
+Value IDLE ([-+]?\d+(?:\.\d+)?)
+
+Start
+  ^\s*${CPU}\s+states\s*:\s+${USER}%\s+user,\s+${KERNEL}%\s+kernel,\s+${IDLE}%\s+idle\s*$$ -> Record

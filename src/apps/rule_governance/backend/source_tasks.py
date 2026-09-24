@@ -8,6 +8,7 @@ from src.infrastructure.db.models import OfflinePatrolJobRecord, OfflinePatrolPe
 from src.infrastructure.db.postgres import get_db_session
 
 from .access import authorize, execution_lock, maintenance, require_running
+from .source_preparation import prepare_source_samples
 
 TASK = "netops.rule_governance.import_source"
 
@@ -38,8 +39,10 @@ def import_source(self, job_id, execution_key):
             if not results[role].get("success"):
                 raise ValueError(f"样本周期 {role} 导入失败")
         authorize(owner)
+        preparation = prepare_source_samples(job_id, execution_key)
         result = {
             "success": True,
+            "preparation": preparation,
             "periods": results,
             "snapshot_count": sum(
                 int(item.get("snapshot_count", len(item.get("snapshot_ids") or [])))

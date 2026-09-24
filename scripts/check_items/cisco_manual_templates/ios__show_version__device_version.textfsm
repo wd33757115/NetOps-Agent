@@ -1,0 +1,30 @@
+Value VENDOR (.+?)
+Value SOFTWARE_VERSION (.+?)
+Value BOOT_IMAGE (.+?)
+Value SYSTEM_IMAGE (.+?)
+Value SLOT (.+?)
+Value UPTIME (.+?)
+Value BOARD_TYPE (.+?)
+Value DRAM (.+?)
+Value FLASH (.+?)
+Value REBOOT_REASON (.+?)
+Value HOSTNAME (.+?)
+Value SERIAL (.+?)
+Value BIOS (.+?)
+Value ROMMON (.+?)
+Value SOFTWARE_IMAGE (.+?)
+Value CONFIG_REGISTER (.+?)
+Value MAC_ADDRESS (.+?)
+Value RESTARTED (.+?)
+
+Start
+  ^${VENDOR} IOS.*Software,.*Version\s+${SOFTWARE_VERSION},\s+RELEASE
+  ^ROM:\s+${ROMMON}\s*$$
+  ^${HOSTNAME}\s+uptime is\s+${UPTIME}\s*$$
+  ^System image file is "${SYSTEM_IMAGE}"\s*$$
+  ^Last reload reason:\s+${REBOOT_REASON}\s*$$
+  ^System restarted at\s+${RESTARTED}\s*$$
+  ^cisco\s+${BOARD_TYPE}\s+\(.+?\) processor.*with\s+${DRAM}\s+of memory\.
+  ^Processor board ID\s+${SERIAL}\s*$$
+  ^Configuration register is\s+${CONFIG_REGISTER}\s*$$
+  ^Switch Ports Model -> Record End

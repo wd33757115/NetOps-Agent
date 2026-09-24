@@ -1,0 +1,14 @@
+Value Required slot (\d+)
+Value Required sensor (\S+\s+\d+)
+Value temperature_celsius (-?[\d.]+)
+Value temperature_high_warning_celsius (-?[\d.]+)
+Value temperature_high_alarm_celsius (-?[\d.]+)
+
+Start
+  ^Slot Subslot -> Router
+  ^\s*${slot}\s+${sensor}\s+${temperature_celsius}\s+\S+\s+(?:${temperature_high_warning_celsius}|NA)\s+(?:${temperature_high_alarm_celsius}|NA)\s+\S+\s*$$ -> Record
+
+Router
+  ^\s*${slot}\s+\d+\s+${sensor}\s+${temperature_celsius}\s+\S+\s+(?:${temperature_high_warning_celsius}|NA)\s+(?:${temperature_high_alarm_celsius}|NA)\s*$$ -> Record
+
+EOF

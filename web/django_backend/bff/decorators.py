@@ -192,3 +192,14 @@ def require_jwt(view_func=None, *, strict: bool | None = None):
     if view_func is not None:
         return decorator(view_func)
     return decorator
+
+
+def require_app_grants_manager(view_func):
+    """Only admin and netops-config may delegate App usage; not account roles."""
+    @wraps(view_func)
+    def wrapper(request, *args, **kwargs):
+        from .roles import can_manage_app_grants
+        if not can_manage_app_grants(getattr(request, 'user', None)):
+            return bff_error('需要 admin 或 netops-config 用户组的应用授权管理权限', 403)
+        return view_func(request, *args, **kwargs)
+    return wrapper

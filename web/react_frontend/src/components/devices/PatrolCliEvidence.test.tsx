@@ -32,7 +32,7 @@ it('loads the exact observation and shows source lines before requesting full ou
   const user = userEvent.setup()
   mount(<PatrolCliEvidence jobId="job" reference="obs-1" />)
   expect(await screen.findByText('两期对象摘录一致；当前值低于设备下限。')).toBeVisible()
-  expect(patrolReports.evidence).toHaveBeenCalledWith('job', 0, 'obs-1')
+  expect(patrolReports.evidence).toHaveBeenCalledWith('job', 0, 'obs-1', expect.any(AbortSignal))
   expect(screen.getByText('基线 CLI 原文')).toBeVisible()
   expect(screen.getByText('快照：base-1')).toBeVisible()
   expect(screen.getByTitle('当前异常值')).toHaveTextContent('-13.07')
@@ -40,7 +40,7 @@ it('loads the exact observation and shows source lines before requesting full ou
   expect(patrolReports.fullEvidence).not.toHaveBeenCalled()
   await user.click(screen.getByText('查看完整命令输出'))
   expect(await screen.findByText('FULL CURRENT')).toBeVisible()
-  expect(patrolReports.fullEvidence).toHaveBeenCalledWith('job', 'CLI-001', 'digest')
+  expect(patrolReports.fullEvidence).toHaveBeenCalledWith('job', 'CLI-001', 'digest', undefined, expect.any(AbortSignal))
 })
 
 it('keeps recovery changes unmarked and escapes raw CLI markup', () => {
@@ -64,7 +64,7 @@ it('does not fetch collapsed trend evidence', async () => {
   expect(patrolReports.evidence).not.toHaveBeenCalled()
   await user.click(screen.getByText('查看基线与当前 CLI 原文对比'))
   await screen.findByText(entry.note)
-  expect(patrolReports.evidence).toHaveBeenCalledWith('job', 0, 'recovered-obs')
+  expect(patrolReports.evidence).toHaveBeenCalledWith('job', 0, 'recovered-obs', expect.any(AbortSignal))
 })
 
 it('can retry a failed excerpt request without claiming empty evidence', async () => {

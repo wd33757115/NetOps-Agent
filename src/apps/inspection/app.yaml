@@ -1,7 +1,7 @@
 manifest_version: 1
 id: inspection
 name: 网络巡检
-version: 1.2.0
+version: 1.2.7
 platform_api: '>=1.0,<2.0'
 icon: radar
 aliases:
@@ -75,4 +75,3 @@ database:
 lifecycle:
   drain: src.apps.inspection.backend.lifecycle:drain
   pending: src.apps.inspection.backend.lifecycle:pending
-

@@ -21,7 +21,7 @@ export interface DesktopLayout {
 export const defaultLayout = (): DesktopLayout => ({
   schemaVersion: 1,
   revision: 0,
-  nodes: appRegistry.filter(app => app.enabled).map((app, col) => ({
+  nodes: appRegistry.filter(app => app.enabled && app.showOnDesktop).map((app, col) => ({
     id: app.id,
     kind: 'app',
     appId: app.id,
@@ -65,6 +65,7 @@ export function reconcileLayout(input: DesktopLayout): DesktopLayout {
     )
       continue
     if (raw.kind === 'app' && (!raw.appId || apps.has(raw.appId))) continue
+    if (raw.kind === 'app' && appRegistry.some(app => app.id === raw.appId && !app.showOnDesktop)) continue
     const n = { ...raw }
     if (n.kind === 'folder' || !folders.has(n.containerId))
       n.containerId = 'desktop:0'
@@ -91,7 +92,7 @@ export function reconcileLayout(input: DesktopLayout): DesktopLayout {
     if (n.appId) apps.add(n.appId)
   }
   for (const app of appRegistry) {
-    if (!app.enabled) continue
+    if (!app.enabled || !app.showOnDesktop) continue
     if (!apps.has(app.id)) {
       let id = `app-${app.id}`
       while (nodes.some((node) => node.id === id)) id += '-new'

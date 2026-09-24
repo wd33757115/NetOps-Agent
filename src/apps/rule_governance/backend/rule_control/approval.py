@@ -21,7 +21,6 @@ from src.infrastructure.db.models import (
     ChangePolicyVersionRecord,
     EventRuleRecord,
     EventRuleVersionRecord,
-    ObservationContractRecord,
     RuleGenerationContextRecord,
     RuleGenerationJobRecord,
 )
@@ -107,7 +106,6 @@ def _active_event_rule_predecessors(
 
 def _job_asset_is_active(db: Any, job: RuleGenerationJobRecord) -> bool:
     model = {
-        "OBSERVATION_CONTRACT": ObservationContractRecord,
         "CHANGE_POLICY": ChangePolicyVersionRecord,
         "EVENT_RULE": EventRuleVersionRecord,
     }.get(str(job.job_type or ""))
@@ -544,79 +542,8 @@ class RuleAssetApprovalService:
             "asset_requirements": requirements,
         }
         replaced_source_job_ids: set[str] = set()
-        contract_jobs = by_type.get("OBSERVATION_CONTRACT") or []
-        if requirements["requires_observation_contract"]:
-            if len(contract_jobs) != 1:
-                raise RuleGenerationJobStateError(
-                    "rule asset bundle requires exactly one ObservationContract"
-                )
-            contract_job = contract_jobs[0]
-            contract = (
-                db.query(ObservationContractRecord)
-                .filter(ObservationContractRecord.id == contract_job.asset_version_id)
-                .with_for_update()
-                .first()
-            )
-            if contract is None:
-                raise ValueError("observation contract not found")
-            if str(contract.contract_sha256 or "") != str(contract_job.asset_digest or ""):
-                raise RuleGenerationJobStateError(
-                    "observation contract digest no longer matches the approved candidate"
-                )
-            if contract.status not in {"draft", "pending_approval", "active"}:
-                raise RuleGenerationJobStateError(
-                    f"observation contract is not releasable from status {contract.status}"
-                )
-            previous_contracts = (
-                db.query(ObservationContractRecord)
-                .filter(
-                    ObservationContractRecord.source_type == contract.source_type,
-                    ObservationContractRecord.schema_id == contract.schema_id,
-                    ObservationContractRecord.status == "active",
-                    ObservationContractRecord.id != contract.id,
-                )
-                .order_by(ObservationContractRecord.version)
-                .with_for_update()
-                .all()
-            )
-            activation_snapshot["assets"].append(
-                {
-                    "asset_type": "OBSERVATION_CONTRACT",
-                    "candidate_version_id": contract.id,
-                    "candidate_status_before": contract.status,
-                    "logical_key": f"{contract.source_type}:{contract.schema_id}",
-                    "previous_active_version_ids": [item.id for item in previous_contracts],
-                }
-            )
-            for previous in previous_contracts:
-                if previous.source_job_id:
-                    replaced_source_job_ids.add(str(previous.source_job_id))
-                previous.status = "deprecated"
-                previous.deprecated_at = now
-                previous.updated_at = now
-            if previous_contracts:
-                db.flush()
-            contract.status = "active"
-            contract.activated_at = now
-            contract.deprecated_at = None
-            contract.updated_at = now
-            contract.approval_json = {
-                **dict(contract.approval_json or {}),
-                "approved_by": actor,
-                "approved_at": now.isoformat(),
-                "bundle_id": bundle.id,
-            }
-            activations.append(
-                {
-                    "asset_type": "OBSERVATION_CONTRACT",
-                    "asset_id": contract.id,
-                    "version": contract.version,
-                }
-            )
-        elif contract_jobs:
-            raise RuleGenerationJobStateError(
-                "rule asset bundle contains an ObservationContract that CheckItem does not require"
-            )
+        if by_type.get("OBSERVATION_CONTRACT"):
+            raise RuleGenerationJobStateError("旧数据契约候选已退役，请从检查项重新制作规则")
 
         for policy_job in by_type.get("CHANGE_POLICY") or []:
             policy_version = (
@@ -859,59 +786,14 @@ class RuleAssetApprovalService:
 
         restored: list[dict[str, Any]] = []
         for child in children:
-            if child.job_type == "OBSERVATION_CONTRACT" and child.asset_version_id:
-                contract = (
-                    db.query(ObservationContractRecord)
-                    .filter(ObservationContractRecord.id == child.asset_version_id)
-                    .with_for_update()
-                    .first()
-                )
-                if contract is not None:
-                    entry = snapshot_entry("OBSERVATION_CONTRACT", contract.id)
-                    was_active = contract.status == "active"
-                    was_active_before = entry.get("candidate_status_before") == "active"
-                    if not (was_active and was_active_before):
-                        contract.status = "deprecated"
-                        contract.deprecated_at = now
-                        contract.updated_at = now
-                    if was_active and not was_active_before:
-                        previous_ids = [
-                            str(item) for item in entry.get("previous_active_version_ids") or []
-                        ]
-                        previous_rows = (
-                            db.query(ObservationContractRecord)
-                            .filter(
-                                ObservationContractRecord.id.in_(previous_ids),
-                            )
-                            .with_for_update()
-                            .all()
-                            if previous_ids
-                            else []
-                        )
-                        if len(previous_rows) != len(set(previous_ids)):
-                            raise RuleGenerationJobStateError(
-                                "rollback snapshot references a missing observation contract"
-                            )
-                        db.flush()
-                        for previous in previous_rows:
-                            previous.status = "active"
-                            previous.activated_at = now
-                            previous.deprecated_at = None
-                            previous.updated_at = now
-                            restored.append(
-                                {
-                                    "asset_type": "OBSERVATION_CONTRACT",
-                                    "asset_version_id": previous.id,
-                                }
-                            )
-            elif child.job_type == "CHANGE_POLICY" and child.asset_version_id:
+            if child.job_type == "CHANGE_POLICY" and child.asset_version_id:
                 version = (
                     db.query(ChangePolicyVersionRecord)
                     .filter(ChangePolicyVersionRecord.id == child.asset_version_id)
                     .with_for_update()
                     .first()
                 )
-                if version is not None:
+                if version is not None and version.status != "deleted":
                     entry = snapshot_entry("CHANGE_POLICY", version.id)
                     was_active = version.status == "active"
                     was_active_before = entry.get("candidate_status_before") == "active"
@@ -945,6 +827,8 @@ class RuleAssetApprovalService:
                             )
                         db.flush()
                     for previous in previous_rows:
+                        if previous.status == "deleted":
+                            raise RuleGenerationJobStateError("历史资产已删除，不能回滚恢复")
                         previous.status = "active"
                         previous.activated_at = now
                         previous.deprecated_at = None
@@ -975,7 +859,7 @@ class RuleAssetApprovalService:
                     .with_for_update()
                     .first()
                 )
-                if version is not None:
+                if version is not None and version.status != "deleted":
                     entry = snapshot_entry("EVENT_RULE", version.id)
                     was_active = version.status == "active"
                     was_active_before = entry.get("candidate_status_before") == "active"
@@ -1009,6 +893,8 @@ class RuleAssetApprovalService:
                             )
                         db.flush()
                     for previous in previous_rows:
+                        if previous.status == "deleted":
+                            raise RuleGenerationJobStateError("历史资产已删除，不能回滚恢复")
                         previous.status = "active"
                         previous.activated_at = now
                         previous.deprecated_at = None
@@ -1158,6 +1044,8 @@ class RuleAssetApprovalService:
                 )
                 if version is None:
                     raise ValueError("event rule version not found")
+                if version.status == "deleted":
+                    raise RuleGenerationJobStateError("事件规则已删除")
                 rule = (
                     db.query(EventRuleRecord)
                     .filter(EventRuleRecord.id == version.rule_id)
@@ -1202,6 +1090,8 @@ class RuleAssetApprovalService:
                 )
                 if version is None:
                     raise ValueError("change policy version not found")
+                if version.status == "deleted":
+                    raise RuleGenerationJobStateError("变化策略已删除")
                 policy = (
                     db.query(ChangePolicyRecord)
                     .filter(ChangePolicyRecord.id == version.policy_id)
@@ -1377,7 +1267,7 @@ class RuleAssetApprovalService:
                         .with_for_update()
                         .first()
                     )
-                    if version is not None:
+                    if version is not None and version.status != "deleted":
                         rule = (
                             db.query(EventRuleRecord)
                             .filter(EventRuleRecord.id == version.rule_id)
@@ -1408,7 +1298,7 @@ class RuleAssetApprovalService:
                         .with_for_update()
                         .first()
                     )
-                    if version is not None:
+                    if version is not None and version.status != "deleted":
                         policy = (
                             db.query(ChangePolicyRecord)
                             .filter(ChangePolicyRecord.id == version.policy_id)

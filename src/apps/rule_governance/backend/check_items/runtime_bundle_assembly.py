@@ -50,7 +50,6 @@ from src.infrastructure.db.models import (
     EntityIdentityPolicyVersionRecord,
     EventRuleRecord,
     EventRuleVersionRecord,
-    ObservationContractRecord,
     ParserTemplate,
     TextComparisonProfileRecord,
     TextComparisonProfileVersionRecord,
@@ -83,516 +82,18 @@ def govern_evaluation_scope(value: Any, *, event_class: str = "fault") -> str:
     return _govern_evaluation_scope(value, event_class=event_class)
 
 
-def contract_observation_types(contract: ObservationContractRecord) -> set[str]:
-    values: set[str] = set()
-
-    def collect(semantics: Any) -> None:
-        for item in dict(semantics or {}).values():
-            if not isinstance(item, dict):
-                continue
-            observation_type = str(item.get("observation_type") or "").strip()
-            if observation_type:
-                values.add(observation_type)
-
-    collect(contract.state_semantics_json)
-    for record_set in contract.record_sets_json or []:
-        if isinstance(record_set, dict):
-            collect(record_set.get("state_semantics"))
-    return values
 
 
-def adapter_observation_bindings(
-    implementation: CollectionImplementationVersionRecord,
-    *,
-    check_item_id: str,
-    canonical_rows: Iterable[Mapping[str, Any]],
-    parser_template_id: str,
-) -> tuple[dict[str, str], ...]:
-    """Return explicitly governed direct field mappings for one Parser route."""
-
-    adapter_spec = dict(implementation.adapter_spec_json or {})
-    bound_parser_id = str(
-        dict(adapter_spec.get("parser") or {}).get("template_id") or ""
-    ).strip()
-    if not bound_parser_id or bound_parser_id != parser_template_id:
-        return ()
-
-    observation_by_field = {
-        str(item.get("canonical_field") or "").strip(): str(
-            item.get("observation_type") or ""
-        ).strip()
-        for item in canonical_rows
-        if str(item.get("canonical_field") or "").strip()
-        and str(item.get("observation_type") or "").strip()
-    }
-    bindings: list[dict[str, str]] = []
-    for output in adapter_spec.get("outputs") or []:
-        if not isinstance(output, Mapping):
-            continue
-        if str(output.get("check_item_id") or "").strip() != check_item_id:
-            continue
-        source_record_set = str(output.get("source_record_set") or "").strip()
-        if not source_record_set:
-            continue
-        for target_field, raw_binding in dict(output.get("fields") or {}).items():
-            observation_type = observation_by_field.get(str(target_field).strip())
-            binding = dict(raw_binding) if isinstance(raw_binding, Mapping) else {}
-            source_field = str(binding.get("source") or "").strip()
-            if observation_type and source_field:
-                bindings.append(
-                    {
-                        "observation_type": observation_type,
-                        "source_record_set": source_record_set,
-                        "source_field": source_field,
-                    }
-                )
-    return tuple(bindings)
 
 
-def contract_identity_bindings(
-    contract: ObservationContractRecord,
-) -> tuple[dict[str, Any], ...]:
-    """Return canonical identity declarations at each independent record grain."""
-
-    def observation_types(semantics: Any) -> set[str]:
-        return {
-            str(item.get("observation_type") or "").strip()
-            for item in dict(semantics or {}).values()
-            if isinstance(item, dict)
-            and str(item.get("observation_type") or "").strip()
-        }
-
-    record_sets = [
-        dict(item)
-        for item in contract.record_sets_json or []
-        if isinstance(item, dict)
-    ]
-    if record_sets:
-        return tuple(
-            {
-                "name": str(item.get("name") or ""),
-                "source_entity_type": str(
-                    item.get("entity_type") or contract.entity_type or "record"
-                ),
-                "source_primary_keys": [
-                    str(key) for key in item.get("primary_keys") or []
-                ],
-                "canonical_entity_type": str(
-                    item.get("canonical_entity_type")
-                    or item.get("entity_type")
-                    or contract.canonical_entity_type
-                    or contract.entity_type
-                    or "record"
-                ),
-                "identity_fields": [
-                    str(key)
-                    for key in (
-                        item.get("entity_identity_fields")
-                        or item.get("primary_keys")
-                        or []
-                    )
-                ],
-                "entity_dimensions": dict(
-                    item.get("entity_dimensions") or {}
-                ),
-                "observation_types": observation_types(
-                    item.get("state_semantics")
-                ),
-                "declared_fields": {
-                    str(field)
-                    for key in (
-                        "primary_keys",
-                        "required_fields",
-                        "optional_fields",
-                    )
-                    for field in item.get(key) or []
-                },
-            }
-            for item in record_sets
-        )
-    return (
-        {
-            "name": "default",
-            "source_entity_type": str(contract.entity_type or "record"),
-            "source_primary_keys": [
-                str(key) for key in contract.primary_keys_json or []
-            ],
-            "canonical_entity_type": str(
-                contract.canonical_entity_type
-                or contract.entity_type
-                or "record"
-            ),
-            "identity_fields": [
-                str(key)
-                for key in (
-                    contract.entity_identity_fields_json
-                    or contract.primary_keys_json
-                    or []
-                )
-            ],
-            "entity_dimensions": dict(contract.entity_dimensions_json or {}),
-            "observation_types": observation_types(
-                contract.state_semantics_json
-            ),
-            "declared_fields": {
-                str(field)
-                for values in (
-                    contract.primary_keys_json,
-                    contract.required_fields_json,
-                    contract.optional_fields_json,
-                )
-                for field in values or []
-            },
-        },
-    )
 
 
-def contract_identity_blockers(
-    contract: ObservationContractRecord,
-    *,
-    expected_entity_type: str,
-    expected_identity_fields: tuple[str, ...],
-    expected_observation_types: set[str],
-) -> list[dict[str, Any]]:
-    blockers: list[dict[str, Any]] = []
-    relevant = [
-        item
-        for item in contract_identity_bindings(contract)
-        if item["observation_types"] & expected_observation_types
-    ]
-    for item in relevant:
-        if item["canonical_entity_type"] != expected_entity_type:
-            blockers.append(
-                {
-                    "code": "canonical_entity_type_mismatch",
-                    "message": (
-                        "Contract 的规范实体类型与检查项目录不一致。"
-                    ),
-                    "record_set": item["name"],
-                    "expected": expected_entity_type,
-                    "actual": item["canonical_entity_type"],
-                }
-            )
-        actual_identity_fields = tuple(item["identity_fields"])
-        canonical_prefix = actual_identity_fields[: len(expected_identity_fields)]
-        source_identity_extensions = actual_identity_fields[
-            len(expected_identity_fields) :
-        ]
-        identity_matches = (
-            canonical_prefix == expected_identity_fields
-            and set(source_identity_extensions).issubset(
-                set(item["source_primary_keys"])
-            )
-        )
-        if not identity_matches:
-            blockers.append(
-                {
-                    "code": "canonical_identity_dimensions_mismatch",
-                    "message": (
-                        "Contract 的规范实体身份维度与检查项目录不一致。"
-                    ),
-                    "record_set": item["name"],
-                    "expected": list(expected_identity_fields),
-                    "actual": list(actual_identity_fields),
-                }
-            )
-        dimensions = item["entity_dimensions"]
-        if dimensions:
-            try:
-                normalized = normalize_dimensions(dimensions)
-            except SemanticProjectionError as exc:
-                blockers.append(
-                    {
-                        "code": "canonical_identity_mapping_invalid",
-                        "message": f"Contract 的规范实体映射无效：{exc}",
-                        "record_set": item["name"],
-                    }
-                )
-                continue
-            if set(normalized) != set(item["identity_fields"]):
-                blockers.append(
-                    {
-                        "code": "canonical_identity_mapping_incomplete",
-                        "message": (
-                            "Contract 的规范实体映射未完整覆盖身份维度。"
-                        ),
-                        "record_set": item["name"],
-                    }
-                )
-            unknown_fields = sorted(
-                set(dimension_field_references(normalized))
-                - set(item["declared_fields"])
-            )
-            if unknown_fields:
-                blockers.append(
-                    {
-                        "code": "canonical_identity_source_field_missing",
-                        "message": (
-                            "Contract 的规范实体映射引用了 Parser 未声明字段。"
-                        ),
-                        "record_set": item["name"],
-                        "fields": unknown_fields,
-                    }
-                )
-        elif (
-            item["canonical_entity_type"] != item["source_entity_type"]
-            or tuple(item["source_primary_keys"]) != expected_identity_fields
-        ):
-            blockers.append(
-                {
-                    "code": "canonical_identity_mapping_missing",
-                    "message": (
-                        "源记录身份不同于检查项规范身份，但 Contract 未声明映射。"
-                    ),
-                    "record_set": item["name"],
-                }
-            )
-    return blockers
 
 
-def _contract_source_record_sets(
-    contract: ObservationContractRecord,
-    *,
-    fallback_name: str = "default",
-) -> tuple[dict[str, Any], ...]:
-    record_sets = tuple(
-        dict(item)
-        for item in contract.record_sets_json or []
-        if isinstance(item, dict)
-    )
-    if record_sets:
-        return record_sets
-    return (
-        {
-            "name": fallback_name,
-            "primary_keys": list(contract.primary_keys_json or []),
-            "required_fields": list(contract.required_fields_json or []),
-            "optional_fields": list(contract.optional_fields_json or []),
-            "validators": dict(contract.validators_json or {}),
-            "ignore_fields": list(contract.ignore_fields_json or []),
-            "entity_dimensions": dict(contract.entity_dimensions_json or {}),
-            "state_semantics": dict(contract.state_semantics_json or {}),
-        },
-    )
 
 
-def adapter_contract_observation_types(
-    contract: ObservationContractRecord,
-    *,
-    parser_field_contract: Mapping[str, Any],
-    bindings: Iterable[Mapping[str, str]],
-) -> tuple[set[str], set[str]]:
-    """Prove mapped semantics from explicit adapter, Parser, and Contract fields."""
-
-    parser_sets = {
-        str(name): {str(field) for field in fields or []}
-        for name, fields in dict(
-            parser_field_contract.get("template_record_sets") or {}
-        ).items()
-    }
-    produced_types: set[str] = set()
-    source_record_sets: set[str] = set()
-    for binding in bindings:
-        source_record_set = str(binding.get("source_record_set") or "").strip()
-        source_field = str(binding.get("source_field") or "").strip()
-        observation_type = str(binding.get("observation_type") or "").strip()
-        if source_field not in parser_sets.get(source_record_set, set()):
-            continue
-        contract_sets = {
-            str(item.get("name") or ""): item
-            for item in _contract_source_record_sets(
-                contract,
-                fallback_name=source_record_set,
-            )
-        }
-        contract_set = contract_sets.get(source_record_set)
-        if contract_set is None:
-            continue
-        contract_fields = {
-            str(field)
-            for key in ("primary_keys", "required_fields", "optional_fields")
-            for field in contract_set.get(key) or []
-        }
-        contract_fields.update(
-            str(field) for field in dict(contract_set.get("validators") or {})
-        )
-        if source_field not in contract_fields:
-            continue
-        produced_types.add(observation_type)
-        source_record_sets.add(source_record_set)
-    return produced_types, source_record_sets
 
 
-def contract_source_field_blockers(
-    contract: ObservationContractRecord,
-    *,
-    parser_field_contract: Mapping[str, Any],
-    fallback_record_set: str = "default",
-) -> list[dict[str, Any]]:
-    """Prove every Contract source reference exists in the frozen Parser schema."""
-
-    parser_sets = {
-        str(name): {str(field) for field in fields or []}
-        for name, fields in dict(
-            parser_field_contract.get("template_record_sets") or {}
-        ).items()
-    }
-    blockers: list[dict[str, Any]] = []
-    contract_sets = {
-        str(item.get("name") or "default"): item
-        for item in _contract_source_record_sets(
-            contract,
-            fallback_name=fallback_record_set,
-        )
-    }
-
-    def missing_fields(
-        *,
-        record_set: str,
-        fields: Iterable[Any],
-        reference_kind: str,
-    ) -> None:
-        if record_set not in parser_sets:
-            blockers.append(
-                {
-                    "code": "observation_contract_record_set_missing",
-                    "message": "Contract 引用了 Parser 不存在的 record set。",
-                    "record_set": record_set,
-                    "reference_kind": reference_kind,
-                }
-            )
-            return
-        missing = sorted(
-            {
-                str(field)
-                for field in fields
-                if str(field).strip()
-            }
-            - parser_sets[record_set]
-        )
-        if missing:
-            blockers.append(
-                {
-                    "code": "observation_contract_source_field_missing",
-                    "message": "Contract 引用了 Parser 未输出的源字段。",
-                    "record_set": record_set,
-                    "reference_kind": reference_kind,
-                    "fields": missing,
-                }
-            )
-
-    for name, item in contract_sets.items():
-        semantics = dict(item.get("state_semantics") or {})
-        direct_fields = {
-            str(field)
-            for key in (
-                "primary_keys",
-                "required_fields",
-                "optional_fields",
-                "ignore_fields",
-            )
-            for field in item.get(key) or []
-            if str(field).strip()
-        }
-        direct_fields.update(
-            str(field) for field in dict(item.get("validators") or {})
-        )
-        direct_fields.update(str(field) for field in semantics)
-        direct_fields.update(
-            dimension_field_references(item.get("entity_dimensions") or {})
-        )
-        for raw_semantics in semantics.values():
-            if not isinstance(raw_semantics, Mapping):
-                continue
-            direct_fields.update(
-                transform_field_references(raw_semantics.get("transform"))
-            )
-            direct_fields.update(
-                str(field)
-                for field in raw_semantics.get("context_fields") or []
-                if str(field).strip()
-            )
-            for reference in dict(
-                raw_semantics.get("threshold_references") or {}
-            ).values():
-                if not isinstance(reference, Mapping):
-                    continue
-                target_set = str(
-                    reference.get("record_set_name") or name
-                ).strip()
-                field_name = str(
-                    reference.get("field_name") or ""
-                ).strip()
-                missing_fields(
-                    record_set=target_set,
-                    fields=[field_name],
-                    reference_kind="threshold_reference",
-                )
-                join_keys = dict(reference.get("join_keys") or {})
-                missing_fields(
-                    record_set=name,
-                    fields=join_keys.keys(),
-                    reference_kind="threshold_join_source",
-                )
-                missing_fields(
-                    record_set=target_set,
-                    fields=join_keys.values(),
-                    reference_kind="threshold_join_target",
-                )
-        missing_fields(
-            record_set=name,
-            fields=direct_fields,
-            reference_kind="contract_schema",
-        )
-
-    for relation in contract.record_set_relations_json or []:
-        if not isinstance(relation, Mapping):
-            continue
-        source_set = str(
-            relation.get("source_record_set") or ""
-        ).strip()
-        target_set = str(
-            relation.get("target_record_set") or ""
-        ).strip()
-        join_keys = dict(relation.get("join_keys") or {})
-        missing_fields(
-            record_set=source_set,
-            fields=join_keys.keys(),
-            reference_kind="relation_join_source",
-        )
-        missing_fields(
-            record_set=target_set,
-            fields=join_keys.values(),
-            reference_kind="relation_join_target",
-        )
-        threshold_bindings = dict(
-            relation.get("threshold_bindings") or {}
-        )
-        missing_fields(
-            record_set=source_set,
-            fields=threshold_bindings.keys(),
-            reference_kind="relation_measurement_source",
-        )
-        missing_fields(
-            record_set=target_set,
-            fields=[
-                field
-                for bindings in threshold_bindings.values()
-                if isinstance(bindings, Mapping)
-                for field in bindings.values()
-            ],
-            reference_kind="relation_threshold_target",
-        )
-
-    unique: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for item in blockers:
-        signature = canonical_digest(item)
-        if signature in seen:
-            continue
-        seen.add(signature)
-        unique.append(item)
-    return unique
 
 
 def event_rule_observation_types(rule: EventRuleVersionRecord) -> tuple[str, ...]:
@@ -613,7 +114,6 @@ def event_rule_observation_types(rule: EventRuleVersionRecord) -> tuple[str, ...
 _ASSET_REQUIREMENT_ORDER = (
     "parser_template",
     "command_adapter_projection",
-    "observation_contract",
     "current_state_rule",
     "change_policy",
     "event_rule",
@@ -825,20 +325,6 @@ def derive_asset_requirement_profile(
                 "structured_output_uses_command_adapter_projection"
                 if structured and direct_projection
                 else "legacy_or_non_structured_route_does_not_use_direct_projection"
-            ),
-            "required_observation_types": sorted(required_types),
-            "conditional_observation_types": sorted(optional_types),
-        },
-        "observation_contract": {
-            "required": structured and not direct_projection,
-            "reason_code": (
-                "structured_output_uses_legacy_observation_contract"
-                if structured and not direct_projection
-                else (
-                    "command_adapter_projection_owns_canonical_mapping"
-                    if structured and direct_projection
-                    else "result_mode_does_not_emit_observations"
-                )
             ),
             "required_observation_types": sorted(required_types),
             "conditional_observation_types": sorted(optional_types),
@@ -1229,7 +715,6 @@ def _remediation_profile(code: str) -> tuple[str, str, str, str | None]:
 
     normalized = str(code or "runtime_bundle_invalid").strip().casefold()
     source_required_assets = {
-        "observation_contract_missing": "observation_contract",
         "command_adapter_projection_invalid": "command_adapter_projection",
         "command_adapter_projection_source_missing": "command_adapter_projection",
         "command_adapter_parser_mismatch": "command_adapter_projection",
@@ -1289,10 +774,10 @@ def _remediation_profile(code: str) -> tuple[str, str, str, str | None]:
         or normalized == "unapproved_observation_type"
     ):
         return (
-            "在规则资产生产工作台修订 ObservationContract 的标准语义和实体映射，验证后发布。",
-            "repair_observation_contract",
-            "处理 Contract",
-            "observation_contract",
+            "请核对检查项语义与 V2 命令适配器投影，验证后发布。",
+            "repair_command_adapter_projection",
+            "处理语义投影",
+            "command_adapter_projection",
         )
     if "change_policy" in normalized:
         return (
@@ -1374,7 +859,6 @@ def _actionable_issues(
                 params["action"] = "parser"
             elif action_code in {
                 "repair_command_adapter_projection",
-                "repair_observation_contract",
                 "repair_change_policy",
                 "repair_event_rule",
                 "repair_comparison_profile",
@@ -1404,7 +888,6 @@ class RuntimeBundleAssemblyPlanner:
         check_item_version_id: str,
         implementation_version_id: str,
         parser_template_ids: Iterable[str] = (),
-        observation_contract_ids: Iterable[str] = (),
         change_policy_version_ids: Iterable[str] = (),
         event_rule_version_ids: Iterable[str] = (),
         comparison_profile_version_id: str | None = None,
@@ -1635,9 +1118,6 @@ class RuntimeBundleAssemblyPlanner:
         requested_parser_ids = {
             str(item) for item in parser_template_ids if str(item).strip()
         }
-        requested_contract_ids = {
-            str(item) for item in observation_contract_ids if str(item).strip()
-        }
         requested_policy_ids = {
             str(item) for item in change_policy_version_ids if str(item).strip()
         }
@@ -1681,43 +1161,8 @@ class RuntimeBundleAssemblyPlanner:
                 )
             )
 
-        if direct_projection and requested_contract_ids:
-            blockers.append(
-                _issue(
-                    "observation_contract_not_allowed",
-                    "CommandAdapter V2 运行包不得再选择 ObservationContract。",
-                    observation_contract_ids=sorted(requested_contract_ids),
-                )
-            )
-        contract_rows = (
-            db.query(ObservationContractRecord)
-            .filter(ObservationContractRecord.status == "active")
-            .order_by(
-                ObservationContractRecord.source_template_id,
-                ObservationContractRecord.schema_id,
-                ObservationContractRecord.version,
-                ObservationContractRecord.id,
-            )
-            .all()
-            if result_mode == "structured" and not direct_projection
-            else []
-        )
-        contract_by_id = {str(item.id): item for item in contract_rows}
-        unknown_requested_contracts = sorted(
-            requested_contract_ids - set(contract_by_id)
-        )
-        if unknown_requested_contracts and not direct_projection:
-            blockers.append(
-                _issue(
-                    "selected_contract_unavailable",
-                    "所选 ObservationContract 不存在或不是 Active。",
-                    observation_contract_ids=unknown_requested_contracts,
-                )
-            )
-
-        contracts_by_parser: dict[str, list[ObservationContractRecord]] = defaultdict(list)
-        for contract in contract_rows:
-            contracts_by_parser[str(contract.source_template_id or "")].append(contract)
+        if result_mode == "structured" and not direct_projection:
+            blockers.append(_issue("command_adapter_v2_required", "结构化检查项必须绑定 V2 命令适配器，请重新制作适配器。"))
 
         parser_candidates: list[dict[str, Any]] = []
         route_candidates_by_command: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -1728,58 +1173,7 @@ class RuntimeBundleAssemblyPlanner:
                 validation=dict(parser.validation_json or {}),
                 template_text=parser.template_text,
             )
-            if direct_projection:
-                available_contracts: list[ObservationContractRecord] = []
-                contract_types: dict[str, set[str]] = {}
-                contract_adapter_sets: dict[str, set[str]] = {}
-                relevant_contracts: list[ObservationContractRecord] = []
-                duplicate_types: list[str] = []
-                produced_types = set(
-                    projection_manifest.get("observation_types") or []
-                ) if projection_manifest is not None else set()
-            else:
-                adapter_bindings = adapter_observation_bindings(
-                    implementation_version,
-                    check_item_id=str(check_item.id) if check_item is not None else "",
-                    canonical_rows=canonical_rows,
-                    parser_template_id=parser_id,
-                )
-                available_contracts = [
-                    item
-                    for item in contracts_by_parser.get(parser_id, [])
-                    if not requested_contract_ids or str(item.id) in requested_contract_ids
-                ]
-                contract_types = {}
-                contract_adapter_sets = {}
-                for item in available_contracts:
-                    mapped_types, mapped_sets = adapter_contract_observation_types(
-                        item,
-                        parser_field_contract=parser_field_contract,
-                        bindings=adapter_bindings,
-                    )
-                    contract_types[str(item.id)] = (
-                        contract_observation_types(item) | mapped_types
-                    )
-                    contract_adapter_sets[str(item.id)] = mapped_sets
-                relevant_contracts = [
-                    item
-                    for item in available_contracts
-                    if contract_types[str(item.id)] & expected_types
-                ]
-                produced_counts = Counter(
-                    observation_type
-                    for contract in relevant_contracts
-                    for observation_type in contract_types[str(contract.id)]
-                    if observation_type in expected_types
-                )
-                duplicate_types = sorted(
-                    key for key, count in produced_counts.items() if count > 1
-                )
-                produced_types = {
-                    observation_type
-                    for contract in relevant_contracts
-                    for observation_type in contract_types[str(contract.id)]
-                }
+            produced_types = set(projection_manifest.get("observation_types") or []) if projection_manifest else set()
             missing_types = sorted(required_types - produced_types)
             unapproved_types = sorted(produced_types - approved_types)
             route_blockers = list(compatibility["blockers"])
@@ -1827,37 +1221,6 @@ class RuntimeBundleAssemblyPlanner:
                                 "message": error,
                             }
                         )
-            else:
-                for contract in relevant_contracts:
-                    route_blockers.extend(
-                        contract_identity_blockers(
-                            contract,
-                            expected_entity_type=expected_entity_type,
-                            expected_identity_fields=expected_identity_fields,
-                            expected_observation_types=expected_types,
-                        )
-                    )
-                    if parser_field_contract["status"] == "aligned":
-                        mapped_sets = contract_adapter_sets[str(contract.id)]
-                        route_blockers.extend(
-                            contract_source_field_blockers(
-                                contract,
-                                parser_field_contract=parser_field_contract,
-                                fallback_record_set=(
-                                    next(iter(mapped_sets))
-                                    if not contract.record_sets_json
-                                    and len(mapped_sets) == 1
-                                    else "default"
-                                ),
-                            )
-                        )
-                if not relevant_contracts:
-                    route_blockers.append(
-                        {
-                            "code": "observation_contract_missing",
-                            "message": "Parser 没有产生本检查项标准语义的 Active Contract。",
-                        }
-                    )
             if missing_types:
                 route_blockers.append(
                     {
@@ -1882,14 +1245,6 @@ class RuntimeBundleAssemblyPlanner:
                         "observation_types": unapproved_types,
                     }
                 )
-            if duplicate_types:
-                route_blockers.append(
-                    {
-                        "code": "observation_projection_ambiguous",
-                        "message": "多个 Contract 重复产生同一检查项标准语义。",
-                        "observation_types": duplicate_types,
-                    }
-                )
             candidate = {
                 "parser_template_id": parser_id,
                 "vendor": parser.vendor,
@@ -1901,7 +1256,6 @@ class RuntimeBundleAssemblyPlanner:
                 "sha256": parser.sha256,
                 "compatibility": compatibility,
                 "field_contract": parser_field_contract,
-                "contract_ids": [str(item.id) for item in relevant_contracts],
                 "projection": projection_manifest if direct_projection else None,
                 "produced_observation_types": sorted(produced_types),
                 "missing_observation_types": missing_types,
@@ -1922,7 +1276,6 @@ class RuntimeBundleAssemblyPlanner:
                         "status": "executable",
                         "execution_mode": result_mode,
                         "selected_parser_template_id": None,
-                        "selected_contract_ids": [],
                         "candidate_count": 0,
                         "reasons": [],
                     }
@@ -1984,9 +1337,6 @@ class RuntimeBundleAssemblyPlanner:
                     "selected_parser_template_id": (
                         selected["parser_template_id"] if selected else None
                     ),
-                    "selected_contract_ids": (
-                        list(selected["contract_ids"]) if selected else []
-                    ),
                     "candidate_count": len(candidates),
                     "reasons": reasons,
                 }
@@ -1994,11 +1344,6 @@ class RuntimeBundleAssemblyPlanner:
 
         selected_parser_ids = {
             item["parser_template_id"] for item in selected_routes
-        }
-        selected_contract_ids = {
-            contract_id
-            for item in selected_routes
-            for contract_id in item["contract_ids"]
         }
         if requested_parser_ids - selected_parser_ids:
             blockers.append(
@@ -2010,17 +1355,6 @@ class RuntimeBundleAssemblyPlanner:
                     ),
                 )
             )
-        if not direct_projection and requested_contract_ids - selected_contract_ids:
-            blockers.append(
-                _issue(
-                    "selected_contract_not_executable",
-                    "一个或多个所选 Contract 未进入完整可执行命令路径。",
-                    observation_contract_ids=sorted(
-                        requested_contract_ids - selected_contract_ids
-                    ),
-                )
-            )
-
         if result_mode == "structured" and not selected_routes:
             promoted: set[tuple[str, str]] = set()
             for candidate in parser_candidates:
@@ -2859,7 +2193,6 @@ class RuntimeBundleAssemblyPlanner:
             "command_adapter_projection": (
                 dict(projection_manifest or {}) if direct_projection else None
             ),
-            "observation_contract_ids": sorted(selected_contract_ids),
             "change_policy_version_ids": sorted(selected_policy_ids),
             "event_rule_version_ids": sorted(selected_rule_bindings),
             "event_rule_bindings": {
@@ -3009,14 +2342,6 @@ class RuntimeBundleAssemblyPlanner:
                 for item in parser_rows
                 if str(item.id) in selected_parser_ids
             },
-            "contracts": {
-                str(item.id): {
-                    "digest": str(item.contract_sha256),
-                    "status": str(item.status),
-                }
-                for item in contract_rows
-                if str(item.id) in selected_contract_ids
-            },
             "policies": {
                 str(item.id): {
                     "digest": str(item.digest),
@@ -3112,20 +2437,6 @@ class RuntimeBundleAssemblyPlanner:
             ),
             "candidates": {
                 "parsers": parser_candidates,
-                "observation_contracts": [
-                    {
-                        "contract_id": str(item.id),
-                        "source_template_id": str(item.source_template_id or ""),
-                        "schema_id": str(item.schema_id),
-                        "entity_type": str(item.entity_type),
-                        "observation_types": sorted(
-                            contract_observation_types(item)
-                        ),
-                        "digest": str(item.contract_sha256),
-                    }
-                    for item in contract_rows
-                    if str(item.source_template_id or "") in parser_by_id
-                ],
                 "change_policies": [
                     {
                         "version_id": str(item.id),
@@ -3201,7 +2512,6 @@ class RuntimeBundleAssemblyPlanner:
             "selected": {
                 "parser_template_ids": [],
                 "command_adapter_projection": None,
-                "observation_contract_ids": [],
                 "change_policy_version_ids": [],
                 "event_rule_version_ids": [],
                 "event_rule_bindings": {},
@@ -3210,7 +2520,6 @@ class RuntimeBundleAssemblyPlanner:
             },
             "candidates": {
                 "parsers": [],
-                "observation_contracts": [],
                 "change_policies": [],
                 "event_rules": [],
                 "comparison_profiles": [],

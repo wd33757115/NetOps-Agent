@@ -1,3 +1,4 @@
+import { InspectionPageHost } from './InspectionDetailPage'
 import React, { useEffect, useRef } from 'react'
 import { Button } from 'antd'
 import { ArrowLeftOutlined, ArrowRightOutlined, CheckCircleOutlined, CloudServerOutlined, FileTextOutlined, InboxOutlined, MessageOutlined, PlusOutlined, RadarChartOutlined, SettingOutlined, WarningOutlined } from '@ant-design/icons'
@@ -44,15 +45,17 @@ export default function InspectionLayout({ children, onNewPatrol, canConfigure }
             setParams(next)
           }}><Icon aria-hidden="true" /><span>{item.label}</span></button>
         })}</nav>
-        {canConfigure && <Link className="inspection-settings" to={appRoutes.devices}><SettingOutlined aria-hidden="true" /> 设备与命令集 <ArrowRightOutlined aria-hidden="true" /></Link>}
+        {canConfigure && <Link className="inspection-settings" to={appRoutes.devices}><SettingOutlined aria-hidden="true" /> 设备管理 <ArrowRightOutlined aria-hidden="true" /></Link>}
         <div className="inspection-sidebar-note"><CheckCircleOutlined aria-hidden="true" /> 从采集到结论<p>核对检查范围，查看原始证据，<br />跟进风险与整改。</p></div>
       </aside>
       <main className="inspection-main" ref={mainRef}>
+        <InspectionPageHost view={view.key}>
         <header className="inspection-heading">
           <div><span className="inspection-eyebrow">网络巡检 / {view.key === 'tasks' ? '任务中心' : view.label}</span><h1>{view.title}</h1><p>{view.description}</p></div>
           <Button type="primary" icon={<PlusOutlined aria-hidden="true" />} onClick={onNewPatrol}>新建巡检</Button>
         </header>
         <div className="inspection-body">{children}</div>
+        </InspectionPageHost>
       </main>
     </div>
   </div>

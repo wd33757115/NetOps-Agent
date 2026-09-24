@@ -12,7 +12,6 @@ from celery import chord
 from src.apps.rule_governance.backend.parser.worker import (
     _PARSER_FAILURE_CODE_RE,
     _parser_skill_failure_code,
-    _refresh_rule_asset_projection_from_skill_result,
 )
 from src.apps.rule_governance.backend.parser.worker import (
     _refresh_rule_asset_projection as _refresh_rule_asset_projection,
@@ -75,7 +74,6 @@ def execute_skill_task(self, skill_name: str, **params):
     except SkillExecutionError as exc:
         return {"success": False, "message": str(exc), "error": str(exc),
                 "failure_code": _parser_skill_failure_code(exc)}
-    _refresh_rule_asset_projection_from_skill_result(skill_name, result)
     return result
 
 

@@ -15,6 +15,10 @@ from sqlalchemy import and_, func, or_, text
 from src.apps.rule_governance.backend.identity import actor_user_id as normalize_actor_user_id
 
 from src.apps.rule_governance.backend.parser.outbox_repository import add_outbox_row
+from src.apps.rule_governance.backend.parser.check_item_binding import (
+    CheckItemBindingError,
+    require_parser_check_item,
+)
 from src.apps.rule_governance.backend.parser.output_classifier import (
     classify_parser_generation_sample,
 )
@@ -40,12 +44,10 @@ from src.apps.rule_governance.backend.rule_control.source_scope import (
     require_immutable_rule_asset_source_datasets,
 )
 from src.common.config import get_settings
-from src.core.observation import ObservationContractRepository
 from src.core.patrol.repository import PatrolRepository
 from src.infrastructure.db.models import (
     AuditLogRecord,
     CommandSnapshot,
-    ObservationContractRecord,
     ParserBackfillJobRecord,
     ParserCandidateSampleEvidence,
     ParserCommandAlias,
@@ -413,6 +415,13 @@ def _parser_generation_readiness(
 
     readiness = _simple_parser_readiness(job, samples)
     blockers = list(readiness["blockers"])
+    try:
+        binding = require_parser_check_item(db, job.id)
+        readiness["check_item_binding"] = binding
+        if (job.agent_state_json or {}).get("parser_spec_check_item") != binding:
+            blockers.append("检查项语义与当前 ParserSpec 不一致，请重新生成或确认字段方案")
+    except CheckItemBindingError as exc:
+        blockers.append(str(exc))
     if samples:
         try:
             source_scope = require_immutable_rule_asset_source_datasets(
@@ -907,40 +916,6 @@ def generated_template_activation_errors(
     return errors
 
 
-def _deprecate_rule_generation_seeds(
-    db: Any,
-    *,
-    template_id: str,
-    actor: str,
-    reason: str,
-) -> int:
-    """Retire unpublished rule jobs when their Parser source is retired."""
-
-    now = utcnow()
-    rows = (
-        db.query(RuleGenerationJobRecord)
-        .filter(
-            RuleGenerationJobRecord.source_ref == f"parser_template:{template_id}",
-            RuleGenerationJobRecord.status.in_(
-                {"draft", "validating", "pending_approval", "rejected"}
-            ),
-        )
-        .with_for_update()
-        .all()
-    )
-    for row in rows:
-        validation = dict(row.validation_report_json or {})
-        validation["source_asset_lifecycle"] = {
-            "status": "deprecated",
-            "actor": actor,
-            "reason": reason,
-            "at": now.isoformat(),
-        }
-        row.validation_report_json = validation
-        row.status = "deprecated"
-        row.updated_at = now
-        row.completed_at = now
-    return len(rows)
 
 
 def _invalidate_parser_candidates_for_sample_revision(
@@ -988,16 +963,6 @@ def _invalidate_parser_candidates_for_sample_revision(
         template.validation_json = validation
         template.updated_at = now
         invalidated_template_ids.append(str(template.id))
-        ObservationContractRepository().deprecate_from_parser_template_row(
-            db,
-            str(template.id),
-        )
-        _deprecate_rule_generation_seeds(
-            db,
-            template_id=str(template.id),
-            actor=actor,
-            reason=reason,
-        )
     return invalidated_template_ids
 
 
@@ -1043,16 +1008,6 @@ def _invalidate_parser_job_for_spec_revision(
         template.validation_json = validation
         template.updated_at = now
         invalidated_template_ids.append(str(template.id))
-        ObservationContractRepository().deprecate_from_parser_template_row(
-            db,
-            str(template.id),
-        )
-        _deprecate_rule_generation_seeds(
-            db,
-            template_id=str(template.id),
-            actor=actor,
-            reason="ParserSpec revised before candidate approval",
-        )
 
     if previous_status in {
         "pending",
@@ -1150,11 +1105,6 @@ class ParserRepository:
                 validation["contract_sha256"] = row.contract_sha256
                 row.validation_json = validation
                 row.updated_at = utcnow()
-                ObservationContractRepository().upsert_from_parser_template_row(
-                    db,
-                    row,
-                    status="active" if row.status == "active" else "draft",
-                )
                 count += 1
         return count
 
@@ -2081,11 +2031,6 @@ class ParserRepository:
                         "generated Parser candidate source evidence is invalid: "
                         + "; ".join(evidence_errors)
                     )
-            ObservationContractRepository().upsert_from_parser_template_row(
-                db,
-                template,
-                status="active" if status == "active" else "draft",
-            )
         return template_id
 
     def activate_template(
@@ -2217,19 +2162,6 @@ class ParserRepository:
                 old_template.status = "deprecated"
                 old_template.deprecated_at = utcnow()
                 old_template.updated_at = utcnow()
-                ObservationContractRepository().deprecate_from_parser_template_row(
-                    db,
-                    str(old_template.id),
-                )
-                _deprecate_rule_generation_seeds(
-                    db,
-                    template_id=str(old_template.id),
-                    actor=normalized_actor,
-                    reason=(
-                        f"parser template superseded by {template.id}"
-                        + (f": {normalized_reason}" if normalized_reason else "")
-                    ),
-                )
             db.flush()
             template.status = "active"
             validation["contract_approval_status"] = "approved"
@@ -2276,12 +2208,6 @@ class ParserRepository:
             template.validation_json = validation
             template.activated_at = utcnow()
             template.updated_at = utcnow()
-            if not automated:
-                ObservationContractRepository().upsert_from_parser_template_row(
-                    db,
-                    template,
-                    status="active",
-                )
             profile = (
                 db.query(ParserDeviceProfile)
                 .filter(
@@ -2720,6 +2646,8 @@ class ParserRepository:
             row = db.query(ParserTemplate).filter(ParserTemplate.id == template_id).one()
             if actor is not None and (not actor.strip() or not str(reason or "").strip()):
                 raise ValueError("template status transition requires actor and reason")
+            if row.status == "deleted":
+                raise ParserTemplateStateError("模板已删除，不能变更状态")
             previous_status = row.status
             row.status = status
             if status == "deprecated":
@@ -2738,25 +2666,6 @@ class ParserRepository:
                 ]
                 row.validation_json = validation
             row.updated_at = utcnow()
-            observation_contracts = ObservationContractRepository()
-            if status == "active":
-                observation_contracts.upsert_from_parser_template_row(
-                    db,
-                    row,
-                    status="active",
-                )
-            else:
-                observation_contracts.deprecate_from_parser_template_row(
-                    db,
-                    str(row.id),
-                )
-            if status in {"deprecated", "rejected"}:
-                _deprecate_rule_generation_seeds(
-                    db,
-                    template_id=str(row.id),
-                    actor=str(actor or "parser-control-plane"),
-                    reason=str(reason or f"parser template marked {status}"),
-                )
 
     def governance_alert_summary(self) -> dict[str, Any]:
         settings = get_settings()
@@ -3019,6 +2928,12 @@ class ParserRepository:
                 if isinstance(parser_spec_suggestion, dict)
                 else {}
             )
+            # The confirmed spec is still bound to this CheckItem version.
+            # Keep the binding with the plan; readiness revalidates it against
+            # the current association, so a retry cannot bless a stale spec.
+            binding = current_state.get("parser_spec_check_item")
+            if isinstance(binding, dict):
+                next_state["parser_spec_check_item"] = binding
             next_state["execution_identity"] = {
                 "user_id": actor_user_id, "display": actor, "task_id": None,
             }
@@ -3081,30 +2996,9 @@ class ParserRepository:
             template.source_job_id = None
             template.updated_at = utcnow()
         deleted_rule_jobs = 0
-        deleted_contracts = 0
         deleted_backfills = 0
         deleted_parse_results = 0
         deleted_candidate_evidence = 0
-        contract_filters = [ObservationContractRecord.source_job_id == job_id]
-        if historical_template_ids:
-            contract_filters.append(
-                ObservationContractRecord.source_template_id.in_(historical_template_ids)
-            )
-        historical_contracts = (
-            db.query(ObservationContractRecord).filter(or_(*contract_filters)).all()
-        )
-        historical_template_id_set = set(historical_template_ids)
-        for contract in historical_contracts:
-            if contract.status == "active":
-                if contract.source_job_id == job_id:
-                    contract.source_job_id = None
-                if str(contract.source_template_id or "") in historical_template_id_set:
-                    contract.source_template_id = None
-                contract.updated_at = utcnow()
-            else:
-                db.delete(contract)
-                deleted_contracts += 1
-
         if historical_template_ids:
             deleted_candidate_evidence = int(
                 db.query(ParserCandidateSampleEvidence)
@@ -3180,7 +3074,6 @@ class ParserRepository:
             "deleted_templates": len(historical_templates),
             "detached_active_templates": len(active_templates),
             "deleted_rule_jobs": deleted_rule_jobs,
-            "deleted_contracts": deleted_contracts,
             "deleted_backfills": deleted_backfills,
             "deleted_parse_results": deleted_parse_results,
             "deleted_candidate_evidence": deleted_candidate_evidence,
@@ -3408,6 +3301,11 @@ class ParserRepository:
             if job is None:
                 raise ParserJobStateError(f"parser job {job_id} not found")
             previous_digest = job.parser_spec_sha256
+            try:
+                binding = require_parser_check_item(db, job.id)
+            except CheckItemBindingError as exc:
+                raise ParserJobStateError(str(exc)) from exc
+            job.agent_state_json = {**dict(job.agent_state_json or {}), "parser_spec_check_item": binding}
             previous_status = str(job.status)
             previous_spec_status = str(job.parser_spec_status or "missing")
             spec_changed = previous_digest != digest
@@ -3515,6 +3413,11 @@ class ParserRepository:
             )
             if not samples:
                 raise ParserJobStateError("ParserSpec suggestion requires at least one sample")
+            try:
+                binding = require_parser_check_item(db, job.id, requested_id=normalized_check_item_id)
+            except CheckItemBindingError as exc:
+                raise ParserJobStateError(str(exc)) from exc
+            normalized_check_item_id = binding["check_item_id"]
             if any(
                 sample.sanitization_status != "sanitized" or sample.sanitized_text is None
                 for sample in samples
@@ -3539,6 +3442,7 @@ class ParserRepository:
                 "requested_by_user_id": actor_user_id,
                 "revision_instruction": normalized_instruction,
                 "check_item_id": normalized_check_item_id or None,
+                "check_item_binding": binding,
                 "requested_at": now.isoformat(),
                 "heartbeat_at": now.isoformat(),
                 "deadline_at": (
@@ -3632,6 +3536,13 @@ class ParserRepository:
                 raise ParserJobStateError("stale ParserSpec suggestion task")
             if current.get("status") not in {"queued", "running"}:
                 raise ParserJobStateError("ParserSpec suggestion is already terminal")
+            if normalized_status in {"running", "ready"}:
+                try:
+                    binding = require_parser_check_item(db, job.id)
+                except CheckItemBindingError as exc:
+                    raise ParserJobStateError(str(exc)) from exc
+                if current.get("check_item_binding") != binding:
+                    raise ParserJobStateError("检查项语义已变化，请重新生成字段方案")
             if normalized_status == "ready":
                 from src.apps.rule_governance.backend.access import authorize
                 authorize(current.get("requested_by_user_id"))
@@ -3697,6 +3608,7 @@ class ParserRepository:
             }
             job.agent_state_json = state
             if normalized_spec is not None:
+                job.agent_state_json = {**state, "parser_spec_check_item": current["check_item_binding"]}
                 job.pipeline_version = "simple_v2"
                 job.parser_spec_json = normalized_spec
                 job.parser_spec_sha256 = normalized_spec_digest

@@ -60,7 +60,7 @@ class RuleGenerationJobRepository:
         created_by: str | None = None,
         status: str = "draft",
     ) -> dict[str, Any]:
-        if job_type not in RULE_GENERATION_JOB_TYPES:
+        if job_type == "OBSERVATION_CONTRACT" or job_type not in RULE_GENERATION_JOB_TYPES:
             raise ValueError(f"unsupported rule generation job_type: {job_type}")
         if status not in RULE_GENERATION_STATUSES:
             raise ValueError(f"unsupported rule generation status: {status}")

@@ -207,6 +207,7 @@ interface OfflineJobDetailSurfaceProps {
   page: boolean
   subtitle?: string
   onClose: () => void
+  Surface?: OfflineWorkspace['DetailSurface']
 }
 
 const OfflineJobDetailSurface: React.FC<OfflineJobDetailSurfaceProps> = ({
@@ -220,7 +221,11 @@ const OfflineJobDetailSurface: React.FC<OfflineJobDetailSurfaceProps> = ({
   page,
   subtitle,
   onClose,
+  Surface,
 }) => {
+  if (Surface) return <Surface open={open} title={detailTitle} subtitle={subtitle} extra={extra} onClose={onClose} backLabel="返回离线任务">
+    {loading ? <div role="status" aria-label="任务详情加载中"><Spin /></div> : children}
+  </Surface>
   if (!page) {
     return (
       <Drawer
@@ -268,6 +273,10 @@ export interface OfflineWorkbenchOptions {
 }
 
 export interface OfflineWorkspace {
+  DetailSurface?: React.ComponentType<{
+    open?: boolean; title?: React.ReactNode; subtitle?: React.ReactNode; extra?: React.ReactNode
+    onClose?: () => void; children?: React.ReactNode; backLabel?: string
+  }>
   purpose: OfflinePatrolJobPurpose
   api: ReturnType<typeof import('@netops/services/offlineJobApi').createOfflineJobApi>
   canManageRules: boolean
@@ -298,7 +307,9 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
     ResultPanel: OfflinePatrolResultPanel, ReportDialog: PatrolReportDialog,
     CurrentAuthorityPanel: OfflineCurrentAuthorityPanel,
     ProductionPanel: OfflineCommandAssetUnits, PipelinePanel: OfflineRuleAssetPipeline,
+    DetailSurface,
   } = workspace
+  const WizardSurface = DetailSurface || Drawer
   const navigate = useRuleTaskNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const isAssetSource = purpose === 'rule_asset_source'
@@ -308,9 +319,9 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
     : searchParams.get('offline_job_id')
   )
   const focusedSourceJobTab = isDetailPage
-    ? searchParams.get('tab') || 'overview'
+    ? (searchParams.get('tab') === 'production' ? 'classification' : searchParams.get('tab')) || 'overview'
     : isAssetSource
-      ? searchParams.get('source_job_tab') || 'overview'
+      ? (searchParams.get('source_job_tab') === 'production' ? 'classification' : searchParams.get('source_job_tab')) || 'overview'
     : searchParams.get('offline_job_tab') || 'overview'
   const queryClient = useQueryClient()
   const [page, setPage] = useState(1)
@@ -364,7 +375,6 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
   }, [searchParams, setSearchParams])
 
   useEffect(() => {
-    if (!focusedSourceJobId) return
     if (focusedSourceJobId !== detailJobId) {
       setDetailJobId(focusedSourceJobId)
     }
@@ -389,19 +399,24 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
       page, page_size: pageSize, search: search || undefined, status,
       job_type: jobTypeFilter, archived,
     }),
-    { enabled: !isDetailPage, refetchInterval: 5000, keepPreviousData: true },
+    {
+      enabled: !isDetailPage && !detailJobId,
+      refetchInterval: (data) => data?.items.some((job) => ACTIVE.has(job.status)) ? 5000 : false,
+      keepPreviousData: true,
+    },
   )
   const detailQuery = useQuery(
     ['offline-job', purpose, detailJobId],
     () => jobApi.get(detailJobId!),
     {
       enabled: Boolean(detailJobId),
-      refetchInterval: (data) => data && ACTIVE.has(data.status) ? 2000 : false,
+      refetchInterval: (data, query) => !query.state.error && data && ACTIVE.has(data.status) ? 5000 : false,
+      retry: false,
     },
   )
   const detail = detailQuery.data
   const analysisQuery = useQuery(
-    ['offline-analysis', purpose, detailJobId],
+    ['offline-analysis', purpose, detailJobId, detail?.attempt_number, detail?.completed_at],
     () => jobApi.replay(detailJobId!),
     {
       enabled: Boolean(
@@ -423,7 +438,8 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
     () => jobApi.get(draftJob!.id),
     {
       enabled: Boolean(draftJob?.id && ACTIVE.has(draftJob.status)),
-      refetchInterval: 2000,
+      refetchInterval: (data, query) => !query.state.error && data && ACTIVE.has(data.status) ? 5000 : false,
+      retry: false,
       onSuccess: (latest) => {
         setDraftJob((current) => current?.id === latest.id ? latest : current)
       },
@@ -481,9 +497,11 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
   })
   const executeJob = useMutation((id: string) => jobApi.execute(id, crypto.randomUUID()), {
     onSuccess: (_result, id) => {
-      message.success(isAssetSource ? 'CLI 样本导入已启动' : '离线巡检 Workflow 已启动')
+      message.success(isAssetSource ? 'CLI 样本导入已启动' : '离线巡检已启动')
       setWizardOpen(false)
       setDetailJobId(id)
+      if (isAssetSource) navigate(buildRuleAssetSourceJobDetailUrl(id, 'assets'))
+      else openDetail(id)
       refresh(id)
     },
     onError: (error: any) => message.error(errorText(
@@ -637,7 +655,7 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
 
   const openDetail = useCallback((jobId: string, completed = false) => {
     if (isAssetSource) {
-      navigate(buildRuleAssetSourceJobDetailUrl(jobId, completed ? 'production' : 'overview'))
+      navigate(buildRuleAssetSourceJobDetailUrl(jobId, completed ? 'classification' : 'overview'))
       return
     }
     const tab = completed ? 'result' : 'overview'
@@ -646,7 +664,7 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
     const next = new URLSearchParams(searchParams)
     next.set('offline_job_id', jobId)
     next.set('offline_job_tab', tab)
-    setSearchParams(next, { replace: true })
+    setSearchParams(next)
   }, [isAssetSource, navigate, searchParams, setSearchParams])
 
   const closeDetail = () => {
@@ -978,15 +996,12 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
       <input ref={fileInputRef} hidden type="file" multiple accept=".txt,.log,.zip" onChange={(event) => uploadFiles(pendingRole.current, Array.from(event.target.files || []))} />
       <input ref={folderInputRef} hidden type="file" multiple accept=".txt,.log" {...({ webkitdirectory: '', directory: '' } as any)} onChange={(event) => uploadFiles(pendingRole.current, Array.from(event.target.files || []))} />
 
-      <Drawer
+      <WizardSurface
         title={draftJob
           ? isAssetSource ? '继续 CLI 样本导入' : '继续离线巡检任务'
           : isAssetSource ? '新建 CLI 样本导入' : '新建离线巡检任务'}
         open={wizardOpen}
-        width={isMobile ? '100vw' : 860}
-        destroyOnClose
-        keyboard={false}
-        maskClosable={false}
+        {...(!DetailSurface ? { width: isMobile ? '100vw' : 860, destroyOnClose: true, keyboard: false, maskClosable: false } : {})}
         onClose={() => { setWizardOpen(false); const next = new URLSearchParams(searchParams); next.delete('new_offline'); next.delete('offline_kind'); if (next.get('action') === 'new-adapter') next.delete('action'); setSearchParams(next, { replace: true }) }}
         extra={draftJob && <Space>
           <Button icon={<EyeOutlined />} loading={previewJob.isLoading || draftJob.status === 'previewing'} disabled={!draftJob.source_files?.length || ACTIVE.has(draftJob.status)} onClick={() => previewJob.mutate(draftJob.id)}>预览</Button>
@@ -1064,11 +1079,12 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
             {draftJob.blocker_count > 0 && <Button icon={<SafetyCertificateOutlined />} onClick={() => navigate(isAssetSource ? buildOfflineAssetControlUrl(draftJob) : businessHref('/skills/parser?workspace=production&subtab=source-jobs'))}>查看导入进度</Button>}
           </>}
         </Space>
-      </Drawer>
+      </WizardSurface>
 
       <OfflineJobDetailSurface
+        Surface={DetailSurface}
         drawerTitle={isAssetSource ? 'CLI 样本导入详情' : '离线巡检任务详情'}
-        detailTitle={detail ? offlineJobDisplayName(detail) : 'CLI 样本导入'}
+        detailTitle={detail ? offlineJobDisplayName(detail) : isAssetSource ? 'CLI 样本导入' : '离线巡检任务详情'}
         subtitle={detailJobId || undefined}
         open={Boolean(detailJobId)}
         page={isDetailPage}
@@ -1120,7 +1136,8 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
           />
         )}
           {detail && <section className="patrol-task-context" aria-label="任务分析范围">
-            <Space wrap><Typography.Text strong>{offlineJobDisplayName(detail)}</Typography.Text>
+            <Space wrap>{!DetailSurface && <Typography.Text strong>{offlineJobDisplayName(detail)}</Typography.Text>}
+              {DetailSurface && <Tag color={statusColor(detail.status)}>{statusLabel[detail.status] || detail.status}</Tag>}
               <Tag>{isAssetSource ? '规则验证 · 不形成健康结论' : '离线证据 · 历史分析'}</Tag>
               <Typography.Text type="secondary">{detail.periods?.map(period => `${period.role === 'baseline' ? '基线' : '采集'}：${new Date(period.observed_at).toLocaleString()}`).join(' → ') || '采集时间待确认'}</Typography.Text>
             </Space>
@@ -1128,7 +1145,7 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
             {!isAssetSource && <Typography.Paragraph type="secondary">结论仅适用于上述采集时间和已覆盖范围。当前现状证明请查看独立资格核验结果。</Typography.Paragraph>}
           </section>}
           {detail && <Tabs activeKey={detailTab} onChange={changeDetailTab} items={[
-          ...(isAssetSource && OfflineCommandAssetUnits ? [{ key: 'production', label: '制作与验证', children: detail.status === 'completed' ? <OfflineCommandAssetUnits jobId={detail.id} /> : <Alert type="info" message="请先完成样本导入，再继续制作" /> }] : []),
+          ...(isAssetSource && OfflineCommandAssetUnits ? [{ key: 'classification', label: '待归类检查项', children: detail.status === 'completed' ? <OfflineCommandAssetUnits jobId={detail.id} /> : <Alert type="info" message="请先完成样本处理，再关联检查项" /> }] : []),
           { key: 'overview', label: '任务信息', children: <Space direction="vertical" size={12} style={{ width: '100%' }}>
             <Descriptions bordered size="small" column={isMobile ? 1 : 3}>
               <Descriptions.Item label="任务">{offlineJobDisplayName(detail)}</Descriptions.Item><Descriptions.Item label="状态"><Tag color={statusColor(detail.status)}>{statusLabel[detail.status] || detail.status}</Tag></Descriptions.Item>
@@ -1593,7 +1610,7 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
                 )}
                 onOpenRuleAssets={() => navigate(
                   isAssetSource
-                    ? buildRuleAssetSourceJobDetailUrl(detail.id, 'production')
+                    ? buildRuleAssetSourceJobDetailUrl(detail.id, 'classification')
                     : businessHref(`/skills/parser?workspace=production&subtab=source-jobs&patrol_source_job_id=${encodeURIComponent(detail.id)}&return_to=${encodeURIComponent(`/apps/patrol?patrol_view=offline&offline_job_id=${detail.id}&offline_job_tab=result`)}`),
                 )}
               /> },

@@ -1,0 +1,10 @@
+Value Filldown SLOT (\d+)
+Value Required SUBSLOT (\d+)
+Value Required COMPONENT (\S+)
+Value DETAIL (.*)
+
+Start
+  ^(?:MPU\(\S+\) )?Slot ${SLOT}:
+  ^\[(?:SUBSLOT|SubSlot)\s+${SUBSLOT}\]\s*${COMPONENT}(?:\s+${DETAIL})?\s*$$ -> Record
+
+EOF

@@ -7,7 +7,9 @@ from copy import deepcopy
 def normalize_value_contract(contract):
     result = deepcopy(contract)
     if "change_events" not in result:
-        return result  # Other active checks retain their explicitly configured assessment rules.
+        if not any('semantic_definition' in row for row in result.get('observations', [])):
+            return result  # Other active checks retain their explicitly configured assessment rules.
+        result['change_events'] = False
     if not isinstance(result["change_events"], bool):
         raise ValueError("change_events must be a boolean")
     result["value_contract"] = "same-name/v1"
@@ -15,12 +17,18 @@ def normalize_value_contract(contract):
     seen = set(identities)
     for row in result.get("observations", []):
         field = row.get("canonical_field", "")
-        if not re.fullmatch(r"[a-z][a-z0-9_]*", field) or field in seen:
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", field) or field in seen:
             raise ValueError(f"invalid or duplicate standard Value: {field}")
         seen.add(field)
-        row["event_on_change"] = result["change_events"]
+        if 'semantic_definition' in row and not result['change_events'] and 'current_state' in row.get('assessment_roles', []):
+            row['event_on_change'] = False
+            continue
+        local_change = 'semantic_definition' in row and 'change' in row.get('assessment_roles', [])
+        track_change = (result["change_events"] or local_change) and row.get("change_tracking", True)
+        row["event_on_change"] = track_change
         roles = set(row.get("assessment_roles") or []) - {"change"}
-        if result["change_events"]:
+        if track_change:
+            roles.discard('evidence')
             roles.add("change")
             event_type = str(row["observation_type"]) + ".changed"
             row["event_constraints"] = {
@@ -50,7 +58,17 @@ def same_name_fields(contract, source_fields):
         errors.append("TextFSM missing required Values: " + ", ".join(sorted(required - sources)))
     if errors:
         raise ValueError("; ".join(errors))
-    return {field: {"source": field} for field in sorted(sources)}
+    fields = {field: {"source": field} for field in sorted(sources)}
+    for row in rows:
+        field = row['canonical_field']
+        dimensions = row.get('dimensions') or []
+        if field not in fields or not dimensions:
+            continue
+        missing = set(dimensions) - sources
+        if missing:
+            raise ValueError('TextFSM missing dimension Values: ' + ', '.join(sorted(missing)))
+        fields[field]['dimensions'] = {name: {'field': name} for name in dimensions}
+    return fields
 
 
 def validate_same_name_record_sets(contracts, record_sets):

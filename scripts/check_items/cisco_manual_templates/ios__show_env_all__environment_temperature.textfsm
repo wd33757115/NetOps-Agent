@@ -1,0 +1,13 @@
+Value slot (\S+)
+Value sensor (.+?)
+Value sensor_status (\S+)
+Value temperature_celsius ([-+]?\d+(?:\.\d+)?)
+Value temperature_high_warning_celsius ([-+]?\d+(?:\.\d+)?)
+Value temperature_high_alarm_celsius ([-+]?\d+(?:\.\d+)?)
+
+Start
+  ^\s*Temp:\s+${sensor}\s{2,}${slot}\s+${sensor_status}\s+${temperature_celsius}\s+Celsius\s*$$ -> Record
+  ^${sensor} Temperature Value:\s+${temperature_celsius}\s+Degree Celsius
+  ^System Temperature State:\s+${sensor_status}
+  ^Yellow Threshold\s*:\s+${temperature_high_warning_celsius}
+  ^Red Threshold\s*:\s+${temperature_high_alarm_celsius} -> Record

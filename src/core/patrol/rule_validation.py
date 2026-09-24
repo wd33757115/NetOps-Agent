@@ -764,6 +764,8 @@ def validate_event_rule_condition(condition: dict[str, Any]) -> list[str]:
             "fields",
             "from_group",
             "to_group",
+            "from_values",
+            "to_values",
             "allow_initial_target",
             "applicability",
         },
@@ -780,6 +782,7 @@ def validate_event_rule_condition(condition: dict[str, Any]) -> list[str]:
             "kind",
             "entity_types",
             "fields",
+            "values",
             "applicability",
         },
         "field_change": {
@@ -861,10 +864,10 @@ def validate_event_rule_condition(condition: dict[str, Any]) -> list[str]:
             errors.append("condition.reference_field is required")
         require_number("hysteresis")
     elif kind == "transition":
-        if str(condition.get("from_group") or "") not in {"up", "down", "other"}:
-            errors.append("condition.from_group must be up, down, or other")
-        if str(condition.get("to_group") or "") not in {"up", "down", "other"}:
-            errors.append("condition.to_group must be up, down, or other")
+        for side in ("from", "to"):
+            # The executor prefers explicit states; groups are its fallback.
+            if not condition.get(f"{side}_values") and str(condition.get(f"{side}_group") or "") not in {"up", "down", "other"}:
+                errors.append(f"condition.{side}_group must be up, down, or other when {side}_values is absent")
     elif kind == "bgp_transition":
         for key in ("from_established", "to_established"):
             if not isinstance(condition.get(key), bool):
@@ -879,6 +882,14 @@ def validate_event_rule_condition(condition: dict[str, Any]) -> list[str]:
             errors.append("condition.fallback_reference_fields must be a non-empty string list")
         elif len({str(item).strip() for item in fallback_fields}) != len(fallback_fields):
             errors.append("condition.fallback_reference_fields must not contain duplicates")
+    explicit_keys = ("from_values", "to_values") if kind == "transition" else ("values",) if kind == "entity_status_down" else ()
+    for key in explicit_keys:
+        if key in condition:
+            values = condition[key]
+            if not isinstance(values, list) or not values or any(
+                not isinstance(value, str) or not value.strip() for value in values
+            ):
+                errors.append(f"condition.{key} must be a non-empty string list")
     return errors
 
 

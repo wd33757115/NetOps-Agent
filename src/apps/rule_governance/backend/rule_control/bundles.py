@@ -17,7 +17,6 @@ from src.apps.rule_governance.backend.rule_control.source_scope import (
 from src.infrastructure.db.models import (
     ChangePolicyVersionRecord,
     EventRuleVersionRecord,
-    ObservationContractRecord,
     OfflinePatrolPeriodRecord,
     RuleGenerationContextRecord,
     RuleGenerationJobRecord,
@@ -183,12 +182,10 @@ class RuleAssetBundleService:
 
         states: dict[str, dict[str, Any]] = {}
         model_by_type = {
-            "OBSERVATION_CONTRACT": ObservationContractRecord,
             "CHANGE_POLICY": ChangePolicyVersionRecord,
             "EVENT_RULE": EventRuleVersionRecord,
         }
         digest_field_by_type = {
-            "OBSERVATION_CONTRACT": "contract_sha256",
             "CHANGE_POLICY": "digest",
             "EVENT_RULE": "digest",
         }

@@ -1,7 +1,7 @@
 manifest_version: 1
 id: rule-governance
 name: 规则治理
-version: 1.0.0
+version: 1.4.3
 platform_api: '>=1.0,<2.0'
 icon: rules
 aliases:
@@ -10,10 +10,8 @@ dependencies: {}
 backend:
   router: src.apps.rule_governance.backend.router:router
   task_modules:
-  - src.apps.rule_governance.backend.tasks
   - src.apps.rule_governance.backend.parser.tasks
   - src.apps.rule_governance.backend.rule_control.tasks
-  - src.apps.rule_governance.backend.rule_control.engineering_revision_async
   - src.apps.rule_governance.backend.source_tasks
   - src.apps.rule_governance.backend.rollout_tasks
   task_names:
@@ -21,15 +19,9 @@ backend:
   - publish_parser_outbox
   - sanitize_parser_samples
   - reconcile_parser_jobs
-  - reconcile_rule_asset_automation
   - recover_command_autopilots
-  - recover_engineering_revisions
   - promote_parser_gap_ledger
-  - netops.rule_governance.recover_generation
-  - netops.rule_governance.generate
   - netops.rule_governance.execute_parser
-  - netops.rule_governance.revise
-  - validate_rule_asset_engineering_revision
   - advance_command_autopilot
   - netops.rule_governance.preview_source
   - netops.rule_governance.import_source
@@ -56,21 +48,12 @@ backend:
   - name: reconcile-parser-jobs
     task: reconcile_parser_jobs
     seconds: 60
-  - name: reconcile-rule-asset-automation
-    task: reconcile_rule_asset_automation
-    seconds: 30
   - name: recover-command-autopilots
     task: recover_command_autopilots
-    seconds: 60
-  - name: recover-engineering-revisions
-    task: recover_engineering_revisions
     seconds: 60
   - name: promote-parser-gap-ledger
     task: promote_parser_gap_ledger
     seconds: 3600
-  - name: recover-generation
-    task: netops.rule_governance.recover_generation
-    seconds: 60
   - name: recover-sources
     task: netops.rule_governance.recover_sources
     seconds: 30
@@ -89,13 +72,10 @@ agent:
   legacy_skills:
   - textfsm-generator
   - rule-target-planner
-  - observation-contract-generator
   - change-policy-generator
   - event-rule-generator
   - event-rule-validator
   - event-rule-replay
-  - rule-asset-persister
-  - rule-asset-submitter
   - rule-asset-approver
   tools: src.apps.rule_governance.backend.tools:TOOLS
 database:
@@ -128,7 +108,6 @@ database:
   - netops_entity_identity_policy_versions
   - netops_event_rule_versions
   - netops_event_rules
-  - netops_observation_contracts
   - netops_parser_gap_ledger
   - netops_parser_spec_revisions
   - netops_rollout_campaigns
@@ -158,7 +137,7 @@ database:
   - parser_outbox_events
   - parser_template_jobs
   - parser_templates
-  minimum_revision: 0101_patrol_report_templates
+  minimum_revision: 0103_retire_data_contracts
 lifecycle:
   drain: src.apps.rule_governance.backend.lifecycle:drain
   pending: src.apps.rule_governance.backend.lifecycle:pending

@@ -19,7 +19,7 @@ def normalize_rule_asset_requirements(
     if not isinstance(raw, Mapping):
         raw = {
             "schema_version": "rule-asset-requirements/legacy-v1",
-            "requires_observation_contract": True,
+            "requires_observation_contract": False,
             "requires_change_policy": True,
             "requires_current_state_rule": False,
             "requires_event_rule": True,
@@ -58,9 +58,7 @@ def normalize_rule_asset_requirements(
         )
     return {
         **dict(raw),
-        "requires_observation_contract": (
-            raw.get("requires_observation_contract") is True
-        ),
+        "requires_observation_contract": False,
         "requires_change_policy": raw.get("requires_change_policy") is True,
         "requires_current_state_rule": requires_current,
         "requires_event_rule": requires_event,
@@ -177,15 +175,8 @@ def rule_asset_composition_errors(
 
     normalized = normalize_rule_asset_requirements(requirements)
     errors: list[str] = []
-    if normalized["requires_observation_contract"] and (
-        int(counts.get("OBSERVATION_CONTRACT") or 0) != 1
-    ):
-        errors.append("bundle requires exactly one ObservationContract")
-    if (
-        not normalized["requires_observation_contract"]
-        and int(counts.get("OBSERVATION_CONTRACT") or 0) > 0
-    ):
-        errors.append("bundle contains an ObservationContract that is not required")
+    if int(counts.get("OBSERVATION_CONTRACT") or 0):
+        errors.append("旧数据契约已退役，请按检查项语义重新生成规则")
     if normalized["requires_change_policy"] and (
         int(counts.get("CHANGE_POLICY") or 0) < 1
     ):

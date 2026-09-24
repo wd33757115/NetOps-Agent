@@ -330,10 +330,10 @@ const ChatShellSidebar: React.FC<ChatShellSidebarProps> = ({ embedded = false, o
               <AppstoreOutlined />
               <span>Skills 和连接器</span>
             </button>
-            {user?.role === 'admin' && (
-              <button type="button" className="grok-user-menu-item" onClick={() => go('/users')}>
+            {(user?.role === 'admin' || user?.permissions?.includes('apps.manage')) && (
+              <button type="button" className="grok-user-menu-item" onClick={() => go(user?.role === 'admin' ? '/system/users' : '/system/apps')}>
                 <TeamOutlined />
-                <span>账户管理</span>
+                <span>系统管理</span>
               </button>
             )}
             <button type="button" className="grok-user-menu-item" onClick={() => go('/status')}>

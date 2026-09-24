@@ -1,0 +1,14 @@
+Value Required ID (\d+)
+Value PORT (\S+)
+Value STATUS (\S+)
+Value CONSISTENCY (\S+)
+Value CONSISTENCY_REASON (.+?)
+Value List ACTIVE_VLANS ([0-9,\-]+)
+
+Start
+  ^vPC status\s*$$ -> Members
+
+Members
+  ^\d+\s+\S+\s+ -> Continue.Record
+  ^${ID}\s+${PORT}\s+${STATUS}\s+${CONSISTENCY}\s+${CONSISTENCY_REASON}\s{2,}${ACTIVE_VLANS}\s*$$
+  ^\s{20,}${ACTIVE_VLANS}\s*$$

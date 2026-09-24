@@ -1,0 +1,34 @@
+Value Required INTERFACE (GigabitEthernet\s+\S+)
+Value ADMIN_STATE (\S+)
+Value MTU (\d+)
+Value SPEED (\S+)
+Value DUPLEX (\S+)
+Value AUTONEG (\S+)
+Value STATS_INTERVAL (\d+)
+Value INPUT_PACKETS (\d+)
+Value INPUT_BYTES (\d+)
+Value INPUT_MULTICAST (\d+)
+Value INPUT_BROADCAST (\d+)
+Value CRC_ERRORS (\d+)
+Value FRAGMENTS (\d+)
+Value DROPPED_PACKETS (\d+)
+Value RUNTS (\d+)
+Value GIANTS (\d+)
+Value TOTAL_ERRORS (\d+)
+Value LINK_STATE (\S+)
+
+Start
+  ^GigabitEthernet\s+\S+\s+Status: -> Continue.Record
+  ^${INTERFACE}\s+Status:
+  ^Driver Configuration Block: Admin State ${ADMIN_STATE} MTU ${MTU} Speed ${SPEED} Duplex ${DUPLEX} Autoneg ${AUTONEG} Stats Interval ${STATS_INTERVAL}
+  ^Input packet count\s+${INPUT_PACKETS}
+  ^Input bytes count\s+${INPUT_BYTES}
+  ^Input mcast packets\s+${INPUT_MULTICAST}
+  ^Input bcast packets\s+${INPUT_BROADCAST}
+  ^Input CRC packets\s+${CRC_ERRORS}
+  ^Input fragment packets\s+${FRAGMENTS}
+  ^Dropped packets\s+${DROPPED_PACKETS}
+  ^Runt packets\s+${RUNTS}
+  ^Giant packets count\s+${GIANTS}
+  ^Total error packet count\s+${TOTAL_ERRORS}
+  ^PCS Status: Link State \[${LINK_STATE}\]

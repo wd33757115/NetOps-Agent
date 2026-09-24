@@ -149,6 +149,7 @@ class ManualParserCandidateSubmissionService:
         job_id: str,
         template_text: str,
         actor: str,
+        actor_user_id: str | None = None,
         reason: str | None = None,
         based_on_template_id: str | None = None,
     ) -> ManualParserCandidateResult:
@@ -255,6 +256,7 @@ class ManualParserCandidateSubmissionService:
             self.jobs.retry_job(
                 job_id,
                 actor=normalized_actor,
+                actor_user_id=actor_user_id,
                 reason=str(reason or "").strip() or "engineer submitted a Parser revision",
             )
             current_status = "pending"
@@ -262,10 +264,17 @@ class ManualParserCandidateSubmissionService:
             raise ParserJobStateError(
                 f"parser job {job_id} cannot accept an engineer revision from {current_status}"
             )
+        # Claim a durable execution identity for this synchronous submission too.
+        # The existing task-id fence prevents an older worker from saving over it;
+        # this does not enqueue a Celery task.
+        execution_id = "manual:" + uuid.uuid4().hex
+        self.jobs.mark_job_dispatched(job_id, execution_id,
+            actor=normalized_actor, actor_user_id=actor_user_id)
         self.jobs.transition_job_status(
             job_id,
             "running",
-            expected_status=current_status,
+            expected_status="pending",
+            expected_celery_task_id=execution_id,
         )
         try:
             current_job = self.jobs.get_job(job_id, include_sanitized_payload=True)

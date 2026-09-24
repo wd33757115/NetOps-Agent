@@ -301,6 +301,48 @@ describe('OfflinePatrolPanel', () => {
     expect(offlineList).toHaveBeenCalled()
   })
 
+  it('opens the task detail after executing from the upload page', async () => {
+    const job = { id: 'offline-start', purpose: 'offline_patrol', job_type: 'single_patrol',
+      name: '启动后的任务', status: 'ready', periods: [], source_files: [], archived: false }
+    offlineList.mockResolvedValue({ items: [job], total: 1, page: 1, page_size: 25 })
+    offlineGet.mockResolvedValue(job)
+    offlineExecute.mockResolvedValue({ success: true })
+    const user = userEvent.setup()
+    renderPanel('offline_patrol')
+    await user.click(await screen.findByRole('button', { name: /继续处理/ }))
+    await screen.findByRole('heading', { name: '继续离线巡检任务' })
+    await user.click(screen.getByRole('button', { name: /执行巡检/ }))
+    await waitFor(() => expect(offlineExecute).toHaveBeenCalledWith(job.id, expect.any(String)))
+    expect(await screen.findByRole('heading', { name: job.name })).toBeVisible()
+    expect(screen.getByRole('button', { name: '返回离线任务' })).toBeVisible()
+  })
+
+  it('keeps an offline detail link across refresh and browser history without a drawer', async () => {
+    const job = { id: 'offline-nav', purpose: 'offline_patrol', job_type: 'single_patrol',
+      name: '路由恢复巡检', status: 'ready', periods: [], source_files: [], archived: false }
+    offlineGet.mockResolvedValue(job)
+    const History = () => {
+      const navigate = useNavigate()
+      return <>
+        <button onClick={() => navigate(-1)}>浏览器后退</button>
+        <button onClick={() => navigate(1)}>浏览器前进</button>
+        <button onClick={() => navigate('/?patrol_view=offline&offline_job_id=offline-nav&offline_job_tab=sources')}>打开详情链接</button>
+      </>
+    }
+    const user = userEvent.setup()
+    renderPanel('offline_patrol', { accessory: <History /> })
+    await user.click(screen.getByRole('button', { name: '打开详情链接' }))
+    expect(await screen.findByRole('heading', { name: job.name })).toBeVisible()
+    expect(screen.getByRole('tab', { name: /文件与设备/ })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '浏览器后退' }))
+    await waitFor(() => expect(screen.queryByRole('heading', { name: job.name })).not.toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: '浏览器前进' }))
+    expect(await screen.findByRole('heading', { name: job.name })).toBeVisible()
+    await user.click(screen.getByRole('button', { name: '返回离线任务' }))
+    await waitFor(() => expect(screen.queryByRole('heading', { name: job.name })).not.toBeInTheDocument())
+  })
+
   it('creates a separate historical analysis without resetting or executing the original patrol', async () => {
     const completedJob = {
       id: 'offline-patrol-completed',

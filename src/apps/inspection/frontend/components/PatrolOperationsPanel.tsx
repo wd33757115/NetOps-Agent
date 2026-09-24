@@ -1,8 +1,9 @@
+import InspectionDetailPage from '../InspectionDetailPage'
 import { inspectionView } from '../inspectionNavigation'
 import PatrolTaskInbox from '@netops/components/devices/PatrolTaskInbox'
 import { useSearchParams } from 'react-router-dom'
 import React, { useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Descriptions, Drawer, Form, Input, Modal, Pagination, Progress, Select, Space, Switch, Table, Tabs, Tag, Typography, message, type TableProps } from 'antd'
+import { Alert, Button, Descriptions, Form, Input, Modal, Pagination, Progress, Select, Space, Switch, Table, Tabs, Tag, Typography, message, type TableProps } from 'antd'
 import { DownloadOutlined, FileExcelOutlined, LeftOutlined, ReloadOutlined, RightOutlined, SafetyCertificateOutlined, SearchOutlined, StopOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from 'react-query'
 import type { PatrolBatchCheckResult, PatrolBatchDeviceItem, PatrolBatchDevicePage, PatrolBatchResultSummary, PatrolBatchSummary, ProductionFeedbackType } from '@netops/services/api'
@@ -513,6 +514,8 @@ const PatrolOperationsPanel: React.FC<PatrolOperationsPanelProps> = ({
       />
     </Space>
     {activePatrolBatchId && (
+      <InspectionDetailPage open title={activeBatch?.target_label || '在线巡检批次'}
+        subtitle={activePatrolBatchId} backLabel="返回在线任务" onClose={onClearActiveBatch}>
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
         <Space style={{ width: '100%', justifyContent: 'space-between' }}>
           <Space wrap>
@@ -538,7 +541,7 @@ const PatrolOperationsPanel: React.FC<PatrolOperationsPanelProps> = ({
               </Button>
             )}
             <Button size="small" onClick={onRefreshActiveBatchRuns}>刷新</Button>
-            <Button size="small" onClick={onClearActiveBatch}>关闭</Button>
+
           </Space>
         </Space>
 
@@ -1109,6 +1112,7 @@ const PatrolOperationsPanel: React.FC<PatrolOperationsPanelProps> = ({
           )}
         </Space>
       </Space>
+      </InspectionDetailPage>
     )}
   </Space>
   )
@@ -1163,9 +1167,8 @@ const PatrolOperationsPanel: React.FC<PatrolOperationsPanelProps> = ({
           },
         ]}
       />
-      <Drawer
+      <InspectionDetailPage
         open={Boolean(selectedCheckExecutionId)}
-        width={isMobile ? '100%' : 980}
         title="巡检判断依据"
         onClose={() => {
           setSelectedCheckExecutionId(undefined)
@@ -1343,7 +1346,7 @@ const PatrolOperationsPanel: React.FC<PatrolOperationsPanelProps> = ({
             </section>
           </Space>
         )}
-      </Drawer>
+      </InspectionDetailPage>
       <Modal
         open={feedbackOpen}
         title="提交巡检质量反馈"

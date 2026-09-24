@@ -18,6 +18,8 @@ const SkillsPage = React.lazy(() => import('./pages/SkillsPage'))
 const StatusPage = React.lazy(() => import('./pages/StatusPage'))
 const StoragePage = React.lazy(() => import('./pages/StoragePage'))
 const UsersPage = React.lazy(() => import('./pages/UsersPage'))
+const SystemGroupsPage = React.lazy(() => import('./pages/SystemGroupsPage'))
+const SystemAppsPage = React.lazy(() => import('./pages/SystemAppsPage'))
 const LoginPage = React.lazy(() => import('./pages/LoginPage'))
 const DevicesPage = React.lazy(() => import('./pages/DevicesPage'))
 const WorkbenchPage = React.lazy(() => import('./pages/WorkbenchPage'))
@@ -60,17 +62,15 @@ const App: React.FC = () => {
             <Route path="skills/parser/source-jobs/:jobId" element={<BusinessRoute><PackageRoute appId="rule-governance"><RuleAssetSourceJobDetailPage /></PackageRoute></BusinessRoute>} />
             <Route path="skills/:section" element={<SkillsPage />} />
             <Route path="devices" element={<DevicesPage />} />
-            <Route path="admin/netops/devices" element={<PackageRoute appId="rule-governance"><DevicesPage /></PackageRoute>} />
+            <Route path="admin/netops/devices" element={<DevicesPage />} />
+            <Route path="apps/rule-governance/devices" element={<DevicesPage />} />
             <Route path="storage" element={<StoragePage />} />
             <Route path="status" element={<StatusPage />} />
-            <Route
-              path="users"
-              element={
-                <AdminRoute>
-                  <UsersPage />
-                </AdminRoute>
-              }
-            />
+            <Route path="users" element={<AdminRoute><Navigate to="/system/users" replace /></AdminRoute>} />
+            <Route path="system" element={<AdminRoute appGrants><Navigate to="/system/apps" replace /></AdminRoute>} />
+            <Route path="system/users" element={<AdminRoute><UsersPage /></AdminRoute>} />
+            <Route path="system/groups" element={<AdminRoute><SystemGroupsPage /></AdminRoute>} />
+            <Route path="system/apps" element={<AdminRoute appGrants><SystemAppsPage /></AdminRoute>} />
           </Route>
           </Routes>
         </Suspense>

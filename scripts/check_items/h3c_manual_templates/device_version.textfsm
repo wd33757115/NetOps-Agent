@@ -1,0 +1,30 @@
+Value Filldown VENDOR (H3C)
+Value Filldown SOFTWARE_VERSION (.+)
+Value Filldown BOOT_IMAGE (\S+)
+Value Filldown SYSTEM_IMAGE (\S+)
+Value Required SLOT (\d+)
+Value UPTIME (.+)
+Value BOARD_TYPE (\S+)
+Value DRAM (.+?)
+Value FLASH (.+?)
+Value PATCH_VERSION (\S+)
+Value REBOOT_REASON (.+)
+
+Start
+  ^${VENDOR} Comware Software, Version ${SOFTWARE_VERSION}
+  ^Boot image: ${BOOT_IMAGE}
+  ^System image: ${SYSTEM_IMAGE}
+  ^(?:MPU\(\S+\) )?Slot \d+: -> Continue.Record
+  ^(?:MPU\(\S+\) )?Slot ${SLOT}:\s*${BOARD_TYPE} uptime is ${UPTIME}
+  ^(?:MPU\(\S+\) )?Slot ${SLOT}:\s*$$
+  ^Uptime is ${UPTIME}
+  ^BOARD TYPE:\s*${BOARD_TYPE}
+  ^\s*(?:DRAM|BuckleDRAM Size):\s*${DRAM}\s*$$
+  ^\s*(?:FLASH|BuckleFLASH Size):\s*${FLASH}\s*$$
+  ^${DRAM} bytes DDR\d SDRAM Memory
+  ^${FLASH} bytes Flash Memory
+  ^Patch Version\s*:\s*${PATCH_VERSION}
+  ^(?:Reboot Cause|Last reboot reason)\s*:\s*${REBOOT_REASON}
+  ^__NETOPS_TEXTFSM_END_OF_INPUT_7F3A9C__ -> Record
+
+EOF

@@ -257,6 +257,23 @@ def build_parser_field_naming_context(
             if isinstance(item, Mapping)
             and str(item.get("observation_type") or "").strip()
         ]
+        if contract.get("value_contract") == "same-name/v1":
+            identity_fields = [str(name) for name in contract.get("identity_dimensions", []) if name != "device_id"]
+            observations = [
+                {**_preferred_observation_field(row), "preferred_name": row["canonical_field"],
+                 "preferred_pattern": row["canonical_field"]}
+                for row in contract.get("observations", [])
+            ]
+            # The selected contract owns exact names; legacy aliases are not hints
+            # for a strict schema, including when its Values use uppercase.
+            configured_vocabulary = [
+                {"preferred_name": name, "role": "identity", "aliases": []}
+                for name in identity_fields
+            ] + [
+                {"preferred_name": row["canonical_field"], "observation_type": row["observation_type"],
+                 "role": "state", "aliases": []}
+                for row in contract.get("observations", [])
+            ]
         items.append(
             {
                 "check_item_id": check_item.id,

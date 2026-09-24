@@ -7,13 +7,12 @@ import pytest
 
 from src.core.patrol import change_detector, event_builder
 from src.core.patrol.runtime_manifest import (
-    build_patrol_runtime_manifest,
     comparison_scopes_for_device,
     first_observation_collection_action_ids,
     resolve_patrol_runtime_rule_assets,
     validate_patrol_runtime_manifest,
 )
-from src.core.rule_control.runtime_assets import RuntimeRuleAssetBundle
+from types import SimpleNamespace as RuntimeRuleAssetBundle
 
 
 class _ParserBundle:
@@ -94,7 +93,12 @@ class _Resolver:
 
 
 def _manifest():
-    return build_patrol_runtime_manifest(_ParserBundle(), resolver=_Resolver())
+    # Existing serialized reports remain verifiable without a legacy DB resolver.
+    from src.core.patrol.runtime_manifest import _digest, _manifest_payload
+    manifest = {"version": 1, "parser_bundle": _ParserBundle().to_dict(),
+                "rule_assets": vars(_Resolver().load_bundle(observation_schemas=[("cli", "template-1")])), "readiness": {}}
+    manifest["digest"] = _digest(_manifest_payload(manifest))
+    return manifest
 
 
 def test_runtime_manifest_detects_tampering():

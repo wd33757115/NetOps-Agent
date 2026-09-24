@@ -13,7 +13,6 @@ from typing import Any
 from src.apps.rule_governance.backend.check_items.catalog import CheckItemCatalogRepository
 from src.apps.rule_governance.backend.check_items.runtime_bundle_assembly import (
     RuntimeBundleAssemblyPlanner,
-    contract_observation_types,
     derive_asset_requirement_profile,
     event_rule_observation_types,
     govern_evaluation_scope,
@@ -41,7 +40,6 @@ from src.infrastructure.db.models import (
     EntityIdentityPolicyVersionRecord,
     EventRuleRecord,
     EventRuleVersionRecord,
-    ObservationContractRecord,
     ParserTemplate,
     RuntimeBundleAssetRecord,
     TextComparisonProfileVersionRecord,
@@ -108,7 +106,6 @@ class CheckItemRuntimeBundleService:
         check_item_version_id: str,
         implementation_version_id: str,
         parser_template_ids: Iterable[str] = (),
-        observation_contract_ids: Iterable[str] = (),
         change_policy_version_ids: Iterable[str] = (),
         event_rule_version_ids: Iterable[str] = (),
         comparison_profile_version_id: str | None = None,
@@ -120,7 +117,6 @@ class CheckItemRuntimeBundleService:
                 check_item_version_id=check_item_version_id,
                 implementation_version_id=implementation_version_id,
                 parser_template_ids=parser_template_ids,
-                observation_contract_ids=observation_contract_ids,
                 change_policy_version_ids=change_policy_version_ids,
                 event_rule_version_ids=event_rule_version_ids,
                 comparison_profile_version_id=comparison_profile_version_id,
@@ -134,7 +130,6 @@ class CheckItemRuntimeBundleService:
         preview_digest: str,
         actor: str,
         parser_template_ids: Iterable[str] = (),
-        observation_contract_ids: Iterable[str] = (),
         change_policy_version_ids: Iterable[str] = (),
         event_rule_version_ids: Iterable[str] = (),
         comparison_profile_version_id: str | None = None,
@@ -145,7 +140,6 @@ class CheckItemRuntimeBundleService:
             check_item_version_id=check_item_version_id,
             implementation_version_id=implementation_version_id,
             parser_template_ids=parser_template_ids,
-            observation_contract_ids=observation_contract_ids,
             change_policy_version_ids=change_policy_version_ids,
             event_rule_version_ids=event_rule_version_ids,
             comparison_profile_version_id=comparison_profile_version_id,
@@ -165,7 +159,6 @@ class CheckItemRuntimeBundleService:
             check_item_version_id=check_item_version_id,
             implementation_version_id=implementation_version_id,
             parser_template_ids=selected["parser_template_ids"],
-            observation_contract_ids=selected["observation_contract_ids"],
             change_policy_version_ids=selected["change_policy_version_ids"],
             event_rule_bindings=dict(selected["event_rule_bindings"]),
             comparison_profile_version_id=selected.get(
@@ -181,7 +174,6 @@ class CheckItemRuntimeBundleService:
         check_item_version_id: str,
         implementation_version_id: str,
         parser_template_ids: Iterable[str],
-        observation_contract_ids: Iterable[str],
         change_policy_version_ids: Iterable[str],
         event_rule_bindings: Mapping[str, str | Iterable[str]],
         comparison_profile_version_id: str | None = None,
@@ -197,7 +189,6 @@ class CheckItemRuntimeBundleService:
                 check_item_version_id=check_item_version_id,
                 implementation_version_id=implementation_version_id,
                 parser_template_ids=parser_template_ids,
-                observation_contract_ids=observation_contract_ids,
                 change_policy_version_ids=change_policy_version_ids,
                 event_rule_version_ids=requested_rule_bindings,
                 comparison_profile_version_id=comparison_profile_version_id,
@@ -230,9 +221,6 @@ class CheckItemRuntimeBundleService:
                     ]
                 )
             parser_template_ids = tuple(selected["parser_template_ids"])
-            observation_contract_ids = tuple(
-                selected["observation_contract_ids"]
-            )
             change_policy_version_ids = tuple(
                 selected["change_policy_version_ids"]
             )
@@ -287,9 +275,6 @@ class CheckItemRuntimeBundleService:
                 blockers.append("implementation version is not active")
 
             parser_ids = tuple(sorted(set(str(item) for item in parser_template_ids if item)))
-            contract_ids = tuple(
-                sorted(set(str(item) for item in observation_contract_ids if item))
-            )
             policy_ids = tuple(
                 sorted(set(str(item) for item in change_policy_version_ids if item))
             )
@@ -297,13 +282,6 @@ class CheckItemRuntimeBundleService:
             parser_rows = (
                 db.query(ParserTemplate).filter(ParserTemplate.id.in_(parser_ids)).all()
                 if parser_ids
-                else []
-            )
-            contract_rows = (
-                db.query(ObservationContractRecord)
-                .filter(ObservationContractRecord.id.in_(contract_ids))
-                .all()
-                if contract_ids
                 else []
             )
             policy_rows = (
@@ -343,8 +321,6 @@ class CheckItemRuntimeBundleService:
 
             if len(parser_rows) != len(parser_ids):
                 blockers.append("one or more Parser template versions do not exist")
-            if len(contract_rows) != len(contract_ids):
-                blockers.append("one or more ObservationContract versions do not exist")
             if len(policy_rows) != len(policy_ids):
                 blockers.append("one or more ChangePolicy versions do not exist")
             if len(rule_rows) != len(rule_bindings):
@@ -369,16 +345,8 @@ class CheckItemRuntimeBundleService:
                 blockers.append(
                     "structured CommandAdapter V2 implementation requires a projection"
                 )
-            if result_mode == "structured" and direct_projection and contract_rows:
-                blockers.append(
-                    "structured CommandAdapter V2 implementation cannot bind ObservationContracts"
-                )
-            if (
-                result_mode == "structured"
-                and not direct_projection
-                and not contract_rows
-            ):
-                blockers.append("structured implementation requires an ObservationContract")
+            if result_mode == "structured" and not direct_projection:
+                blockers.append("structured implementation requires command-adapter/v2")
             if result_mode != "structured" and parser_rows:
                 blockers.append("non-structured implementation cannot bind Parser templates")
             if (
@@ -399,15 +367,6 @@ class CheckItemRuntimeBundleService:
                 if parser.status != "active":
                     blockers.append(f"Parser template is not active: {parser.id}")
             produced_types: set[str] = set()
-            for contract in contract_rows:
-                if contract.status != "active":
-                    blockers.append(f"ObservationContract is not active: {contract.id}")
-                if str(contract.source_template_id or "") not in parser_by_id:
-                    blockers.append(
-                        f"ObservationContract is not bound to a selected Parser: {contract.id}"
-                    )
-                produced_types.update(contract_observation_types(contract))
-
             canonical_rows = list(
                 dict(check_version.canonical_contract_json or {}).get("observations") or []
             )
@@ -591,9 +550,6 @@ class CheckItemRuntimeBundleService:
                     if direct_projection
                     else {}
                 ),
-                "observation_contracts": {
-                    str(item.id): str(item.contract_sha256) for item in contract_rows
-                },
                 "change_policies": {
                     str(item.id): str(item.digest) for item in policy_rows
                 },
@@ -743,16 +699,6 @@ class CheckItemRuntimeBundleService:
                             ),
                             "projection": projection_manifest,
                         },
-                    )
-                )
-            for contract in contract_rows:
-                assets.append(
-                    self._asset(
-                        version_id,
-                        "observation_contract",
-                        str(contract.schema_id),
-                        str(contract.id),
-                        str(contract.contract_sha256),
                     )
                 )
             for policy in policy_rows:
@@ -907,10 +853,45 @@ class CheckItemRuntimeBundleService:
     ) -> CheckItemRuntimeBundleVersionRecord:
         """Activate one bundle inside the caller's transaction."""
 
+        candidate = db.get(CheckItemRuntimeBundleVersionRecord, version_id)
+        if candidate is None:
+            raise ValueError("runtime bundle version not found")
+        # Lock the implementation root first, in the same order as deletion.
+        # A rollback may reuse a historical version, but must not resurrect a
+        # deliberately deleted implementation or race its retirement.
+        implementation = (
+            db.query(CollectionImplementationRecord)
+            .join(
+                CollectionImplementationVersionRecord,
+                CollectionImplementationVersionRecord.implementation_id
+                == CollectionImplementationRecord.id,
+            )
+            .filter(CollectionImplementationVersionRecord.id == candidate.implementation_version_id)
+            .with_for_update(of=CollectionImplementationRecord)
+            .populate_existing()
+            .first()
+        )
+        if implementation is None or implementation.status == "deprecated":
+            raise RuntimeBundleValidationError(["命令适配器已删除，不能重新启用其运行包"])
+        # Serialize asset withdrawal with activation, including rollback. Deleted
+        # assets must never be resurrected through allow_deprecated_dependencies.
+        asset_models = {"parser_template": ParserTemplate,
+                        "change_policy": ChangePolicyVersionRecord, "event_rule": EventRuleVersionRecord,
+                        "current_state_rule": EventRuleVersionRecord}
+        dependencies = db.query(RuntimeBundleAssetRecord).filter_by(bundle_version_id=version_id).all()
+        for asset in sorted(dependencies, key=lambda item: (
+            0 if item.asset_type == "parser_template" else 1, item.asset_type, item.asset_version_id
+        )):
+            model = asset_models.get(asset.asset_type)
+            if model is not None:
+                dependency = db.query(model).filter(model.id == asset.asset_version_id).with_for_update().populate_existing().first()
+                if dependency is None or dependency.status == "deleted":
+                    raise RuntimeBundleValidationError(["运行包依赖的资产已删除，不能启用或回滚"])
         version = (
             db.query(CheckItemRuntimeBundleVersionRecord)
             .filter(CheckItemRuntimeBundleVersionRecord.id == version_id)
             .with_for_update()
+            .populate_existing()
             .one_or_none()
         )
         if version is None:
@@ -1519,10 +1500,6 @@ class CheckItemRuntimeBundleService:
                 "command_adapter_projection": (
                     CollectionImplementationVersionRecord,
                     "digest",
-                ),
-                "observation_contract": (
-                    ObservationContractRecord,
-                    "contract_sha256",
                 ),
                 "change_policy": (ChangePolicyVersionRecord, "digest"),
                 "current_state_rule": (EventRuleVersionRecord, "digest"),

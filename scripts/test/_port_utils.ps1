@@ -65,6 +65,36 @@ function Test-ProjectAppProcess {
     return $false
 }
 
+function Clear-StaleProjectBeatPid {
+    param([Parameter(Mandatory = $true)][string]$ProjectRoot)
+    $root = (Resolve-Path -LiteralPath $ProjectRoot -ErrorAction Stop).Path.TrimEnd('\', '/')
+    $marker = Join-Path $root '.runtime\test\celery-beat.pid'
+    # Query failures must not be interpreted as an empty process list.
+    $processes = @(Get-CimInstance Win32_Process -Filter "Name='python.exe'" -ErrorAction Stop)
+    $running = @($processes | Where-Object {
+        (Test-ProjectAppProcess -Process $_ -ProjectRoot $root) -and
+        $_.CommandLine -match '-m\s+celery\s+-A\s+src\.core\.celery_tasks\.celery_app\s+beat(?:\s|$)'
+    })
+    if ($running.Count) { throw 'Project Celery Beat is still running; keep its PID file and do not start another scheduler.' }
+    if (-not (Test-Path -LiteralPath $marker -ErrorAction Stop)) { return }
+    foreach ($path in @((Join-Path $root '.runtime'), (Join-Path $root '.runtime\test'), $marker)) {
+        $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            throw 'Refusing to clean a Beat PID file through a filesystem link.'
+        }
+    }
+    $content = [IO.File]::ReadAllText($marker)
+    $recordedId = 0
+    if (-not [int]::TryParse($content.Trim(), [ref]$recordedId) -or $recordedId -le 0) {
+        throw 'Invalid Celery Beat PID file; inspect it before restarting the scheduler.'
+    }
+    $owner = @(Get-CimInstance Win32_Process -Filter "ProcessId=$recordedId" -ErrorAction Stop)
+    if ($owner.Count) { throw "Beat PID file refers to live PID $recordedId; it has been preserved." }
+    if ([IO.File]::ReadAllText($marker) -ne $content) { throw 'Beat PID file changed during inspection; retry after checking the scheduler.' }
+    Remove-Item -LiteralPath $marker -Force -ErrorAction Stop
+    Write-ColorOutput "  [OK] Removed stale Celery Beat PID $recordedId" 'Gray'
+}
+
 function Test-ProjectLauncherProcess {
     param($Process, [string]$ProjectRoot)
     if (-not $Process -or $Process.Name -notin @('powershell.exe', 'pwsh.exe')) { return $false }

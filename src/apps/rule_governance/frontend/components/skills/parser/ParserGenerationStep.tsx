@@ -706,6 +706,7 @@ const ParserGenerationStep: React.FC<{
     },
   )
   const job = jobQuery.data
+  const associatedCheckItemId = job?.generation_readiness?.check_item_binding?.check_item_id || ''
   const checkItemsQuery = useQuery(
     ['parser-check-items-for-generation'],
     () => parserApi.checkItems({ limit: 200 }),
@@ -796,7 +797,6 @@ const ParserGenerationStep: React.FC<{
     setManualTemplateReason('')
     setParserRevisionInstruction('')
     setRevisionMode(false)
-    setSelectedCheckItemId(lockedCheckItemId || '')
     setProjectionRecordSet('')
     setProjectionText('')
     setProjectionSampleIndex(0)
@@ -812,22 +812,8 @@ const ParserGenerationStep: React.FC<{
   )
 
   useEffect(() => {
-    if (lockedCheckItemId) {
-      if (structuredCheckItems.some((item) => item.check_item_id === lockedCheckItemId)
-        && selectedCheckItemId !== lockedCheckItemId) {
-        setSelectedCheckItemId(lockedCheckItemId)
-      }
-      return
-    }
-    if (selectedCheckItemId || !job || !structuredCheckItems.length) return
-    const suggestedId = String(suggestion.check_item_id || '')
-    const command = job.canonical_command.trim().toLowerCase()
-    const matched = structuredCheckItems.find((item) => item.check_item_id === suggestedId)
-      || structuredCheckItems.find((item) => item.implementations.some((implementation) => (
-        implementation.commands.some((candidate) => candidate.command.trim().toLowerCase() === command)
-      )))
-    if (matched) setSelectedCheckItemId(matched.check_item_id)
-  }, [job, lockedCheckItemId, selectedCheckItemId, structuredCheckItems, suggestion.check_item_id])
+    setSelectedCheckItemId(associatedCheckItemId)
+  }, [associatedCheckItemId])
 
   const parserRecordSetNames = useMemo(
     () => {
@@ -1597,20 +1583,20 @@ const ParserGenerationStep: React.FC<{
           <section className="parser-generation-step">
             <Typography.Text strong>2. 目标标准语义 B</Typography.Text>
             <Typography.Paragraph type="secondary" style={{ margin: '4px 0 12px' }}>
-              {lockedCheckItemId
-                ? '该样本命令已在检查项目录关联 CheckItem；此处固定使用同一个 B 指导 TextFSM 与 Projection。'
-                : '选择本命令要产出的 CheckItem；其 Canonical Contract 会与 CLI 样本一起发送给 LLM。'}
+              {associatedCheckItemId
+                ? '使用已关联检查项的语义和字段要求制作 TextFSM 与 Projection。'
+                : '尚未关联有效检查项，请返回检查项目录完成关联后继续。'}
             </Typography.Paragraph>
             <Select
               aria-label="目标 CheckItem"
               value={selectedCheckItemId || undefined}
-              disabled={Boolean(lockedCheckItemId)}
+              disabled
               onChange={(value) => {
                 setSelectedCheckItemId(value)
                 setProjectionText('')
                 setProjectionPreview(undefined)
               }}
-              placeholder="选择 CheckItem"
+              placeholder="请先在待归类检查项中完成关联"
               loading={checkItemsQuery.isLoading}
               showSearch
               optionFilterProp="label"
@@ -1892,13 +1878,13 @@ const ParserGenerationStep: React.FC<{
                 <Select
                   aria-label="Projection 目标 CheckItem"
                   value={selectedCheckItemId || undefined}
-                  disabled={Boolean(lockedCheckItemId)}
+                  disabled
                   onChange={(value) => {
                     setSelectedCheckItemId(value)
                     setProjectionText('')
                     setProjectionPreview(undefined)
                   }}
-                  placeholder="选择 CheckItem"
+                  placeholder="请先在待归类检查项中完成关联"
                   options={structuredCheckItems.map((item) => ({
                     value: item.check_item_id,
                     label: `${item.display_name || item.name} (${item.check_item_id})`,

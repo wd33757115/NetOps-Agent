@@ -183,15 +183,7 @@ class Settings(BaseSettings):
     # cannot create Parser generation candidates.
     PRODUCTION_PARSER_BACKLOG_ENABLED: bool = False
     PARSER_LLM_GENERATION_ENABLED: bool = False
-    RULE_ASSET_AUTO_SEED_ENABLED: bool = True
-    # When True, template activation may auto-start rule-asset-generation after
-    # immutable context is ready. Default off for safe gray release.
-    RULE_ASSET_AUTO_GENERATE_ENABLED: bool = False
     PARSER_BACKFILL_ENABLED: bool = False
-    # Set only after the all-active-route V2 cutover report is fully ready.
-    # It makes ObservationContract assets read-only audit history and prevents
-    # legacy generation paths from recreating the retired semantic bridge.
-    ADAPTER_PROJECTION_CUTOVER_ENFORCED: bool = False
     PARSER_BOOTSTRAP_SHARED_TEMPLATES_ON_STARTUP: bool = False
     PARSER_BACKLOG_ALERT_THRESHOLD: int = 20
     PARSER_CANDIDATE_STALE_MINUTES: int = 60

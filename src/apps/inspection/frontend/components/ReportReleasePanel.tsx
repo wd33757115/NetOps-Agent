@@ -1,10 +1,10 @@
+import InspectionDetailPage from '../InspectionDetailPage'
 import React, { useMemo, useState } from 'react'
 import {
   Alert,
   Button,
   Checkbox,
   Descriptions,
-  Drawer,
   Dropdown,
   Form,
   Input,
@@ -1010,11 +1010,9 @@ const ReportReleasePanel: React.FC<ReportReleasePanelProps> = ({
         </Space>
       )}
 
-      <Drawer
+      <InspectionDetailPage
         title="报告内容验收"
         open={contentReviewOpen}
-        width="min(1180px, 96vw)"
-        destroyOnClose={false}
         onClose={() => {
           setContentReviewOpen(false)
           setSelectedReviewItemIds([])
@@ -1362,7 +1360,7 @@ const ReportReleasePanel: React.FC<ReportReleasePanelProps> = ({
             </Space>
           )}
         </Space>
-      </Drawer>
+      </InspectionDetailPage>
 
       <Modal
         title={reviewDecision === 'accepted' ? '通过所选复核事实' : '驳回所选复核事实'}
@@ -1531,11 +1529,9 @@ const ReportReleasePanel: React.FC<ReportReleasePanelProps> = ({
         </Form>
       </Modal>
 
-      <Drawer
+      <InspectionDetailPage
         title="事实声明与证据边界"
         open={claimsOpen}
-        width="min(1080px, 94vw)"
-        destroyOnClose={false}
         onClose={() => setClaimsOpen(false)}
       >
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
@@ -1658,7 +1654,7 @@ const ReportReleasePanel: React.FC<ReportReleasePanelProps> = ({
             scroll={{ x: 940 }}
           />
         </Space>
-      </Drawer>
+      </InspectionDetailPage>
     </Space>
   )
 }

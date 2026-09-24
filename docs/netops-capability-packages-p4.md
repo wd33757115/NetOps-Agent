@@ -91,7 +91,7 @@
 3. 前端共享文件操作进入 `components/offline/OfflineJobWorkbench.tsx`，由业务适配组件注入客户端和展示组件。
    包内 `RuleAssetSourceWorkbench` 提供制作进度和命令资产；`PatrolOfflineWorkbench` 提供报告、重分析和现状证明。
    实际页面已使用各自适配组件；旧组件只保留兼容入口。共享工作台仍含用途相关展示和宿主类型，尚非最终独立平台包。
-4. TextFSM、ObservationContract、ChangePolicy、EventRule 生成器，以及资产持久化、提交、审批、
+4. TextFSM、ChangePolicy、EventRule 生成器，以及资产持久化、提交、审批、
    事件规则校验和回放共 9 组实际脚本及 SKILL.md 迁入 `backend/generators`。
    原 run.py 转接到包内执行，TextFSM 辅助模块采用同一模块对象转发，保留 CLI 及 monkeypatch 兼容。
    生成报告、模板等可变产物继续使用历史外部路径，不写入应用源码目录。

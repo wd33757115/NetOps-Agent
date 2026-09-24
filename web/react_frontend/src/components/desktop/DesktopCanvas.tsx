@@ -7,7 +7,6 @@ import {
   CloseOutlined,
   MoreOutlined,
   PlusOutlined,
-  PictureOutlined,
   FolderOpenOutlined,
 } from "@ant-design/icons";
 import {
@@ -63,6 +62,8 @@ export function AppGlyph({ id }: { id?: string }) {
               strokeLinecap="round"
             />
           </>
+        ) : symbol === "server" ? (
+          <><rect x="12" y="10" width="40" height="19" rx="4" fill="white" /><rect x="12" y="35" width="40" height="19" rx="4" fill="white" /><path d="M20 20h16M20 45h16" stroke="#4076b8" strokeWidth="3" strokeLinecap="round" /><circle cx="44" cy="20" r="2" fill="#4076b8" /><circle cx="44" cy="45" r="2" fill="#4076b8" /></>
         ) : symbol === "shield" ? (
           <><path d="M32 7 51 15v16c0 13-10 21-19 26-9-5-19-13-19-26V15L32 7Z" fill="white" fillOpacity=".94" /><path d="m23 31 6 6 13-14" stroke="#4076b8" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" /></>
         ) : symbol === "document" ? (
@@ -325,7 +326,7 @@ export default function DesktopCanvas() {
   }, []);
   const disabled = status === "conflict";
   const visibleNodes = layout.nodes.filter(
-    (n) => n.kind === "folder" || canOpenApp(n.appId!, user),
+    (n) => n.kind === "folder" || (findApp(n.appId!)?.showOnDesktop && canOpenApp(n.appId!, user)),
   );
   const nodes = visibleNodes.filter((n) => n.containerId === "desktop:0");
   // Responsive projection is render-only: resize never saves or overwrites positions.
@@ -354,7 +355,7 @@ export default function DesktopCanvas() {
     node.kind === "folder"
       ? setFolderId(node.id)
       : navigate(findApp(node.appId!)!.route);
-  const dockIds = layout.dockAppIds.filter((id) => canOpenApp(id, user));
+  const dockIds = layout.dockAppIds.filter((id) => findApp(id)?.showOnDesktop && canOpenApp(id, user));
   const pin = (appId: string) =>
     edit((value) => ({
       ...value,
@@ -510,7 +511,7 @@ export default function DesktopCanvas() {
               新建文件夹
             </Button>
           </div>
-          <Button type="text" icon={<PictureOutlined aria-hidden="true" />} aria-label="更换壁纸" disabled={disabled} onClick={() => setWallpaperOpen(true)}>更换壁纸</Button>
+          {(user?.role === 'admin' || user?.permissions?.includes('apps.manage')) && <Button type="text" onClick={() => navigate(user?.role === 'admin' ? '/system/users' : '/system/apps')} style={{ marginLeft: 'auto', color: 'inherit' }}>系统管理</Button>}
           <DesktopClock />
         </header>
         <Dropdown

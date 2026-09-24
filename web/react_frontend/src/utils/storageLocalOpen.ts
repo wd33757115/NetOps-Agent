@@ -39,7 +39,8 @@ export function downloadBlob(blob: Blob, filename: string) {
   document.body.appendChild(a)
   a.click()
   a.remove()
-  URL.revokeObjectURL(url)
+  // Let the browser start consuming the Blob before releasing its download URL.
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
 }
 
 type OpenResult = 'office' | 'saved' | 'downloaded'

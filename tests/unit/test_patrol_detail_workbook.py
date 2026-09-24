@@ -43,168 +43,202 @@ def workbook(data, report=None):
     return load_workbook(BytesIO(render_detail_workbook(report or {}, {}, data)))
 
 
-def test_standard_columns_numeric_values_cell_changes_and_formula_safety():
+def test_original_values_and_reference_style():
     ws = workbook(fixture()).active
+    assert ws.title == "接口信息"
     assert [c.value for c in ws[1]] == [
         "设备ID",
         "命令",
-        "问题描述",
         "interface",
         "input_errors",
         "description",
     ]
-    assert ws["E2"].value == 12 and ws["E2"].font.color.rgb.endswith("C00000")
-    assert not ws["D2"].font.color.rgb.endswith("C00000")
-    assert ws["F2"].value == "=1+1" and ws["F2"].data_type == "s"
-    assert ws.freeze_panes == "D2" and ws.auto_filter.ref == "A1:F2"
+    assert ws["D2"].value == "12"
+    assert ws["E2"].value == "=1+1" and ws["E2"].data_type == "s"
+    assert ws.freeze_panes == "C2"
+    assert ws["A1"].fill.fgColor.rgb.endswith("BDD7EE")
+    assert all(
+        getattr(ws["A2"].border, side).style == "thin"
+        for side in ("left", "right", "top", "bottom")
+    )
 
 
-def test_missing_baseline_not_marked_changed():
+def test_no_mapping_filtering_or_renaming_of_raw_value_records():
     data = fixture()
-    data["snapshots"] = data["snapshots"][1:]
-    ws = workbook(data).active
-    assert not ws["C2"].value
-    assert "未提供可比基线" in workbook(data)["导出说明"]["D2"].value
-    assert not ws["E2"].font.color.rgb.endswith("C00000")
-
-
-def test_missing_five_minute_metric_is_explained_without_filling_a_value():
-    data = fixture()
-    data["definitions"]["v1"]["contract"]["observations"].append({
-        "canonical_field": "memory_usage_percent", "required": False,
-        "fixed_dimensions": {"window": "5m"}, "health_policy": {"window": "5m"},
-    })
-    result = workbook(data)
-    assert result.active["G2"].value is None
-    assert any("未采集五分钟使用率" in str(row[3])
-               for row in result["导出说明"].iter_rows(values_only=True))
-
-
-def test_duplicate_identity_and_parse_failure_do_not_invent_deletion():
-    data = fixture()
-    data["snapshots"][1]["structured_json"] *= 2
-    ws = workbook(data).active
-    assert all(not ws.cell(r, 3).value for r in [2, 3])
-    assert "对象标识不唯一" in workbook(data)["导出说明"]["D2"].value
-    data["snapshots"][1]["structured_json"] = []
-    data["snapshots"][1]["parse_status"] = "failed"
-    ws = workbook(data).active
-    assert ws.max_row == 1
-    assert "没有可用标准记录" in workbook(data)["导出说明"]["D2"].value
-    assert "CLI" not in str([c.value for c in ws[1]])
-
-
-def test_text_comparison_preserves_all_lines_and_marks_only_changes():
-    ws = workbook(fixture("normalized_diff")).active
-    assert [c.value for c in ws[1]] == [
-        "设备ID",
-        "命令",
-        "问题描述",
-        "基线 CLI 原文",
-        "当前 CLI 原文",
+    s = data["snapshots"][1]
+    s["structured_json"] = [
+        {"SLOT_TYPE": "Fan", "SLOT_ID": "01", "SERIAL": "000123", "COUNT": 12345678901234567890},
+        {"SLOT_TYPE": "Power"},
     ]
-    assert ws["D2"].value == "Interface GE1"
-    assert not ws["D2"].font.color.rgb.endswith("C00000")
-    assert ws["D3"].font.color.rgb.endswith("C00000") and ws["E3"].value == "errors 12"
-    assert ws["E4"].value == "unchanged"
-
-
-def test_long_text_cli_not_truncated_and_unlinked_only_has_a_note():
-    data = fixture("normalized_diff")
-    text = "x" * 40000
-    for snapshot in data["snapshots"]:
-        snapshot["raw_text"] = text
+    s["detail_records"] = {"v1": []}  # Old adapter failure must not discard saved records.
+    s["parse_status"] = "incomplete"
     ws = workbook(data).active
-    assert "".join(ws.cell(r, 5).value or "" for r in range(2, ws.max_row + 1)) == text
-    data["definitions"] = {}
-    wb = workbook(data)
-    assert wb.sheetnames == ["导出说明"]
-    assert wb.active.max_row == 2
+    assert ws.max_row == 3
+    assert [c.value for c in ws[1]][2:] == ["SLOT_TYPE", "SLOT_ID", "SERIAL", "COUNT"]
+    assert ws["D2"].value == "01" and ws["E2"].value == "000123"
+    assert ws["F2"].value == "12345678901234567890"
+    assert ws["D3"].value is None
 
 
-def test_full_record_sets_do_not_invent_objects_from_state_observations():
+def test_multi_check_item_command_uses_record_set_selection():
     data = fixture()
-    for snapshot in data["snapshots"]:
-        snapshot["structured_json"] = {"record_sets": {"main": snapshot["structured_json"]}}
-        data["observations"].append(
-            {
-                "snapshot_id": snapshot["id"],
-                "entity_key": '["GE2"]',
-                "field_name": "input_errors",
-                "value_json": 20,
-                "observation_type": "input.errors",
-            }
-        )
+    data["definitions"]["v2"] = {
+        "id": "memory",
+        "name": "内存",
+        "mode": "structured",
+        "contract": {},
+    }
+    for s in data["snapshots"]:
+        s["metadata_json"]["check_item_version_ids"].append("v2")
+        s["structured_json"] = {
+            "record_sets": {"cpu": [{"CPU": "0", "IDLE": "99"}], "mem": [{"FREE": "100"}]}
+        }
+        s["detail_record_sets"] = {"v1": ["cpu"], "v2": ["mem"]}
+    wb = workbook(data)
+    assert [c.value for c in wb["接口信息"][1]][2:] == ["CPU", "IDLE"]
+    assert [c.value for c in wb["内存"][1]][2:] == ["FREE"]
+    assert wb["内存"].max_row == 2
+
+
+def test_text_comparison_preserves_every_byte_and_marks_changes():
+    data = fixture("normalized_diff")
+    data["snapshots"][0]["raw_text"] = "same\r\nold\n"
+    data["snapshots"][1]["raw_text"] = "same\r\nnew\n" + "x" * 40000
     ws = workbook(data).active
-    assert ws.max_row == 2
-    assert ws["D2"].value == "GE1"
-    assert "CLI" not in str([c.value for c in ws[1]])
+    assert [c.value for c in ws[1]] == ["设备ID", "命令", "基线数据", "当前数据"]
+    for col, snapshot in [(3, data["snapshots"][0]), (4, data["snapshots"][1])]:
+        assert (
+            "".join(ws.cell(r, col).value or "" for r in range(2, ws.max_row + 1))
+            == snapshot["raw_text"]
+        )
+    assert ws["C3"].fill.fgColor.rgb.endswith("FFC7CE")
+    assert not ws["C2"].fill.fgColor.rgb.endswith("FFC7CE")
 
 
-def test_sheet_name_collisions_are_resolved_without_merging_check_items():
+def test_unbound_original_text_is_retained_with_an_explicit_note():
+    data = fixture("normalized_diff")
+    data["definitions"] = {}
+    for s in data["snapshots"]:
+        s["structured_json"] = None
+        s["metadata_json"] = {"handling": "raw_hash_diff"}
+    wb = workbook(data)
+    assert wb.sheetnames == ["display interface", "导出说明"]
+    assert wb.active["D2"].value == "Interface GE1\n"
+    assert "未保存可用检查项关联" in wb["导出说明"]["D2"].value
+
+
+def test_missing_period_is_not_substituted_and_empty_results_have_notes():
+    data = fixture()
+    data["snapshots"] = data["snapshots"][:1]
+    wb = workbook(data)
+    assert wb.active.max_row == 1
+    assert "本期未采集" in wb["导出说明"]["D2"].value
+    data = fixture()
+    data["snapshots"][1]["structured_json"] = []
+    wb = workbook(data)
+    assert wb.active.max_row == 1
+    assert "无可导出" in wb["导出说明"]["D2"].value
+
+
+def test_duplicate_current_snapshots_remain_exportable():
+    from copy import deepcopy
+
+    data = fixture()
+    duplicate = deepcopy(data["snapshots"][1])
+    duplicate["id"] = "second-current"
+    data["snapshots"].append(duplicate)
+    assert workbook(data).active.max_row == 3
+    data["definitions"]["v1"]["mode"] = "normalized_diff"
+    wb = workbook(data)
+    assert "分别保留" in wb["导出说明"]["D2"].value
+    assert wb.active.max_row == 10
+
+
+def test_sheet_name_collisions_do_not_merge_different_check_items():
     data = fixture(name="接口/信息")
     data["definitions"]["v2"] = {**data["definitions"]["v1"], "id": "other", "name": "接口:信息"}
     for s in data["snapshots"]:
         s["metadata_json"]["check_item_version_ids"].append("v2")
+        s["detail_record_sets"] = {"v1": ["default"], "v2": ["default"]}
     assert workbook(data).sheetnames == ["接口_信息", "接口_信息 (2)"]
 
 
-def test_problem_description_is_identical_to_word_projection():
-    from src.core.patrol.report_findings import project_findings
-    from src.core.patrol.report_view import project_report
+def test_no_saved_data_and_invalid_period_selection(monkeypatch):
+    import pytest
 
-    data = fixture()
-    report = {
-        "risks": [
+    from src.core.patrol.detail_data import load_detail_data
+
+    assert workbook({"definitions": {}, "snapshots": []}).active.title == "导出说明"
+    with pytest.raises(ValueError):
+        load_detail_data({"periods": [{"role": "baseline", "patrol_run_id": "one"}]})
+    with pytest.raises(ValueError):
+        load_detail_data(
             {
-                "source": "current_state",
-                "device_id": "switch",
-                "entity_key": '["GE1"]',
-                "field": "input_errors",
-                "current_value": 12,
-                "evidence_id": "obs",
+                "periods": [
+                    {"role": "current", "patrol_run_id": "one"},
+                    {"role": "baseline", "patrol_run_id": "one"},
+                ]
             }
-        ],
-        "structured_event_evidence": {
-            "items": [
-                {
-                    "device_id": "switch",
-                    "entity_key": '["GE1"]',
-                    "command": "display interface",
-                    "field": "input_errors",
-                    "current_finding": True,
-                    "finding_id": "obs",
-                    "baseline": {"snapshot_id": "baseline", "raw_text": "GE1 errors 0"},
-                    "current": {"snapshot_id": "current", "raw_text": "GE1 errors 12", "value": 12},
-                }
-            ]
-        },
-    }
-    expected = project_findings(report, {}, {}, project_report(report))["tables"]["findings"][0][2]
-    assert workbook(data, report).active["C2"].value == expected
+        )
 
 
-def test_large_counter_remains_exact_and_singleton_is_comparable():
-    data = fixture()
-    data["definitions"]["v1"]["contract"]["identity_dimensions"] = []
-    for snapshot in data["snapshots"]:
-        snapshot["structured_json"][0]["input_errors"] = 12345678901234567890
-    ws = workbook(data).active
-    assert ws["D2"].value == "12345678901234567890"
-    assert ws["D2"].data_type == "s"
-    assert not ws["C2"].value
+def test_detail_source_authorization_and_period_scope(monkeypatch):
+    from contextlib import contextmanager
+    from datetime import datetime, timezone
 
+    import pytest
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
 
-def test_missing_thresholds_and_text_baseline_are_notes_not_problem_descriptions():
-    data = fixture()
-    data["definitions"]["v1"]["contract"]["observations"][0]["health_policy"] = {
-        "device_thresholds": {"high": ["device_limit"]}
-    }
-    wb = workbook(data)
-    assert not wb.active["C2"].value
-    assert "未采集设备阈值" in wb["导出说明"]["D2"].value
-    text = fixture("normalized_diff")
-    text["snapshots"] = text["snapshots"][1:]
-    wb = workbook(text)
-    assert not wb.active["C2"].value
-    assert "缺少一期原文" in wb["导出说明"]["D2"].value
+    from src.core.patrol.detail_data import load_detail_source
+    from src.infrastructure.db import postgres
+    from src.infrastructure.db.models import OfflinePatrolJobRecord, OfflinePatrolPeriodRecord
+
+    engine = create_engine("sqlite://")
+    for model in (OfflinePatrolJobRecord, OfflinePatrolPeriodRecord):
+        model.__table__.create(engine)
+    now = datetime.now(timezone.utc)
+    with Session(engine) as db:
+        db.add(
+            OfflinePatrolJobRecord(
+                id="job",
+                idempotency_key="k",
+                name="test",
+                owner_id="owner",
+                status="completed",
+                purpose="offline_patrol",
+                job_type="single_patrol",
+            )
+        )
+        db.add(
+            OfflinePatrolPeriodRecord(
+                id="period",
+                job_id="job",
+                role="current",
+                label="current",
+                observed_at=now,
+                dataset_id="dataset",
+                patrol_run_id="selected-run",
+            )
+        )
+        db.commit()
+
+    @contextmanager
+    def session():
+        with Session(engine) as db:
+            yield db
+
+    monkeypatch.setattr(postgres, "get_db_session", session)
+    assert (
+        load_detail_source("job", owner_id="owner")["periods"][0]["patrol_run_id"] == "selected-run"
+    )
+    with pytest.raises(PermissionError):
+        load_detail_source("job", owner_id="other")
+    assert load_detail_source("job", owner_id="admin", is_admin=True)["periods"]
+    with pytest.raises(KeyError):
+        load_detail_source("missing", owner_id="owner")
+    with Session(engine) as db:
+        db.get(OfflinePatrolJobRecord, "job").status = "running"
+        db.commit()
+    with pytest.raises(ValueError, match="任务完成"):
+        load_detail_source("job", owner_id="owner")

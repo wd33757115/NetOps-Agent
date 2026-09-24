@@ -1,0 +1,13 @@
+Value Filldown METRIC (Temperature|Voltage|Transmit Power|Receive Power|Current)
+Value Required INTERFACE (\w+\d+/\S+)
+Value Filldown UNIT (Celsius|Volts|dBm|mA)
+Value VALUE ([-+]?\d+(?:\.\d+)?)
+Value HIGH_ALARM ([-+]?\d+(?:\.\d+)?)
+Value HIGH_WARNING ([-+]?\d+(?:\.\d+)?)
+Value LOW_WARNING ([-+]?\d+(?:\.\d+)?)
+Value LOW_ALARM ([-+]?\d+(?:\.\d+)?)
+
+Start
+  ^\s+${METRIC}\s+Threshold
+  ^Port\s+\(${UNIT}\)
+  ^${INTERFACE}\s+${VALUE}\s+[+\-]*\s*${HIGH_ALARM}\s+${HIGH_WARNING}\s+${LOW_WARNING}\s+${LOW_ALARM}\s*$$ -> Record

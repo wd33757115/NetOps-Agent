@@ -19,10 +19,6 @@ from typing import Any
 from .backend.parser.identity import DeviceIdentity, DeviceIdentityResolver
 from .backend.parser.runtime_bundle import ParserRuntimeBundle, ParserTemplateRef
 from .backend.parser.runtime_repository import ParserRuntimeRepository
-from .backend.rule_control.runtime_assets import (
-    RuntimeRuleAssetBundle,
-    RuntimeRuleAssetResolver,
-)
 
 CONTRACT_VERSION = 1
 
@@ -34,8 +30,6 @@ __all__ = [
     "ParserRuntimeBundle",
     "ParserTemplateRef",
     "ParserRuntimeRepository",
-    "RuntimeRuleAssetBundle",
-    "RuntimeRuleAssetResolver",
 ]
 
 

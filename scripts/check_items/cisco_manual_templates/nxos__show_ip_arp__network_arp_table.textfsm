@@ -1,0 +1,15 @@
+# Adapted from ntc-templates (Apache-2.0); see NOTICE.md.
+Value Required ip_address (\d+\.\d+\.\d+\.\d+)
+Value Required age (\S+)
+Value Required mac_address (\S+)
+Value interface (\S+)
+Value vrf (\S+)
+
+Start
+  ^Address\s+Age\s+MAC Address\s+Interface -> Start_record
+
+Start_record
+  ^${ip_address}\s+${age}\s+${mac_address}\s+${interface} -> Record
+  ^\s+$$
+  ^$$
+  ^.* -> Error "LINE NOT FOUND"

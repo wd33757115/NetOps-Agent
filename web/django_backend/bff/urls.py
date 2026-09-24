@@ -6,6 +6,7 @@ from django.urls import path
 from . import auth, user_admin
 from .views.desktop import desktop_layout
 from .views import app_platform
+from . import group_admin, principals
 from .views.app_proxy import proxy_app
 from .views.official_documents import proxy_documents
 from .views import (
@@ -31,6 +32,9 @@ urlpatterns = [
     path("platform/apps/", app_platform.apps),
     path("platform/apps/runtime/", app_platform.runtime_admission),
     path("platform/apps/admin/", app_platform.administration),
+    path("platform/principals/", principals.directory),
+    path("platform/groups/", group_admin.groups),
+    path("platform/groups/<int:group_id>/", group_admin.groups),
     path("platform/apps/admin/<slug:app_id>/", app_platform.administration),
     path("platform/apps/<slug:app_id>/authorize/", app_platform.authorize),
     path("platform/apps/<slug:app_id>/worker-authorize/", app_platform.worker_authorize),

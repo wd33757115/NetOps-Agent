@@ -1,0 +1,9 @@
+Value Required TIMER (.+?)
+Value STATE (Disabled|Enabled)
+Value VALUE_SECONDS (\d+)
+Value REMAINING_SECONDS (\d+)
+
+Start
+  ^${TIMER}\s+${STATE}\s+(?:${VALUE_SECONDS}|-)\s+(?:${REMAINING_SECONDS}|-)\s*$$ -> Record
+
+EOF

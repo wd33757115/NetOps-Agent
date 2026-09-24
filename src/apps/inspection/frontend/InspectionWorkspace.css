@@ -1,5 +1,30 @@
 .inspection-app { --inspection-ink: #253248; --inspection-muted: #5e6e83; --inspection-blue: #1667cb; height: 100dvh; overflow: auto; background: #edf1f6; color: var(--inspection-ink); font-size: 14px; }
 .inspection-app * { box-sizing: border-box; }
+.inspection-app [hidden] { display: none !important; }
+.inspection-page-host, .inspection-detail-page, .inspection-detail-content { min-width: 0; width: 100%; }
+.inspection-detail-heading { margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px solid #e1e7ef; }
+.inspection-detail-back.ant-btn { margin: -8px 0 22px -12px; color: #52627b; }
+.inspection-detail-title-row { display: flex; justify-content: space-between; align-items: start; gap: 24px; }
+.inspection-detail-title-row > div:first-child { min-width: 0; }
+.inspection-detail-heading h1 { margin: 10px 0 12px; font-size: clamp(22px, 1.65vw, 30px); line-height: 1.45; font-weight: 600; color: #253248; overflow-wrap: anywhere; outline: none; }
+.inspection-detail-subtitle { font-family: ui-monospace, Consolas, monospace; font-size: 12px; overflow-wrap: anywhere; }
+.inspection-detail-actions { flex-shrink: 0; padding-top: 24px; }
+.inspection-detail-content > .ant-tabs > .ant-tabs-nav { margin-bottom: 24px; }
+.inspection-detail-content .ant-tabs-content-holder, .inspection-detail-content .ant-tabs-tabpane, .inspection-detail-content .ant-space-item { min-width: 0; }
+.inspection-detail-content .ant-table-wrapper { width: 100%; }
+.inspection-detail-content .ant-table-thead > tr > th { background: #f5f7fb; color: #52627b; }
+.inspection-detail-content .patrol-task-context { padding: 0 0 12px; }
+.inspection-detail-content .ant-alert { border-radius: 8px; }
+.inspection-detail-content .ant-descriptions-item-content { overflow-wrap: anywhere; }
+@media (max-width: 1000px) {
+  .inspection-detail-title-row { flex-direction: column; gap: 8px; }
+  .inspection-detail-actions { padding-top: 0; }
+}
+@media (max-width: 760px) {
+  .inspection-detail-heading { margin-bottom: 16px; padding-bottom: 18px; }
+  .inspection-detail-back.ant-btn { margin-bottom: 12px; }
+  .inspection-detail-content .ant-descriptions-view { overflow-x: auto; }
+}
 .inspection-toolbar { min-height: 68px; display: flex; align-items: center; gap: 18px; margin: 0 32px; color: var(--inspection-muted); font-size: 13px; }
 .inspection-toolbar a { color: #52627b; text-decoration: none; }
 .inspection-toolbar a:hover { color: var(--inspection-blue); }

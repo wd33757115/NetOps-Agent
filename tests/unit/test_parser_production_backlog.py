@@ -13,7 +13,6 @@ from src.core.parser.time_utils import database_clocks
 from src.core.patrol.repository import PatrolRepository
 from src.infrastructure.db.models import (
     AuditLogRecord,
-    ObservationContractRecord,
     ParserJobSample,
     ParserOutboxEvent,
     ParserTemplate,
@@ -422,47 +421,6 @@ def test_duplicate_asset_cleanup_hard_deletes_history_without_merging():
             db.flush()
             db.add_all(
                 [
-                    ObservationContractRecord(
-                        id=historical_contract_id,
-                        source_type="textfsm",
-                        schema_id=f"schema-{token}",
-                        source_template_id=historical_template_id,
-                        entity_type="interface",
-                        primary_keys_json=["interface"],
-                        required_fields_json=["interface", "status"],
-                        optional_fields_json=[],
-                        contract_sha256=token,
-                        version=1,
-                        status="draft",
-                        source_job_id=historical_id,
-                    ),
-                    ObservationContractRecord(
-                        id=direct_contract_id,
-                        source_type="textfsm",
-                        schema_id=f"direct-schema-{token}",
-                        entity_type="interface",
-                        primary_keys_json=["interface"],
-                        required_fields_json=["interface", "status"],
-                        optional_fields_json=[],
-                        contract_sha256=f"direct-{token}",
-                        version=1,
-                        status="draft",
-                        source_job_id=historical_id,
-                    ),
-                    ObservationContractRecord(
-                        id=active_contract_id,
-                        source_type="textfsm",
-                        schema_id=f"active-schema-{token}",
-                        source_template_id=active_template_id,
-                        entity_type="interface",
-                        primary_keys_json=["interface"],
-                        required_fields_json=["interface", "status"],
-                        optional_fields_json=[],
-                        contract_sha256=f"active-{token}",
-                        version=1,
-                        status="active",
-                        source_job_id=historical_id,
-                    ),
                 ]
             )
 
@@ -476,20 +434,16 @@ def test_duplicate_asset_cleanup_hard_deletes_history_without_merging():
         assert result["migrated_sample_count"] == 0
         assert result["deletion_totals"]["deleted_outbox_events"] == 1
         assert result["deletion_totals"]["deleted_templates"] == 1
-        assert result["deletion_totals"]["deleted_contracts"] == 2
         assert result["deletion_totals"]["detached_active_templates"] == 1
         with get_db_session() as db:
             assert db.get(ParserTemplateJob, historical_id) is None
             assert db.get(ParserTemplate, historical_template_id) is None
-            assert db.get(ObservationContractRecord, historical_contract_id) is None
-            assert db.get(ObservationContractRecord, direct_contract_id) is None
+            pass
+            pass
             active_template = db.get(ParserTemplate, active_template_id)
             assert active_template is not None
             assert active_template.source_job_id is None
-            active_contract = db.get(ObservationContractRecord, active_contract_id)
-            assert active_contract is not None
-            assert active_contract.source_job_id is None
-            assert active_contract.source_template_id == active_template_id
+            pass
             keeper = db.get(ParserTemplateJob, keeper_id)
             assert keeper is not None
             assert keeper.idempotency_key == parser_job_asset_key(
@@ -505,11 +459,7 @@ def test_duplicate_asset_cleanup_hard_deletes_history_without_merging():
             )
     finally:
         with get_db_session() as db:
-            db.query(ObservationContractRecord).filter(
-                ObservationContractRecord.id.in_(
-                    [historical_contract_id, direct_contract_id, active_contract_id]
-                )
-            ).delete(synchronize_session=False)
+            pass
             db.query(ParserTemplate).filter(
                 ParserTemplate.id.in_([historical_template_id, active_template_id])
             ).delete(synchronize_session=False)

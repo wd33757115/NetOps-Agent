@@ -20,6 +20,9 @@ def workspace(monkeypatch):
     audits = []
 
     class Service:
+        def check_access(self, job_id, **kwargs):
+            self.get_job(job_id, **kwargs)
+
         def get_job(self, job_id, *, owner_id=None, is_admin=False, purpose=None):
             job = jobs[job_id]
             if purpose is not None and purpose != job["purpose"]:
@@ -60,7 +63,9 @@ def workspace(monkeypatch):
     monkeypatch.setattr(source_api, "RuleAssetCommandUnitService", unexpected_business_access)
     monkeypatch.setattr(patrol_offline_api, "PatrolCurrentAuthorityService", unexpected_business_access)
     from src.apps.rule_governance.backend.access import app_user
+    from src.apps.inspection.backend.access import app_user as inspection_user
     app.dependency_overrides[app_user] = user
+    app.dependency_overrides[inspection_user] = user
     app.dependency_overrides[get_current_user] = user
     app.dependency_overrides[require_netops_access] = user
     app.include_router(source_api.router, prefix="/actual/source")

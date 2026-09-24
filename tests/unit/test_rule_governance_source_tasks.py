@@ -62,6 +62,8 @@ def source(tmp_path, monkeypatch):
 
 def test_fixed_source_import_claims_once_and_imports_all_periods(source, monkeypatch):
     scope, authorize = source
+    prepared = Mock(return_value={"status": "completed", "sample_count": 4})
+    monkeypatch.setattr(source_tasks, "prepare_source_samples", prepared)
     imported = Mock(return_value={"success": True, "snapshot_count": 2})
     monkeypatch.setattr(offline_jobs.OfflinePatrolJobService, "import_period", imported)
     assert source_tasks.import_source.run("source", "execution")["success"]
@@ -71,6 +73,7 @@ def test_fixed_source_import_claims_once_and_imports_all_periods(source, monkeyp
     )
     assert source_tasks.import_source.run("source", "execution")["ignored"]
     assert imported.call_count == 2
+    prepared.assert_called_once_with("source", "execution")
     authorize.assert_called_with("owner")
     with scope() as db:
         job = db.get(OfflinePatrolJobRecord, "source")

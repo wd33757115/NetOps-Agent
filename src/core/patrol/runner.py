@@ -479,9 +479,8 @@ class DevicePatrolRunner:
         self._snapshot_persister = snapshot_persister
         self._runtime_bundle_factory = runtime_bundle_factory or _build_parser_runtime_bundle
         if runtime_manifest_factory is None:
-            from src.core.patrol.runtime_manifest import build_patrol_runtime_manifest
-
-            runtime_manifest_factory = build_patrol_runtime_manifest
+            def runtime_manifest_factory(_bundle):
+                raise ValueError("生产巡检必须使用检查项运行包；旧命令契约链已退役")
         self._runtime_manifest_factory = runtime_manifest_factory
 
     def run(self, request: DevicePatrolRunRequest) -> dict[str, Any]:

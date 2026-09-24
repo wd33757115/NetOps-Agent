@@ -46,15 +46,13 @@ export default function WorkbenchPage() {
       {available ? (
         <>
           <DesktopCanvas />
-          <div className="desktop-save-status" role="status">
-            {status === 'saved'
-              ? '布局已保存'
-              : status === 'saving'
+          {status !== 'saved' && <div className="desktop-save-status" role="status">
+            {status === 'saving'
                 ? '正在保存…'
                 : status === 'pending'
                   ? '等待同步…'
                   : '本地修改待同步'}
-          </div>
+          </div>}
         </>
       ) : status === 'loading' ? (
         <div className="grok-page-loading">

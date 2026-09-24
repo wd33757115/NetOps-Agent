@@ -35,7 +35,8 @@ import {
   ReloadOutlined,
 } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from 'react-query'
-import { useLocation } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
+import { transferHref } from '../../../services/rulePackages'
 import { useAuth } from '@netops/context/AuthContext'
 import {
   parserApi,
@@ -386,6 +387,7 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
   const canUseRules = Boolean(user?.app_ids?.includes('rule-governance'))
   const queryClient = useQueryClient()
   const [view, setView] = useState<CatalogView>('catalog')
+  const [exportSelection, setExportSelection] = useState<React.Key[]>([])
   const [catalogPage, setCatalogPage] = useState(1)
   const [catalogPageSize, setCatalogPageSize] = useState(20)
   const [catalogSearchDraft, setCatalogSearchDraft] = useState('')
@@ -465,7 +467,7 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
       search: changeSearch || undefined,
       status: changeStatus,
     }),
-    { keepPreviousData: true },
+    { keepPreviousData: true, enabled: view === 'changes' },
   )
   const canonicalObservationsQuery = useQuery(
     ['canonical-observation-catalog'],
@@ -611,7 +613,7 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
       ),
     {
       onSuccess: async () => {
-        message.success('命令适配器已删除，历史版本与审计记录已保留')
+        message.success('命令适配器已删除，关联运行包已停用')
         setDeletingImplementation(undefined)
         setDeleteReason('')
         await refreshAll()
@@ -1652,6 +1654,7 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
           </Typography.Text>
         </div>
         <Space>
+          <Link to={transferHref(exportSelection.map(id => `check_version:${id}`))}><Button>规则包{exportSelection.length ? `导出 (${exportSelection.length})` : '导入导出'}</Button></Link>
           <Button icon={<ReloadOutlined />} title="刷新" onClick={() => void refreshAll()} />
           <Button
             type="primary"
@@ -1941,14 +1944,6 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
                 <Space size={4}>
                   <Button
                     size="small"
-                    onClick={() => navigate(
-                      businessHref(`/skills/parser?workspace=production&subtab=asset-production-units&source_job_id=${encodeURIComponent(sourceJobScope)}&offline_job_id=${encodeURIComponent(sourceJobScope)}&action=parser`),
-                    )}
-                  >
-                    处理结构化命令
-                  </Button>
-                  <Button
-                    size="small"
                     onClick={() => navigate(businessHref('/skills/parser?workspace=production&subtab=catalog-management'))}
                   >
                     查看全部目录
@@ -1980,6 +1975,9 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
           )}
           <Table<CatalogDisplayRow>
             rowKey="check_item_version_id"
+            rowSelection={{ selectedRowKeys: exportSelection, preserveSelectedRowKeys: true, onChange: setExportSelection,
+              getCheckboxProps: row => ({ disabled: isPendingCheckItemRow(row), 'aria-label': `选择检查项 ${row.check_item_version_id}` }),
+              getTitleCheckboxProps: () => ({ 'aria-label': '全选当前页检查项' }) }}
             loading={catalogQuery.isLoading || catalogQuery.isFetching
               || unclassifiedCommandsQuery.isLoading || unclassifiedCommandsQuery.isFetching}
             dataSource={catalogRows}
@@ -2049,7 +2047,7 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
             />
           </div>
           {changesQuery.isError && (
-            <Alert type="error" showIcon message="变更记录加载失败" description={queryErrorLabel(changesQuery.error)} />
+            <Alert type="error" showIcon message="变更记录加载失败" description={queryErrorLabel(changesQuery.error)} action={<Button onClick={() => void changesQuery.refetch()}>重试</Button>} />
           )}
           <Table<CheckItemCatalogChange>
             rowKey="id"
@@ -2058,7 +2056,7 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
             columns={changeColumns}
             scroll={{ x: 820 }}
             pagination={false}
-            locale={{ emptyText: '尚无变更记录' }}
+            locale={{ emptyText: changesQuery.isError ? '变更记录暂不可用，请重试或检查候选资产完整性。' : '尚无变更记录' }}
           />
           <Pagination
             current={changePage}
@@ -2630,7 +2628,7 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
           type="warning"
           showIcon
           message={`将删除 ${deletingImplementation?.name || ''}`}
-          description="这是可追溯的逻辑删除：已发布版本会被停用并退出生产匹配，历史版本和审计记录仍会保留。仍被 Active RuntimeBundle 引用时，系统会阻止删除。"
+          description="删除后，该命令适配器及关联运行包将停止用于新巡检。检查项、TextFSM 模板和其他命令适配器不受影响，历史执行结果与审计记录保留。"
           style={{ marginBottom: 16 }}
         />
         <Input.TextArea

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import {
   Alert,
+  AutoComplete,
   Button,
   Collapse,
   Drawer,
@@ -22,6 +23,7 @@ import type {
   ParserCheckItem,
 } from '@netops/services/api'
 import { parserApi } from '@netops/services/api'
+import FieldSemanticEditor from './FieldSemanticEditor'
 
 interface CheckItemEditorDrawerProps {
   open: boolean
@@ -52,6 +54,9 @@ interface CheckItemFormValues {
     value_type: string
     unit?: string
     required: boolean
+    semantic_definition?: any
+    compare_mode?: string
+    threshold_fields?: Record<string, string>
   }>
   report_projection: string
   max_observation_age?: string
@@ -76,7 +81,7 @@ const jsonObject = (value: string | undefined, label: string): Record<string, un
   }
 }
 
-const initialValues = (checkItem?: ParserCheckItem): CheckItemFormValues => {
+const initialValues = (checkItem?: ParserCheckItem, catalog?: CanonicalObservationCatalog): CheckItemFormValues => {
   const contract = checkItem?.canonical_contract || {}
   const observations = Array.isArray(contract.observations)
     ? contract.observations as Array<Record<string, unknown>>
@@ -93,13 +98,25 @@ const initialValues = (checkItem?: ParserCheckItem): CheckItemFormValues => {
     identity_dimensions: Array.isArray(contract.identity_dimensions)
       ? contract.identity_dimensions.map(String)
       : ['device_id'],
-    canonical_fields: observations.map((item) => ({
-      name: String(item.canonical_field || item.observation_type || ''),
-      observation_type: String(item.observation_type || ''),
-      value_type: String(item.value_type || item.semantic_type || 'text'),
-      unit: String(item.unit || ''),
-      required: item.required !== false,
-    })),
+    canonical_fields: observations.map((item) => {
+      const snapshot = (contract.rule_semantics_snapshot as any)?.observations || []
+      const definition = item.semantic_definition || snapshot.find((row: any) => row.id === item.observation_type)
+        || catalog?.items.find((row) => row.id === item.observation_type)
+      const semantic = definition ? { ...definition as any,
+        assessment_roles: item.assessment_roles || (definition as any).assessment_roles } : undefined
+      return {
+        name: String(item.canonical_field || item.observation_type || ''),
+        observation_type: String(item.observation_type || ''),
+        value_type: String(item.value_type || semantic?.value_types?.[0] || 'text'),
+        unit: String(item.unit || semantic?.canonical_unit || ''),
+        required: item.required !== false,
+        semantic_definition: semantic,
+        compare_mode: (item.policy_constraints as any)?.allowed_compare_modes?.length === 1
+          ? (item.policy_constraints as any).allowed_compare_modes[0]
+          : (item.policy_constraints as any)?.allowed_compare_modes?.length ? '__existing__' : undefined,
+        threshold_fields: Object.fromEntries(Object.entries(item.threshold_references || {}).map(([role, ref]) => [role, (ref as any).field_name])),
+      }
+    }),
     report_projection: checkItem?.report_projection || 'auto',
     max_observation_age: String(checkItem?.freshness_policy?.max_observation_age || '24h'),
     max_collection_span: String(checkItem?.freshness_policy?.max_collection_span || '8h'),
@@ -142,10 +159,20 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
 
   useEffect(() => {
     if (open) {
-      form.setFieldsValue(initialValues(checkItem))
+      form.setFieldsValue(initialValues(checkItem, canonicalCatalog))
       setRuleCandidates(null)
     }
   }, [checkItem, form, open])
+
+  useEffect(() => {
+    if (!open || !canonicalCatalog) return
+    const fields = form.getFieldValue('canonical_fields') || []
+    fields.forEach((field: any, index: number) => {
+      if (field.semantic_definition) return
+      const definition = canonicalCatalog.items.find((item) => item.id === field.observation_type)
+      if (definition) form.setFieldValue(['canonical_fields', index, 'semantic_definition'], definition)
+    })
+  }, [canonicalCatalog, form, open])
 
   const buildCanonicalContract = (values: CheckItemFormValues) => {
     const contract = jsonObject(values.canonical_contract_json, '标准输出契约')
@@ -165,19 +192,41 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
     const observations = (values.canonical_fields || []).map((field) => {
       const observationType = field.observation_type
       const existing = existingRows.get(observationType)
-      const definition = definitions.get(observationType)
+      const definition = field.semantic_definition || definitions.get(observationType)
+      if (!definition?.description?.trim()) throw new Error(`${field.name}: 请展开“编辑语义与规则用途”填写语义说明`)
+      const semantic = { ...definition, id: observationType,
+        canonical_unit: field.unit?.trim() || null, value_types: [field.value_type] }
+      const numeric = ['gauge', 'counter', 'threshold'].includes(semantic.semantic_type)
+      const state = ['state', 'enum', 'boolean'].includes(semantic.semantic_type)
+      if (!state) { semantic.state_groups = {}; semantic.allowed_values = [] }
+      if (semantic.value_types[0] === 'boolean') {
+        const booleanValue = (value: unknown) => value === 'true' ? true : value === 'false' ? false : value
+        semantic.allowed_values = (semantic.allowed_values || []).map(booleanValue)
+        semantic.state_groups = Object.fromEntries(Object.entries(semantic.state_groups || {}).map(([key, values]) => [key, (values as unknown[]).map(booleanValue)]))
+      }
+      const constraints = { ...(existing?.policy_constraints as any || {}) }
+      if (field.compare_mode === '__existing__') { /* Preserve advanced multi-mode constraints. */ }
+      else if (field.compare_mode) constraints.allowed_compare_modes = [field.compare_mode]
+      else delete constraints.allowed_compare_modes
+      const references = numeric ? Object.fromEntries(Object.entries(field.threshold_fields || {}).filter(([, value]) => value).map(([role, value]) => [role, (existing?.threshold_references as any)?.[role]?.field_name === value ? (existing?.threshold_references as any)[role] : {
+        ...((existing?.threshold_references as any)?.[role] || {}), field_name: value,
+        context_key: `threshold.${role}`, source: 'structured_reference',
+        level: role.startsWith('critical') ? 'alarm' : 'warning',
+      }])) : {}
       return {
         ...(existing || {}),
         observation_type: observationType,
         canonical_field: field.name.trim(),
-        semantic_type: definition?.semantic_type || existing?.semantic_type || field.value_type,
+        semantic_definition: semantic,
+        description: semantic.description,
+        semantic_type: semantic.semantic_type,
+        assessment_roles: semantic.assessment_roles,
+        policy_constraints: constraints,
+        threshold_references: references,
+        context_fields: [...new Set([...(existing?.context_fields as string[] || []).filter((value) => !Object.values((existing?.threshold_references as any) || {}).some((ref: any) => ref.field_name === value)), ...Object.values(references).map((ref: any) => ref.field_name)])],
         value_type: field.value_type,
-        ...(field.unit?.trim()
-          ? { unit: field.unit.trim() }
-          : definition?.canonical_unit
-            ? { unit: definition.canonical_unit }
-            : {}),
-        ...(definition?.dimensions?.length ? { dimensions: definition.dimensions } : {}),
+        unit: field.unit?.trim() || null,
+        dimensions: existing?.dimensions || definition?.dimensions || [],
         required: field.required,
       }
     })
@@ -276,10 +325,6 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
         }])
         return
       }
-      if (values.result_mode === 'structured' && canonicalError) {
-        message.error('标准观测目录加载失败，暂时不能创建结构化检查项')
-        return
-      }
       const canonicalContract = buildCanonicalContract(values)
       const applicability = jsonObject(values.applicability_json, '适用条件')
       const coveragePolicy: Record<string, unknown> = {
@@ -335,7 +380,6 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
           type="primary"
           className="rule-asset-import-button"
           loading={loading}
-          disabled={resultMode === 'structured' && Boolean(canonicalError)}
           onClick={() => void save()}
         >
           保存草稿并预览影响
@@ -413,7 +457,7 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
           <Alert
             type="error"
             showIcon
-            message="标准观测目录加载失败"
+              message="预填语义目录加载失败；仍可编辑当前语义或创建新语义"
             description={canonicalError}
             style={{ marginBottom: 16 }}
           />
@@ -436,7 +480,7 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
                           {...restField}
                           label="标准列名"
                           name={[name, 'name']}
-                          rules={[{ required: true }, { pattern: /^[a-z][a-z0-9_]*$/, message: '使用稳定的小写 snake_case 名称' }]}
+                          rules={[{ required: true }, { pattern: /^[A-Za-z][A-Za-z0-9_]*$/, message: '使用字母开头的字母、数字或下划线；名称区分大小写' }]}
                         >
                           <Input placeholder="例如 cpu_usage_percent" />
                         </Form.Item>
@@ -446,18 +490,17 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
                           name={[name, 'observation_type']}
                           rules={[{ required: true }]}
                         >
-                          <Select
-                            showSearch
-                            optionFilterProp="label"
-                            loading={canonicalLoading}
-                            onChange={(id) => {
+                          <AutoComplete
+                            placeholder="输入新语义标识，或搜索已有模板"
+                            filterOption={(input, option) => String(option?.label || '').toLowerCase().includes(input.toLowerCase())}
+                            onSelect={(id) => {
                               const definition = canonicalCatalog?.items.find((item) => item.id === id)
                               if (!definition) return
+                              form.setFieldValue(['canonical_fields', name, 'semantic_definition'], { ...definition, state_groups: { ...definition.state_groups } })
                               form.setFieldValue(['canonical_fields', name, 'value_type'], definition.value_types[0] || 'text')
                               form.setFieldValue(['canonical_fields', name, 'unit'], definition.canonical_unit || '')
-                              if (!form.getFieldValue(['canonical_fields', name, 'name'])) {
-                                form.setFieldValue(['canonical_fields', name, 'name'], id.replaceAll('.', '_'))
-                              }
+                              form.setFieldValue(['canonical_fields', name, 'compare_mode'], undefined)
+                              form.setFieldValue(['canonical_fields', name, 'threshold_fields'], {})
                             }}
                             options={(canonicalCatalog?.items || []).map((item) => ({
                               value: item.id,
@@ -472,7 +515,7 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
                           rules={[{ required: true }]}
                         >
                           <Select options={[
-                            'text', 'number', 'percent', 'enum', 'boolean',
+                            'text', 'number', 'integer', 'float', 'percent', 'enum', 'boolean',
                             'interface_name', 'ip_or_unassigned',
                           ].map((value) => ({ value, label: value }))} />
                         </Form.Item>
@@ -488,6 +531,7 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
                           <Switch />
                         </Form.Item>
                       </div>
+                      <FieldSemanticEditor name={name} field={canonicalFields[name]} fields={canonicalFields} />
                       <Button
                         type="text"
                         danger
@@ -501,7 +545,7 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
                   <Button
                     type="dashed"
                     icon={<PlusOutlined />}
-                    onClick={() => add({ value_type: 'text', required: true })}
+                    onClick={() => add({ value_type: 'text', required: true, semantic_definition: { description: '', semantic_type: 'text', assessment_roles: ['evidence'], dimensions: [], allowed_values: [], state_groups: {}, allowed_dimension_values: {} } })}
                   >
                     添加标准字段
                   </Button>
@@ -509,7 +553,7 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
               )}
             </Form.List>
           </div>
-          <Typography.Text type="secondary">选择标准语义后自动填入类型与单位；保存时统一生成并校验数据契约。</Typography.Text>
+          <Typography.Text type="secondary">已有语义用于预填，也可输入新标识并编辑含义。修改仅保存到当前检查项。</Typography.Text>
         </div>
 
         {resultMode === 'structured' && (
@@ -524,7 +568,7 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
             />
             <Space direction="vertical" size={8} style={{ width: '100%' }}>
               {canonicalFields.map((field) => {
-                const definition = canonicalCatalog?.items.find(
+                const definition = field.semantic_definition || canonicalCatalog?.items.find(
                   (item) => item.id === field.observation_type,
                 )
                 if (!definition) return null
@@ -561,7 +605,7 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
                     {Object.keys(definition.state_groups || {}).length > 0 && (
                       <Typography.Paragraph type="secondary" style={{ margin: '8px 0 0' }}>
                         状态分组：{Object.entries(definition.state_groups).map(([group, values]) => (
-                          `${group}=${values.map(String).join('/')}`
+                          `${group}=${(values as unknown[]).map(String).join('/')}`
                         )).join('；')}
                       </Typography.Paragraph>
                     )}

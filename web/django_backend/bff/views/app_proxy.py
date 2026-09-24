@@ -6,6 +6,7 @@ import httpx
 from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.http import HttpResponse, StreamingHttpResponse
+from src.platform.http_tls import client_tls_context
 
 from ..app_access import decision
 from ..decorators import _authenticate_request
@@ -43,7 +44,10 @@ async def forward(request, app_id, path):
     )
     if len(request.body) > 20 * 1024 * 1024:
         return bff_error("上传内容过大", 413)
-    client = httpx.AsyncClient(timeout=httpx.Timeout(320, connect=5), follow_redirects=False)
+    client = httpx.AsyncClient(
+        timeout=httpx.Timeout(320, connect=5), follow_redirects=False,
+        verify=client_tls_context(),
+    )
     try:
         response = await client.send(
             client.build_request(

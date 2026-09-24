@@ -1479,6 +1479,7 @@ def test_manual_parser_candidate_submission_uses_authenticated_engineer(monkeypa
             "job_id": "parser-job-1",
             "template_text": "Value interface (\\S+)\n\nStart\n  ^${interface}$$ -> Record\n",
             "actor": "network-engineer",
+            "actor_user_id": "user:network-engineer",
             "reason": None,
             "based_on_template_id": "template-model-1",
         }
@@ -2325,121 +2326,16 @@ def test_rule_generation_job_approve_rejects_non_pending(monkeypatch):
         raise AssertionError("approve should reject non pending_approval jobs")
 
 
-def test_rule_generation_job_revise_endpoint(monkeypatch):
-    class FakeRevisionService:
-        def create_revision_job(self, job_id, *, actor):
-            assert job_id == "job-1"
-            assert actor == "operator"
-            return {
-                "success": True,
-                "created": True,
-                "parent_job_id": job_id,
-                "job": {"id": "job-2", "status": "draft"},
-            }
-
-    monkeypatch.setattr(parser_api, "AgentLoopRevisionService", FakeRevisionService)
-
-    result = parser_api.revise_rule_generation_job(
-        "job-1",
-        _admin_request(),
-        parser_api.RuleGenerationJobApprovalRequest(actor="operator"),
-    )
-
-    assert result["created"] is True
-    assert result["job"]["id"] == "job-2"
 
 
-def test_rule_generation_job_revise_requires_revision_request(monkeypatch):
-    class FakeRevisionService:
-        def create_revision_job(self, job_id, *, actor):
-            raise ValueError("agent loop revision_request is required")
-
-    monkeypatch.setattr(parser_api, "AgentLoopRevisionService", FakeRevisionService)
-
-    try:
-        parser_api.revise_rule_generation_job("job-1", _admin_request(), None)
-    except parser_api.HTTPException as exc:
-        assert exc.status_code == 409
-    else:
-        raise AssertionError("revise should require revision_request")
 
 
-def test_rule_generation_job_execute_revision_endpoint(monkeypatch):
-    class FakeRevisionExecutor:
-        def execute(self, job_id, *, actor):
-            assert job_id == "job-2"
-            assert actor == "operator"
-            return {
-                "success": True,
-                "job": {"id": job_id, "status": "validating"},
-                "skill_name": "event-rule-validator",
-            }
-
-    monkeypatch.setattr(parser_api, "AgentLoopRevisionExecutor", FakeRevisionExecutor)
-
-    result = parser_api.execute_rule_generation_revision_job(
-        "job-2",
-        _admin_request(),
-        parser_api.RuleGenerationJobApprovalRequest(actor="operator"),
-    )
-
-    assert result["success"] is True
-    assert result["skill_name"] == "event-rule-validator"
 
 
-def test_rule_generation_job_execute_revision_rejects_non_revision(monkeypatch):
-    class FakeRevisionExecutor:
-        def execute(self, job_id, *, actor):
-            raise parser_api.RuleGenerationJobStateError(
-                "only agent loop revision jobs can be executed"
-            )
-
-    monkeypatch.setattr(parser_api, "AgentLoopRevisionExecutor", FakeRevisionExecutor)
-
-    try:
-        parser_api.execute_rule_generation_revision_job("job-1", _admin_request(), None)
-    except parser_api.HTTPException as exc:
-        assert exc.status_code == 409
-    else:
-        raise AssertionError("execute_revision should reject non revision jobs")
 
 
-def test_rule_generation_job_submit_candidate_endpoint(monkeypatch):
-    class FakeSubmissionService:
-        def submit_candidate(self, job_id, *, actor):
-            assert job_id == "job-1"
-            assert actor == "operator"
-            return {
-                "success": True,
-                "submitted_job": {"id": job_id},
-                "persister_result": {"asset_count": 1},
-            }
-
-    monkeypatch.setattr(parser_api, "RuleAssetSubmissionService", FakeSubmissionService)
-
-    result = parser_api.submit_rule_generation_job_candidate(
-        "job-1",
-        _admin_request(),
-        parser_api.RuleGenerationJobApprovalRequest(actor="operator"),
-    )
-
-    assert result["success"] is True
-    assert result["persister_result"]["asset_count"] == 1
 
 
-def test_rule_generation_job_submit_candidate_rejects_invalid_state(monkeypatch):
-    class FakeSubmissionService:
-        def submit_candidate(self, job_id, *, actor):
-            raise parser_api.RuleGenerationJobStateError("validation required")
-
-    monkeypatch.setattr(parser_api, "RuleAssetSubmissionService", FakeSubmissionService)
-
-    try:
-        parser_api.submit_rule_generation_job_candidate("job-1", _admin_request(), None)
-    except parser_api.HTTPException as exc:
-        assert exc.status_code == 409
-    else:
-        raise AssertionError("submit should reject invalid jobs")
 
 
 def test_rule_generation_job_generation_context_endpoint(monkeypatch):

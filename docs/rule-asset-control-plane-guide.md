@@ -1,56 +1,42 @@
-# 规则资产治理与兼容流程
+# 规则资产治理
 
-核对日期：2026-09-06。默认使用检查项驱动的[规则自动制作](patrol-rule-autopilot-guide-2026-09-05.md)。本指南解释资产治理，以及仍为历史任务和人工干预保留的入口。
+当前入口是规则治理 App。样本导入、本地分割脱敏、待归类、确认检查项关联之后，才进入 TextFSM / V2 命令适配器制作。检查项拥有 Value、单位、必填约束和判断语义；变化、状态和事件规则由检查项语义生成。
 
-## 三条路径的边界
+## 当前执行路径
 
-| 路径 | 输入与用途 | 发布方式 |
-| --- | --- | --- |
-| 命令自动制作 | 人工检查项、人工命令关联及脱敏样本 | 管理员启动或授权，完整验证后自动发布 |
-| 候选协调器 `automation.py` | 受治理的来源和资产需求，准备待审候选 | 只支持 `disabled` / `generate_only`，不获得自动发布权限 |
-| 手工资产 Workflow / 审批接口 | 检查和修订已有候选、兼容历史任务 | 按对应工程复核与审批门禁执行 |
+- TextFSM 提取设备输出；检查项版本约束字段与业务语义。
+- CommandAdapter V2 将解析记录转换为标准数据，验证来源字段、实体身份和覆盖范围。
+- 固定自动制作服务保存进度、执行验证并按已有授权发布；不依赖 Workflow。
+- 运行包装配仅接受 V2 结构化适配器。文本检查项继续采用显式比较 Profile。
+- 已发布目录提供 Parser、变化策略和事件规则的单项、批量停用与删除。操作同步停用依赖的活动运行包，历史执行事实保留。
 
-候选协调器读取历史 `auto_publish` 设置时规整为 `generate_only`；它返回的 `publish_authority=human_only` 仅描述这条旧协调路径。不能将这个限制套用到已授权的新命令自动制作，也不能通过修改旧模式绕过新流程的授权。
+## 已删除的旧机制
 
-## 资产与依赖
+规则治理 1.4.0 删除独立 `netops_observation_contracts` 表及 ORM、Repository、生成器和前端页签；删除 Parser 发布后自动生成契约的种子链、旧样本规则生成入口、旧候选自动协调器和契约编辑修订链。Agent 工具使用相同的检查项规则服务。
 
-当前新检查项通过 CommandAdapter v2 直接投影到标准记录，变化与事件规则使用检查项标准语义。旧 ObservationContract 仍解释已有厂商字段映射；它不是每个新检查项必须手工创建的前置对象。
+旧 `/parser/observation-contracts`、`/parser/runtime-assets/resolve`、`/parser/runtime-assets/health`、`/generation-runs`、种子 `/start-generation`、`/generation-context` 和旧工程修订任务接口不再提供。请使用检查项 `/rule-context`、规则草稿及运行包装配接口。
 
-资产需求画像决定是否需要 CurrentStateRule、ChangePolicy、EventRule、历史回放，以及对应 observation type 和事件类型。不要按“有几个资产”判断完整度：必需资产缺失、额外语义、来源或摘要变化都应阻止发布。
+旧候选的 `/rule-generation-jobs/{id}/revise`、`/execute-revision`、`/submit` 及其修订执行器、提交服务、提交 Skill 和 Workflow 也已删除；检查项规则草稿仍由当前业务服务创建、验证与审批。
 
-规则子资产进入 active 不等于设备已经可巡检。RuntimeBundle 还必须校验设备范围、实现、Parser、Adapter 和规则版本。实际运行消费已验证的运行包，不在巡检过程中临时调用模型生成缺失规则。
+迁移 `0103_retire_data_contracts` 拒绝删除仍被活动运行包引用的契约表，不使用 CASCADE。旧契约候选退出任务队列；历史报告、执行事实、审计和冻结资产摘要保留，不能重新通过旧契约运行。回退需恢复升级前备份和相应代码。
 
-## 人工治理
+检查项的 `canonical_contract`、Parser 字段格式校验、API 输入输出结构不属于独立数据契约资产，继续使用。
 
-生成任务、候选资产与运行包各有状态，不把它们压成一个通用进度。界面可查看候选、验证、样本和历史回放，提交工程复核、要求修订、拒绝或审批激活。
+## 代码与验证
 
-手工规则包审批检查：
+- [规则上下文](../src/apps/rule_governance/backend/check_items/canonical_rule_context.py)
+- [自动制作](../src/apps/rule_governance/backend/rule_control/command_autopilot.py)
+- [运行包装配](../src/apps/rule_governance/backend/check_items/runtime_bundle.py)
+- [退役回归](../tests/unit/test_retire_observation_contracts.py)
 
-1. 候选处于待审批状态，验证及所需回放通过。
-2. 来源、上下文、资产需求和候选摘要一致，子任务归属及版本完整。
-3. 工程复核通过，审批人满足对应职责分离约束。
-4. 资产切换对已有依赖的影响符合门禁。
+制作未完成时，先查看检查项关联、输入是否过期、Parser 验证和适配器覆盖缺口；不要重复创建任务。正式 API 以当前 OpenAPI 为准。
 
-新自动发布通过 `autopilot_authorization.py` 校验限定授权，记录 `administrator_delegated_automation`；它不伪造工程师签名。该分支要求人工所有的 CheckItem 语义及完整机器证据。
+升级时先排空相关应用并备份数据库，再执行 `venv/Scripts/python.exe -m alembic upgrade head`，之后升级应用包、构建前端并通过部署校验启用。应用声明最低迁移版本 0103，防止遗漏删表迁移。
 
-## 仍保留的 Workflow
+## 2026-09-23 本地执行记录
 
-- [rule-asset-generation](../src/workflows/network/rule-asset-generation/WORKFLOW.yaml)：按声明的需求准备候选和验证结果。
-- [rule-asset-submit](../src/workflows/network/rule-asset-submit/WORKFLOW.yaml)：通过提交 Skill 处理候选，不等同于生产激活。
-- [rule-asset-approve](../src/workflows/network/rule-asset-approve/WORKFLOW.yaml)：调用审批 Skill；不能只靠输入中的 actor 文本替代服务端权限与审批门禁。
-
-这些 Workflow 仍有注册和调用入口，不能按“旧方案代码”直接删除。新业务不要绕过工作台权限直接拼接 FastAPI 路由；浏览器经 BFF，具体 API 契约以当前 OpenAPI 和 `parser_api.py` 为准。
-
-## 排查顺序
-
-任务停住时先检查来源用途、检查项版本、需求画像与资产缺口，再看样本验证、回放及审批原因。模型生成成功只证明有候选，不能证明运行包可用。
-
-协调任务依赖 Worker、Beat、任务认领与租约；命令自动制作有自己的持久检查点及恢复机制。不要因前端无进度重新创建重复发布任务。
-
-## 代码与验证入口
-
-- [候选协调器](../src/core/rule_control/automation.py)、[审批服务](../src/core/rule_control/approval.py)
-- [规则标准上下文](../src/core/check_items/canonical_rule_context.py)、[发布授权](../src/core/rule_control/autopilot_authorization.py)
-- [API 实现](../src/gateway/parser_api.py)、[兼容退出登记](implementation/deprecations.yaml)
-
-自动发布回归见[自动制作指南](patrol-rule-autopilot-guide-2026-09-05.md)，通用检查见[维护与验证](maintenance.md)。旧环境的资产数量或审批快照不作为当前可用性证明。
+- 已执行 `0103_retire_data_contracts`，独立契约表已物理删除。27 条旧契约及 43 条相关生成任务状态已备份至 `.runtime/retire-observation-contracts/`；历史事实、报告与审计未删除。
+- 回归：129 项后端、18 项前端通过；补充旧提交入口删除后的 28 项回归通过。两项命令资产测试在修改前即失败（目录样例缺失、未关联检查项时未创建 Parser 任务），本次未将其记为通过。2144 项单元测试可正常收集；前端生产构建与差异空白检查通过。
+- 19 个活动运行包的只读装配结果与升级前完全一致：14 个就绪，5 个已有阻塞。第一轮在线检查中现行目录/制作/检查项语义接口正常，旧契约接口返回 404。
+- 规则治理 1.4.0 已完成最终启用，当前状态 `enabled`。此前失效 PID 11352 导致 Beat 无法启动；在用户再次授权处理后，确认无存活进程并归档旧文件，恢复 Worker、Beat 并通过部署检查。现行目录/制作/检查项语义接口再次验证返回 200，旧契约接口返回 404。Windows 启停脚本已统一增加 PID 状态检查，完整启动和单服务启动都能安全清理失效文件，见[维护与验证](maintenance.md)。
+- 采集中 Parser 草稿已恢复到原状态，样本数量未变，也未触发新的生成任务。

@@ -1,0 +1,25 @@
+Value Required LOCAL_NUMBER (\d+)
+Value PEER_NUMBER (\S+)
+Value LOCAL_MAC (\S+)
+Value PEER_MAC (\S+)
+Value LOCAL_PRIORITY (\S+)
+Value PEER_PRIORITY (\S+)
+Value LOCAL_BRIDGE_MAC (\S+)
+Value PEER_BRIDGE_MAC (\S+)
+Value LOCAL_ROLE (\S+)
+Value PEER_ROLE (\S+)
+Value HEALTH_LEVEL (\S+)
+Value SPLIT_MODE (\S+)
+Value STANDALONE (\S+)
+
+Start
+  ^Local system number:\s*${LOCAL_NUMBER}\s+Peer system number:\s*${PEER_NUMBER}
+  ^Local system MAC:\s*${LOCAL_MAC}\s+Peer system MAC:\s*${PEER_MAC}
+  ^Local system priority:\s*${LOCAL_PRIORITY}\s+Peer system priority:\s*${PEER_PRIORITY}
+  ^Local bridge MAC:\s*${LOCAL_BRIDGE_MAC}\s+Peer bridge MAC:\s*${PEER_BRIDGE_MAC}
+  ^Local effective role:\s*${LOCAL_ROLE}\s+Peer effective role:\s*${PEER_ROLE}
+  ^Health level:\s*${HEALTH_LEVEL}
+  ^Standalone mode on split:\s*${SPLIT_MODE}
+  ^In standalone mode:\s*${STANDALONE} -> Record
+
+EOF

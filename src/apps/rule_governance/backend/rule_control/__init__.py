@@ -11,14 +11,8 @@ __all__ = [
     "RuleGenerationJob",
     "RuleGenerationJobStateError",
     "RuleAssetApprovalService",
-    "AgentLoopRevisionService",
-    "AgentLoopRevisionExecutor",
-    "RuleAssetSubmissionService",
     "RuleGenerationJobRepository",
-    "RuntimeRuleAssetBundle",
-    "RuntimeRuleAssetResolver",
     "RuntimeRuleAssetSeedService",
-    "RuleAssetTemplateActivationService",
     "transition_job",
 ]
 
@@ -36,37 +30,13 @@ _EXPORTS = {
         "src.apps.rule_governance.backend.rule_control.approval",
         "RuleAssetApprovalService",
     ),
-    "AgentLoopRevisionService": (
-        "src.apps.rule_governance.backend.rule_control.revision",
-        "AgentLoopRevisionService",
-    ),
-    "AgentLoopRevisionExecutor": (
-        "src.apps.rule_governance.backend.rule_control.executor",
-        "AgentLoopRevisionExecutor",
-    ),
-    "RuleAssetSubmissionService": (
-        "src.apps.rule_governance.backend.rule_control.submission",
-        "RuleAssetSubmissionService",
-    ),
-    "RuleGenerationJobRepository": (
-        "src.apps.rule_governance.backend.rule_control.repository",
-        "RuleGenerationJobRepository",
-    ),
-    "RuntimeRuleAssetBundle": (
-        "src.apps.rule_governance.backend.rule_control.runtime_assets",
-        "RuntimeRuleAssetBundle",
-    ),
-    "RuntimeRuleAssetResolver": (
-        "src.apps.rule_governance.backend.rule_control.runtime_assets",
-        "RuntimeRuleAssetResolver",
-    ),
     "RuntimeRuleAssetSeedService": (
         "src.apps.rule_governance.backend.rule_control.runtime_seed",
         "RuntimeRuleAssetSeedService",
     ),
-    "RuleAssetTemplateActivationService": (
-        "src.apps.rule_governance.backend.rule_control.template_activation",
-        "RuleAssetTemplateActivationService",
+    "RuleGenerationJobRepository": (
+        "src.apps.rule_governance.backend.rule_control.repository",
+        "RuleGenerationJobRepository",
     ),
 }
 

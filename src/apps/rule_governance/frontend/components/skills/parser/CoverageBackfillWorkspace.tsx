@@ -42,7 +42,6 @@ const backfillStatusMeta: Record<string, { label: string; className: string }> =
 
 const assetTypeLabels: Record<string, string> = {
   parser_template: 'Parser',
-  observation_contract: 'ObservationContract',
   current_state_rule: 'CurrentStateRule',
   change_policy: 'ChangePolicy',
   event_rule: 'EventRule',
@@ -436,7 +435,6 @@ const CoverageBackfillWorkspace: React.FC = () => {
   const assetRequirementProfile = assembly?.asset_requirement_profile
   const assetRequirements = assetRequirementProfile?.requirements || {}
   const parserRequired = Boolean(assetRequirements.parser_template?.required)
-  const contractRequired = Boolean(assetRequirements.observation_contract?.required)
   const policyRelevant = Boolean(
     assetRequirements.change_policy?.required
     || assetRequirements.change_policy?.conditional_observation_types?.length,
@@ -452,7 +450,6 @@ const CoverageBackfillWorkspace: React.FC = () => {
   const comparisonRequired = Boolean(assetRequirements.comparison_profile?.required)
   const hasSelectableAssets = (
     parserRequired
-    || contractRequired
     || policyRelevant
     || eventRuleRelevant
     || comparisonRequired
@@ -1066,7 +1063,7 @@ const CoverageBackfillWorkspace: React.FC = () => {
                                Parser {row.selected_parser_template_id || '-'}
                              </Typography.Text>
                              <Typography.Text type="secondary">
-                               Contract {row.selected_contract_ids?.length || 0} 个
+                               V2 语义投影
                              </Typography.Text>
                            </>
                          ) : comparisonRequired ? (
@@ -1084,7 +1081,7 @@ const CoverageBackfillWorkspace: React.FC = () => {
                 ]}
               />
 
-              {contractRequired && (
+              {Boolean(assetRequirements.command_adapter_projection?.required) && (
                 <div>
                   <Typography.Title level={5}>标准语义覆盖</Typography.Title>
                   <Descriptions bordered size="small" column={1}>
@@ -1093,7 +1090,7 @@ const CoverageBackfillWorkspace: React.FC = () => {
                         {(assembly.compatibility.expected_observation_types || []).map((item) => <Tag key={item}>{item}</Tag>)}
                       </Space>
                     </Descriptions.Item>
-                    <Descriptions.Item label="Contract 产生">
+                    <Descriptions.Item label="适配器产生">
                       <Space wrap>
                         {(assembly.compatibility.produced_observation_types || []).map((item) => <Tag key={item}>{item}</Tag>)}
                       </Space>
@@ -1135,25 +1132,6 @@ const CoverageBackfillWorkspace: React.FC = () => {
                       options={assembly.candidates.parsers.map((item: any) => ({
                         value: item.parser_template_id,
                         label: `${item.vendor} ${item.profile} / ${item.canonical_command}${item.ready ? '' : '（不可用）'}`,
-                      }))}
-                    />
-                  </Descriptions.Item>
-                  )}
-                  {contractRequired && (
-                    <Descriptions.Item label="ObservationContract">
-                    <Select
-                      allowClear
-                      mode="multiple"
-                      placeholder="留空选择覆盖本检查项语义的 Contract"
-                      value={assemblySelection.observation_contract_ids}
-                      style={{ width: '100%' }}
-                      onChange={(value) => setAssemblySelection((current) => ({
-                        ...current,
-                        observation_contract_ids: value,
-                      }))}
-                      options={assembly.candidates.observation_contracts.map((item: any) => ({
-                        value: item.contract_id,
-                        label: `${item.schema_id} / ${(item.observation_types || []).join(', ') || '未声明语义'}`,
                       }))}
                     />
                   </Descriptions.Item>

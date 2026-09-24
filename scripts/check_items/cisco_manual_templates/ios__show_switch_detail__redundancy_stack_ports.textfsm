@@ -1,0 +1,11 @@
+Value SWITCH (\d+)
+Value PORT1_STATUS (\S+)
+Value PORT2_STATUS (\S+)
+Value PORT1_NEIGHBOR (\S+)
+Value PORT2_NEIGHBOR (\S+)
+
+Start
+  ^\s*Stack Port Status -> Ports
+
+Ports
+  ^\s*${SWITCH}\s+${PORT1_STATUS}\s+${PORT2_STATUS}\s+${PORT1_NEIGHBOR}\s+${PORT2_NEIGHBOR}\s*$$ -> Record

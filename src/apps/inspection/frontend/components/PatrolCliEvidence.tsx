@@ -27,8 +27,9 @@ export function PatrolCliComparison({ entry, jobId, digest }: {
   entry: ReportEvidence; jobId: string; digest: string
 }) {
   const [showFull, setShowFull] = React.useState(false)
-  const full = useQuery(['patrol-cli-full', jobId, digest, entry.id],
-    () => patrolReports.fullEvidence(jobId, entry.id, digest), { enabled: showFull, retry: false })
+  const full = useQuery(['patrol-cli-full', jobId, digest, entry.lookup_reference, entry.id],
+    ({ signal }) => patrolReports.fullEvidence(jobId, entry.id, digest, entry.lookup_reference, signal),
+    { enabled: showFull, retry: false, staleTime: 60_000, refetchOnWindowFocus: false })
   const previous = { baseline: 0, current: 0 }
   return <Space direction="vertical" size={10} style={{ width: '100%' }}>
     <Typography.Text strong>{entry.command}</Typography.Text>
@@ -72,7 +73,8 @@ export default function PatrolCliEvidence({ jobId, reference, revision }: {
 }) {
   const [page, setPage] = React.useState(1)
   const query = useQuery(['patrol-cli-excerpts', jobId, reference, revision, page],
-    () => patrolReports.evidence(jobId, (page - 1) * 10, reference), { retry: false, staleTime: 60_000 })
+    ({ signal }) => patrolReports.evidence(jobId, (page - 1) * 10, reference, signal),
+    { retry: false, staleTime: 60_000, refetchOnWindowFocus: false })
   return <Space direction="vertical" size={12} style={{ width: '100%' }}>
     <Space wrap><Typography.Text strong>基线与当前 CLI 原文对比</Typography.Text>
       <Button size="small" loading={query.isFetching} onClick={() => query.refetch()}>重新加载对比</Button></Space>

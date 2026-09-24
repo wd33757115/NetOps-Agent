@@ -37,9 +37,6 @@ from src.apps.rule_governance.backend.rule_control.asset_requirements import (
     normalize_rule_asset_requirements,
 )
 from src.apps.rule_governance.backend.rule_control.source_scope import require_rule_asset_source_job
-from src.apps.rule_governance.backend.rule_control.template_activation import (
-    RuleAssetTemplateActivationService,
-)
 from src.core.check_items.presentation import (
     check_item_display_description,
     check_item_display_name,
@@ -47,7 +44,6 @@ from src.core.check_items.presentation import (
 from src.core.check_items.resolver import CheckItemImplementationResolver
 from src.infrastructure.db.models import (
     CommandSnapshot,
-    ObservationContractRecord,
     OfflinePatrolJobRecord,
     OfflinePatrolPeriodRecord,
     ParserGenerationAttempt,
@@ -62,7 +58,7 @@ from src.infrastructure.db.models import (
 )
 from src.infrastructure.db.postgres import get_db_session
 
-PROJECTION_VERSION = 12
+PROJECTION_VERSION = 13
 logger = logging.getLogger(__name__)
 
 COMMAND_ASSET_DISPOSITION_KEY = "command_asset_dispositions"
@@ -74,7 +70,7 @@ PENDING_CHECK_ITEM_ASSOCIATION = "pending_check_item_association"
 CHECK_ITEM_COMPONENT_ORDER = (
     "identity",
     "parser",
-    "contract",
+    "projection",
     "current_state",
     "policy",
     "event",
@@ -84,7 +80,7 @@ CHECK_ITEM_COMPONENT_ORDER = (
 CHECK_ITEM_COMPONENT_REQUIREMENTS = {
     "identity": "identity_policy",
     "parser": "parser_template",
-    "contract": "observation_contract",
+    "projection": "command_adapter_projection",
     "current_state": "current_state_rule",
     "policy": "change_policy",
     "event": "event_rule",
@@ -235,7 +231,7 @@ STAGE_ORDER = (
     "parser_generation",
     "parser_validation",
     "structured_quality",
-    "observation_contract",
+    "adapter_projection",
     "change_policy",
     "event_rule",
     "validation_review",
@@ -247,7 +243,7 @@ STAGE_LABELS = {
     "parser_generation": "Parser 生成",
     "parser_validation": "Parser 全样本验证",
     "structured_quality": "结构化数据质量",
-    "observation_contract": "Observation Contract",
+    "adapter_projection": "命令适配器投影",
     "change_policy": "Change Policy",
     "event_rule": "Event Rule",
     "validation_review": "验证、回放与工程复核",
@@ -572,12 +568,8 @@ class RuleAssetCommandUnitService:
     def __init__(
         self,
         *,
-        template_activation_service: RuleAssetTemplateActivationService | None = None,
         catalog_repository: CheckItemCatalogRepository | None = None,
     ) -> None:
-        self.template_activation_service = (
-            template_activation_service or RuleAssetTemplateActivationService()
-        )
         self.catalog_repository = catalog_repository or CheckItemCatalogRepository()
 
     @staticmethod
@@ -1419,129 +1411,6 @@ class RuleAssetCommandUnitService:
             # the legacy Contract/Policy/Event generation chain.  Those assets
             # already belong to CheckItem B; only an approved CommandAdapter
             # turns the preproduction association into a production mapping.
-            active_template_ids = {
-                str(item["template"].id)
-                for item in resolved_groups.values()
-                if item["template"] is not None and item["template"].status == "active"
-                and self._resolve_check_item_mappings(item, catalog=catalog)
-            }
-            contract_by_template = {
-                str(item.source_template_id): item
-                for item in (
-                    db.query(ObservationContractRecord)
-                    .filter(
-                        ObservationContractRecord.source_template_id.in_(active_template_ids),
-                        ObservationContractRecord.status == "active",
-                    )
-                    .order_by(ObservationContractRecord.version.desc())
-                    .all()
-                    if active_template_ids
-                    else []
-                )
-            }
-            source_refs = {f"parser_template:{item}" for item in active_template_ids}
-            seeds = (
-                db.query(RuleGenerationJobRecord)
-                .filter(
-                    RuleGenerationJobRecord.job_type == "OBSERVATION_CONTRACT",
-                    RuleGenerationJobRecord.source_ref.in_(source_refs),
-                )
-                .order_by(RuleGenerationJobRecord.updated_at.desc())
-                .all()
-                if source_refs
-                else []
-            )
-            seeded_source_refs = {str(item.source_ref) for item in seeds}
-            missing_seed_template_ids = sorted(
-                template_id
-                for template_id in active_template_ids
-                if f"parser_template:{template_id}" not in seeded_source_refs
-            )
-            for template_id in missing_seed_template_ids:
-                self.template_activation_service.seed_from_template(template_id)
-            if missing_seed_template_ids:
-                seeds = (
-                    db.query(RuleGenerationJobRecord)
-                    .filter(
-                        RuleGenerationJobRecord.job_type == "OBSERVATION_CONTRACT",
-                        RuleGenerationJobRecord.source_ref.in_(source_refs),
-                    )
-                    .order_by(RuleGenerationJobRecord.updated_at.desc())
-                    .all()
-                )
-            seed_by_ref: dict[str, RuleGenerationJobRecord] = {}
-            for item in seeds:
-                if (item.payload_json or {}).get("workflow") == "rule-asset-generation":
-                    seed_by_ref.setdefault(str(item.source_ref), item)
-            seed_ids = {str(item.id) for item in seed_by_ref.values()}
-            contexts = (
-                db.query(RuleGenerationContextRecord)
-                .filter(RuleGenerationContextRecord.job_id.in_(seed_ids))
-                .order_by(RuleGenerationContextRecord.created_at.desc())
-                .all()
-                if seed_ids
-                else []
-            )
-            context_by_seed = _latest_context_by_seed_for_source(
-                contexts,
-                offline_job_id,
-            )
-            context_ids = {str(item.id) for item in context_by_seed.values()}
-            # A seed is shared by compatible Parser implementations, but its
-            # generated context and candidate bundle are source-job evidence.
-            for seed in seed_by_ref.values():
-                seed_key = str(seed.id)
-                if seed_key in context_by_seed:
-                    continue
-                payload = dict(seed.payload_json or {})
-                for key in (
-                    "auto_context_id",
-                    "latest_generation_context_id",
-                    "context_id",
-                ):
-                    context_id = str(payload.get(key) or "").strip()
-                    if not context_id:
-                        continue
-                    row = db.get(RuleGenerationContextRecord, context_id)
-                    if row is None or str(row.job_id) != seed_key:
-                        continue
-                    if str(row.offline_job_id or "") != offline_job_id:
-                        continue
-                    context_by_seed[seed_key] = row
-                    context_ids.add(str(row.id))
-                    break
-            bundles = (
-                db.query(RuleGenerationJobRecord)
-                .filter(
-                    RuleGenerationJobRecord.job_type == "RULE_ASSET_BUNDLE",
-                    RuleGenerationJobRecord.payload_json["context_id"].as_string().in_(context_ids),
-                )
-                # A revision updates its parent review metadata after the replacement
-                # bundle is created. Ordering by updated_at would therefore select the
-                # superseded parent again. Bundle creation order is the immutable
-                # version order for a single context.
-                .order_by(
-                    RuleGenerationJobRecord.created_at.desc(),
-                    RuleGenerationJobRecord.id.desc(),
-                )
-                .all()
-                if context_ids
-                else []
-            )
-            bundle_by_context = _latest_bundle_by_context(bundles)
-            child_ids = {
-                str(child_id)
-                for item in bundles
-                for child_id in (item.payload_json or {}).get("child_job_ids") or []
-            }
-            children = (
-                db.query(RuleGenerationJobRecord)
-                .filter(RuleGenerationJobRecord.id.in_(child_ids))
-                .all()
-                if child_ids
-                else []
-            )
-            child_by_id = {str(item.id): item for item in children}
             runtime_planner = RuntimeBundleAssemblyPlanner(db)
 
             keep_ids: set[str] = set()
@@ -1615,7 +1484,10 @@ class RuleAssetCommandUnitService:
                         ),
                         None,
                     )
-                if preproduction_check_item is not None and direct_projection_mappings:
+                published_check_items = tuple(
+                    item for item in catalog.check_items if item.id in direct_check_item_ids
+                )
+                if direct_projection_mappings:
                     # A published V2 adapter is already the formal A→B mapping.
                     # Keep its command-unit state on the same CheckItem-driven
                     # path as a pre-production association, rather than falling
@@ -1687,26 +1559,14 @@ class RuleAssetCommandUnitService:
                 template = unit["template"]
                 parser_job = unit["parser_job"]
                 template_id = str(template.id) if template is not None else None
-                seed = seed_by_ref.get(f"parser_template:{template_id}") if template_id else None
-                context = context_by_seed.get(str(seed.id)) if seed is not None else None
-                bundle = bundle_by_context.get(str(context.id)) if context is not None else None
-                bundle_children = (
-                    [
-                        child_by_id[str(child_id)]
-                        for child_id in (bundle.payload_json or {}).get("child_job_ids") or []
-                        if str(child_id) in child_by_id
-                    ]
-                    if bundle is not None
-                    else []
-                )
-                active_contract = contract_by_template.get(template_id or "")
+                seed = context = bundle = None
+                bundle_children = []
                 stages = self._build_stages(
                     offline_job_id=offline_job_id,
                     dataset_ids=dataset_ids,
                     unit=unit,
                     parser_job=parser_job,
                     template=template,
-                    active_contract=active_contract,
                     seed=seed,
                     context=context,
                     bundle=bundle,
@@ -1716,6 +1576,7 @@ class RuleAssetCommandUnitService:
                     preproduction_check_item=preproduction_check_item,
                     adapter_published=bool(direct_projection_mappings),
                     adapter_route_ready=direct_projection_route_ready,
+                    published_check_items=published_check_items,
                 )
                 current_stage, overall_status, progress, next_action = self._rollup(stages)
                 # Expose one authoritative next action. Future-stage actions stay
@@ -2507,8 +2368,8 @@ class RuleAssetCommandUnitService:
                 "no_executable_structured_command",
                 "implementation_scope",
             ),
-            "contract": (
-                "observation_contract",
+            "projection": (
+                "command_adapter_projection",
                 "canonical_observation",
                 "contract_",
                 "entity_type",
@@ -2607,7 +2468,7 @@ class RuleAssetCommandUnitService:
         )
         candidate_rows = {
             "parser": list(candidates.get("parsers") or []),
-            "contract": list(candidates.get("observation_contracts") or []),
+            "projection": [item for item in candidates.get("parsers") or [] if item.get("projection")],
             "current_state": list(candidates.get("event_rules") or []),
             "policy": list(candidates.get("change_policies") or []),
             "event": list(candidates.get("event_rules") or []),
@@ -2616,7 +2477,7 @@ class RuleAssetCommandUnitService:
         selected_assets = {
             "identity": bool(selected.get("entity_identity_policy_version_id")),
             "parser": bool(selected.get("parser_template_ids")),
-            "contract": bool(selected.get("observation_contract_ids")),
+            "projection": bool(selected.get("command_adapter_projection")),
             "current_state": bool(
                 required_current_types
                 and required_current_types <= covered_current_types
@@ -2630,7 +2491,7 @@ class RuleAssetCommandUnitService:
         }
         fallback_keys = {
             "parser": "parser",
-            "contract": "contract",
+            "projection": "projection",
             "current_state": "event",
             "policy": "policy",
             "event": "event",
@@ -3638,7 +3499,6 @@ class RuleAssetCommandUnitService:
         unit: dict[str, Any],
         parser_job: ParserTemplateJob | None,
         template: ParserTemplate | None,
-        active_contract: ObservationContractRecord | None,
         seed: RuleGenerationJobRecord | None,
         context: RuleGenerationContextRecord | None,
         bundle: RuleGenerationJobRecord | None,
@@ -3648,6 +3508,7 @@ class RuleAssetCommandUnitService:
         preproduction_check_item: Any | None = None,
         adapter_published: bool = False,
         adapter_route_ready: bool = False,
+        published_check_items: tuple[Any, ...] = (),
     ) -> list[dict[str, Any]]:
         command = unit["command"]
         source_job_url = "/skills/parser?" + urlencode(
@@ -3690,7 +3551,7 @@ class RuleAssetCommandUnitService:
             asset_mode = str(unit.get("asset_mode") or "full_chain")
             explicit_requirements = {
                 "schema_version": "rule-asset-requirements/command-mode-v1",
-                "requires_observation_contract": asset_mode != "preproduction_mapping",
+                "requires_observation_contract": False,
                 "requires_change_policy": asset_mode in {"change_only", "full_chain"},
                 "requires_current_state_rule": False,
                 "requires_event_rule": asset_mode == "full_chain",
@@ -3706,8 +3567,6 @@ class RuleAssetCommandUnitService:
                 unit["asset_mode"] = "full_chain"
             elif requirements["requires_change_policy"]:
                 unit["asset_mode"] = "change_only"
-            elif requirements["requires_observation_contract"]:
-                unit["asset_mode"] = "observation_only"
         parse_counts = dict(unit["parse_counts"])
         stages = [
             _stage(
@@ -3770,7 +3629,7 @@ class RuleAssetCommandUnitService:
                 stage["label"] = label
                 stages.append(stage)
             adapter_stage = _stage(
-                "observation_contract",
+                "adapter_projection",
                 "ready",
                 (
                     f"样本命令已预生产关联到 {target_name}。该检查项走文本/哈希证据路径，"
@@ -3968,10 +3827,14 @@ class RuleAssetCommandUnitService:
             )
         )
 
-        if preproduction_check_item is not None:
-            target_name = str(
-                getattr(preproduction_check_item, "name", "")
-                or getattr(preproduction_check_item, "id", "CheckItem")
+        if preproduction_check_item is not None or (adapter_published and published_check_items):
+            # One CLI output may populate several CheckItems (e.g. version and
+            # subslot inventory). Every published output is checked by the
+            # planner above; do not require an arbitrary single association.
+            target_items = published_check_items or (preproduction_check_item,)
+            target_name = "、".join(
+                str(getattr(item, "name", "") or getattr(item, "id", "CheckItem"))
+                for item in target_items
             )
             catalog_url = "/skills/parser?" + urlencode(
                 {"workspace": "production", "subtab": "catalog-management"}
@@ -4016,7 +3879,7 @@ class RuleAssetCommandUnitService:
                     else None
                 )
             projection_stage = _stage(
-                "observation_contract",
+                "adapter_projection",
                 projection_status,
                 projection_detail,
                 metrics={
@@ -4024,6 +3887,8 @@ class RuleAssetCommandUnitService:
                     "check_item_version_id": str(
                         getattr(preproduction_check_item, "version_id", "")
                     ),
+                    "check_item_ids": [str(item.id) for item in target_items],
+                    "check_item_version_ids": [str(item.version_id) for item in target_items],
                 },
                 blockers=projection_blockers,
                 next_action=projection_action,
@@ -4073,194 +3938,12 @@ class RuleAssetCommandUnitService:
             )
             return stages
 
-        bundle_status = str(bundle.status) if bundle else None
-        contract_status, contract_children = _child_stage_status(
-            children, "OBSERVATION_CONTRACT", bundle_status=bundle_status
-        )
-        if active_contract is not None:
-            contract_status = "passed"
-        elif contract_status == "not_started":
-            contract_status = "ready" if seed and quality_status == "passed" else "not_started"
-        contract_artifacts = (
-            [{"type": "observation_contract", "id": active_contract.id, "status": "active"}]
-            if active_contract
-            else []
-        )
-        contract_artifacts.extend(
-            {"type": "rule_job", "id": item.id, "status": item.status} for item in contract_children
-        )
-        stages.append(
-            _stage(
-                "observation_contract",
-                contract_status,
-                "定义实体、主键、字段类型、单位、空值和状态语义。",
-                metrics={"candidate_count": len(contract_children)},
-                artifacts=contract_artifacts,
-                next_action=(
-                    None
-                    if contract_status == "passed" or bundle is not None
-                    else _action(
-                        "generate_rule_asset_bundle",
-                        "生成完整规则资产包",
-                        "从离线结构化样本生成 Contract、Policy 和 EventRule 候选。",
-                        generation_url,
-                    )
-                ),
-            )
-        )
-
-        policy_status, policy_children = _child_stage_status(
-            children, "CHANGE_POLICY", bundle_status=bundle_status
-        )
-        if not requirements["requires_change_policy"]:
-            policy_status = "skipped"
-        elif policy_status == "not_started" and context:
-            policy_status = "ready"
-        stages.append(
-            _stage(
-                "change_policy",
-                policy_status,
-                "声明比较字段、变化类型、阈值、滞回和噪声抑制策略。",
-                metrics={"candidate_count": len(policy_children)},
-                artifacts=[
-                    {"type": "rule_job", "id": item.id, "status": item.status}
-                    for item in policy_children
-                ],
-                next_action=(
-                    None
-                    if (
-                        policy_status in RESOLVED_STAGE_STATUSES
-                        or contract_status != "passed"
-                        or bundle is not None
-                    )
-                    else _action(
-                        "generate_rule_asset_bundle",
-                        "生成完整规则资产包",
-                        "从离线结构化样本生成缺失的变化策略和事件规则候选。",
-                        generation_url,
-                    )
-                ),
-            )
-        )
-
-        event_status, event_children = _child_stage_status(
-            children, "EVENT_RULE", bundle_status=bundle_status
-        )
-        if not requirements["requires_event_rule_assets"]:
-            event_status = "skipped"
-        elif event_status == "not_started" and context:
-            event_status = "ready"
-        stages.append(
-            _stage(
-                "event_rule",
-                event_status,
-                "将有运营意义的变化映射为事件、恢复和严重级别。",
-                metrics={"candidate_count": len(event_children)},
-                artifacts=[
-                    {"type": "rule_job", "id": item.id, "status": item.status}
-                    for item in event_children
-                ],
-                next_action=(
-                    None
-                    if (
-                        event_status in RESOLVED_STAGE_STATUSES
-                        or contract_status != "passed"
-                        or policy_status not in RESOLVED_STAGE_STATUSES
-                        or bundle is not None
-                    )
-                    else _action(
-                        "generate_rule_asset_bundle",
-                        "生成完整规则资产包",
-                        "从离线结构化样本补齐事件与恢复规则候选。",
-                        generation_url,
-                    )
-                ),
-            )
-        )
-
-        report = bundle_report
-        replay = dict(report.get("historical_replay") or {})
-        context_gate = dict(report.get("context_gate") or {})
-        replay_gate = evaluate_requirement_replay_gate(
-            requirements=requirements,
-            replay=replay,
-            context_gate=context_gate,
-        )
-        review = dict((report.get("governance") or {}).get("engineering_review") or {})
-        validation_success = report.get("success") is True
-        replay_success = replay_gate.get("success") is True
-        review_accepted = review.get("decision") == "accepted"
-        if runtime_ready or bundle_status == "active":
-            review_status = "passed"
-        elif bundle is None:
-            review_status = "not_started"
-        elif not validation_success or not replay_success:
-            review_status = "blocked"
-        elif review_accepted:
-            review_status = "passed"
-        else:
-            review_status = "needs_review"
-        review_blockers = []
-        if bundle and not validation_success:
-            review_blockers.append("确定性验证未通过")
-        if bundle and not replay_success:
-            review_blockers.extend(str(item) for item in replay_gate.get("errors") or [])
-        stages.append(
-            _stage(
-                "validation_review",
-                review_status,
-                "执行合成验证、历史回放、碰撞检查和工程师修订复核。",
-                metrics={
-                    "matched_change_count": replay.get("matched_change_count"),
-                    "sampled_change_count": replay.get("sampled_change_count"),
-                    "collision_count": replay.get("collision_count"),
-                    "estimated_daily_event_count": replay.get("estimated_daily_event_count"),
-                    "engineering_review_decision": review.get("decision"),
-                },
-                blockers=review_blockers,
-                next_action=(
-                    None
-                    if review_status == "passed" or bundle is None
-                    else _action(
-                        "review_bundle", "验证并复核资产包", "查看回放并修订候选资产。", bundle_url
-                    )
-                ),
-            )
-        )
-        if runtime_ready or bundle_status == "active":
-            release_status = "passed"
-        elif (
-            bundle_status == "pending_approval"
-            and review_accepted
-            and validation_success
-            and replay_success
-        ):
-            release_status = "ready"
-        elif bundle is None:
-            release_status = "not_started"
-        elif review_status == "blocked":
-            release_status = "blocked"
-        else:
-            release_status = "not_started"
-        stages.append(
-            _stage(
-                "release",
-                release_status,
-                "审批后原子激活 Contract、Policy 和 Rule，保留回滚与审计记录。",
-                artifacts=(
-                    [{"type": "rule_asset_bundle", "id": bundle.id, "status": bundle.status}]
-                    if bundle
-                    else []
-                ),
-                next_action=(
-                    None
-                    if release_status == "passed" or bundle is None
-                    else _action(
-                        "release_bundle", "审批发布", "完成工程复核后发布资产包。", bundle_url
-                    )
-                ),
-            )
-        )
+        stages.append(_stage(
+            "adapter_projection", "blocked", "请先关联检查项，再制作 Parser 与命令适配器。",
+            blockers=["尚未关联检查项"],
+            next_action=_action("associate_check_item", "关联检查项", "在待归类命令中关联检查项。",
+                f"/skills/parser?workspace=production&subtab=catalog-management&source_job_id={offline_job_id}"),
+        ))
         return stages
 
     @staticmethod
@@ -4440,7 +4123,7 @@ class RuleAssetCommandUnitService:
             "governance_bucket": _governance_bucket(status, current_stage, asset_mode),
             "component_statuses": {
                 "parser": _component_status(stage_statuses.get("parser_generation")),
-                "contract": _component_status(stage_statuses.get("observation_contract")),
+                "projection": _component_status(stage_statuses.get("adapter_projection")),
                 "policy": _component_status(stage_statuses.get("change_policy")),
                 "event": _component_status(stage_statuses.get("event_rule")),
             },

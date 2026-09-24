@@ -34,7 +34,6 @@ from src.infrastructure.db.models import (
     EntityIdentityPolicyVersionRecord,
     EventRuleVersionRecord,
     EvidenceQualificationRecord,
-    ObservationContractRecord,
     ParserTemplate,
     PatrolBatchRecord,
     PatrolSourceQualificationRecord,
@@ -589,10 +588,6 @@ class ProductionBaselineCandidateRepository:
             "command_adapter_projection": (
                 CollectionImplementationVersionRecord,
                 "digest",
-            ),
-            "observation_contract": (
-                ObservationContractRecord,
-                "contract_sha256",
             ),
             "change_policy": (ChangePolicyVersionRecord, "digest"),
             "current_state_rule": (EventRuleVersionRecord, "digest"),

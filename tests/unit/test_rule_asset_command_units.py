@@ -137,7 +137,6 @@ def test_active_parser_approved_valid_empty_passes_structured_quality() -> None:
             status="active",
             validation_json={"allow_empty": True},
         ),
-        active_contract=None,
         seed=None,
         context=None,
         bundle=None,
@@ -154,6 +153,42 @@ def test_active_parser_approved_valid_empty_passes_structured_quality() -> None:
     assert quality["status"] == "passed"
     assert quality["metrics"]["approved_valid_empty"] is True
     assert "不会伪造结构化记录" in quality["detail"]
+
+
+@pytest.mark.parametrize("route_ready", [True, False])
+def test_published_multi_output_adapter_tracks_all_check_items(route_ready: bool) -> None:
+    checks = tuple(
+        SimpleNamespace(id=key, name=name, version_id=f"{key}-v1")
+        for key, name in (
+            ("device.version", "设备版本"),
+            ("device.subslot_inventory", "子槽位资产"),
+        )
+    )
+    stages = RuleAssetCommandUnitService()._build_stages(
+        offline_job_id="offline-multi-check",
+        unit={
+            "command": "display version", "vendor": "H3C", "profile": "S6860-54HF",
+            "models": {"S6860-54HF"}, "sample_count": 1, "device_count": 1,
+            "asset_mode": "check_item_mapping", "parse_counts": {"success": 1},
+            "structured_count": 3,
+        },
+        parser_job=None,
+        template=SimpleNamespace(id="multi-output-parser", status="active", validation_json={}),
+        seed=None, context=None, bundle=None, children=[], output_signature_count=1,
+        adapter_published=True, adapter_route_ready=route_ready,
+        published_check_items=checks,
+    )
+    projection = next(stage for stage in stages if stage["key"] == "adapter_projection")
+    assert projection["metrics"]["check_item_ids"] == [item.id for item in checks]
+    assert projection["metrics"]["check_item_id"] == ""
+    assert projection["status"] == ("passed" if route_ready else "blocked")
+    _, status, _, action = RuleAssetCommandUnitService._rollup(stages)
+    assert status == ("completed" if route_ready else "blocked")
+    if route_ready:
+        assert action is None
+        assert "设备版本、子槽位资产" in projection["detail"]
+    else:
+        assert action["code"] == "repair_command_adapter"
 
 
 def test_published_text_adapter_is_not_downgraded_to_preproduction() -> None:
@@ -275,7 +310,7 @@ def test_check_item_projection_ignores_assets_not_required_by_profile() -> None:
         "governance_bucket": "exception",
         "component_statuses": {
             "parser": "published",
-            "contract": "published",
+            "projection": "published",
             "policy": "failed",
             "event": "blocked",
         },
@@ -292,7 +327,7 @@ def test_check_item_projection_ignores_assets_not_required_by_profile() -> None:
             "requirements": {
                 "identity_policy": {"required": True},
                 "parser_template": {"required": True},
-                "observation_contract": {"required": True},
+                "command_adapter_projection": {"required": True},
                 "current_state_rule": {"required": False},
                 "change_policy": {"required": False},
                 "event_rule": {"required": False},
@@ -302,7 +337,7 @@ def test_check_item_projection_ignores_assets_not_required_by_profile() -> None:
         "selected": {
             "entity_identity_policy_version_id": "identity-v1",
             "parser_template_ids": ["parser-v1"],
-            "observation_contract_ids": ["contract-v1"],
+            "command_adapter_projection": {"digest": "projection-v1"},
             "change_policy_version_ids": [],
             "event_rule_version_ids": [],
         },
@@ -323,7 +358,7 @@ def test_check_item_projection_ignores_assets_not_required_by_profile() -> None:
     assert projected["component_statuses"] == {
         "identity": "published",
         "parser": "published",
-        "contract": "published",
+        "projection": "published",
         "current_state": "not_applicable",
         "policy": "not_applicable",
         "event": "not_applicable",
@@ -347,7 +382,7 @@ def test_check_item_projection_separates_current_state_and_change_event_rules() 
         "governance_bucket": "published",
         "component_statuses": {
             "parser": "published",
-            "contract": "published",
+            "projection": "published",
             "policy": "published",
             "event": "published",
         },
@@ -364,7 +399,7 @@ def test_check_item_projection_separates_current_state_and_change_event_rules() 
             "requirements": {
                 "identity_policy": {"required": True},
                 "parser_template": {"required": True},
-                "observation_contract": {"required": True},
+                "command_adapter_projection": {"required": True},
                 "current_state_rule": {
                     "required": True,
                     "required_observation_types": [
@@ -384,7 +419,7 @@ def test_check_item_projection_separates_current_state_and_change_event_rules() 
         "selected": {
             "entity_identity_policy_version_id": "identity-v1",
             "parser_template_ids": ["parser-v1"],
-            "observation_contract_ids": ["contract-v1"],
+            "command_adapter_projection": {"digest": "projection-v1"},
             "change_policy_version_ids": ["policy-v1"],
             "event_rule_version_ids": ["event-change-v1"],
         },
@@ -433,7 +468,7 @@ def test_check_item_projection_keeps_upstream_parser_action_before_runtime_bundl
         },
         "component_statuses": {
             "parser": "ready_to_generate",
-            "contract": "not_started",
+            "projection": "not_started",
         },
     }
     plan = {
@@ -448,7 +483,7 @@ def test_check_item_projection_keeps_upstream_parser_action_before_runtime_bundl
             "requirements": {
                 "identity_policy": {"required": True},
                 "parser_template": {"required": True},
-                "observation_contract": {"required": True},
+                "command_adapter_projection": {"required": True},
                 "current_state_rule": {"required": False},
                 "change_policy": {"required": False},
                 "event_rule": {"required": False},
@@ -571,7 +606,7 @@ def test_unclassified_ignored_commands_do_not_create_false_exceptions() -> None:
             for component in (
                 "identity",
                 "parser",
-                "contract",
+                "projection",
                 "current_state",
                 "policy",
                 "event",
@@ -615,7 +650,7 @@ def test_unclassified_raw_hash_commands_still_require_check_item_classification(
             for component in (
                 "identity",
                 "parser",
-                "contract",
+                "projection",
                 "current_state",
                 "policy",
                 "event",
@@ -826,7 +861,7 @@ def test_command_units_deduplicate_evidence_and_keep_asset_boundaries():
         assert h3c_interface["sample_count"] == 3
         assert h3c_interface["device_count"] == 2
         assert h3c_interface["asset_mode"] == "full_chain"
-        assert h3c_interface["current_stage"] == "parser_generation"
+        assert h3c_interface["current_stage"] == "adapter_projection"
 
         raw_hash = next(
             item
@@ -848,7 +883,7 @@ def test_command_units_deduplicate_evidence_and_keep_asset_boundaries():
         assert unsupported["status"] == "completed"
 
         detail = service.get_unit(job_id, h3c_interface["id"])
-        assert len(detail["stages"]) == 10
+        assert len(detail["stages"]) == 6
         assert len(detail["evidence"]) == 3
         assert all("raw_text" not in item for item in detail["evidence"])
         visible_actions = [
@@ -857,7 +892,7 @@ def test_command_units_deduplicate_evidence_and_keep_asset_boundaries():
             if stage.get("next_action")
         ]
         assert visible_actions == [detail["next_action"]]
-        assert detail["next_action"]["code"] == "open_parser_job"
+        assert detail["next_action"]["code"] == "associate_check_item"
         assert f"source_job_id={job_id}" in detail["next_action"]["target_url"]
         paged_detail = service.get_unit(
             job_id,
@@ -940,7 +975,6 @@ def test_collecting_parser_job_is_actionable_not_reported_as_running():
             failure_code="template_missing",
         ),
         template=None,
-        active_contract=None,
         seed=None,
         context=None,
         bundle=None,
@@ -1124,10 +1158,10 @@ def test_command_unit_projection_uses_latest_successful_reparse_as_effective_sta
         assert unit["parse_counts"] == {"success": 1}
         assert unit["output_signature_count"] == 1
         assert unit["stage_statuses"]["structured_quality"] == "passed"
-        assert unit["current_stage"] == "observation_contract"
-        assert unit["rule_seed_job_id"]
-        assert unit["next_action"]["code"] == "generate_rule_asset_bundle"
-        assert unit["next_action"]["label"] == "生成完整规则资产包"
+        assert unit["current_stage"] == "adapter_projection"
+        assert unit["rule_seed_job_id"] is None
+        assert unit["next_action"]["code"] == "associate_check_item"
+        assert unit["next_action"]["label"] == "关联检查项"
 
         service.reconcile(job_id)
         with get_db_session() as db:
@@ -1139,7 +1173,7 @@ def test_command_unit_projection_uses_latest_successful_reparse_as_effective_sta
                 )
                 .all()
             )
-            assert len(seeds) == 1
+            assert len(seeds) == 0
 
         detail = service.get_unit(job_id, unit["id"])
         assert len(detail["evidence"]) == 1
@@ -1150,14 +1184,10 @@ def test_command_unit_projection_uses_latest_successful_reparse_as_effective_sta
         assert evidence["parser_template_id"] == template_id
         assert evidence["structured_record_count"] == 1
         contract_stage = next(
-            item for item in detail["stages"] if item["key"] == "observation_contract"
+            item for item in detail["stages"] if item["key"] == "adapter_projection"
         )
-        assert contract_stage["status"] == "ready"
-        assert f"rule_seed_job_id={unit['rule_seed_job_id']}" in (
-            contract_stage["next_action"]["target_url"]
-        )
-        assert "workspace=production" in contract_stage["next_action"]["target_url"]
-        assert "action=rule-generation" in contract_stage["next_action"]["target_url"]
+        assert contract_stage["status"] == "blocked"
+        assert "subtab=catalog-management" in contract_stage["next_action"]["target_url"]
 
         with get_db_session() as db:
             stale = db.get(RuleAssetCommandUnitRecord, unit["id"])
@@ -1172,8 +1202,8 @@ def test_command_unit_projection_uses_latest_successful_reparse_as_effective_sta
             CheckItemCatalogRepository().load_active()
         )
         assert refreshed["projection_version"] == expected_projection_version
-        assert refreshed["next_action"]["code"] == "generate_rule_asset_bundle"
-        assert refreshed["next_action"]["label"] == "生成完整规则资产包"
+        assert refreshed["next_action"]["code"] == "associate_check_item"
+        assert refreshed["next_action"]["label"] == "关联检查项"
     finally:
         with get_db_session() as db:
             db.query(RuleGenerationJobRecord).filter(
@@ -1415,7 +1445,6 @@ def test_command_unit_stages_respect_semantic_asset_mode(
         unit=unit,
         parser_job=None,
         template=None,
-        active_contract=None,
         seed=None,
         context=None,
         bundle=None,
@@ -1424,8 +1453,9 @@ def test_command_unit_stages_respect_semantic_asset_mode(
     )
     by_key = {stage["key"]: stage["status"] for stage in stages}
 
-    assert by_key["change_policy"] == policy_status
-    assert by_key["event_rule"] == event_status
+    assert by_key["adapter_projection"] == "blocked"
+    assert "change_policy" not in by_key
+    assert "event_rule" not in by_key
 
 
 def test_command_unit_uses_bundle_requirements_instead_of_legacy_full_chain_mode():
@@ -1469,7 +1499,6 @@ def test_command_unit_uses_bundle_requirements_instead_of_legacy_full_chain_mode
         unit=unit,
         parser_job=None,
         template=SimpleNamespace(id="template-contract-only", status="active"),
-        active_contract=SimpleNamespace(id="contract-active"),
         seed=None,
         context=None,
         bundle=bundle,
@@ -1486,12 +1515,10 @@ def test_command_unit_uses_bundle_requirements_instead_of_legacy_full_chain_mode
     by_key = {stage["key"]: stage["status"] for stage in stages}
     current, overall, progress, next_action = RuleAssetCommandUnitService._rollup(stages)
 
-    assert unit["asset_mode"] == "observation_only"
-    assert by_key["change_policy"] == "skipped"
-    assert by_key["event_rule"] == "skipped"
-    assert by_key["validation_review"] == "passed"
-    assert by_key["release"] == "passed"
-    assert (current, overall, progress, next_action) == ("release", "completed", 100, None)
+    assert by_key["adapter_projection"] == "blocked"
+    assert "change_policy" not in by_key
+    assert "event_rule" not in by_key
+    assert overall != "completed"
 
 
 def test_product_command_asset_list_deduplicates_latest_units_and_enforces_owner_scope():
@@ -1542,7 +1569,7 @@ def test_product_command_asset_list_deduplicates_latest_units_and_enforces_owner
             parse_counts_json={"parsed": 1},
             stage_states_json=[
                 {"key": "parser_generation", "status": "passed"},
-                {"key": "observation_contract", "status": "ready"},
+                {"key": "adapter_projection", "status": "ready"},
                 {"key": "change_policy", "status": "not_started"},
                 {"key": "event_rule", "status": "not_started"},
             ],
@@ -1731,7 +1758,7 @@ def test_check_item_workbench_groups_catalog_implementations_and_blocks_unclassi
             parse_counts_json={"parsed": 2},
             stage_states_json=[
                 {"key": "parser_generation", "status": "passed"},
-                {"key": "observation_contract", "status": "passed"},
+                {"key": "adapter_projection", "status": "passed"},
                 {"key": "change_policy", "status": "passed"},
                 {"key": "event_rule", "status": "passed"},
                 {"key": "release", "status": "passed"},

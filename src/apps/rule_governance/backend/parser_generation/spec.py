@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any
 
 _FIELD_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+_VALUE_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 _ALLOWED_TYPES = {
     "text",
     "number",
@@ -60,7 +61,7 @@ class FieldSpec:
     primary_key_default: str | None = None
 
     def __post_init__(self) -> None:
-        if not _FIELD_NAME_RE.fullmatch(self.name):
+        if not _VALUE_NAME_RE.fullmatch(self.name):
             raise ValueError(f"invalid ParserSpec field name: {self.name}")
         if self.value_type not in _ALLOWED_TYPES:
             raise ValueError(f"unsupported ParserSpec field type: {self.value_type}")

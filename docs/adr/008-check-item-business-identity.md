@@ -27,7 +27,7 @@
    Parser 或文本比较要求。
 3. 一个检查项可以有多个实现，一个实现可以服务多个检查项。
 4. Effective Plan 先解析 `设备 x 检查项`，再按规范化命令去重采集。
-5. Parser 只提取厂商输出；ObservationContract 负责投影到 canonical observation。
+5. Parser 提取厂商输出；CommandAdapter V2 按检查项语义投影到标准数据（1.4.0 已删除独立 ObservationContract）。
 6. 每个计划内的 `设备 x 检查项` 必须形成独立执行事实和 Assessment。
 7. `completed` 仅表示链路完成，不代表健康；健康结论只能是
    `healthy / at_risk / unable_to_determine / not_applicable / informational`。

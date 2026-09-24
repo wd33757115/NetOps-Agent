@@ -617,6 +617,41 @@ def test_reusable_candidate_requires_same_contract_and_sample_manifest():
     assert changed_contract is None
 
 
+@pytest.mark.parametrize("marker", ["provenance", "model_provider", "action", "manual"])
+def test_reusable_candidate_excludes_automatic_ntc_but_keeps_manual_uploads(marker):
+    sample_set = _samples()
+    attempt = {
+        "template_text": "uploaded-or-historical-template",
+        "contract_hash": "spec-sha",
+        "train_sample_set_hash": sample_set_digest(sample_set.generation),
+        "holdout_sample_set_hash": sample_set_digest(sample_set.acceptance),
+        "validation_report_json": {
+            "generation": {"passed": True},
+            "acceptance": {"passed": True},
+        },
+    }
+    if marker == "provenance":
+        attempt["validation_report_json"]["candidate_provenance"] = {"provider": "ntc_templates"}
+        attempt["model_provider"] = "llm:persisted_revalidation"
+    elif marker == "model_provider":
+        attempt["model_provider"] = "ntc_templates"
+    elif marker == "action":
+        attempt["action"] = "seed:ntc_templates"
+    else:
+        attempt["validation_report_json"]["candidate_provenance"] = {"provider": "engineer"}
+
+    class Repository:
+        def list_generation_attempts(self, _job_id, *, include_template):
+            return [attempt]
+
+    candidate = latest_reusable_candidate(
+        job={"id": "job-1", "parser_spec_sha256": "spec-sha"},
+        sample_set=sample_set,
+        repository=Repository(),
+    )
+    assert (candidate is not None) is (marker == "manual")
+
+
 def test_reusable_candidate_skips_content_rejected_by_engineer():
     sample_set = _samples()
     generation_hash = sample_set_digest(sample_set.generation)

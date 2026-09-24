@@ -1,0 +1,17 @@
+Value Filldown slot (\d+)
+Value Filldown slot_input_watts ([\d.]+)
+Value Required power_supply (\d+|PWR\d+)
+Value power_supply_status (\S+)
+Value mode (\S+)
+Value current_amperes ([\d.]+)
+Value voltage_volts ([\d.]+)
+Value output_watts ([\d.]+)
+Value fan_direction ((?!--)\S+)
+
+Start
+  ^\s*Slot ${slot}:
+  ^\s*Input Power:\s*${slot_input_watts}
+  ^\s*${power_supply}\s+${power_supply_status}\s+${mode}\s+(?:${current_amperes}|--)\s+(?:${voltage_volts}|--)\s+(?:${output_watts}|--)(?:\s+(?:${fan_direction}|--))?\s*$$ -> Record
+  ^\s*${power_supply}\s+${power_supply_status}\s*$$ -> Record
+
+EOF

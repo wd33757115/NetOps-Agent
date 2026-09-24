@@ -17,7 +17,6 @@ from src.apps.rule_governance.backend.parser.repository import ParserJobReposito
 from src.apps.rule_governance.backend.parser_generation import (
     MAX_PARSER_MODEL_CALLS,
     KeyValueCompiler,
-    NtcTemplateResolver,
     ParserSample,
     ParserSpec,
     ParserSpecDocument,
@@ -34,7 +33,7 @@ from src.apps.rule_governance.backend.parser_generation import (
     latest_reusable_candidate,
     outcome_records,
     persist_generation,
-    validate_template_execution,
+    validate_template_runtime_compatibility,
 )
 from src.core.patrol.repository import PatrolRepository
 from src.observability.deprecations import observe_legacy_path
@@ -123,24 +122,6 @@ def _process_simple_job(
         else ()
     )
     seed_candidates: list[TemplateCandidate] = []
-    if isinstance(spec, ParserSpec):
-        _platform_decision, ntc_resolutions = NtcTemplateResolver().resolve(
-            device={
-                "vendor": job.get("vendor"),
-                "model": job.get("model") or job.get("profile"),
-                "family": job.get("family"),
-                "platform": job.get("platform"),
-                "device_type": job.get("device_type"),
-            },
-            command=str(job["canonical_command"]),
-            samples=sample_set.samples,
-            spec=spec,
-        )
-        seed_candidates.extend(
-            resolution.candidate
-            for resolution in ntc_resolutions
-            if resolution.candidate is not None
-        )
     seed_candidate = latest_reusable_candidate(
         job=job,
         sample_set=sample_set,
@@ -179,10 +160,9 @@ def _process_simple_job(
         observer=generation_observer,
         seed_candidates=tuple(seed_candidates),
         total_timeout_seconds=settings.PARSER_GENERATION_TOTAL_TIMEOUT_SECONDS,
-        # Local code is an evidence executor, not the semantic acceptance authority.
-        # It compiles and runs the exact candidate against every frozen sample, then
-        # the independent model reviews the resulting records or execution errors.
-        validator=validate_template_execution,
+        # Enforce the same executable contract as production (including unique keys).
+        # Advisory counts are ignored; independent review still owns semantics.
+        validator=validate_template_runtime_compatibility,
     ).generate(job_id=str(job["id"]), spec=spec, sample_set=sample_set)
 
     persisted = persist_generation(

@@ -182,26 +182,36 @@ class PatrolBatchService:
             )
             latest_observations[key] = item
         observations = list(latest_observations.values())
+        # A device may have thousands of fields from the same command. Resolve
+        # its domain once per distinct pair, not once per field per domain.
+        domain_cache: dict[tuple[str, str], str | None] = {}
+
+        def domain_for(entity_type=None, command=None):
+            key = (str(entity_type or ""), str(command or ""))
+            if key not in domain_cache:
+                domain_cache[key] = report_domain(*key)
+            return domain_cache[key]
+
         for domain, label in REPORT_DOMAINS:
             domain_observations = [
                 item
                 for item in observations
-                if report_domain(item.get("entity_type"), item.get("command")) == domain
+                if domain_for(item.get("entity_type"), item.get("command")) == domain
             ]
             domain_commands = [
                 item
                 for item in command_details
-                if report_domain(None, item.get("command")) == domain
+                if domain_for(None, item.get("command")) == domain
             ]
             domain_changes = [
                 item
                 for item in changes
-                if report_domain(item.get("entity_type"), item.get("command")) == domain
+                if domain_for(item.get("entity_type"), item.get("command")) == domain
             ]
             domain_events = [
                 item
                 for item in events
-                if report_domain(item.get("entity_type"), item.get("event_type")) == domain
+                if domain_for(item.get("entity_type"), item.get("event_type")) == domain
             ]
             unresolved_fault_events = [
                 item

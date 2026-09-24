@@ -43,9 +43,6 @@ describe('rule asset product workspaces', () => {
       limit: 25,
       offset: 0,
     })
-    vi.spyOn(parserApi, 'observationContracts').mockResolvedValue({
-      items: [], total: 2, limit: 1, offset: 0,
-    })
     vi.spyOn(parserApi, 'changePolicies').mockResolvedValue({
       items: [], total: 3, limit: 1, offset: 0,
     })

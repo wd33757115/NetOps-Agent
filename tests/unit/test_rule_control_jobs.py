@@ -7,15 +7,12 @@ import pytest
 from src.core.patrol.change_policy_repository import ChangePolicyRepository
 from src.core.patrol.event_rules import EventRuleRepository
 from src.core.rule_control.approval import RuleAssetApprovalService
-from src.core.rule_control.executor import AgentLoopRevisionExecutor
 from src.core.rule_control.jobs import (
     RuleGenerationJob,
     RuleGenerationJobStateError,
     transition_job,
 )
 from src.core.rule_control.repository import RuleGenerationJobRepository
-from src.core.rule_control.revision import AgentLoopRevisionService
-from src.core.rule_control.submission import RuleAssetSubmissionService
 from src.infrastructure.db.models import (
     ChangePolicyRecord,
     ChangePolicyVersionRecord,
@@ -32,7 +29,6 @@ from src.infrastructure.db.postgres import get_db_session
 def test_rule_generation_job_supports_planned_asset_types():
     for job_type in {
         "TEXTFSM_TEMPLATE",
-        "OBSERVATION_CONTRACT",
         "CHANGE_POLICY",
         "EVENT_RULE",
     }:
@@ -414,284 +410,16 @@ def test_rule_job_history_uses_transactional_database_projections(monkeypatch):
             ).delete(synchronize_session=False)
 
 
-def test_agent_loop_revision_service_creates_idempotent_child_job():
-    repo = RuleGenerationJobRepository()
-    parent = repo.create_job(
-        job_type="EVENT_RULE",
-        source_ref=f"unit:{uuid.uuid4().hex}",
-        payload={"candidate_rules": [{"event_type": "CPUHigh"}]},
-        validation_report={
-            "success": False,
-            "agent_loop": {
-                "ready_for_approval": False,
-                "next_action": "revise_candidate_rule",
-                "revision_request": {
-                    "target_generator": "event-rule-generator",
-                    "reason": ["unexpected CPUHigh"],
-                    "required_fixes": ["narrow entity_types"],
-                    "next_params_patch": {"agent_loop": True},
-                },
-                "attempts": [
-                    {
-                        "attempt": 1,
-                        "stage": "event_rule_validation",
-                        "success": False,
-                    }
-                ],
-            },
-        },
-        created_by="pytest",
-    )
-
-    try:
-        first = AgentLoopRevisionService(repo).create_revision_job(
-            parent["id"],
-            actor="pytest",
-        )
-        second = AgentLoopRevisionService(repo).create_revision_job(
-            parent["id"],
-            actor="pytest",
-        )
-
-        assert first["created"] is True
-        assert second["created"] is False
-        assert first["job"]["id"] == second["job"]["id"]
-        assert first["job"]["job_type"] == "EVENT_RULE"
-        assert first["job"]["source_ref"] == f"agent_loop_revision:{parent['id']}"
-        assert first["job"]["payload_json"]["parent_job_id"] == parent["id"]
-        assert first["job"]["payload_json"]["agent_loop_round"] == 2
-        assert (
-            first["job"]["payload_json"]["revision_request"]["target_generator"]
-            == "event-rule-generator"
-        )
-
-        reloaded_parent = repo.get_job(parent["id"])
-        assert reloaded_parent is not None
-        governance = reloaded_parent["validation_report_json"]["governance"]
-        assert governance["agent_loop_revision"]["child_job_id"] == first["job"]["id"]
-    finally:
-        child_id = None
-        try:
-            reloaded_parent = repo.get_job(parent["id"])
-            child_id = (
-                reloaded_parent.get("validation_report_json", {})
-                .get("governance", {})
-                .get("agent_loop_revision", {})
-                .get("child_job_id")
-                if reloaded_parent
-                else None
-            )
-        finally:
-            with get_db_session() as db:
-                ids = [parent["id"]]
-                if child_id:
-                    ids.append(child_id)
-                db.query(RuleGenerationJobRecord).filter(
-                    RuleGenerationJobRecord.id.in_(ids)
-                ).delete(synchronize_session=False)
 
 
-def test_agent_loop_revision_service_requires_revision_request():
-    repo = RuleGenerationJobRepository()
-    parent = repo.create_job(
-        job_type="CHANGE_POLICY",
-        validation_report={"success": False},
-        created_by="pytest",
-    )
-    try:
-        with pytest.raises(ValueError, match="revision_request"):
-            AgentLoopRevisionService(repo).create_revision_job(parent["id"])
-    finally:
-        with get_db_session() as db:
-            db.query(RuleGenerationJobRecord).filter(
-                RuleGenerationJobRecord.id == parent["id"]
-            ).delete()
 
 
-def test_agent_loop_revision_executor_runs_validator_and_updates_report(monkeypatch):
-    repo = RuleGenerationJobRepository()
-    job = repo.create_job(
-        job_type="EVENT_RULE",
-        source_ref=f"agent_loop_revision:{uuid.uuid4().hex}",
-        payload={
-            "parent_job_id": f"parent-{uuid.uuid4().hex}",
-            "agent_loop_round": 2,
-            "rule": {
-                "name": "cpu-high-candidate",
-                "event_type": "CPUHigh",
-                "severity": "warning",
-                "condition": {
-                    "kind": "threshold",
-                    "entity_types": ["cpu"],
-                    "fields": ["cpu_5s"],
-                    "gte": 90,
-                },
-            },
-            "revision_request": {"target_generator": "event-rule-generator"},
-        },
-        validation_report={"success": None},
-        created_by="pytest",
-    )
-
-    def fake_execute_skill(skill_name, params):
-        assert skill_name == "event-rule-validator"
-        assert params["mode"] == "candidates"
-        assert len(params["candidate_rules"]) == 1
-        return {
-            "success": True,
-            "agent_loop": {
-                "ready_for_approval": True,
-                "next_action": "submit_for_approval",
-                "attempts": [
-                    {
-                        "attempt": 1,
-                        "stage": "event_rule_validation",
-                        "success": True,
-                    }
-                ],
-            },
-        }
-
-    monkeypatch.setattr("src.core.rule_control.executor.execute_generator", fake_execute_skill)
-
-    try:
-        result = AgentLoopRevisionExecutor(repo).execute(job["id"], actor="pytest")
-
-        assert result["success"] is True
-        assert result["job"]["status"] == "validating"
-        updated = repo.get_job(job["id"])
-        assert updated is not None
-        report = updated["validation_report_json"]
-        assert report["success"] is True
-        assert report["generator"] == "event-rule-validator"
-        assert report["revision_execution"]["agent_loop_round"] == 2
-        assert report["agent_loop"]["ready_for_approval"] is True
-    finally:
-        with get_db_session() as db:
-            db.query(RuleGenerationJobRecord).filter(
-                RuleGenerationJobRecord.id == job["id"]
-            ).delete()
 
 
-def test_agent_loop_revision_executor_rejects_failed_revision(monkeypatch):
-    repo = RuleGenerationJobRepository()
-    job = repo.create_job(
-        job_type="CHANGE_POLICY",
-        source_ref=f"agent_loop_revision:{uuid.uuid4().hex}",
-        payload={
-            "parent_job_id": f"parent-{uuid.uuid4().hex}",
-            "agent_loop_round": 2,
-            "observation_type": "device.cpu.utilization",
-            "field_name": "cpu_5s",
-            "field_semantics": {"semantic_type": "gauge", "unit": "percent"},
-        },
-        validation_report={"success": None},
-        created_by="pytest",
-    )
-
-    def fake_execute_skill(skill_name, params):
-        assert skill_name == "change-policy-generator"
-        return {"success": False, "error": "invalid policy"}
-
-    monkeypatch.setattr("src.core.rule_control.executor.execute_generator", fake_execute_skill)
-
-    try:
-        result = AgentLoopRevisionExecutor(repo).execute(job["id"], actor="pytest")
-
-        assert result["success"] is False
-        assert result["job"]["status"] == "rejected"
-        updated = repo.get_job(job["id"])
-        assert updated is not None
-        assert updated["validation_report_json"]["success"] is False
-    finally:
-        with get_db_session() as db:
-            db.query(RuleGenerationJobRecord).filter(
-                RuleGenerationJobRecord.id == job["id"]
-            ).delete()
 
 
-def test_rule_asset_submission_service_persists_successful_revision(monkeypatch):
-    repo = RuleGenerationJobRepository()
-    job = repo.create_job(
-        job_type="CHANGE_POLICY",
-        source_ref=f"agent_loop_revision:{uuid.uuid4().hex}",
-        payload={
-            "parent_job_id": f"parent-{uuid.uuid4().hex}",
-            "observation_type": "device.cpu.utilization",
-        },
-        validation_report={
-            "success": True,
-            "skill_result": {
-                "success": True,
-                "policy": {
-                    "observation_type": "device.cpu.utilization",
-                    "semantic_type": "gauge",
-                    "compare_mode": "threshold_and_deadband",
-                    "thresholds": {"high": 90},
-                    "recovery_threshold": 80,
-                },
-                "validation": {"success": True},
-            },
-        },
-        created_by="pytest",
-    )
-
-    def fake_execute_skill(skill_name, params):
-        assert skill_name == "rule-asset-persister"
-        assert params["created_by"] == "pytest"
-        assert params["change_policy_result"]["policy"]["compare_mode"] == (
-            "threshold_and_deadband"
-        )
-        return {
-            "success": True,
-            "asset_count": 1,
-            "jobs": [{"id": "generated-review-job"}],
-        }
-
-    monkeypatch.setattr("src.core.rule_control.submission.execute_generator", fake_execute_skill)
-
-    try:
-        repo.transition_job(job["id"], status="validating")
-
-        result = RuleAssetSubmissionService(repo).submit_candidate(
-            job["id"],
-            actor="pytest",
-        )
-
-        assert result["success"] is True
-        updated = repo.get_job(job["id"])
-        assert updated is not None
-        governance = updated["validation_report_json"]["governance"]
-        assert governance["submitted_by"] == "pytest"
-        assert governance["submitted_asset_count"] == 1
-        assert governance["submitted_job_ids"] == ["generated-review-job"]
-    finally:
-        with get_db_session() as db:
-            db.query(RuleGenerationJobRecord).filter(
-                RuleGenerationJobRecord.id == job["id"]
-            ).delete()
 
 
-def test_rule_asset_submission_service_requires_successful_validation():
-    repo = RuleGenerationJobRepository()
-    job = repo.create_job(
-        job_type="CHANGE_POLICY",
-        validation_report={
-            "success": False,
-            "skill_result": {"policy": {"observation_type": "cpu"}},
-        },
-        created_by="pytest",
-    )
-
-    try:
-        repo.transition_job(job["id"], status="validating")
-        with pytest.raises(RuleGenerationJobStateError, match="successful validation"):
-            RuleAssetSubmissionService(repo).submit_candidate(job["id"], actor="pytest")
-    finally:
-        with get_db_session() as db:
-            db.query(RuleGenerationJobRecord).filter(
-                RuleGenerationJobRecord.id == job["id"]
-            ).delete()
 
 
 def test_rule_generation_job_repository_rejects_non_draft_create():

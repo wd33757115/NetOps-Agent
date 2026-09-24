@@ -63,19 +63,10 @@ from src.apps.rule_governance.backend.parser.value_mapping_config import (
 )
 from src.apps.rule_governance.backend.parser.work_queue import ParserWorkQueueService
 from src.apps.rule_governance.backend.rule_control import (
-    AgentLoopRevisionExecutor,
-    AgentLoopRevisionService,
     RuleAssetApprovalService,
-    RuleAssetSubmissionService,
-    RuleAssetTemplateActivationService,
     RuleGenerationJobRepository,
     RuleGenerationJobStateError,
-    RuntimeRuleAssetResolver,
     RuntimeRuleAssetSeedService,
-)
-from src.apps.rule_governance.backend.rule_control.automation import (
-    RuleAssetAutomationService,
-    RuleAssetAutomationSettingsRepository,
 )
 from src.apps.rule_governance.backend.rule_control.bundles import RuleAssetBundleService
 from src.apps.rule_governance.backend.rule_control.command_asset_units import (
@@ -122,7 +113,6 @@ from src.core.collection.policy import (
     ExecutionPlan,
 )
 from src.core.device_ops.tools import PatrolTool
-from src.core.observation.repository import ObservationContractRepository
 from src.core.patrol.change_policy_repository import ChangePolicyRepository
 from src.core.patrol.event_rules import (
     EventRuleDefinition,
@@ -143,6 +133,8 @@ from src.platform.inventory.repository import DeviceRepository
 
 logger = logging.getLogger(__name__)
 
+from .published_assets import PublishedAssetService
+
 router = APIRouter(
     prefix="/parser",
     tags=["Parser Control Plane"],
@@ -158,6 +150,28 @@ def _refresh_rule_asset_projection_for_template(template_id: str) -> None:
             "Rule asset projection refresh failed template_id=%s",
             template_id,
         )
+
+
+class PublishedAssetBulkRequest(BaseModel):
+    kind: Literal['parser', 'policy', 'event']
+    action: Literal['deprecate', 'delete']
+    ids: list[str] = Field(min_length=1, max_length=100)
+    reason: str = Field(default='', max_length=2000)
+
+
+@router.post('/published-assets/bulk-action')
+def bulk_action_published_assets(request: Request, payload: PublishedAssetBulkRequest):
+    from .access import execution_lock
+    try:
+        with execution_lock():
+            result = PublishedAssetService().bulk(**payload.model_dump(), actor=_authenticated_actor(request))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if payload.kind == 'parser':
+        for item in result['results']:
+            if item['success']:
+                _refresh_rule_asset_projection_for_template(item['id'])
+    return result
 
 
 def _authenticated_user(request: Request) -> CurrentUser:
@@ -563,7 +577,6 @@ class RuntimeBundleAssemblyRequest(BaseModel):
     check_item_version_id: str
     implementation_version_id: str
     parser_template_ids: list[str] = Field(default_factory=list)
-    observation_contract_ids: list[str] = Field(default_factory=list)
     change_policy_version_ids: list[str] = Field(default_factory=list)
     event_rule_version_ids: list[str] = Field(default_factory=list)
     comparison_profile_version_id: str | None = None
@@ -945,47 +958,10 @@ def list_asset_production_check_items(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/asset-production/automation-control")
-def get_rule_asset_automation_control(
-    _user: CurrentUser = Depends(app_user),
-):
-    return RuleAssetAutomationSettingsRepository().status()
 
 
-@router.post("/asset-production/automation-control")
-def set_rule_asset_automation_control(
-    request: Request,
-    payload: RuleAssetAutomationControlRequest,
-    user: CurrentUser = Depends(app_user),
-):
-    try:
-        settings = RuleAssetAutomationSettingsRepository().set(
-            payload.model_dump(exclude={"reason"}),
-            actor=_authenticated_actor(request),
-            actor_user_id=user.user_id,
-            reason=_required_reason(
-                payload.reason,
-                action="rule asset automation policy change",
-            ),
-        )
-        return {
-            "success": True,
-            "settings": settings,
-            **RuleAssetAutomationSettingsRepository().status(),
-        }
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/asset-production/automation-control/run")
-def run_rule_asset_automation_now(
-    user: CurrentUser = Depends(app_user),
-):
-    try:
-        return RuleAssetAutomationService().run_once(actor=user.username, actor_user_id=user.user_id)
-    except Exception as exc:
-        logger.exception("Manual rule asset automation reconciliation failed")
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.get("/asset-production/units/{unit_id}")
@@ -1317,6 +1293,12 @@ def compare_template(template_id: str, request: Request, limit: int = 20):
     )
     source_evidence_errors: list[str] = []
     frozen_samples: list[dict[str, Any]] = []
+    if (candidate.validation_json or {}).get("import_package"):
+        from .transfer_service import TransferService
+        try:
+            frozen_samples = TransferService().parser_samples(candidate)
+        except ValueError as exc:
+            source_evidence_errors.append(str(exc))
     evidence_loader = getattr(repository, "get_candidate_sample_evidence", None)
     if candidate.source_job_id and callable(evidence_loader):
         evidence = evidence_loader(
@@ -1373,8 +1355,8 @@ def compare_template(template_id: str, request: Request, limit: int = 20):
                 "raw_text": sanitized_text,
                 "raw_text_sha256": sample.get("sanitized_hash")
                 or hashlib.sha256(sanitized_text.encode("utf-8")).hexdigest(),
-                "raw_text_redacted": True,
-                "evidence_kind": "sanitized_candidate_sample",
+                "raw_text_redacted": sample.get("sample_role") != "package_replay",
+                "evidence_kind": "rule_package_sample" if sample.get("sample_role") == "package_replay" else "sanitized_candidate_sample",
                 "sample_role": sample.get("sample_role"),
                 "expectation": sample.get("expectation") or {},
                 "source_context": source_context,
@@ -1555,7 +1537,7 @@ def compare_template(template_id: str, request: Request, limit: int = 20):
         "check_item_capabilities": check_item_capabilities,
         "capability_claim": (
             "Parser approval proves structured extraction only. Canonical check-item "
-            "mapping requires an approved ObservationContract, and production readiness "
+            "mapping requires an approved CheckItem / CommandAdapter V2, and production readiness "
             "requires a complete RuntimeBundle."
         ),
         "review_readiness": {
@@ -1636,6 +1618,7 @@ def submit_manual_parser_candidate(
             job_id=job_id,
             template_text=payload.template_text,
             actor=_authenticated_actor(request),
+            actor_user_id=_authenticated_user(request).user_id,
             reason=payload.reason,
             based_on_template_id=payload.based_on_template_id,
         )
@@ -1679,15 +1662,7 @@ def suggest_parser_spec(
     revision_instruction = str(payload.revision_instruction or "").strip()
     check_item_id = str(payload.check_item_id or "").strip()
     try:
-        if check_item_id:
-            # Selecting B in the source Parser workflow is the one and only
-            # pre-production association.  Persist it on the imported command
-            # as well, so the later Projection/adapter step sees the same B.
-            RuleAssetCommandUnitService().associate_parser_job_to_check_item(
-                job_id,
-                check_item_id=check_item_id,
-                actor=_authenticated_actor(request),
-            )
+        # Association is an explicit catalog action, never a side effect of generation.
         repository.queue_parser_spec_suggestion(
             job_id,
             task_id=task_id,
@@ -2523,105 +2498,14 @@ def review_rule_asset_bundle(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-@router.post("/rule-asset-bundles/{bundle_id}/engineering-revision")
-def revise_rule_asset_bundle(
-    bundle_id: str,
-    request: Request,
-    payload: RuleAssetEngineeringRevisionRequest,
-    async_mode: bool = False,
-):
-    try:
-        if async_mode:
-            from src.apps.rule_governance.backend.rule_control.engineering_revision_async import (
-                enqueue_engineering_revision,
-            )
-
-            return enqueue_engineering_revision(
-                bundle_id,
-                contract=payload.contract,
-                change_policies=list(payload.change_policies or []),
-                event_rules=list(payload.event_rules or []),
-                actor=_authenticated_actor(request),
-                actor_user_id=_authenticated_user(request).user_id,
-                reason=payload.reason,
-                idempotency_key=payload.idempotency_key,
-            )
-        from src.apps.rule_governance.backend.rule_control.engineering_revision_jobs import EngineeringRevisionJobs
-        jobs = EngineeringRevisionJobs()
-        submitted = jobs.submit(
-            bundle_id,
-            contract=payload.contract,
-            change_policies=payload.change_policies,
-            event_rules=payload.event_rules,
-            actor=_authenticated_actor(request),
-            actor_user_id=_authenticated_user(request).user_id,
-            reason=payload.reason,
-            idempotency_key=payload.idempotency_key,
-            dispatch=False,
-        )
-        jobs.run(submitted["task_id"])
-        user = _authenticated_user(request)
-        state = jobs.read(submitted["task_id"], user_id=user.user_id, is_admin=user.is_admin())
-        if state["successful"]:
-            return state["result"]["result"]
-        if state["ready"]:
-            raise HTTPException(422, {"message": state["error"], "validation": state.get("validation")})
-        return {"success": True, "async": True, **state}
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except RuleAssetEngineeringRevisionError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={"message": str(exc), "validation": exc.validation},
-        ) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-@router.get("/engineering-revision-tasks/{task_id}")
-def get_engineering_revision_task(task_id: str, request: Request):
-    from src.apps.rule_governance.backend.rule_control.engineering_revision_jobs import EngineeringRevisionJobs
-    user = _authenticated_user(request)
-    try:
-        return EngineeringRevisionJobs().read(task_id, user_id=user.user_id, is_admin=user.is_admin())
-    except KeyError as exc:
-        raise HTTPException(404, "revision task not found") from exc
 
 
-@router.get("/rule-asset-bundles/{bundle_id}/engineering-revisions")
-def list_engineering_revision_tasks(bundle_id: str, request: Request):
-    from src.apps.rule_governance.backend.rule_control.engineering_revision_jobs import EngineeringRevisionJobs
-    user = _authenticated_user(request)
-    return EngineeringRevisionJobs().list_for_bundle(bundle_id, user_id=user.user_id, is_admin=user.is_admin())
 
 
-@router.get("/engineering-revision-tasks/{task_id}/inspection")
-def inspect_engineering_revision_task(task_id: str, request: Request):
-    from src.apps.rule_governance.backend.rule_control.engineering_revision_jobs import EngineeringRevisionJobs
-
-    user = _authenticated_user(request)
-    try:
-        return EngineeringRevisionJobs().inspection(task_id, user_id=user.user_id, is_admin=user.is_admin())
-    except KeyError as exc:
-        raise HTTPException(404, "revision task not found") from exc
-    except ValueError as exc:
-        raise HTTPException(409, str(exc)) from exc
 
 
-@router.post("/engineering-revision-tasks/{task_id}/resolve")
-def resolve_engineering_revision_task(task_id: str, request: Request, payload: EngineeringRevisionResolutionRequest):
-    from src.apps.rule_governance.backend.rule_control.engineering_revision_jobs import EngineeringRevisionJobs
-
-    user = _authenticated_user(request)
-    try:
-        return EngineeringRevisionJobs().resolve(
-            task_id, user_id=user.user_id, actor=_authenticated_actor(request),
-            is_admin=user.is_admin(), evidence_digest=payload.evidence_digest, note=payload.note,
-        )
-    except KeyError as exc:
-        raise HTTPException(404, "revision task not found") from exc
-    except ValueError as exc:
-        raise HTTPException(409, str(exc)) from exc
 
 
 @router.get("/replay-reports")
@@ -2682,21 +2566,6 @@ def list_rule_asset_agent_loop_attempts(
     )
 
 
-@router.get("/observation-contracts")
-def list_observation_contracts(
-    source_type: str | None = None,
-    status: str | None = None,
-    search: str | None = None,
-    limit: int = 20,
-    offset: int = 0,
-):
-    return ObservationContractRepository().list_contracts_page(
-        source_type=source_type,
-        status=status,
-        search=search,
-        limit=limit,
-        offset=offset,
-    )
 
 
 @router.get("/catalog/adapter-projections/cutover-readiness")
@@ -2869,22 +2738,8 @@ def list_change_policies(
     )
 
 
-@router.post("/runtime-assets/resolve")
-def resolve_runtime_rule_assets(payload: RuntimeRuleAssetResolveRequest):
-    return (
-        RuntimeRuleAssetResolver()
-        .load_bundle(
-            observation_schemas=payload.observation_schemas,
-            observation_types=payload.observation_types,
-            include_event_rules=payload.include_event_rules,
-        )
-        .to_dict()
-    )
 
 
-@router.get("/runtime-assets/health")
-def get_runtime_rule_asset_health():
-    return RuntimeRuleAssetResolver().load_inventory_bundle().to_dict()
 
 
 @router.get("/assessment-policies")
@@ -3395,7 +3250,6 @@ def preview_check_item_runtime_bundle_assembly(
             check_item_version_id=payload.check_item_version_id,
             implementation_version_id=payload.implementation_version_id,
             parser_template_ids=payload.parser_template_ids,
-            observation_contract_ids=payload.observation_contract_ids,
             change_policy_version_ids=payload.change_policy_version_ids,
             event_rule_version_ids=payload.event_rule_version_ids,
             comparison_profile_version_id=payload.comparison_profile_version_id,
@@ -3422,7 +3276,6 @@ def assemble_check_item_runtime_bundle(
             preview_digest=payload.preview_digest,
             actor=_authenticated_actor(request),
             parser_template_ids=payload.parser_template_ids,
-            observation_contract_ids=payload.observation_contract_ids,
             change_policy_version_ids=payload.change_policy_version_ids,
             event_rule_version_ids=payload.event_rule_version_ids,
             comparison_profile_version_id=payload.comparison_profile_version_id,
@@ -3994,204 +3847,16 @@ def approve_rule_generation_job(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.post("/rule-generation-jobs/{job_id}/revise")
-def revise_rule_generation_job(
-    job_id: str,
-    request: Request,
-    payload: RuleGenerationJobApprovalRequest | None = None,
-):
-    try:
-        return AgentLoopRevisionService().create_revision_job(
-            job_id,
-            actor=_authenticated_actor(request),
-        )
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-@router.post("/rule-generation-jobs/{job_id}/execute-revision")
-def execute_rule_generation_revision_job(
-    job_id: str,
-    request: Request,
-    payload: RuleGenerationJobApprovalRequest | None = None,
-):
-    try:
-        return AgentLoopRevisionExecutor().execute(
-            job_id,
-            actor=_authenticated_actor(request),
-        )
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except RuleGenerationJobStateError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.post("/rule-generation-jobs/{job_id}/submit")
-def submit_rule_generation_job_candidate(
-    job_id: str,
-    request: Request,
-    payload: RuleGenerationJobApprovalRequest | None = None,
-):
-    try:
-        return RuleAssetSubmissionService().submit_candidate(
-            job_id,
-            actor=_authenticated_actor(request),
-        )
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except RuleGenerationJobStateError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-@router.post("/rule-generation-jobs/{job_id}/auto-context")
-def auto_build_rule_generation_context(
-    job_id: str,
-    http_request: Request,
-    payload: RuleAssetGenerationContextRequest | None = None,
-):
-    try:
-        request = payload or RuleAssetGenerationContextRequest()
-        return RuleAssetTemplateActivationService().auto_build_context(
-            job_id,
-            dataset_ids=list(request.dataset_ids or []),
-            actor=_authenticated_actor(http_request),
-        )
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-@router.post("/rule-generation-jobs/{job_id}/generation-context")
-def preview_rule_asset_generation_context(
-    job_id: str,
-    http_request: Request,
-    payload: RuleAssetGenerationContextRequest | None = None,
-):
-    try:
-        request = payload or RuleAssetGenerationContextRequest()
-        if not request.context_id and not request.dataset_ids:
-            raise ValueError(
-                "select an offline patrol dataset before previewing rule generation context"
-            )
-        overrides = dict(request.context_overrides or {})
-        prepared_dataset = None
-        if request.context_id or request.dataset_ids:
-            from src.apps.rule_governance.backend.rule_control.dataset_context import (
-                DatasetRuleGenerationContextService,
-            )
-
-            context_service = DatasetRuleGenerationContextService()
-            prepared_dataset = (
-                context_service.load(context_id=request.context_id, job_id=job_id)
-                if request.context_id
-                else context_service.prepare(
-                    job_id=job_id,
-                    dataset_ids=list(request.dataset_ids or []),
-                    created_by=_authenticated_actor(http_request),
-                    max_records=request.max_records,
-                    field_name=request.field_name,
-                    observation_type=request.observation_type,
-                )
-            )
-            protected = {
-                "records",
-                "record_groups",
-                "historical_values",
-                "historical_values_by_field",
-                "field_name",
-                "observation_type",
-                "replay_run_ids",
-            }.intersection(overrides)
-            if protected:
-                raise ValueError(
-                    "immutable dataset context cannot override: " + ", ".join(sorted(protected))
-                )
-            overrides = {**prepared_dataset["context"], **overrides}
-        result = RuleAssetTemplateActivationService().build_generation_context(
-            job_id,
-            context_overrides=overrides,
-        )
-        if prepared_dataset:
-            result.update(
-                context_id=prepared_dataset["context_id"],
-                context_digest=prepared_dataset["context_digest"],
-                dataset_ids=prepared_dataset["dataset_ids"],
-                privacy=prepared_dataset["privacy"],
-            )
-        return result
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-@router.post("/rule-generation-jobs/{job_id}/start-generation")
-def start_rule_asset_generation_workflow(
-    job_id: str,
-    http_request: Request,
-    payload: RuleAssetGenerationContextRequest | None = None,
-):
-    try:
-        request = payload or RuleAssetGenerationContextRequest()
-        if not request.context_id and not request.dataset_ids:
-            raise ValueError(
-                "select an offline patrol dataset before starting rule asset generation"
-            )
-        overrides = dict(request.context_overrides or {})
-        context_id = request.context_id
-        if context_id or request.dataset_ids:
-            from src.apps.rule_governance.backend.rule_control.dataset_context import (
-                DatasetRuleGenerationContextService,
-            )
-
-            context_service = DatasetRuleGenerationContextService()
-            prepared_dataset = (
-                context_service.load(context_id=context_id, job_id=job_id)
-                if context_id
-                else context_service.prepare(
-                    job_id=job_id,
-                    dataset_ids=list(request.dataset_ids or []),
-                    created_by=_authenticated_actor(http_request),
-                    max_records=request.max_records,
-                    field_name=request.field_name,
-                    observation_type=request.observation_type,
-                )
-            )
-            protected = {
-                "records",
-                "record_groups",
-                "historical_values",
-                "historical_values_by_field",
-                "field_name",
-                "observation_type",
-                "replay_run_ids",
-            }.intersection(overrides)
-            if protected:
-                raise ValueError(
-                    "immutable dataset context cannot override: " + ", ".join(sorted(protected))
-                )
-            overrides = {**prepared_dataset["context"], **overrides}
-            context_id = prepared_dataset["context_id"]
-        generation_kwargs = {
-            "context_overrides": overrides,
-            "actor": _authenticated_actor(http_request),
-            "actor_user_id": _authenticated_user(http_request).user_id,
-        }
-        if context_id:
-            generation_kwargs["context_id"] = context_id
-        return RuleAssetTemplateActivationService().start_generation(
-            job_id,
-            **generation_kwargs,
-        )
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/rule-generation-jobs/{job_id}/reject")

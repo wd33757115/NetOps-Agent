@@ -53,6 +53,60 @@ def test_start_is_idempotent_and_never_changes_human_definition(environment):
         assert db.get(CheckItemVersionRecord, "version").digest == "human-digest"
 
 
+@pytest.mark.parametrize("action", ["start", "resume"])
+def test_human_start_carries_parser_retry_through_rules(environment, action):
+    service, _, _ = environment
+    if action == "resume":
+        service.control("source", "unit", action="start", actor="admin")
+        service.control("source", "unit", action="pause", actor="admin")
+    service._inputs.return_value = {**service._inputs.return_value, "result_mode": "structured"}
+    state = service.control("source", "unit", action=action, actor="admin")
+    assert state["stage"] == "rules"
+    assert state["outputs"]["retry_requested"] is True
+
+
+def test_failed_parser_is_retried_once_then_requires_human_intervention(environment, monkeypatch):
+    from src.core.rule_control import command_autopilot_steps as steps
+    from src.core.parser.repository import ParserJobRepository, ParserSampleRepository
+    from src.core.celery_tasks.celery_app import celery
+    service, scope, dispatch = environment
+    service._inputs.return_value = {
+        **service._inputs.return_value, "result_mode": "structured",
+        "unit": {**service._inputs.return_value["unit"], "parser_job_id": "parser"},
+    }
+    job = {"id": "parser", "status": "cancelled", "last_error": "应用已停用"}
+    monkeypatch.setattr(ParserJobRepository, "get_job", lambda *a, **k: dict(job))
+    retry = Mock(side_effect=lambda *a, **k: job.update(status="pending", last_error=None))
+    monkeypatch.setattr(ParserJobRepository, "retry_job", retry)
+    queue = Mock(side_effect=lambda *a, **k: job.update(agent_state_json={"parser_spec_suggestion": {"status": "queued"}}))
+    monkeypatch.setattr(ParserJobRepository, "queue_parser_spec_suggestion", queue)
+    monkeypatch.setattr(ParserSampleRepository, "sanitize_pending_samples", Mock())
+    monkeypatch.setattr(celery, "send_task", Mock())
+    # Only the candidate lookup is irrelevant here; exercise the real executor and state machine.
+    db_context = Mock()
+    db_context.__enter__ = Mock(return_value=db_context)
+    db_context.__exit__ = Mock(return_value=False)
+    db_context.query.return_value.filter.return_value.order_by.return_value.first.return_value = None
+    monkeypatch.setattr(steps, "get_db_session", lambda: db_context)
+    service.control("source", "unit", action="start", actor="admin")
+    with scope() as db:
+        row = db.get(ParserControlSetting, task_key("source", "unit"))
+        row.value_json = {**row.value_json, "stage": "parser"}
+    result = service.advance(task_key("source", "unit"))
+    assert result["status"] == "queued", result.get("error")
+    assert "retry_requested" not in result["outputs"]
+    retry.assert_called_once()
+    queue.assert_called_once()
+    job.update(status="failed", last_error="新一轮解析失败")
+    result = service.advance(task_key("source", "unit"))
+    assert result["status"] == "needs_attention"
+    assert result["error"] == "新一轮解析失败"
+    retry.assert_called_once()
+    count = dispatch.call_count
+    assert service.advance(task_key("source", "unit")) == {"skipped": True}
+    assert dispatch.call_count == count
+
+
 def test_pause_fences_inflight_result_and_next_step(environment):
     service, scope, dispatch = environment
     service.control("source", "unit", action="start", actor="admin", authorize_publish=True)

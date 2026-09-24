@@ -19,7 +19,6 @@ from src.infrastructure.db.models import (
     NetworkEventOccurrenceRecord,
     NetworkEventOutboxRecord,
     NetworkEventRecord,
-    ObservationContractRecord,
     OfflinePatrolJobRecord,
     OfflinePatrolPeriodRecord,
     ParserBackfillJobRecord,
@@ -325,7 +324,7 @@ Start
             db.query(PatrolRun).filter_by(id=run_id).delete()
             db.query(PatrolRun).filter_by(id=excluded_run_id).delete()
             db.query(PatrolRun).filter_by(id=validation_run_id).delete()
-            db.query(ObservationContractRecord).filter_by(source_template_id=template_id).delete()
+            pass
             db.query(ParserTemplate).filter_by(id=template_id).delete()
 
 
@@ -444,9 +443,7 @@ Start
             db.query(PatrolRun).filter(PatrolRun.id.in_(run_ids)).delete(
                 synchronize_session=False
             )
-            db.query(ObservationContractRecord).filter_by(
-                source_template_id=template_id
-            ).delete()
+            pass
             db.query(ParserTemplate).filter_by(id=template_id).delete()
 
 

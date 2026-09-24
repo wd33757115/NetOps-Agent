@@ -163,10 +163,8 @@ if (Test-Path $pidFile) {
     Stop-RecordedProjectLaunchers -Records $old -ProjectRoot $ProjectRoot
     Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
 }
-# Celery Beat writes its own PID file. A forced Windows process-tree stop cannot
-# remove that file, so a clean restart must discard the now-stale runtime marker.
-$celeryBeatRuntimePid = Join-Path $runtimeDir "celery-beat.pid"
-Remove-Item $celeryBeatRuntimePid -Force -ErrorAction SilentlyContinue
+# Forced Windows stops leave PID files behind. Never remove a live scheduler's lock.
+Clear-StaleProjectBeatPid -ProjectRoot $ProjectRoot
 foreach ($round in 1..2) {
     foreach ($p in $AppPorts) { Kill-ProcessOnPort -Port $p | Out-Null }
     $busy = @()
@@ -339,9 +337,8 @@ Write-ColorOutput "  [TIP] Long LLM calls are isolated from patrol, health and r
 Write-ColorOutput "        Debug: scripts\test\celery_worker.ps1" "Gray"
 $celeryBeatLog = Join-Path $logDir "celery-beat.log"
 $celeryBeatLauncher = Join-Path $logDir "celery-beat-launcher.ps1"
-$celeryBeatPid = Join-Path $runtimeDir "celery-beat.pid"
-$celeryBeatSchedule = Join-Path $runtimeDir "celery-beat-schedule"
-$celeryBeatCmd = "& '$py' -m celery -A src.core.celery_tasks.celery_app beat --loglevel=info --pidfile='$celeryBeatPid' --schedule='$celeryBeatSchedule'"
+$celeryBeatEntry = Escape-SingleQuotedPath (Join-Path $ProjectRoot 'scripts\test\celery_beat.ps1')
+$celeryBeatCmd = "& '$celeryBeatEntry' -ProjectRoot '$(Escape-SingleQuotedPath $ProjectRoot)'"
 New-LauncherScript -Path $celeryBeatLauncher -WorkingDirectory $ProjectRoot -EnvVars $celeryEnv -CommandLine $celeryBeatCmd -LogFile $celeryBeatLog -PreCommands @(
     'Remove-Item Env:DJANGO_SETTINGS_MODULE -ErrorAction SilentlyContinue'
 )
@@ -473,7 +470,7 @@ Write-ColorOutput "  React:   http://localhost:$ReactPort/chat  $(if ($reactOk) 
 Write-ColorOutput "  Django:  http://localhost:$DjangoPort/api/health/  $(if ($bffOk) { '[OK]' } else { '[WAIT]' })" "Gray"
 Write-ColorOutput "  FastAPI: http://localhost:$FastAPIPort/health  $(if ($apiOk) { '[OK]' } else { '[WAIT]' })" "Gray"
 Write-ColorOutput "  Materials: http://localhost:$ReactPort/apps/materials (publish shared sources; App grant required)" "Gray"
-Write-ColorOutput "  Assistant: http://localhost:$ReactPort/apps/assistant (DSH runs inside Gateway; App grant required)" "Gray"
+Write-ColorOutput "  Assistant: http://localhost:$ReactPort/chat (DSH runs inside Gateway; App grant required)" "Gray"
 Write-ColorOutput '  First enablement: add -EnableApps materials,assistant; existing enablement and grants are preserved.' "Gray"
 Write-ColorOutput "  Celery:  celery-core.log (patrol), celery-ai.log (discovered App queues), celery-beat.log" "Gray"
 if ($dockerOk -and -not $SkipLangfuse) {

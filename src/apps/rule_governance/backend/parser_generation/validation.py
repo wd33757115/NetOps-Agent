@@ -40,7 +40,7 @@ class TextFSMValidationBackend:
         """Compile with the same TextFSM runtime used in production.
 
         Platform dialect lint remains available to authors and audits, but it is
-        not execution truth. In particular, trusted ntc_templates legitimately
+        not execution truth. Engineer-uploaded templates may legitimately
         use native constructs such as ``Required``, ``NoRecord`` and implicit
         EOF recording. The generation loop must execute those templates and
         give their actual rows (or runtime error) to semantic review instead of

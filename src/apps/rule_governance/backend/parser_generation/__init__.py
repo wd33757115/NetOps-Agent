@@ -1,18 +1,6 @@
 """Bounded, job-oriented Parser generation primitives."""
 
 from .compilers import KeyValueCompiler, RepeatedBlockCompiler, TableCompiler
-from .ntc_resolver import (
-    NtcPlatformDecision,
-    NtcPlatformMapper,
-    NtcResolution,
-    NtcTemplateResolver,
-)
-from .ntc_upgrade import (
-    NTC_REGRESSION_BASELINE_VERSION,
-    NTC_REGRESSION_DECISION_VERSION,
-    compare_ntc_resolution,
-    freeze_ntc_resolution,
-)
 from .publishing import (
     PersistedGeneration,
     RepositoryGenerationObserver,
@@ -72,12 +60,6 @@ __all__ = [
     "RepositoryGenerationObserver",
     "RepositoryModelCallController",
     "ModelCallBudgetExhaustedError",
-    "NtcPlatformDecision",
-    "NtcPlatformMapper",
-    "NtcResolution",
-    "NtcTemplateResolver",
-    "NTC_REGRESSION_BASELINE_VERSION",
-    "NTC_REGRESSION_DECISION_VERSION",
     "SampleExpectation",
     "SampleRole",
     "SampleSet",
@@ -89,8 +71,6 @@ __all__ = [
     "TextFSMValidationBackend",
     "ValidationReport",
     "execute_template_candidate",
-    "freeze_ntc_resolution",
-    "compare_ntc_resolution",
     "validate_template_candidate",
     "validate_template_execution",
     "validate_template_runtime_compatibility",

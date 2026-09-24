@@ -103,7 +103,6 @@ from src.infrastructure.db.models import (
     NetworkDevice,
     NetworkEventOccurrenceRecord,
     NetworkEventRecord,
-    ObservationContractRecord,
     ParserTemplate,
     PatrolBatchDeviceRecord,
     PatrolBatchRecord,
@@ -191,7 +190,6 @@ def _runtime(tmp_path):
             AuditLogRecord.__table__,
             ParserTemplate.__table__,
             CollectionImplementationParserBindingRecord.__table__,
-            ObservationContractRecord.__table__,
             ChangePolicyRecord.__table__,
             ChangePolicyVersionRecord.__table__,
             EventRuleRecord.__table__,
@@ -411,33 +409,6 @@ def _seed_cpu_assets(session_factory, catalog_repository):
                     created_at=now,
                     updated_at=now,
                 ),
-                ObservationContractRecord(
-                    id="contract-cpu-v1",
-                    source_type="cli",
-                    schema_id="h3c.cpu.usage",
-                    source_template_id="parser-cpu-v1",
-                    entity_type="cpu_scope",
-                    primary_keys_json=["scope", "scope_id"],
-                    required_fields_json=["cpu_usage"],
-                    optional_fields_json=[],
-                    validators_json={},
-                    ignore_fields_json=[],
-                    allow_empty=False,
-                    empty_patterns_json=[],
-                    state_semantics_json={
-                        "cpu_usage": {
-                            "observation_type": "device.cpu.utilization",
-                            "semantic_type": "gauge",
-                            "unit": "percent",
-                            "dimensions": {"window": "instant"},
-                        }
-                    },
-                    record_sets_json=[],
-                    version=1,
-                    contract_sha256="b" * 64,
-                    status="active",
-                    activated_at=now,
-                ),
                 ChangePolicyRecord(
                     id="policy-cpu",
                     name="policy:device.cpu.utilization",
@@ -587,7 +558,7 @@ def _seed_cpu_assets(session_factory, catalog_repository):
     return check_item, implementation
 
 
-def _create_cpu_bundle(tmp_path, *, direct_projection: bool = False):
+def _create_cpu_bundle(tmp_path, *, direct_projection: bool = True):
     session_factory, scope, catalog_repository = _runtime(tmp_path)
     check_item, implementation = _seed_cpu_assets(
         session_factory,
@@ -632,7 +603,6 @@ def _create_cpu_bundle(tmp_path, *, direct_projection: bool = False):
         check_item_version_id=check_item.version_id,
         implementation_version_id=implementation.version_id,
         parser_template_ids=["parser-cpu-v1"],
-        observation_contract_ids=([] if direct_projection else ["contract-cpu-v1"]),
         change_policy_version_ids=["policy-cpu-v1"],
         event_rule_bindings={
             "rule-cpu-high-v1": "device.cpu.utilization",
@@ -782,7 +752,6 @@ def _create_configuration_bundle(tmp_path):
         check_item_version_id=check_item.version_id,
         implementation_version_id=implementation.version_id,
         parser_template_ids=[],
-        observation_contract_ids=[],
         change_policy_version_ids=[],
         event_rule_bindings={},
         comparison_profile_version_id=profile.version_id,
@@ -2129,7 +2098,6 @@ def test_runtime_bundle_does_not_block_on_missing_optional_observation(tmp_path)
         check_item_version_id=check_item.version_id,
         implementation_version_id=implementation.version_id,
         parser_template_ids=["parser-cpu-v1"],
-        observation_contract_ids=["contract-cpu-v1"],
         change_policy_version_ids=["policy-cpu-v1"],
         event_rule_bindings={
             "rule-cpu-high-v1": "device.cpu.utilization",
@@ -2186,38 +2154,6 @@ def test_runtime_bundle_rejects_parser_spec_and_textfsm_field_drift(tmp_path):
     assert blocker["remediation_action"]["asset_type"] == "parser_template"
 
 
-def test_runtime_bundle_rejects_contract_fields_absent_from_parser(tmp_path):
-    session_factory, scope, catalog_repository = _runtime(tmp_path)
-    check_item, implementation = _seed_cpu_assets(
-        session_factory,
-        catalog_repository,
-    )
-    EntityIdentityPolicyRepository(scope).bootstrap(actor="test")
-    with _session_scope(session_factory) as db:
-        contract = db.get(ObservationContractRecord, "contract-cpu-v1")
-        contract.required_fields_json = [
-            *list(contract.required_fields_json or []),
-            "phantom_metric",
-        ]
-
-    preview = CheckItemRuntimeBundleService(scope).preview_assembly(
-        check_item_version_id=check_item.version_id,
-        implementation_version_id=implementation.version_id,
-    )
-
-    assert preview["operationally_ready"] is False
-    assert "observation_contract_source_field_missing" in {
-        item["code"] for item in preview["blockers"]
-    }
-    blocker = next(
-        item
-        for item in preview["blockers"]
-        if item["code"] == "observation_contract_source_field_missing"
-    )
-    assert blocker["context"]["fields"] == ["phantom_metric"]
-    assert blocker["remediation_action"]["code"] == (
-        "repair_observation_contract"
-    )
 
 
 def test_runtime_bundle_assembly_rejects_stale_preview(tmp_path):
@@ -2334,71 +2270,6 @@ def test_runtime_bundle_accepts_exact_model_pattern_and_plural_vendor_selector(t
     assert "implementation_scope_broader_than_parser" not in blocker_codes
 
 
-def test_runtime_bundle_requires_source_to_canonical_entity_mapping(tmp_path):
-    session_factory, scope, catalog_repository = _runtime(tmp_path)
-    check_item, implementation = _seed_cpu_assets(
-        session_factory,
-        catalog_repository,
-    )
-    EntityIdentityPolicyRepository(scope).bootstrap(actor="test")
-    with _session_scope(session_factory) as db:
-        parser = db.get(ParserTemplate, "parser-cpu-v1")
-        parser.template_text = (
-            "Value slot (\\S+)\n"
-            "Value cpu (\\S+)\n"
-            "Value cpu_usage (\\d+)\n\n"
-            "Start\n"
-            " ^CPU usage slot ${slot} cpu ${cpu}: ${cpu_usage}% -> Record\n"
-        )
-        validation = dict(parser.validation_json or {})
-        validation["parser_spec"] = {
-            "entity": "cpu_record",
-            "primary_keys": ["slot", "cpu"],
-            "fields": {
-                "slot": {"required": True, "type": "text"},
-                "cpu": {"required": True, "type": "text"},
-                "cpu_usage": {"required": True, "type": "number"},
-            },
-            "allow_empty": False,
-            "empty_patterns": [],
-        }
-        parser.validation_json = validation
-        contract = db.get(ObservationContractRecord, "contract-cpu-v1")
-        contract.entity_type = "cpu_record"
-        contract.primary_keys_json = ["slot", "cpu"]
-        contract.required_fields_json = ["slot", "cpu", "cpu_usage"]
-        contract.canonical_entity_type = "cpu_scope"
-        contract.entity_identity_fields_json = ["scope", "scope_id"]
-        contract.entity_dimensions_json = {}
-
-    blocked = CheckItemRuntimeBundleService(scope).preview_assembly(
-        check_item_version_id=check_item.version_id,
-        implementation_version_id=implementation.version_id,
-    )
-    assert blocked["operationally_ready"] is False
-    assert "canonical_identity_mapping_missing" in {
-        item["code"] for item in blocked["blockers"]
-    }
-
-    with _session_scope(session_factory) as db:
-        contract = db.get(ObservationContractRecord, "contract-cpu-v1")
-        contract.entity_dimensions_json = {
-            "scope": {"literal": "processor"},
-            "scope_id": {
-                "op": "concat",
-                "args": [
-                    {"field": "slot"},
-                    {"literal": "/"},
-                    {"field": "cpu"},
-                ],
-            },
-        }
-
-    ready = CheckItemRuntimeBundleService(scope).preview_assembly(
-        check_item_version_id=check_item.version_id,
-        implementation_version_id=implementation.version_id,
-    )
-    assert ready["operationally_ready"] is True, ready["blockers"]
 
 
 def test_runtime_bundle_rejects_rule_without_explicit_observation_type(tmp_path):
@@ -2441,7 +2312,6 @@ def test_runtime_bundle_rejects_health_assets_without_current_state_rule(tmp_pat
             check_item_version_id=check_item.version_id,
             implementation_version_id=implementation.version_id,
             parser_template_ids=["parser-cpu-v1"],
-            observation_contract_ids=["contract-cpu-v1"],
             change_policy_version_ids=["policy-cpu-v1"],
             event_rule_bindings={
                 "rule-cpu-high-v1": "device.cpu.utilization",
@@ -2513,7 +2383,6 @@ def test_nonstructured_runtime_bundle_freezes_comparison_profile(tmp_path):
         check_item_version_id=check_item.version_id,
         implementation_version_id=implementation.version_id,
         parser_template_ids=[],
-        observation_contract_ids=[],
         change_policy_version_ids=[],
         event_rule_bindings={},
         actor="test",

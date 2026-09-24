@@ -23,7 +23,6 @@ from spec_suggester import (  # noqa: E402
     _enrich_structural_spec,
     _nested_record_layout,
     _normalize_spec,
-    _ntc_parser_spec_draft,
     _representative_data_samples,
     _semantic_valid_empty_spec_draft,
     suggest_parser_spec,
@@ -104,40 +103,6 @@ def test_semantic_valid_empty_spec_draft_accepts_governed_vrrp_header():
     assert spec["record_sets"][0]["allow_empty"] is True
 
 
-def test_parser_spec_prompt_uses_trusted_parser_value_shapes_as_execution_evidence():
-    prompt = _build_prompt(
-        {
-            "vendor": "Cisco",
-            "model": "N9K-C9364C",
-            "canonical_command": "show interface status",
-        },
-        [{"id": "sample-1", "sanitized_text": "Eth1/1 connected trunk auto 40G"}],
-        [],
-        [
-            {
-                "provider": "ntc_templates",
-                "template_name": "cisco_nxos_show_interface_status.textfsm",
-                "field_profiles": {
-                    "speed": {
-                        "examples": ["auto", "40G", "100G"],
-                        "value_shape": "text",
-                    },
-                    "vlan_id": {
-                        "examples": ["trunk", "routed"],
-                        "value_shape": "text",
-                    },
-                },
-            }
-        ],
-    )
-
-    assert "cisco_nxos_show_interface_status.textfsm" in prompt
-    assert '"speed"' in prompt
-    assert '"vlan_id"' in prompt
-    assert "do not replace them with an" in prompt
-    assert "auto, 40G, routed or trunk" in prompt
-
-
 def test_parser_spec_prompt_prefers_check_item_field_names_without_making_them_a_gate():
     prompt = _build_prompt(
         {
@@ -146,7 +111,6 @@ def test_parser_spec_prompt_prefers_check_item_field_names_without_making_them_a
             "canonical_command": "show interface status",
         },
         [{"id": "sample-1", "sanitized_text": "Eth1/1 connected"}],
-        [],
         [],
         {
             "schema_version": "parser-field-naming-guidance/v1",
@@ -180,7 +144,7 @@ def test_parser_spec_prompt_receives_the_selected_canonical_contract():
         family=None,
         profile="S6000",
         command="display interface brief",
-        check_item_id="interface.oper_status",
+        check_item_id="interface.runtime_statistics",
     )
     prompt = _build_prompt(
         {
@@ -190,16 +154,15 @@ def test_parser_spec_prompt_receives_the_selected_canonical_contract():
         },
         [{"id": "sample-1", "sanitized_text": "FGE1/0/25 down"}],
         [],
-        [],
         context,
     )
 
     assert [item["check_item_id"] for item in context["check_items"]] == [
-        "interface.oper_status"
+        "interface.runtime_statistics"
     ]
     assert context["check_items"][0]["canonical_contract"]
     assert '"canonical_contract"' in prompt
-    assert '"interface.oper_status"' in prompt
+    assert '"interface.runtime_statistics"' in prompt
 
 
 def test_parser_spec_normalization_prefers_unambiguous_check_item_field_name():
@@ -438,31 +401,26 @@ def test_simple_job_uses_deterministic_pipeline_without_llm(mock_session, tmp_pa
         for snapshot_id in ("snapshot-generation", "snapshot-acceptance")
     }
     attempts: list[dict] = []
-    with patch("generate_templates.NtcTemplateResolver") as ntc_resolver:
-        ntc_resolver.return_value.resolve.return_value = (None, [])
-        with patch("generate_templates.PatrolRepository") as patrol_repository:
-            patrol_repository.return_value.get_snapshot_context.side_effect = contexts.get
-            with patch("generate_templates.ParserJobRepository") as job_repository:
-                job_repository.return_value.create_generation_attempt.side_effect = (
-                    lambda **payload: (
-                        attempts.append(payload) or {"id": f"attempt-{len(attempts)}"}
-                    )
+    with patch("generate_templates.PatrolRepository") as patrol_repository:
+        patrol_repository.return_value.get_snapshot_context.side_effect = contexts.get
+        with patch("generate_templates.ParserJobRepository") as job_repository:
+            job_repository.return_value.create_generation_attempt.side_effect = (
+                lambda **payload: (
+                    attempts.append(payload) or {"id": f"attempt-{len(attempts)}"}
                 )
-                report = _process_simple_job(
-                    job,
-                    reports_dir=tmp_path / "reports",
-                    publish=False,
-                    dry_run=True,
-                )
+            )
+            report = _process_simple_job(
+                job,
+                reports_dir=tmp_path / "reports",
+                publish=False,
+                dry_run=True,
+            )
 
     assert report.accepted is True
     assert report.template_generated is False
     assert report.agent_loop["pipeline_version"] == "simple_v2"
     assert report.agent_loop["model_calls"] == 0
     assert [item["action"] for item in attempts] == ["deterministic:table"]
-    assert ntc_resolver.return_value.resolve.call_args.kwargs["device"]["model"] == (
-        job["profile"]
-    )
     mock_session.assert_not_called()
 
 
@@ -612,34 +570,32 @@ Start
             raw_text=raw,
         ),
     }
-    with patch("generate_templates.NtcTemplateResolver") as ntc_resolver:
-        ntc_resolver.return_value.resolve.return_value = (None, [])
-        with patch(
-            "generate_templates.IndependentParserResultReviewer",
-            lambda: RejectingReviewer(),
-        ), patch("generate_templates.PatrolRepository") as patrol_repository:
-            patrol_repository.return_value.get_snapshot_context.return_value = context
-            with patch("generate_templates.ParserJobRepository") as job_repository:
-                repository = job_repository.return_value
-                model_calls: list[dict] = []
-                repository.reserve_model_call.side_effect = lambda job_id, **payload: (
-                    model_calls.append({"job_id": job_id, **payload})
-                    or {
-                        "id": f"call-{len(model_calls)}",
-                        "call_number": len(model_calls),
-                        "generation_run_id": payload["generation_run_id"],
-                    }
-                )
-                repository.complete_model_call.return_value = {}
-                repository.create_generation_attempt.side_effect = lambda **payload: (
-                    attempts.append(payload) or {"id": f"attempt-{len(attempts)}"}
-                )
-                report = _process_simple_job(
-                    job,
-                    reports_dir=tmp_path / "reports",
-                    publish=False,
-                    dry_run=True,
-                )
+    with patch(
+        "generate_templates.IndependentParserResultReviewer",
+        lambda: RejectingReviewer(),
+    ), patch("generate_templates.PatrolRepository") as patrol_repository:
+        patrol_repository.return_value.get_snapshot_context.return_value = context
+        with patch("generate_templates.ParserJobRepository") as job_repository:
+            repository = job_repository.return_value
+            model_calls: list[dict] = []
+            repository.reserve_model_call.side_effect = lambda job_id, **payload: (
+                model_calls.append({"job_id": job_id, **payload})
+                or {
+                    "id": f"call-{len(model_calls)}",
+                    "call_number": len(model_calls),
+                    "generation_run_id": payload["generation_run_id"],
+                }
+            )
+            repository.complete_model_call.return_value = {}
+            repository.create_generation_attempt.side_effect = lambda **payload: (
+                attempts.append(payload) or {"id": f"attempt-{len(attempts)}"}
+            )
+            report = _process_simple_job(
+                job,
+                reports_dir=tmp_path / "reports",
+                publish=False,
+                dry_run=True,
+            )
 
     assert report.accepted is emits_records
     assert report.compile_success is True
@@ -795,7 +751,7 @@ def test_spec_suggester_normalizes_and_validates_a_weaker_model_response(monkeyp
     assert recorded[-1]["auto_adopt"] is True
 
 
-def test_spec_suggester_uses_executed_ntc_schema_before_calling_llm(monkeypatch):
+def test_spec_suggester_uses_samples_and_check_item_even_for_ntc_supported_command(monkeypatch):
     recorded: list[dict] = []
 
     class Repository:
@@ -838,21 +794,32 @@ def test_spec_suggester_uses_executed_ntc_schema_before_calling_llm(monkeypatch)
             ],
         },
     )
-    monkeypatch.setattr(
-        "spec_suggester.call_llm",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("an executable trusted template must be reviewed after parsing")
-        ),
-    )
+    prompts = []
+    def model(prompt):
+        prompts.append(prompt)
+        return json.dumps({"parser_spec": {
+            "entity": "interface", "primary_keys": ["interface"],
+            "fields": {
+                "interface": {"required": True, "type": "text"},
+                "ip_address": {"required": True, "type": "ip"},
+                "oper_status": {"required": True, "type": "text"},
+                "protocol_status": {"required": True, "type": "text"},
+            },
+        }})
+    monkeypatch.setattr("spec_suggester.call_llm", model)
 
     result = suggest_parser_spec(
         {"job_id": "job-ntc", "suggestion_task_id": "task-ntc"}
     )
 
     suggestion = result["suggestion"]
-    record_set = suggestion["parser_spec"]["record_sets"][0]
-    assert suggestion["draft_source"] == "ntc_templates_objective_execution"
-    assert suggestion["model_called"] is False
+    record_set = suggestion["parser_spec"]
+    assert suggestion["model_called"] is True
+    assert len(prompts) == 1
+    assert "Vlan1 10.0.0.1 YES manual up up" in prompts[0]
+    assert '"preferred_value_names"' in prompts[0]
+    assert "Trusted local parser execution evidence" not in prompts[0]
+    assert "trusted_parser_evidence" not in suggestion
     assert record_set["primary_keys"] == ["interface"]
     assert set(record_set["fields"]) == {
         "interface",
@@ -862,80 +829,6 @@ def test_spec_suggester_uses_executed_ntc_schema_before_calling_llm(monkeypatch)
     }
     assert recorded[-1]["status"] == "ready"
     assert recorded[-1]["auto_adopt"] is True
-
-
-def test_ntc_parser_spec_keeps_version_identifiers_as_text():
-    draft = _ntc_parser_spec_draft(
-        job={"canonical_command": "show version"},
-        data_samples=[{"sanitized_text": "BIOS: version 05.31"}],
-        evidence=[
-            {
-                "template_name": "cisco_nxos_show_version.textfsm",
-                "sample_record_counts": {"sample-1": 1},
-                "field_profiles": {
-                    "bios_version": {
-                        "value_shape": "number",
-                        "examples": ["05.31"],
-                        "observed_non_empty_count": 1,
-                    },
-                    "os_version": {
-                        "value_shape": "number",
-                        "examples": ["9.3"],
-                        "observed_non_empty_count": 1,
-                    },
-                    "uptime_days": {
-                        "value_shape": "number",
-                        "examples": ["12"],
-                        "observed_non_empty_count": 1,
-                    },
-                },
-            }
-        ],
-        field_naming_context={"check_items": []},
-    )
-
-    fields = draft["record_sets"][0]["fields"]
-    assert fields["bios_version"]["type"] == "text"
-    assert fields["os_version"]["type"] == "text"
-    assert fields["uptime_days"]["type"] == "number"
-
-
-def test_ntc_parser_spec_uses_check_item_vocabulary_and_preserves_source_label():
-    context = build_parser_field_naming_context(
-        vendor="Cisco",
-        model="WS-C2960XR-24TS-I",
-        family="IOS",
-        profile="CISCO_IOS",
-        command="show version",
-    )
-    draft = _ntc_parser_spec_draft(
-        job={"canonical_command": "show version"},
-        data_samples=[{"sanitized_text": "System image file is flash:/image.bin"}],
-        evidence=[
-            {
-                "template_name": "cisco_ios_show_version.textfsm",
-                "sample_record_counts": {"sample-1": 1},
-                "field_profiles": {
-                    "running_image": {
-                        "value_shape": "text",
-                        "examples": ["flash:/image.bin"],
-                        "observed_non_empty_count": 1,
-                    },
-                    "rommon_version": {
-                        "value_shape": "text",
-                        "examples": ["15.2(3r)E1"],
-                        "observed_non_empty_count": 1,
-                    },
-                },
-            }
-        ],
-        field_naming_context=context,
-    )
-
-    fields = draft["record_sets"][0]["fields"]
-    assert set(fields) == {"boot_image", "bootloader_version"}
-    assert fields["boot_image"]["source_labels"] == ["running_image"]
-    assert fields["bootloader_version"]["source_labels"] == ["rommon_version"]
 
 
 def test_spec_suggester_promotes_ip_when_evidence_contains_unassigned_values(

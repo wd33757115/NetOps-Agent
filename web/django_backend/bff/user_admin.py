@@ -10,6 +10,7 @@ import json
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.views.decorators.csrf import csrf_exempt
 
 from .audit import log_auth_event
@@ -34,7 +35,8 @@ def _serialize_user(user) -> dict:
 
 def _parse_body(request) -> dict:
     try:
-        return json.loads(request.body.decode("utf-8") or "{}")
+        body = json.loads(request.body.decode("utf-8") or "{}")
+        return body if isinstance(body, dict) else {}
     except (json.JSONDecodeError, UnicodeDecodeError):
         return {}
 
@@ -112,8 +114,11 @@ def bff_users_list_or_create(request):
 @csrf_exempt
 @require_jwt(strict=True)
 @require_role("admin")
+@transaction.atomic
 def bff_user_detail(request, user_id: int):
     User = get_user_model()
+    if request.method in {"PATCH", "DELETE"}:
+        list(User.objects.select_for_update().order_by("pk"))
 
     if request.method == "GET":
         try:
@@ -153,6 +158,15 @@ def bff_user_detail(request, user_id: int):
 
     body = _parse_body(request)
     updates: list[str] = []
+    # Reject invalid account-state changes before assign_user_role writes groups.
+    # A rejected combined "change role + disable self" must not partially apply.
+    if "is_active" in body:
+        if type(body["is_active"]) is not bool:
+            return bff_error("启用状态必须为布尔值", 400)
+        if not body["is_active"] and user.id == request.user.id:
+            return bff_error("不能禁用当前登录账号", 400)
+        if _would_remove_last_admin(user, deactivate=not body["is_active"]):
+            return bff_error("不能禁用最后一个 admin 账号", 400)
     grant = body.get("netops_configure")
     if "netops_configure" in body and (not isinstance(grant, bool) or (grant and body.get("role", get_user_role(user)) == "viewer")):
         return bff_error("配置授权必须为布尔值，且仅可授予 operator 或 admin", 400)

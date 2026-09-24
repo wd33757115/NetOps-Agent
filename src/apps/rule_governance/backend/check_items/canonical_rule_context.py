@@ -251,9 +251,18 @@ def _compile_policy_candidate(target: Mapping[str, Any]) -> dict[str, Any]:
         },
         dimension_selector=dimension_selector,
     ).to_dict()
+    references = dict(target.get('threshold_references') or {})
+    if references and target.get('semantic_type') in {'gauge', 'threshold'}:
+        proposal['threshold_references'] = references
+        proposal['thresholds'] = {}
+        proposal['recovery_threshold'] = None
+        proposal['compare_mode'] = 'threshold_and_deadband' if {'high', 'critical_high'} & references.keys() else 'threshold_low_and_deadband'
     if target.get("event_on_change"):
         proposal.update(deadband=0, thresholds={}, threshold_references={})
         proposal["compare_mode"] = {"counter": "counter_delta", "gauge": "numeric_delta", "threshold": "numeric_delta", "state": "state_transition"}.get(target.get("semantic_type"), "exact")
+        modes = constraints.get('allowed_compare_modes') or []
+        if len(modes) == 1 and modes[0] in {'exact', 'state_transition', 'enum_transition', 'numeric_delta', 'counter_delta', 'hash_diff'}:
+            proposal['compare_mode'] = modes[0]
         proposal["source"] = "check_item_all_value_changes"
         proposal["reason"] = "Every available standard Value change produces an informational event."
         return proposal

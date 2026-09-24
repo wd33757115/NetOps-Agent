@@ -74,6 +74,38 @@ def _repository(tmp_path):
     )
 
 
+def _catalog_with_h3c_fixtures():
+    catalog = load_catalog()
+    fixtures = []
+    for ident, check, command in (
+        ("h3c-cpu-usage", "system.cpu_usage", "display cpu"),
+        ("test-h3c-interface", "interface.runtime_statistics", "display interface"),
+        ("test-h3c-optical", "interface.optical_power", "display transceiver diagnosis interface"),
+    ):
+        fixtures.append(build_collection_implementation({
+            "id": ident, "version": 1, "name": ident,
+            "check_item_ids": [check], "match": {"vendor": "H3C"},
+            "commands": [{"command": command, "priority": 100}],
+            "collector": "cli", "parser_requirement": "structured",
+            "template_scope": "model", "selection_priority": 100, "status": "active",
+        }, known_check_item_ids={c.id for c in catalog.check_items}))
+    return replace(catalog, implementations=(*catalog.implementations, *fixtures))
+
+
+def _catalog_with_family_scoped_shared_command():
+    catalog = _catalog_with_h3c_fixtures()
+    implementation = build_collection_implementation({
+        "id": "test-shared-resources", "version": 1,
+        "name": "Shared resources fixture",
+        "check_item_ids": ["system.cpu_usage", "system.memory_usage"],
+        "match": {"vendor": "Cisco", "families": ["NXOS"]},
+        "commands": [{"command": "show system resources", "priority": 100}],
+        "collector": "cli", "parser_requirement": "structured",
+        "template_scope": "family", "selection_priority": 100, "status": "active",
+    }, known_check_item_ids={c.id for c in catalog.check_items})
+    return replace(catalog, implementations=(*catalog.implementations, implementation))
+
+
 def test_production_catalog_is_check_item_centered_and_complete():
     catalog = load_catalog()
 
@@ -151,7 +183,7 @@ def test_parser_field_naming_guidance_comes_from_resolved_check_item_contract():
         family="Comware7",
         profile="S6850-56HF",
         command="display interface",
-        catalog=load_catalog(),
+        catalog=_catalog_with_h3c_fixtures(),
     )
 
     assert context["resolved"] is True
@@ -170,12 +202,12 @@ def test_parser_field_naming_guidance_comes_from_resolved_check_item_contract():
     assert context["strict_value_names"] is True
 
     optical_context = build_parser_field_naming_context(
-        vendor="Cisco",
-        model="WS-C2960XR-24TS-I",
-        family="IOS",
-        profile="CISCO_IOS",
-        command="show interfaces transceiver detail",
-        catalog=load_catalog(),
+        vendor="H3C",
+        model="S6850-56HF",
+        family="Comware7",
+        profile="S6850-56HF",
+        command="display transceiver diagnosis interface",
+        catalog=_catalog_with_h3c_fixtures(),
     )
     optical = next(
         item
@@ -363,7 +395,7 @@ def test_entity_identity_policy_normalizes_aliases_without_vendor_branching():
 
 
 def test_resolver_uses_vendor_family_and_does_not_guess_missing_identity():
-    resolver = CheckItemImplementationResolver(load_catalog())
+    resolver = CheckItemImplementationResolver(_catalog_with_family_scoped_shared_command())
 
     h3c = resolver.resolve(
         device={"device_id": "h3c-1", "vendor": "H3C", "family": "Comware7"},
@@ -381,7 +413,7 @@ def test_resolver_uses_vendor_family_and_does_not_guess_missing_identity():
 
 
 def test_resolver_reports_ambiguity_instead_of_choosing_by_id():
-    catalog = load_catalog()
+    catalog = _catalog_with_h3c_fixtures()
     source = next(
         item for item in catalog.implementations if item.id == "h3c-cpu-usage"
     )
@@ -411,7 +443,7 @@ def test_resolver_reports_ambiguity_instead_of_choosing_by_id():
 
 
 def test_shadow_plan_collects_shared_nxos_command_once():
-    resolver = CheckItemImplementationResolver(load_catalog())
+    resolver = CheckItemImplementationResolver(_catalog_with_family_scoped_shared_command())
 
     plan = resolver.build_shadow_plan(
         device={
@@ -433,7 +465,7 @@ def test_shadow_plan_collects_shared_nxos_command_once():
 
 def test_catalog_bootstrap_is_idempotent_and_versions_are_immutable(tmp_path):
     repository, _session_factory = _repository(tmp_path)
-    catalog = load_catalog()
+    catalog = _catalog_with_family_scoped_shared_command()
 
     first = repository.bootstrap(catalog)
     second = repository.bootstrap(catalog)
@@ -496,6 +528,11 @@ def test_current_seed_does_not_recreate_removed_interface_entries(tmp_path):
     assert active.check_item("interface.runtime_statistics") is not None
     assert active.check_item("interface.oper_status") is None
     assert active.check_item("interface.statistics") is None
+    assert not {
+        "cisco-device-version", "cisco-fan-health", "cisco-ios-cpu-usage",
+        "cisco-ios-memory-usage", "cisco-nxos-system-resources",
+        "cisco-optical-power", "cisco-power-health", "cisco-running-configuration",
+    } & {i.id for i in active.implementations}
     with _session_scope(session_factory) as db:
         assert db.query(CheckItemVersionRecord).count() == len(current.check_items)
         assert db.query(CollectionImplementationVersionRecord).count() == len(

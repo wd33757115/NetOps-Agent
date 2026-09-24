@@ -236,7 +236,7 @@ def mark_anomaly(rows, item):
     return "异常值出现多处或原文格式不同，未精确标红；请按字段核对"
 
 
-def build_excerpts(report):
+def build_excerpts(report, *, include_unmatched_changes=False):
     result = []
     structured = (report.get("structured_event_evidence") or {}).get("items") or []
     sources = [
@@ -245,6 +245,7 @@ def build_excerpts(report):
         if (i.get("event") or {}).get("event_id")
         or i.get("current_finding")
         or i.get("numeric_trend")
+        or include_unmatched_changes
     ]
     sources += [
         ("text", i) for i in (report.get("unstructured_comparison") or {}).get("items") or []
@@ -262,7 +263,7 @@ def build_excerpts(report):
             if item.get("current_finding")
             else "numeric_trend"
             if item.get("numeric_trend")
-            else "text_change"
+            else "structured_change" if kind == "event" else "text_change"
         )
         key = (
             kind,
@@ -304,6 +305,8 @@ def build_excerpts(report):
                 if source_kind == "current_finding"
                 else "数值趋势：" + str(item.get("trend_explanation") or "仅作趋势说明，不代表故障")
                 if source_kind == "numeric_trend"
+                else "原始观测对比：展示采集证据，不代表故障或事件判定"
+                if source_kind == "structured_change"
                 else "变化事件：由关联事件列入"
             )
             note = f"{source_label}；{comparison_label}。{note}"

@@ -129,7 +129,7 @@ def _compile_reference_policy_candidate(
     output["confidence"] = max(float(output.get("confidence") or 0), 0.95)
     output["reason"] = (
         "Structured per-entity threshold fields from the approved "
-        "ObservationContract are authoritative. Dataset medians are profiling "
+        "CheckItem / CommandAdapter V2 are authoritative. Dataset medians are profiling "
         "evidence only and are never used as runtime threshold fallbacks; "
         f"deadband={output.get('deadband')!r}."
     )

@@ -1,0 +1,9 @@
+Value slot (\S+)
+Value fan (Fan(?:\d+\(\S+\)|_in_PS\d+))
+Value fan_model (\S+)
+Value hardware_revision (\S+)
+Value fan_airflow_direction (\S+)
+Value fan_status (.+?)
+
+Start
+  ^${fan}\s+${fan_model}\s+${hardware_revision}\s+${fan_airflow_direction}\s+${fan_status}\s*$$ -> Record

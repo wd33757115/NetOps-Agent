@@ -31,6 +31,7 @@ const failedReadyJob: ParserJobItem = {
   model_calls_used: 1,
   last_error: 'first generation failed',
   generation_readiness: {
+    check_item_binding: { check_item_id: 'interface.oper_status', version_id: 'check-interface-v1', digest: 'catalog-digest' },
     ready: true,
     blockers: [],
     validation_mode: 'generation_sample_only',
@@ -117,6 +118,21 @@ describe('ParserGenerationStep', () => {
     vi.restoreAllMocks()
   })
 
+  it('keeps an unassociated command out of semantic generation even when its command matches a check item', async () => {
+    vi.spyOn(parserApi, 'job').mockResolvedValue({
+      ...failedReadyJob, status: 'collecting', parser_spec_json: undefined, parser_spec_status: 'missing',
+      generation_readiness: { ready: false, blockers: ['请先关联检查项'] },
+    })
+    const suggest = vi.spyOn(parserApi, 'suggestJobSpec')
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<MemoryRouter><QueryClientProvider client={client}><ParserGenerationStep jobId="parser-job-1" /></QueryClientProvider></MemoryRouter>)
+    await userEvent.click(await screen.findByRole('button', { name: /样本已确认，进入语义设计/ }))
+    expect(await screen.findByText('尚未关联有效检查项，请返回检查项目录完成关联后继续。')).toBeVisible()
+    expect(screen.getByRole('combobox', { name: '目标 CheckItem' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /让 LLM 提出语义方案/ })).toBeDisabled()
+    expect(suggest).not.toHaveBeenCalled()
+  })
+
   it('waits for the operator to inspect samples before semantic analysis', async () => {
     const collectingJob: ParserJobItem = {
       ...failedReadyJob,
@@ -125,6 +141,7 @@ describe('ParserGenerationStep', () => {
       parser_spec_status: 'missing',
       parser_spec_json: undefined,
       generation_readiness: {
+    check_item_binding: { check_item_id: 'interface.oper_status', version_id: 'check-interface-v1', digest: 'catalog-digest' },
         ready: false,
         blockers: ['parser_spec_missing', 'sample_roles_unassigned'],
         role_counts: { unassigned: 2 },
@@ -171,6 +188,7 @@ describe('ParserGenerationStep', () => {
       parser_spec_status: 'missing',
       parser_spec_json: undefined,
       generation_readiness: {
+    check_item_binding: { check_item_id: 'interface.oper_status', version_id: 'check-interface-v1', digest: 'catalog-digest' },
         ready: false,
         blockers: ['parser_spec_missing', 'sample_roles_unassigned'],
         role_counts: { unassigned: 2 },
@@ -364,6 +382,7 @@ describe('ParserGenerationStep', () => {
       parser_spec_json: undefined,
       last_error: undefined,
       generation_readiness: {
+    check_item_binding: { check_item_id: 'interface.oper_status', version_id: 'check-interface-v1', digest: 'catalog-digest' },
         ready: false,
         blockers: [
           'parser_spec_missing',
@@ -859,6 +878,7 @@ describe('ParserGenerationStep', () => {
         stop_reason: 'model_requested_review:insufficient_sample: zero interface data rows',
       },
       generation_readiness: {
+    check_item_binding: { check_item_id: 'interface.oper_status', version_id: 'check-interface-v1', digest: 'catalog-digest' },
         ready: false,
         blockers: ['generation_samples_without_data', 'header_only_samples_unverified'],
         role_counts: { generation: 4 },

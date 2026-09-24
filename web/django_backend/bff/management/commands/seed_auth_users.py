@@ -5,6 +5,7 @@
 
 from django.contrib.auth.models import Group, User
 from django.core.management.base import BaseCommand
+from bff.roles import assign_user_role, SYSTEM_GROUPS
 
 DEMO_USERS = [
     ("admin", "admin123", "admin", True),
@@ -14,10 +15,10 @@ DEMO_USERS = [
 
 
 class Command(BaseCommand):
-    help = "创建 admin/operator/viewer 演示账号与 Django Group"
+    help = "创建演示账号及 admin/netops-config 默认组"
 
     def handle(self, *args, **options):
-        for group_name in ("admin", "operator", "viewer"):
+        for group_name in SYSTEM_GROUPS:
             Group.objects.get_or_create(name=group_name)
             self.stdout.write(f"Group ready: {group_name}")
 
@@ -27,8 +28,8 @@ class Command(BaseCommand):
             user.is_staff = is_staff
             user.is_superuser = group_name == "admin"
             user.save()
-            group = Group.objects.get(name=group_name)
-            user.groups.set([group])
+            assign_user_role(user, group_name)
+            user.save()
             action = "created" if created else "updated"
             self.stdout.write(self.style.SUCCESS(f"User {username} {action} (role={group_name})"))
 

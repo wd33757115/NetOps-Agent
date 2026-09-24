@@ -1,0 +1,1864 @@
+schema_version: check-item-value-reference/v1
+revision: cisco-samples-2026-09-23
+# interface.runtime_statistics 保持既有定义，不纳入本轮字段完善。
+items:
+- id: device.version
+  name: 设备版本与资产信息
+  new: false
+  identity_dimensions: null
+  references:
+  - template: cisco_ios_show_version.textfsm
+    sha256: 00ec4a1fabf7f83781c85c205ae8656b5fbee4abff5a30c1d19783d7e218303e
+    values:
+    - SOFTWARE_IMAGE
+    - VERSION
+    - RELEASE
+    - ROMMON
+    - HOSTNAME
+    - UPTIME
+    - UPTIME_YEARS
+    - UPTIME_WEEKS
+    - UPTIME_DAYS
+    - UPTIME_HOURS
+    - UPTIME_MINUTES
+    - RELOAD_REASON
+    - RUNNING_IMAGE
+    - HARDWARE
+    - SERIAL
+    - CONFIG_REGISTER
+    - MAC_ADDRESS
+    - RESTARTED
+  - template: cisco_nxos_show_version.textfsm
+    sha256: d3118b91026289ef1bef77e3a2f71a1de19261e6cbde491d7aeb02f49c6bf226
+    values:
+    - UPTIME
+    - LAST_REBOOT_REASON
+    - BIOS
+    - OS
+    - BOOT_IMAGE
+    - PLATFORM
+    - HOSTNAME
+    - SERIAL
+  record_notes: 保留已确认的七项必填及槽位/子槽位粒度。NTC OS/VERSION 参考 SOFTWARE_VERSION，PLATFORM/HARDWARE
+    参考 BOARD_TYPE，LAST_REBOOT_REASON/RELOAD_REASON 参考 REBOOT_REASON；不增加运行时别名映射。Cisco
+    不提供槽位或两种镜像时仍报告不完整，不能拿 BOOT_IMAGE 同时填两列。
+  fields:
+  - canonical_field: HOSTNAME
+    semantic_type: text
+    value_type: text
+    description: 设备主机名原文；不是管理 IP。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - HOSTNAME
+    source_kind: ntc
+  - canonical_field: SERIAL
+    semantic_type: text
+    value_type: text
+    description: 对应板卡或设备序列号；NTC 的多成员 List 不能拼成一个槽位值。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - SERIAL
+    source_kind: ntc
+  - canonical_field: BIOS
+    semantic_type: text
+    value_type: text
+    description: NX-OS BIOS 版本原文。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - BIOS
+    source_kind: ntc
+  - canonical_field: ROMMON
+    semantic_type: text
+    value_type: text
+    description: IOS 引导程序版本；不等同于 BOOT_IMAGE。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - ROMMON
+    source_kind: ntc
+  - canonical_field: SOFTWARE_IMAGE
+    semantic_type: text
+    value_type: text
+    description: IOS 软件特性镜像标识，不能替代实际系统镜像路径。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - SOFTWARE_IMAGE
+    source_kind: ntc
+  - canonical_field: RELEASE
+    semantic_type: text
+    value_type: text
+    description: IOS Release 修饰原文。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - RELEASE
+    source_kind: ntc
+  - canonical_field: CONFIG_REGISTER
+    semantic_type: text
+    value_type: text
+    description: 配置寄存器值，保留十六进制文本。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - CONFIG_REGISTER
+    source_kind: ntc
+  - canonical_field: MAC_ADDRESS
+    semantic_type: text
+    value_type: text
+    description: 设备或板卡基础 MAC；多成员地址须按所属板卡展开。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - MAC_ADDRESS
+    source_kind: ntc
+  - canonical_field: RESTARTED
+    semantic_type: text
+    value_type: text
+    description: 最近重启时间原文；与 UPTIME、重启原因分别保存。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - RESTARTED
+    source_kind: ntc
+- id: device.inventory
+  name: 硬件组件资产
+  new: false
+  identity_dimensions: null
+  references:
+  - template: cisco_ios_show_inventory.textfsm
+    sha256: 02e276e51f12a9b710d8c23e5a70628cada702c96b31d20ac9807f23425c44be
+    values:
+    - NAME
+    - DESCR
+    - PID
+    - VID
+    - SN
+  - template: cisco_nxos_show_inventory.textfsm
+    sha256: 6cc5ab81a504a679e9bc7806f87df08a3027c0d3f97d9b2bdd7e81eb4adb3be3
+    values:
+    - NAME
+    - DESCR
+    - PID
+    - VID
+    - SN
+  record_notes: 每个物理组件一行；保留原有 model、serial_number、vendor_name 与实体键。没有组件类型时须显式指出身份缺口。
+  fields:
+  - canonical_field: name
+    semantic_type: text
+    value_type: text
+    description: 组件名称原文，保留机箱、槽位和收发器位置。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - NAME
+    source_kind: ntc
+  - canonical_field: description
+    semantic_type: text
+    value_type: text
+    description: 组件完整描述。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - DESCR
+    source_kind: ntc
+  - canonical_field: product_id
+    semantic_type: text
+    value_type: text
+    description: 厂商产品编号；PID 在 inventory 中不是进程号。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - PID
+    source_kind: ntc
+  - canonical_field: hardware_version
+    semantic_type: text
+    value_type: text
+    description: 硬件修订号；不等同于软件版本。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - VID
+    source_kind: ntc
+- id: environment.fan
+  name: 风扇状态
+  new: false
+  identity_dimensions: null
+  references:
+  - template: cisco_nxos_show_environment.textfsm
+    sha256: ada88fb6ab46f3f2043237c96d5d8ee899e81aa09b4ff31aa74dd274078c3b6d
+    values:
+    - POWER_SUPPLY
+    - POWER_SUPPLY_MODEL
+    - POWER_SUPPLY_OUTPUT
+    - POWER_SUPPLY_INPUT
+    - POWER_SUPPLY_CAPACITY
+    - POWER_SUPPLY_STATUS
+    - FAN
+    - FAN_STATUS
+    - TEMPERATURE_MODULE
+    - TEMPERATURE_SENSOR
+    - TEMPERATURE_MAJOR_THRESH
+    - TEMPERATURE_MINOR_THRESH
+    - TEMPERATURE_CURRENT
+    - TEMPERATURE_STATUS
+  record_notes: 保留 fan_status 与气流方向。NTC FAN/FAN_STATUS 对应原有 fan/fan_status；slot 只能来自明确位置。
+  fields:
+  - canonical_field: fan_model
+    semantic_type: text
+    value_type: text
+    description: 风扇型号；当前 NTC 模板未保留该列，来自样本 Model 列。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values: []
+    source_kind: sample_cli
+  - canonical_field: hardware_revision
+    semantic_type: text
+    value_type: text
+    description: 风扇硬件版本原文，-- 表示未提供。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values: []
+    source_kind: sample_cli
+  - canonical_field: speed_rpm
+    semantic_type: gauge
+    value_type: number
+    description: IOS 环境传感器明确给出的风扇转速；不能把十六进制 Fan Zone Speed 当 RPM。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values: []
+    source_kind: sample_cli
+    unit: rpm
+- id: environment.power
+  name: 电源状态
+  new: false
+  identity_dimensions: null
+  references:
+  - template: cisco_nxos_show_environment.textfsm
+    sha256: ada88fb6ab46f3f2043237c96d5d8ee899e81aa09b4ff31aa74dd274078c3b6d
+    values:
+    - POWER_SUPPLY
+    - POWER_SUPPLY_MODEL
+    - POWER_SUPPLY_OUTPUT
+    - POWER_SUPPLY_INPUT
+    - POWER_SUPPLY_CAPACITY
+    - POWER_SUPPLY_STATUS
+    - FAN
+    - FAN_STATUS
+    - TEMPERATURE_MODULE
+    - TEMPERATURE_SENSOR
+    - TEMPERATURE_MAJOR_THRESH
+    - TEMPERATURE_MINOR_THRESH
+    - TEMPERATURE_CURRENT
+    - TEMPERATURE_STATUS
+  record_notes: 每个电源一行。POWER_SUPPLY_OUTPUT 对应 output_watts；禁止把设备 Total Power 汇总值复制到每个电源。
+  fields:
+  - canonical_field: model
+    semantic_type: text
+    value_type: text
+    description: 电源模块型号。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - POWER_SUPPLY_MODEL
+    source_kind: ntc
+  - canonical_field: input_watts
+    semantic_type: gauge
+    value_type: number
+    description: 单个电源实际输入功率。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - POWER_SUPPLY_INPUT
+    source_kind: ntc
+    unit: w
+  - canonical_field: capacity_watts
+    semantic_type: gauge
+    value_type: number
+    description: 单个电源额定容量，不是当前输出功率。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - POWER_SUPPLY_CAPACITY
+    source_kind: ntc
+    unit: w
+  - canonical_field: input_state
+    semantic_type: text
+    value_type: text
+    description: 输入供电状态原文。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values: []
+    source_kind: sample_cli
+  - canonical_field: output_state
+    semantic_type: text
+    value_type: text
+    description: 输出供电状态原文。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values: []
+    source_kind: sample_cli
+- id: environment.temperature
+  name: 温度传感器状态
+  new: false
+  identity_dimensions: null
+  references:
+  - template: cisco_nxos_show_environment_temperature.textfsm
+    sha256: 0d1921cf16e914dbc936709734119576245413ef0d20bb635189acc0c5c8f3d4
+    values:
+    - CURRENT_VALUE
+    - MAJOR_THRESHOLD
+    - MINOR_THRESHOLD
+    - STATUS
+    - MODULE
+    - SENSOR
+  - template: cisco_ios_show_environment_temperature.textfsm
+    sha256: 79f9929cd7afb1b8623deaeea6a9e2da6f2619de31da462a2c2eba67fc48253f
+    values:
+    - SWITCH
+    - SWITCH_TEMPERATURE
+    - INLET_TEMPERATURE_VALUE
+    - INLET_TEMPERATURE_STATE
+    - INLET_YELLOW_THRESHOLD
+    - INLET_RED_THRESHOLD
+    - HOTSPOT_TEMPERATURE_VALUE
+    - HOTSPOT_TEMPERATURE_STATE
+    - HOTSPOT_YELLOW_THRESHOLD
+    - HOTSPOT_RED_THRESHOLD
+  record_notes: MODULE/SENSOR 对应 slot/sensor；CURRENT_VALUE、MINOR_THRESHOLD、MAJOR_THRESHOLD
+    对应现有温度、warning 和 alarm。未知单位不自动当摄氏度。
+  fields:
+  - canonical_field: sensor_status
+    semantic_type: text
+    value_type: text
+    description: 设备报告的温度传感器状态；保留 Ok/Normal 等原文。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - STATUS
+    source_kind: ntc
+  - canonical_field: temperature_low_warning_celsius
+    semantic_type: threshold
+    value_type: number
+    description: 设备明确报告的低温告警阈值；未输出时缺失。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values: []
+    source_kind: sample_cli
+    unit: celsius
+  - canonical_field: temperature_low_alarm_celsius
+    semantic_type: threshold
+    value_type: number
+    description: 设备明确报告的低温严重告警阈值。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values: []
+    source_kind: sample_cli
+    unit: celsius
+- id: interface.ip_assignment
+  name: 接口 IP 与协议状态
+  new: false
+  identity_dimensions: null
+  references:
+  - template: cisco_ios_show_ip_interface_brief.textfsm
+    sha256: 3b3d244b3cecfb9a7e8679bb83245abfbf805a2c690ddd13dfe8675da74573a7
+    values:
+    - INTERFACE
+    - IP_ADDRESS
+    - STATUS
+    - PROTO
+  - template: cisco_nxos_show_ip_interface_brief.textfsm
+    sha256: 103d339b2fa593e0faef2cd08e6c08a90c408d0788ef3a8d9e4d358057ad0512
+    values:
+    - VRF
+    - INTERFACE
+    - IP_ADDRESS
+    - STATUS
+    - LINK
+    - PROTO
+  record_notes: 保留 interface/address_family 实体键；unassigned 不伪造为 0.0.0.0。接口多个地址需后续适配器明确多值粒度。
+  fields:
+  - canonical_field: interface_status
+    semantic_type: text
+    value_type: text
+    description: 接口管理/物理状态原文，administratively down 与 down 不混同。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - STATUS
+    source_kind: ntc
+  - canonical_field: link_status
+    semantic_type: text
+    value_type: text
+    description: NX-OS Link 列原文。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - LINK
+    source_kind: ntc
+  - canonical_field: protocol_status
+    semantic_type: text
+    value_type: text
+    description: 接口协议状态原文。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - PROTO
+    source_kind: ntc
+  - canonical_field: vrf
+    semantic_type: text
+    value_type: text
+    description: 接口所属 VRF；默认域只能由命令作用域明确给出。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - VRF
+    source_kind: ntc
+- id: interface.optical_power
+  name: 光模块监测与光功率
+  new: false
+  identity_dimensions: null
+  references:
+  - template: cisco_nxos_show_interface_transceiver_details.textfsm
+    sha256: 8ff6510db0c2e13957229c3c127c7206ef3f4be728cc39f944861161669095b3
+    values:
+    - INTERFACE
+    - LANE
+    - TEMPERATURE_VALUE
+    - TEMPERATURE_ALARM_HIGH
+    - TEMPERATURE_ALARM_LOW
+    - TEMPERATURE_WARN_HIGH
+    - TEMPERATURE_WARN_LOW
+    - VOLTAGE_VALUE
+    - VOLTAGE_ALARM_HIGH
+    - VOLTAGE_ALARM_LOW
+    - VOLTAGE_WARN_HIGH
+    - VOLTAGE_WARN_LOW
+    - AMPS_VALUE
+    - AMPS_ALARM_HIGH
+    - AMPS_ALARM_LOW
+    - AMPS_WARN_HIGH
+    - AMPS_WARN_LOW
+    - RX_VALUE
+    - RX_ALARM_HIGH
+    - RX_ALARM_LOW
+    - RX_WARN_HIGH
+    - RX_WARN_LOW
+    - TX_VALUE
+    - TX_ALARM_HIGH
+    - TX_ALARM_LOW
+    - TX_WARN_HIGH
+    - TX_WARN_LOW
+  - template: cisco_ios_show_interface_transceiver.textfsm
+    sha256: dc880058b56f67351b757ea10aea1e5ea1ccbec46d685b422bf30661cc9f6766
+    values:
+    - INTERFACE
+    - TEMPERATURE
+    - VOLTAGE
+    - CURRENT
+    - TX_PWR
+    - RX_PWR
+  record_notes: LANE 对应 channel。保留现有 RX/TX 高低阈值和严格要求：在位但缺少光功率仍为数据不完整；不更改已有健康策略。
+  fields:
+  - canonical_field: temperature_celsius
+    semantic_type: gauge
+    value_type: number
+    description: 光模块温度，不是机箱环境温度。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - TEMPERATURE_VALUE
+    - TEMPERATURE
+    source_kind: ntc
+    unit: celsius
+  - canonical_field: voltage_volts
+    semantic_type: gauge
+    value_type: number
+    description: 光模块供电电压。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - VOLTAGE_VALUE
+    - VOLTAGE
+    source_kind: ntc
+    unit: v
+  - canonical_field: bias_current_ma
+    semantic_type: gauge
+    value_type: number
+    description: 激光器偏置电流；mA 与 A 不可混用。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - AMPS_VALUE
+    - CURRENT
+    source_kind: ntc
+    unit: ma
+  - canonical_field: transceiver_type
+    semantic_type: text
+    value_type: text
+    description: 模块类型原文，例如 QSFP-100G。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values: []
+    source_kind: sample_cli
+  - canonical_field: vendor_name
+    semantic_type: text
+    value_type: text
+    description: 模块 name/vendor 原文，不由设备厂商推断。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values: []
+    source_kind: sample_cli
+  - canonical_field: revision
+    semantic_type: text
+    value_type: text
+    description: 光模块硬件修订号。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values: []
+    source_kind: sample_cli
+  - canonical_field: wavelength_nm
+    semantic_type: gauge
+    value_type: number
+    description: 模块波长；只有源输出明确 nm 时使用。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values: []
+    source_kind: sample_cli
+    unit: nm
+  - canonical_field: dom_supported
+    semantic_type: text
+    value_type: text
+    description: DOM 是否支持及不支持原因原文；不提供 DOM 不表示零光功率。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values: []
+    source_kind: sample_cli
+  - canonical_field: temperature_high_alarm_celsius
+    semantic_type: threshold
+    value_type: number
+    unit: celsius
+    required: false
+    assessment_roles:
+    - reference
+    description: 模块明确输出的温度 high_alarm 阈值；保留缺失，不套用通用阈值。
+    ntc_values:
+    - TEMPERATURE_ALARM_HIGH
+    source_kind: ntc
+  - canonical_field: temperature_low_alarm_celsius
+    semantic_type: threshold
+    value_type: number
+    unit: celsius
+    required: false
+    assessment_roles:
+    - reference
+    description: 模块明确输出的温度 low_alarm 阈值；保留缺失，不套用通用阈值。
+    ntc_values:
+    - TEMPERATURE_ALARM_LOW
+    source_kind: ntc
+  - canonical_field: temperature_high_warning_celsius
+    semantic_type: threshold
+    value_type: number
+    unit: celsius
+    required: false
+    assessment_roles:
+    - reference
+    description: 模块明确输出的温度 high_warning 阈值；保留缺失，不套用通用阈值。
+    ntc_values:
+    - TEMPERATURE_WARN_HIGH
+    source_kind: ntc
+  - canonical_field: temperature_low_warning_celsius
+    semantic_type: threshold
+    value_type: number
+    unit: celsius
+    required: false
+    assessment_roles:
+    - reference
+    description: 模块明确输出的温度 low_warning 阈值；保留缺失，不套用通用阈值。
+    ntc_values:
+    - TEMPERATURE_WARN_LOW
+    source_kind: ntc
+  - canonical_field: voltage_high_alarm_volts
+    semantic_type: threshold
+    value_type: number
+    unit: v
+    required: false
+    assessment_roles:
+    - reference
+    description: 模块明确输出的电压 high_alarm 阈值；保留缺失，不套用通用阈值。
+    ntc_values:
+    - VOLTAGE_ALARM_HIGH
+    source_kind: ntc
+  - canonical_field: voltage_low_alarm_volts
+    semantic_type: threshold
+    value_type: number
+    unit: v
+    required: false
+    assessment_roles:
+    - reference
+    description: 模块明确输出的电压 low_alarm 阈值；保留缺失，不套用通用阈值。
+    ntc_values:
+    - VOLTAGE_ALARM_LOW
+    source_kind: ntc
+  - canonical_field: voltage_high_warning_volts
+    semantic_type: threshold
+    value_type: number
+    unit: v
+    required: false
+    assessment_roles:
+    - reference
+    description: 模块明确输出的电压 high_warning 阈值；保留缺失，不套用通用阈值。
+    ntc_values:
+    - VOLTAGE_WARN_HIGH
+    source_kind: ntc
+  - canonical_field: voltage_low_warning_volts
+    semantic_type: threshold
+    value_type: number
+    unit: v
+    required: false
+    assessment_roles:
+    - reference
+    description: 模块明确输出的电压 low_warning 阈值；保留缺失，不套用通用阈值。
+    ntc_values:
+    - VOLTAGE_WARN_LOW
+    source_kind: ntc
+  - canonical_field: bias_current_high_alarm_ma
+    semantic_type: threshold
+    value_type: number
+    unit: ma
+    required: false
+    assessment_roles:
+    - reference
+    description: 模块明确输出的偏置电流 high_alarm 阈值；保留缺失，不套用通用阈值。
+    ntc_values:
+    - AMPS_ALARM_HIGH
+    source_kind: ntc
+  - canonical_field: bias_current_low_alarm_ma
+    semantic_type: threshold
+    value_type: number
+    unit: ma
+    required: false
+    assessment_roles:
+    - reference
+    description: 模块明确输出的偏置电流 low_alarm 阈值；保留缺失，不套用通用阈值。
+    ntc_values:
+    - AMPS_ALARM_LOW
+    source_kind: ntc
+  - canonical_field: bias_current_high_warning_ma
+    semantic_type: threshold
+    value_type: number
+    unit: ma
+    required: false
+    assessment_roles:
+    - reference
+    description: 模块明确输出的偏置电流 high_warning 阈值；保留缺失，不套用通用阈值。
+    ntc_values:
+    - AMPS_WARN_HIGH
+    source_kind: ntc
+  - canonical_field: bias_current_low_warning_ma
+    semantic_type: threshold
+    value_type: number
+    unit: ma
+    required: false
+    assessment_roles:
+    - reference
+    description: 模块明确输出的偏置电流 low_warning 阈值；保留缺失，不套用通用阈值。
+    ntc_values:
+    - AMPS_WARN_LOW
+    source_kind: ntc
+- id: network.arp_table
+  name: ARP 地址绑定
+  new: false
+  identity_dimensions: null
+  references:
+  - template: cisco_ios_show_ip_arp.textfsm
+    sha256: c6e99c37d00db1417910674d819b5cce383a59ded8ceb54c7957987881dcc406
+    values:
+    - PROTOCOL
+    - IP_ADDRESS
+    - AGE
+    - MAC_ADDRESS
+    - TYPE
+    - INTERFACE
+  - template: cisco_nxos_show_ip_arp.textfsm
+    sha256: a3edce17e75dd2da71d0bc3da6643efc45e7391926caec71c678689fe11826f7
+    values:
+    - IP_ADDRESS
+    - AGE
+    - MAC_ADDRESS
+    - INTERFACE
+  record_notes: 保留 VRF/IP 实体键和 MAC；不完整 ARP 条目的 MAC 不可补零。
+  fields:
+  - canonical_field: interface
+    semantic_type: text
+    value_type: text
+    description: ARP 邻接出口接口。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - INTERFACE
+    source_kind: ntc
+  - canonical_field: age
+    semantic_type: text
+    value_type: text
+    description: ARP 老化时间原文；IOS 分钟、NX-OS 时分秒及 - 不作无单位数值比较。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - AGE
+    source_kind: ntc
+  - canonical_field: protocol
+    semantic_type: text
+    value_type: text
+    description: 地址协议原文，例如 Internet。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - PROTOCOL
+    source_kind: ntc
+  - canonical_field: entry_type
+    semantic_type: text
+    value_type: text
+    description: 协议封装或条目类型原文，例如 ARPA；不能据此直接判定动态/静态。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - TYPE
+    source_kind: ntc
+- id: network.mac_table
+  name: MAC 转发表
+  new: false
+  identity_dimensions: null
+  references:
+  - template: cisco_ios_show_mac-address-table.textfsm
+    sha256: 28b93670e7c4a393e8cefd4501cb7230ba7269e6ee3939d887d7f2959e5d09e6
+    values:
+    - DESTINATION_ADDRESS
+    - TYPE
+    - VLAN_ID
+    - DESTINATION_PORT
+  - template: cisco_nxos_show_mac_address-table.textfsm
+    sha256: eb2f369f50868f459e35907b5b8c1959c7ddd23d9f7632240d7bd53b0ccc9924
+    values:
+    - VLAN_ID
+    - MAC_ADDRESS
+    - TYPE
+    - AGE
+    - SECURE
+    - NTFY
+    - PORTS
+  record_notes: 保留 VLAN/MAC 主键。NTC DESTINATION_ADDRESS/MAC_ADDRESS 参考原有 mac_address；CPU、Router
+    等逻辑出口不应删除。
+  fields:
+  - canonical_field: entry_type
+    semantic_type: text
+    value_type: text
+    description: MAC 条目类型原文，例如 dynamic/static。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - TYPE
+    source_kind: ntc
+  - canonical_field: age
+    semantic_type: text
+    value_type: text
+    description: MAC 老化时间原文，- 为未提供而非零。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - AGE
+    source_kind: ntc
+  - canonical_field: secure
+    semantic_type: text
+    value_type: text
+    description: 安全 MAC 标记原文。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - SECURE
+    source_kind: ntc
+  - canonical_field: notify
+    semantic_type: text
+    value_type: text
+    description: 通知标记原文。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - NTFY
+    source_kind: ntc
+  - canonical_field: ports
+    semantic_type: text
+    value_type: text
+    description: 有序端口列表；多个出口不得仅保留第一个。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - PORTS
+    - DESTINATION_PORT
+    source_kind: ntc
+    collection: list
+- id: network.vrf_inventory
+  name: VRF 清单
+  new: false
+  identity_dimensions: null
+  references:
+  - template: cisco_nxos_show_vrf_detail.textfsm
+    sha256: b341422d616800d27b77497d986dea77782205a778434b3a226e5197d6b2b44d
+    values:
+    - NAME
+    - ID
+    - VPN_ID
+    - STATE
+    - DEFAULT_RD
+    - MAX_ROUTES
+    - MID_THRESHOLD
+    - TABLE_ID
+    - ADDRESS_FAMILY
+    - FWD_ID
+    - TABLE_STATUS
+  - template: cisco_ios_show_vrf_detail.textfsm
+    sha256: 67ff6590f8e1bd1e84781dce58c0388ccc70d9c5f3674926d30d73b7ba1182b5
+    values:
+    - VRF
+    - RD
+    - RT_IMPORT
+    - RT_EXPORT
+    - VPN_ID
+    - DESCRIPTION
+    - INTERFACES
+  record_notes: 补齐原有 network.vrf.status 的 canonical_field=status。当前七份材料没有 show vrf
+    输出，字段仅完成模板参考，尚无本地样本验收。
+  fields:
+  - canonical_field: vrf_id
+    semantic_type: text
+    value_type: text
+    description: 设备本地 VRF ID，保留原文。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - ID
+    source_kind: ntc
+  - canonical_field: route_distinguisher
+    semantic_type: text
+    value_type: text
+    description: 默认 RD 原文，<not set> 为未配置。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - DEFAULT_RD
+    source_kind: ntc
+  - canonical_field: vpn_id
+    semantic_type: text
+    value_type: text
+    description: VPN 标识原文。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - VPN_ID
+    source_kind: ntc
+  - canonical_field: max_routes
+    semantic_type: text
+    value_type: text
+    description: 最大路由限制原文，保留无限制等非数值状态。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - MAX_ROUTES
+    source_kind: ntc
+- id: redundancy.mlag
+  name: M-LAG / vPC 域状态
+  new: false
+  identity_dimensions: null
+  references:
+  - template: cisco_nxos_show_vpc.textfsm
+    sha256: b6fdd1649f648ea75c472e0720c782774106bba71d0a615248e4d8ed074a34a2
+    values:
+    - ID
+    - PORT
+    - STATUS
+  record_notes: 一行一个域，保留 domain_id/peer_status。NTC show vpc 只解析成员 ID/PORT/STATUS，不覆盖域健康；成员列表单独建项，不覆盖域状态。
+  fields:
+  - canonical_field: peer_keepalive_status
+    semantic_type: text
+    value_type: text
+    description: 对端 keepalive 状态，与 peer adjacency 分开。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values: []
+    source_kind: sample_cli
+  - canonical_field: configuration_consistency
+    semantic_type: text
+    value_type: text
+    description: 全局配置一致性状态原文。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values: []
+    source_kind: sample_cli
+  - canonical_field: per_vlan_consistency
+    semantic_type: text
+    value_type: text
+    description: 按 VLAN 配置一致性状态原文。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values: []
+    source_kind: sample_cli
+  - canonical_field: type2_consistency
+    semantic_type: text
+    value_type: text
+    description: Type-2 一致性状态原文。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values: []
+    source_kind: sample_cli
+  - canonical_field: role
+    semantic_type: text
+    value_type: text
+    description: 本机 vPC/M-LAG 角色原文。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values: []
+    source_kind: sample_cli
+  - canonical_field: peer_gateway
+    semantic_type: text
+    value_type: text
+    description: peer-gateway 配置/运行状态原文。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values: []
+    source_kind: sample_cli
+  - canonical_field: dual_active_excluded_vlans
+    semantic_type: text
+    value_type: text
+    description: 双活排除 VLAN 原文，保留范围表达式。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values: []
+    source_kind: sample_cli
+  - canonical_field: graceful_consistency_check
+    semantic_type: text
+    value_type: text
+    description: graceful consistency-check 状态原文。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values: []
+    source_kind: sample_cli
+  - canonical_field: auto_recovery_status
+    semantic_type: text
+    value_type: text
+    description: 自动恢复状态原文。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values: []
+    source_kind: sample_cli
+  - canonical_field: delay_restore_status
+    semantic_type: text
+    value_type: text
+    description: delay-restore 状态原文。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values: []
+    source_kind: sample_cli
+- id: redundancy.stack
+  name: 堆叠成员与端口状态
+  new: false
+  identity_dimensions: null
+  references:
+  - template: cisco_ios_show_switch_detail.textfsm
+    sha256: 8c7d86ec3e9c3d857195faa94378b5d5570cffa6725d32df259f412b519d5dc6
+    values:
+    - SWITCH
+    - ROLE
+    - MAC_ADDRESS
+    - PRIORITY
+    - VERSION
+    - STATE
+  - template: cisco_ios_show_switch_detail_stack_ports.textfsm
+    sha256: 0ca1325b8cc044b289844e7f9520c8cb35c348e26c4f62169b176b2148be1e6b
+    values:
+    - SWITCH
+    - STATUS1
+    - STATUS2
+    - NEIGHBOR1
+    - NEIGHBOR2
+  record_notes: SWITCH/STATE 对应已有 member_id/member_status，不能因 NTC 列名是 VERSION 就当作
+    OS 版本。
+  fields:
+  - canonical_field: role
+    semantic_type: text
+    value_type: text
+    description: 堆叠成员角色；主控不等于故障。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - ROLE
+    source_kind: ntc
+  - canonical_field: mac_address
+    semantic_type: text
+    value_type: text
+    description: 成员基础 MAC 地址。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - MAC_ADDRESS
+    source_kind: ntc
+  - canonical_field: priority
+    semantic_type: gauge
+    value_type: number
+    description: 主控选举优先级，非健康分数。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - PRIORITY
+    source_kind: ntc
+  - canonical_field: hardware_version
+    semantic_type: text
+    value_type: text
+    description: show switch detail 的 H/W Version，不是软件版本。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - VERSION
+    source_kind: ntc
+  - canonical_field: stack_port1_status
+    semantic_type: text
+    value_type: text
+    description: Stack Port 1 状态。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - STATUS1
+    source_kind: ntc
+  - canonical_field: stack_port2_status
+    semantic_type: text
+    value_type: text
+    description: Stack Port 2 状态。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - STATUS2
+    source_kind: ntc
+  - canonical_field: stack_port1_neighbor
+    semantic_type: text
+    value_type: text
+    description: Stack Port 1 邻接成员，None 原文保留。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - NEIGHBOR1
+    source_kind: ntc
+  - canonical_field: stack_port2_neighbor
+    semantic_type: text
+    value_type: text
+    description: Stack Port 2 邻接成员，None 原文保留。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - NEIGHBOR2
+    source_kind: ntc
+- id: redundancy.vrrp
+  name: VRRP 主备状态
+  new: false
+  identity_dimensions: null
+  references:
+  - template: cisco_ios_show_vrrp_brief.textfsm
+    sha256: a1713548940e2934dc9752aeb0d8bb46312a4463bc707c0bb1a226f96ce68cf9
+    values:
+    - INTERFACE
+    - GROUP
+    - ADDR_FAMILY
+    - PRIORITY
+    - TIME
+    - OWN
+    - PREEMPT
+    - STATE
+    - MASTER_IP_ADDRESS
+    - VIRTUAL_IP_ADDRESS
+  record_notes: 保持 interface/vrid 主键与 state。样本命令为空不代表已验证 VRRP 状态；未配置与采集失败应分开处理。
+  fields:
+  - canonical_field: address_family
+    semantic_type: text
+    value_type: text
+    description: IPv4/IPv6 地址族；未来同接口组号双栈时需复核实体键。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - ADDR_FAMILY
+    source_kind: ntc
+  - canonical_field: priority
+    semantic_type: gauge
+    value_type: number
+    description: VRRP 选举优先级。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - PRIORITY
+    source_kind: ntc
+  - canonical_field: master_ip
+    semantic_type: text
+    value_type: text
+    description: 当前 Master 地址原文，不是虚拟地址。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - MASTER_IP_ADDRESS
+    source_kind: ntc
+  - canonical_field: virtual_ip
+    semantic_type: text
+    value_type: text
+    description: VRRP 虚拟网关地址。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - VIRTUAL_IP_ADDRESS
+    source_kind: ntc
+  - canonical_field: preempt
+    semantic_type: text
+    value_type: text
+    description: 抢占状态原文。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - PREEMPT
+    source_kind: ntc
+  - canonical_field: owner
+    semantic_type: text
+    value_type: text
+    description: 虚拟地址所有者标志原文。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - OWN
+    source_kind: ntc
+  - canonical_field: timer
+    semantic_type: text
+    value_type: text
+    description: VRRP brief 的时间列原文，不猜测秒/毫秒。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - TIME
+    source_kind: ntc
+- id: system.cpu_usage
+  name: CPU 使用率
+  new: false
+  identity_dimensions: null
+  references:
+  - template: cisco_ios_show_processes_cpu.textfsm
+    sha256: 580ba59ca0c2b0d09091fb0ccaca5cf2b618404e6b45f336f3bcafdb5bc3abe9
+    values:
+    - CPU_USAGE_5_SEC
+    - CPU_INTERRUPTION_5_SEC
+    - CPU_USAGE_1_MIN
+    - CPU_USAGE_5_MIN
+    - PROCESS_PID
+    - PROCESS_RUNTIME
+    - PROCESS_INVOKED
+    - PROCESS_CPU_TIME_FOR_INVOCATION
+    - PROCESS_CPU_USAGE_5_SEC
+    - PROCESS_CPU_USAGE_1_MIN
+    - PROCESS_CPU_USAGE_5_MIN
+    - PROCESS_TTY
+    - PROCESS_NAME
+  record_notes: 保留已有5s/1m/5m 字段及设备阈值策略。NX-OS show system resources 未给五分钟使用率时，不用瞬时值冒充。
+  fields:
+  - canonical_field: cpu_interrupt_5s_percent
+    semantic_type: gauge
+    value_type: number
+    description: 五秒 CPU 使用率中的中断部分，不应再次加到总 CPU 使用率上。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - CPU_INTERRUPTION_5_SEC
+    source_kind: ntc
+    unit: percent
+  - canonical_field: cpu_user_percent
+    semantic_type: gauge
+    value_type: number
+    description: NX-OS 当前 user 状态百分比，与五分钟平均值不同。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values: []
+    source_kind: sample_cli
+    unit: percent
+  - canonical_field: cpu_kernel_percent
+    semantic_type: gauge
+    value_type: number
+    description: NX-OS 当前 kernel 状态百分比。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values: []
+    source_kind: sample_cli
+    unit: percent
+  - canonical_field: cpu_idle_percent
+    semantic_type: gauge
+    value_type: number
+    description: NX-OS 当前 idle 百分比，不能直接写入五分钟 cpu_usage_percent。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values: []
+    source_kind: sample_cli
+    unit: percent
+- id: system.memory_usage
+  name: 内存使用率
+  new: false
+  identity_dimensions: null
+  references:
+  - template: cisco_ios_show_processes_memory_sorted.textfsm
+    sha256: 0066110987a52e13378a6bbb01ea1d90041347e93c4389d08a3edfa86490a57e
+    values:
+    - MEMORY_TOTAL
+    - MEMORY_USED
+    - MEMORY_FREE
+    - PROCESS_ID
+    - PROCESS_ALLOCATED
+    - PROCESS_FREED
+    - PROCESS_HOLDING
+    - PROCESS
+  record_notes: 保留既有 KB 和百分比值。容量计算得到的比例是派生指标，不能伪造设备明确输出的五分钟平均值；同一 slot 多池应在适配器验收时分开实体。
+  fields:
+  - canonical_field: pool
+    semantic_type: text
+    value_type: text
+    description: 内存池名称，例如 Processor/lsmpi_io；多池数据不能相互覆盖。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values: []
+    source_kind: sample_cli
+  - canonical_field: memory_total_bytes
+    semantic_type: gauge
+    value_type: number
+    description: IOS Processor Pool 原文总字节数；不能直接放入 memory_total_kb。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - MEMORY_TOTAL
+    source_kind: ntc
+    unit: bytes
+  - canonical_field: memory_used_bytes
+    semantic_type: gauge
+    value_type: number
+    description: IOS Processor Pool 已使用字节数。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - MEMORY_USED
+    source_kind: ntc
+    unit: bytes
+  - canonical_field: memory_free_bytes
+    semantic_type: gauge
+    value_type: number
+    description: IOS Processor Pool 空闲字节数。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - MEMORY_FREE
+    source_kind: ntc
+    unit: bytes
+  - canonical_field: memory_status
+    semantic_type: text
+    value_type: text
+    description: NX-OS Current memory status 原文。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values: []
+    source_kind: sample_cli
+- id: device.module
+  name: 板卡模块状态
+  new: true
+  identity_dimensions:
+  - MODULE
+  references:
+  - template: cisco_nxos_show_module.textfsm
+    sha256: 8133ea141854c1a0eb95bb9dbf36217ac8693f51d7246869bd07d233c71c52e3
+    values:
+    - MODULE
+    - PORTS
+    - TYPE
+    - MODEL
+    - STATUS
+  record_notes: 每个 MODULE 一行，与机箱总体版本、inventory 组件记录分开。
+  fields:
+  - canonical_field: PORTS
+    semantic_type: gauge
+    value_type: number
+    description: 板卡端口数量。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - PORTS
+    source_kind: ntc
+    unit: count
+  - canonical_field: TYPE
+    semantic_type: text
+    value_type: text
+    description: 模块类型完整原文。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - TYPE
+    source_kind: ntc
+  - canonical_field: MODEL
+    semantic_type: text
+    value_type: text
+    description: 板卡产品型号。
+    required: true
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - MODEL
+    source_kind: ntc
+  - canonical_field: STATUS
+    semantic_type: text
+    value_type: text
+    description: 板卡运行状态原文。
+    required: true
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - STATUS
+    source_kind: ntc
+- id: interface.port_status
+  name: 接口端口状态概览
+  new: true
+  identity_dimensions:
+  - PORT
+  references:
+  - template: cisco_ios_show_interfaces_status.textfsm
+    sha256: 0a5e8753aa96cb490b79559978995599db7cadf73e791110fde7da0744ee0a38
+    values:
+    - PORT
+    - NAME
+    - STATUS
+    - VLAN_ID
+    - DUPLEX
+    - SPEED
+    - TYPE
+    - FC_MODE
+  - template: cisco_nxos_show_interface_status.textfsm
+    sha256: 9c793babdc3a4155bdff1e6a8c66472e4621fb536e39d5f97c699ac2882a052a
+    values:
+    - PORT
+    - NAME
+    - STATUS
+    - VLAN_ID
+    - DUPLEX
+    - SPEED
+    - TYPE
+  record_notes: 只定义 show interface status 的端口概览。没有 protocol_status 不得填充为 up，也不冒充完整接口统计。
+  fields:
+  - canonical_field: NAME
+    semantic_type: text
+    value_type: text
+    description: 端口描述，可为空。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - NAME
+    source_kind: ntc
+  - canonical_field: STATUS
+    semantic_type: text
+    value_type: text
+    description: 端口连接状态原文；connected/notconnect/disabled/err-disabled 分开。
+    required: true
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - STATUS
+    source_kind: ntc
+  - canonical_field: VLAN_ID
+    semantic_type: text
+    value_type: text
+    description: VLAN 或 trunk/routed 原文，不能强制全部转整数。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - VLAN_ID
+    source_kind: ntc
+  - canonical_field: DUPLEX
+    semantic_type: text
+    value_type: text
+    description: 双工状态，保留 auto 前缀。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - DUPLEX
+    source_kind: ntc
+  - canonical_field: SPEED
+    semantic_type: text
+    value_type: text
+    description: 速率原文，保留 auto、单位及未协商状态。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - SPEED
+    source_kind: ntc
+  - canonical_field: TYPE
+    semantic_type: text
+    value_type: text
+    description: 端口介质/模块类型原文。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - TYPE
+    source_kind: ntc
+  - canonical_field: FC_MODE
+    semantic_type: text
+    value_type: text
+    description: 设备支持时的 Fibre Channel 模式。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - FC_MODE
+    source_kind: ntc
+- id: system.clock
+  name: 设备时钟
+  new: true
+  identity_dimensions:
+  - device_id
+  references:
+  - template: cisco_ios_show_clock.textfsm
+    sha256: 6e07e218e0270460315552287d6830844f5ea12a78b4451cd609f3d4cb8e6d46
+    values:
+    - TIME
+    - TIMEZONE
+    - DAYWEEK
+    - MONTH
+    - DAY
+    - YEAR
+  - template: cisco_nxos_show_clock.textfsm
+    sha256: 28ac101b0d55090ac39402a610e920f34e1a26b914a1cb0e5a6ace2919e8be9d
+    values:
+    - TIME
+    - TIMEZONE
+    - DAYWEEK
+    - MONTH
+    - DAY
+    - YEAR
+  record_notes: 时钟正常走动不生成变化告警；没有 NTP 同步证据时不判断时钟健康。
+  fields:
+  - canonical_field: TIME
+    semantic_type: text
+    value_type: text
+    description: 设备时间原文，保留毫秒；不等于采集时间。
+    required: true
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - TIME
+    source_kind: ntc
+  - canonical_field: TIMEZONE
+    semantic_type: text
+    value_type: text
+    description: 设备明确给出的时区，不用服务器时区补齐。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - TIMEZONE
+    source_kind: ntc
+  - canonical_field: DAYWEEK
+    semantic_type: text
+    value_type: text
+    description: 星期原文。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - DAYWEEK
+    source_kind: ntc
+  - canonical_field: MONTH
+    semantic_type: text
+    value_type: text
+    description: 月份原文。
+    required: true
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - MONTH
+    source_kind: ntc
+  - canonical_field: DAY
+    semantic_type: gauge
+    value_type: number
+    description: 日。
+    required: true
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - DAY
+    source_kind: ntc
+  - canonical_field: YEAR
+    semantic_type: gauge
+    value_type: number
+    description: 年。
+    required: true
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - YEAR
+    source_kind: ntc
+  - canonical_field: CLOCK_MARKER
+    semantic_type: text
+    value_type: text
+    description: IOS 开头 * 或 . 等时钟状态标记；NTC 模板未保留，不推断已同步。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values: []
+    source_kind: sample_cli
+- id: system.cpu_process
+  name: CPU 进程资源
+  new: true
+  identity_dimensions:
+  - PROCESS_PID
+  references:
+  - template: cisco_ios_show_processes_cpu.textfsm
+    sha256: 580ba59ca0c2b0d09091fb0ccaca5cf2b618404e6b45f336f3bcafdb5bc3abe9
+    values:
+    - CPU_USAGE_5_SEC
+    - CPU_INTERRUPTION_5_SEC
+    - CPU_USAGE_1_MIN
+    - CPU_USAGE_5_MIN
+    - PROCESS_PID
+    - PROCESS_RUNTIME
+    - PROCESS_INVOKED
+    - PROCESS_CPU_TIME_FOR_INVOCATION
+    - PROCESS_CPU_USAGE_5_SEC
+    - PROCESS_CPU_USAGE_1_MIN
+    - PROCESS_CPU_USAGE_5_MIN
+    - PROCESS_TTY
+    - PROCESS_NAME
+  record_notes: 每个 PID 一行，不将系统总体百分比复制成进程百分比。PID 重用及设备重启会使跨次比较失去连续性；本项先保留证据，不自动告警。
+  fields:
+  - canonical_field: PROCESS_NAME
+    semantic_type: text
+    value_type: text
+    description: 进程名称原文。
+    required: true
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - PROCESS_NAME
+    source_kind: ntc
+  - canonical_field: PROCESS_RUNTIME
+    semantic_type: counter
+    value_type: number
+    description: 进程累计 CPU 运行毫秒数；重启或进程重建后可归零。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - PROCESS_RUNTIME
+    source_kind: ntc
+    unit: ms
+  - canonical_field: PROCESS_INVOKED
+    semantic_type: counter
+    value_type: number
+    description: 累计调用次数。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - PROCESS_INVOKED
+    source_kind: ntc
+    unit: count
+  - canonical_field: PROCESS_CPU_TIME_FOR_INVOCATION
+    semantic_type: gauge
+    value_type: number
+    description: 原表 uSecs 每次调用 CPU 时间。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - PROCESS_CPU_TIME_FOR_INVOCATION
+    source_kind: ntc
+    unit: us
+  - canonical_field: PROCESS_CPU_USAGE_5_SEC
+    semantic_type: gauge
+    value_type: number
+    description: 进程五秒使用率。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - PROCESS_CPU_USAGE_5_SEC
+    source_kind: ntc
+    unit: percent
+  - canonical_field: PROCESS_CPU_USAGE_1_MIN
+    semantic_type: gauge
+    value_type: number
+    description: 进程一分钟使用率。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - PROCESS_CPU_USAGE_1_MIN
+    source_kind: ntc
+    unit: percent
+  - canonical_field: PROCESS_CPU_USAGE_5_MIN
+    semantic_type: gauge
+    value_type: number
+    description: 进程五分钟使用率。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - PROCESS_CPU_USAGE_5_MIN
+    source_kind: ntc
+    unit: percent
+  - canonical_field: PROCESS_TTY
+    semantic_type: text
+    value_type: text
+    description: 关联终端标识。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - PROCESS_TTY
+    source_kind: ntc
+- id: system.memory_process
+  name: 内存进程资源
+  new: true
+  identity_dimensions:
+  - PROCESS_ID
+  - PROCESS
+  references:
+  - template: cisco_ios_show_processes_memory_sorted.textfsm
+    sha256: 0066110987a52e13378a6bbb01ea1d90041347e93c4389d08a3edfa86490a57e
+    values:
+    - MEMORY_TOTAL
+    - MEMORY_USED
+    - MEMORY_FREE
+    - PROCESS_ID
+    - PROCESS_ALLOCATED
+    - PROCESS_FREED
+    - PROCESS_HOLDING
+    - PROCESS
+  record_notes: NTC 用多个 Value List 保存进程表；按同一索引展开为进程行，禁止列表笛卡尔积。PID 0 可对应多个内部进程，使用 PROCESS_ID 与 PROCESS 共同标识。
+  fields:
+  - canonical_field: PROCESS
+    semantic_type: text
+    value_type: text
+    description: 进程名称原文。
+    required: true
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - PROCESS
+    source_kind: ntc
+  - canonical_field: PROCESS_ALLOCATED
+    semantic_type: counter
+    value_type: number
+    description: 进程累计分配字节数，不等于当前占用。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - PROCESS_ALLOCATED
+    source_kind: ntc
+    unit: bytes
+  - canonical_field: PROCESS_FREED
+    semantic_type: counter
+    value_type: number
+    description: 进程累计释放字节数。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - PROCESS_FREED
+    source_kind: ntc
+    unit: bytes
+  - canonical_field: PROCESS_HOLDING
+    semantic_type: gauge
+    value_type: number
+    description: 进程当前持有字节数。
+    required: true
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - PROCESS_HOLDING
+    source_kind: ntc
+    unit: bytes
+  - canonical_field: PROCESS_TTY
+    semantic_type: text
+    value_type: text
+    description: 进程关联终端标识。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values: []
+    source_kind: sample_cli
+  - canonical_field: GETBUFS
+    semantic_type: counter
+    value_type: number
+    description: Getbufs 累计次数。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values: []
+    source_kind: sample_cli
+    unit: count
+  - canonical_field: RETBUFS
+    semantic_type: counter
+    value_type: number
+    description: Retbufs 累计次数。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values: []
+    source_kind: sample_cli
+    unit: count
+- id: redundancy.vpc_member
+  name: vPC 成员链路状态
+  new: true
+  identity_dimensions:
+  - ID
+  references:
+  - template: cisco_nxos_show_vpc.textfsm
+    sha256: b6fdd1649f648ea75c472e0720c782774106bba71d0a615248e4d8ed074a34a2
+    values:
+    - ID
+    - PORT
+    - STATUS
+  record_notes: 一行一个 vPC 成员，来自同一域；不使用成员状态替代 peer-link 或整个 vPC 域的健康。
+  fields:
+  - canonical_field: PORT
+    semantic_type: text
+    value_type: text
+    description: vPC 成员对应的 Port-channel。
+    required: true
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - PORT
+    source_kind: ntc
+  - canonical_field: STATUS
+    semantic_type: text
+    value_type: text
+    description: 成员运行状态原文。
+    required: true
+    assessment_roles:
+    - evidence
+    ntc_values:
+    - STATUS
+    source_kind: ntc
+  - canonical_field: CONSISTENCY
+    semantic_type: text
+    value_type: text
+    description: 单个成员配置一致性结果。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values: []
+    source_kind: sample_cli
+  - canonical_field: CONSISTENCY_REASON
+    semantic_type: text
+    value_type: text
+    description: 单个成员一致性失败原因。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values: []
+    source_kind: sample_cli
+  - canonical_field: ACTIVE_VLANS
+    semantic_type: text
+    value_type: text
+    description: 成员活动 VLAN 列表或范围原文。
+    required: false
+    assessment_roles:
+    - evidence
+    ntc_values: []
+    source_kind: sample_cli

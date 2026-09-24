@@ -999,7 +999,6 @@ class AdapterProjectionCutoverInventoryService:
             CheckItemVersionRecord,
             CollectionImplementationParserBindingRecord,
             CollectionImplementationVersionRecord,
-            ObservationContractRecord,
             ParserTemplate,
         )
 
@@ -1095,16 +1094,6 @@ class AdapterProjectionCutoverInventoryService:
                     .all()
                 )
             }
-            contracts = (
-                db.query(ObservationContractRecord)
-                .filter(
-                    ObservationContractRecord.status == "active",
-                    ObservationContractRecord.source_template_id.in_(
-                        parser_ids or [""]
-                    ),
-                )
-                .all()
-            )
             audit_rows = (
                 db.query(AuditLogRecord)
                 .filter(
@@ -1162,16 +1151,6 @@ class AdapterProjectionCutoverInventoryService:
                 )
                 for item in templates.values()
             }
-            contracts = [
-                freeze_row(
-                    item,
-                    "id",
-                    "source_template_id",
-                    "state_semantics_json",
-                    "record_sets_json",
-                )
-                for item in contracts
-            ]
             audit_rows = [
                 freeze_row(
                     item,
@@ -1231,12 +1210,6 @@ class AdapterProjectionCutoverInventoryService:
             bindings_by_implementation.setdefault(
                 str(binding.implementation_version_id), []
             ).append(binding)
-        contracts_by_parser: dict[str, list[Any]] = {}
-        for contract in contracts:
-            contracts_by_parser.setdefault(
-                str(contract.source_template_id or ""), []
-            ).append(contract)
-
         routes: list[dict[str, Any]] = []
         for implementation in implementations:
             implementation_id = str(implementation.id)
@@ -1333,33 +1306,12 @@ class AdapterProjectionCutoverInventoryService:
                     )
                 )
 
-            parser_contracts = contracts_by_parser.get(parser_id, [])
-            contract_payloads: dict[str, dict[str, Any]] = {}
-            if len(parser_contracts) == 1:
-                contract = parser_contracts[0]
-                payload = {
-                    "state_semantics": dict(contract.state_semantics_json or {}),
-                    "record_sets": list(contract.record_sets_json or []),
-                }
-                for check_item_id in check_items:
-                    contract_payloads[check_item_id] = payload
-            elif len(parser_contracts) > 1:
-                preflight.append(
-                    _issue(
-                        "legacy_observation_contract_ambiguous",
-                        "同一 Parser 存在多个 Active ObservationContract，无法安全选择迁移来源。",
-                        parser_template_id=parser_id,
-                        observation_contract_ids=[str(item.id) for item in parser_contracts],
-                    )
-                )
-
             routes.append(
                 {
                     "route_id": implementation_id,
                     "implementation_version_id": implementation_id,
                     "adapter_spec": adapter_spec,
                     "check_items": check_items,
-                    "observation_contracts_by_check_item": contract_payloads,
                     "parser_field_contract": parser_field_contract,
                     "sample_replay": replay_index.get(implementation_id, {}),
                     "preflight_blockers": preflight,
@@ -1369,7 +1321,6 @@ class AdapterProjectionCutoverInventoryService:
         report["inventory_scope"] = {
             "active_structured_implementation_count": len(implementations),
             "replay_attestation_count": len(replay_index),
-            "observation_contracts_read_only": True,
         }
         report["replay_attestation_sources"] = replay_sources
         if latest_authorization is not None:
@@ -1519,11 +1470,7 @@ class AdapterProjectionCutoverInventoryService:
             "readiness_digest": str(report["digest"]),
             "route_count": int(report["route_count"]),
             "reason": reason,
-            "deployment_required": {
-                "setting": "ADAPTER_PROJECTION_CUTOVER_ENFORCED",
-                "value": True,
-                "scope": "all production workers",
-            },
+            "runtime_mode": "command-adapter/v2",
         }
         with self._session_scope() as db:
             existing = (

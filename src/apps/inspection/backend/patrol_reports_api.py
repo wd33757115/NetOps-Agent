@@ -7,10 +7,9 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, Up
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
-from .access import app_user
 from src.auth.models import CurrentUser
 from src.core.patrol import report_drafting as drafting
-from src.core.patrol.detail_data import load_detail_data
+from src.core.patrol.detail_data import load_detail_data, load_detail_source
 from src.core.patrol.detail_workbook import render_detail_workbook
 from src.core.patrol.report_evidence import build_excerpts
 from src.core.patrol.report_findings import project_findings
@@ -24,6 +23,9 @@ from src.core.patrol.report_templates import (
     template_catalog,
 )
 from src.core.patrol.report_view import project_report
+
+from .access import app_user
+from .patrol.reference_evidence import reference_evidence
 
 router = APIRouter(prefix="/api/v1/patrol", tags=["Patrol reports"])
 DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -47,9 +49,9 @@ class DraftRequest(BaseModel):
     digest: str = Field(default="", max_length=64)
 
 
-def context(job_id, user):
+def context(job_id, user, loader=None):
     try:
-        return report_context(job_id, owner_id=user.user_id, is_admin=user.is_admin())
+        return (loader or report_context)(job_id, owner_id=user.user_id, is_admin=user.is_admin())
     except KeyError as exc:
         raise HTTPException(404, "巡检任务不存在") from exc
     except PermissionError as exc:
@@ -113,10 +115,15 @@ def evidence(
     reference: str | None = Query(None, min_length=1, max_length=256),
     user: CurrentUser = Depends(app_user),
 ):
+    if reference is not None:
+        result = context(job_id, user, lambda jid, **kw: reference_evidence(jid, reference, **kw))
+        return {
+            "total": len(result["items"]), "source_digest": result["source_digest"],
+            "items": [{k: v for k, v in entry.items() if k != "full_source"}
+                      for entry in result["items"][offset:offset + 10]],
+        }
     report, _ = context(job_id, user)
     entries = build_excerpts(report)
-    if reference is not None:
-        entries = [e for e in entries if reference in e.get("match_references", e["references"])]
     return {
         "total": len(entries),
         "source_digest": drafting.source_digest(report),
@@ -129,9 +136,9 @@ def evidence(
 
 @router.get("/offline-jobs/{job_id}/report/details")
 def detail_excel(job_id: str, user: CurrentUser = Depends(app_user)):
-    report, source = context(job_id, user)
+    source = context(job_id, user, load_detail_source)
     data = checked(load_detail_data, source)
-    content = checked(render_detail_workbook, report, source, data)
+    content = checked(render_detail_workbook, {}, source, data)
     return Response(
         content,
         media_type=XLSX,
@@ -144,8 +151,17 @@ def full_evidence(
     job_id: str,
     entry_id: str,
     source_digest: str = Query(..., min_length=64, max_length=64),
+    reference: str | None = Query(None, min_length=1, max_length=256),
     user: CurrentUser = Depends(app_user),
 ):
+    if reference is not None:
+        result = context(job_id, user, lambda jid, **kw: reference_evidence(jid, reference, **kw))
+        if result["source_digest"] != source_digest:
+            raise HTTPException(409, "分析结果已变化，请重新加载证据列表")
+        entry = next((entry for entry in result["items"] if entry["id"] == entry_id), None)
+        if entry is None:
+            raise HTTPException(404, "证据不存在")
+        return entry["full_source"]
     report, _ = context(job_id, user)
     if drafting.source_digest(report) != source_digest:
         raise HTTPException(409, "分析结果已变化，请重新加载证据列表")
@@ -193,7 +209,8 @@ def export(job_id: str, options: Options, user: CurrentUser = Depends(app_user))
         if options.bundle and source.get("periods")
         else None
     )
-    content = render_report(
+    content = checked(
+        render_report,
         template,
         report,
         source,

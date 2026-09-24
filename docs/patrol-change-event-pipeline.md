@@ -22,7 +22,7 @@ PostgreSQL 为权威数据面；Redis Stream 只承担可选事件分发，MinIO
   -> 采集原始 CLI 并保存 CommandSnapshot
   -> EvidenceQualification / CoverageDecision
   -> Parser Runtime
-  -> CommandAdapter v2 标准转换（历史实现使用冻结的 ObservationContract）
+  -> CommandAdapter v2 标准转换
   -> StateObservation
   -> CurrentStateRule / Finding
   -> ChangePolicy / Change
@@ -35,7 +35,7 @@ PostgreSQL 为权威数据面；Redis Stream 只承担可选事件分发，MinIO
 
 - 原始 CLI 先落证据，再进行解析；Parser 升级后可以基于不可变 Snapshot 回放。
 - Parser、Adapter 及需求画像所要求的规则必须来自同一个冻结 RuntimeBundle；历史实现
-  还可能引用 ObservationContract，运行中不得临时改用另一版资产。
+  新版本不再引用独立 ObservationContract；运行中不得临时改用另一版资产。
 - Change 是事实差异，Event 是规则命中的运维语义，RiskCase 是跨批次持续跟踪对象；三者不能互相
   替代。
 - `event_count=0` 只表示没有形成事件，不能单独证明设备健康。
@@ -99,7 +99,7 @@ device-patrol
 ```text
 Snapshot
   -> Parser
-  -> CommandAdapter v2 / 历史 ObservationContract
+  -> CommandAdapter v2
   -> canonical observation_type
   -> ChangePolicy
   -> EventRule
@@ -153,7 +153,6 @@ Snapshot
 ```powershell
 venv\Scripts\python.exe -m pytest tests\unit\test_patrol_change_event_pipeline.py tests\unit\test_patrol_failure_semantics.py -q
 venv\Scripts\python.exe -m pytest tests\integration\test_patrol_runtime_fault_injection.py -q
-venv\Scripts\python.exe scripts\test\check_item_golden_runtime_replay.py
 ```
 
 总体产品合同、资产治理和报告权限以

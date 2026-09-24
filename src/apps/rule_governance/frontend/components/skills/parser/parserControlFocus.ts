@@ -1,4 +1,5 @@
 export type ParserWorkspaceKey =
+  | 'transfer'
   | 'production'
   | 'inbox'
   | 'inventory'
@@ -8,6 +9,7 @@ export type ParserWorkspaceKey =
   | 'audit'
 
 export type ParserSubWorkspaceKey =
+  | 'rule-packages'
   | 'asset-production-units'
   | 'source-jobs'
   | 'catalog-management'
@@ -90,6 +92,7 @@ const focusMap: Record<ParserFocusKind, { workspace: ParserWorkspaceKey; subWork
 }
 
 export const parserWorkspaceTabs: Record<ParserWorkspaceKey, ParserSubWorkspaceKey[]> = {
+  transfer: ['rule-packages'],
   production: [
     'asset-production-units',
     'source-jobs',
@@ -104,7 +107,8 @@ export const parserWorkspaceTabs: Record<ParserWorkspaceKey, ParserSubWorkspaceK
 }
 
 const isWorkspace = (value: string | null): value is ParserWorkspaceKey =>
-  value === 'production'
+  value === 'transfer'
+  || value === 'production'
   || value === 'inbox'
   || value === 'inventory'
   || value === 'generation'

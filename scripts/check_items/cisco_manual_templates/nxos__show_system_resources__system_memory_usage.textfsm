@@ -1,0 +1,9 @@
+Value slot (\S+)
+Value memory_total_kb (\d+)
+Value memory_used_kb (\d+)
+Value memory_free_kb (\d+)
+Value memory_status (\S+)
+
+Start
+  ^Memory usage:\s+${memory_total_kb}K total,\s+${memory_used_kb}K used,\s+${memory_free_kb}K free
+  ^Current memory status:\s+${memory_status} -> Record

@@ -1,6 +1,7 @@
+import InspectionDetailPage from '../InspectionDetailPage'
 import React from 'react'
 import {
-  Alert, Button, Collapse, Descriptions, Drawer, Space, Spin, Table, Tag, Typography,
+  Alert, Button, Collapse, Descriptions, Space, Spin, Table, Tag, Typography,
 } from 'antd'
 import {
   DownloadOutlined,
@@ -592,7 +593,7 @@ const OfflinePatrolResultPanel: React.FC<OfflinePatrolResultPanelProps> = ({
         </section>
       )}
 
-      <Drawer
+      <InspectionDetailPage
         title={
           comparisonEvidence?.command
             ? 'CLI 原文证据 · ' + comparisonEvidence.command
@@ -655,7 +656,7 @@ const OfflinePatrolResultPanel: React.FC<OfflinePatrolResultPanelProps> = ({
             </div>
           </Space>
         )}
-      </Drawer>
+      </InspectionDetailPage>
 
 
     </Space>

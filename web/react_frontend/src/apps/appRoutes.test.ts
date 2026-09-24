@@ -8,7 +8,10 @@ describe('business route compatibility', () => {
         '/devices?tab=patrol&patrol_batch_id=b1&patrol_view=offline#result',
       ),
     ).toBe('/apps/inspection?patrol_batch_id=b1&patrol_view=offline#result')
-    expect(businessHref('/devices?tab=overview')).toBe('/devices?tab=overview')
+    expect(businessHref('/devices?tab=overview')).toBe('/apps/device-management?tab=overview')
+  })
+  it('redirects management URLs preserving selection', () => {
+    for (const url of ['/devices', '/admin/netops/devices', '/apps/rule-governance/devices']) expect(businessHref(url + '?device_id=d1#details')).toBe('/apps/device-management?device_id=d1#details')
   })
   it('preserves source job and legacy focus links', () => {
     expect(

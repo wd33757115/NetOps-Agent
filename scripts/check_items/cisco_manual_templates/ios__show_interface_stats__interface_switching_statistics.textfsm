@@ -1,0 +1,14 @@
+Value Filldown INTERFACE (\S+)
+Value SWITCHING_PATH (.+?)
+Value PKTS_IN (\d+)
+Value CHARS_IN (\d+)
+Value PKTS_OUT (\d+)
+Value CHARS_OUT (\d+)
+Value ADMIN_STATE (disabled)
+
+Start
+  ^Interface\s+${INTERFACE}\s+is\s+${ADMIN_STATE}\s*$$ -> Record
+  ^${INTERFACE}\s*$$
+  ^\s+${SWITCHING_PATH}\s+${PKTS_IN}\s+${CHARS_IN}\s+${PKTS_OUT}\s+${CHARS_OUT}\s*$$ -> Record
+
+EOF

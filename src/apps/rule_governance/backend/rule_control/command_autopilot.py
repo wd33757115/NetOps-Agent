@@ -179,7 +179,11 @@ class CommandAutopilotService:
                         state["outputs"] = {key: value for key, value in state["outputs"].items()
                                             if key == "rules" or (key == "projection" and value.get("manual"))}
                 state["outputs"].pop("parser_wait_started", None)
-                if state["stage"] == "parser" and action == "resume":
+                # A human start/resume grants one bounded retry, even when rules
+                # must be prepared before reaching a previously cancelled Parser.
+                if (inputs["result_mode"] == "structured"
+                        and state["stage"] in {"rules", "parser"}
+                        and action in {"start", "resume"}):
                     state["outputs"]["retry_requested"] = True
             state["updated_at"] = _now().isoformat()
             state["history"] = [*old.get("history", []), {

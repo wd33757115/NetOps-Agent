@@ -1,10 +1,10 @@
+import InspectionDetailPage from '../InspectionDetailPage'
 import { businessHref } from '@netops/apps/appRoutes'
 import React, { useMemo, useState } from 'react'
 import {
   Alert,
   Button,
   Descriptions,
-  Drawer,
   Empty,
   Form,
   Input,
@@ -273,9 +273,8 @@ const ProductionFeedbackWorkspace: React.FC = () => {
         }}
       />
 
-      <Drawer
+      <InspectionDetailPage
         open={Boolean(selected)}
-        width={isMobile ? '100%' : 760}
         title="反馈与冻结证据"
         onClose={() => setSelected(undefined)}
       >
@@ -317,7 +316,7 @@ const ProductionFeedbackWorkspace: React.FC = () => {
             )}
           </Space>
         )}
-      </Drawer>
+      </InspectionDetailPage>
 
       <Modal
         open={Boolean(triageTarget)}

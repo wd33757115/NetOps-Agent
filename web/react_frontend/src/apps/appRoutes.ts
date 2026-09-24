@@ -3,7 +3,7 @@ export const workbenchEnabled =
 export const documentsEnabled = import.meta.env.VITE_OFFICIAL_DOCUMENTS_ENABLED !== 'false'
 export const appRoutes = {
   workbench: '/workbench',
-  devices: '/apps/rule-governance/devices',
+  devices: '/apps/device-management',
   documents: '/apps/official-documents',
   firewall: '/apps/firewall-policy',
   patrol: '/apps/inspection',
@@ -17,6 +17,10 @@ export function businessHref(href: string): string {
   if (url.pathname === '/apps/patrol' || (url.pathname === '/devices' && url.searchParams.get('tab') === 'patrol')) {
     url.pathname = '/apps/inspection'
     url.searchParams.delete('tab')
+    return url.pathname + url.search + url.hash
+  }
+  if (['/devices', '/admin/netops/devices', '/apps/rule-governance/devices'].includes(url.pathname)) {
+    url.pathname = appRoutes.devices
     return url.pathname + url.search + url.hash
   }
   if (workbenchEnabled) {

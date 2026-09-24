@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+from copy import deepcopy
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from functools import lru_cache
@@ -46,19 +48,44 @@ class CanonicalObservationCatalog:
 
 
 def freeze_rule_semantics(contract: dict[str, Any]) -> dict[str, Any]:
-    """Freeze server-owned semantic definitions when a human creates a revision."""
+    """Validate local definitions and freeze the actual CheckItem-owned semantics."""
+    from .local_semantics import validate_local_definition, validate_local_references
+
+    contract = deepcopy(contract)
     catalog = load_canonical_catalog()
-    selected = {str(row.get("observation_type") or "") for row in contract.get("observations", [])}
-    unknown = selected - {item.id for item in catalog.observations}
-    if unknown:
-        raise ValueError(f"unknown canonical observation types: {sorted(unknown)}")
+    rows = contract.get('observations', [])
+    snapshot = contract.get('rule_semantics_snapshot') or {}
+    if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+        raise ValueError('observations 必须为字段对象数组')
+    if not isinstance(snapshot, dict) or not isinstance(snapshot.get('observations', []), list):
+        raise ValueError('语义快照格式无效')
+    prior = {row['id']: row for row in snapshot.get('observations', []) if isinstance(row, dict) and 'id' in row}
+    definitions = []
+    for row in rows:
+        identifier = str(row.get('observation_type') or '')
+        template = catalog.get(identifier)
+        raw = row['semantic_definition'] if 'semantic_definition' in row else prior.get(identifier) or (asdict(template) if template else None)
+        if raw is None:
+            raise ValueError(f'unknown canonical observation types: {identifier}')
+        definition = validate_local_definition(raw, identifier)
+        if 'semantic_definition' in row:
+            row['semantic_definition'] = definition
+            row['semantic_type'] = definition['semantic_type']
+            row['assessment_roles'] = definition['assessment_roles']
+            row['description'] = definition['description']
+            if row.get('value_type') not in definition['value_types']:
+                raise ValueError(f'{identifier}: 值类型与语义定义不一致')
+            row['unit'] = definition['canonical_unit']
+        definitions.append(definition)
+    validate_local_references(contract.get('observations', []))
+    digest = hashlib.sha256(json.dumps(definitions, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
     return {
         **contract,
         "rule_semantics_snapshot": {
             "catalog_id": catalog.catalog_id,
             "version": catalog.version,
-            "digest": catalog.digest,
-            "observations": [asdict(item) for item in catalog.observations if item.id in selected],
+            "digest": digest,
+            "observations": definitions,
         },
     }
 

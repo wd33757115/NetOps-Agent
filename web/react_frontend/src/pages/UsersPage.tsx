@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
 // SPDX-License-Identifier: Apache-2.0
 
-import AppAccessPanel from '../apps/AppAccessPanel'
 import React, { useMemo, useState } from 'react'
 import {
+  Alert,
+  Button,
   Form,
   Input,
   Modal,
@@ -16,22 +17,20 @@ import {
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { useMutation, useQuery, useQueryClient } from 'react-query'
-import GrokShellLayout from '../components/layout/GrokShellLayout'
+import SystemLayout from '../components/system/SystemLayout'
 import { GrokChip, GrokInfoBar, GrokRowAction, GrokToolBtn } from '../components/ui/GrokUi'
 import { useAuth } from '../context/AuthContext'
 import { useIsMobile } from '../hooks/useBreakpoint'
 import { ManagedUser, userAdminApi } from '../services/api'
 
 const ROLE_OPTIONS = [
-  { value: 'admin', label: 'admin — 管理员' },
-  { value: 'operator', label: 'operator — 运维' },
-  { value: 'viewer', label: 'viewer — 只读' },
+  { value: 'admin', label: 'admin — 平台管理员' },
+  { value: 'operator', label: '普通用户 — 按应用授权访问' },
 ]
 
 const ROLE_FILTER_OPTIONS = [
   { value: 'admin', label: 'admin' },
-  { value: 'operator', label: 'operator' },
-  { value: 'viewer', label: 'viewer' },
+  { value: 'operator', label: '普通用户' },
 ]
 
 const PASSWORD_HINT =
@@ -66,7 +65,7 @@ function canDeleteUser(user: ManagedUser, users: ManagedUser[], currentUserId?: 
 
 const UsersPage: React.FC = () => {
   const isMobile = useIsMobile()
-  const { user: currentUser } = useAuth()
+  const { user: currentUser, refreshProfile } = useAuth()
   const queryClient = useQueryClient()
   const [createOpen, setCreateOpen] = useState(false)
   const [editUser, setEditUser] = useState<ManagedUser | null>(null)
@@ -77,7 +76,7 @@ const UsersPage: React.FC = () => {
   const [editForm] = Form.useForm()
   const [resetForm] = Form.useForm()
 
-  const { data: users = [], isLoading, refetch } = useQuery<ManagedUser[]>(
+  const { data: users = [], isLoading, isError, error, refetch } = useQuery<ManagedUser[]>(
     'managed-users',
     userAdminApi.list,
     { refetchOnWindowFocus: false }
@@ -104,6 +103,9 @@ const UsersPage: React.FC = () => {
       setCreateOpen(false)
       createForm.resetFields()
       queryClient.invalidateQueries('managed-users')
+        queryClient.invalidateQueries(['system-access'])
+        queryClient.invalidateQueries(['system-groups'])
+        void refreshProfile()
     },
     onError: (err: Error) => message.error(err.message || '创建失败'),
   })
@@ -116,6 +118,9 @@ const UsersPage: React.FC = () => {
         setEditUser(null)
         editForm.resetFields()
         queryClient.invalidateQueries('managed-users')
+        queryClient.invalidateQueries(['system-access'])
+        queryClient.invalidateQueries(['system-groups'])
+        void refreshProfile()
       },
       onError: (err: Error) => message.error(err.message || '更新失败'),
     }
@@ -137,6 +142,9 @@ const UsersPage: React.FC = () => {
     onSuccess: () => {
       message.success('用户已删除')
       queryClient.invalidateQueries('managed-users')
+        queryClient.invalidateQueries(['system-access'])
+        queryClient.invalidateQueries(['system-groups'])
+        void refreshProfile()
     },
     onError: (err: Error) => message.error(err.message || '删除失败'),
   })
@@ -171,7 +179,8 @@ const UsersPage: React.FC = () => {
         title: '角色',
         dataIndex: 'role',
         key: 'role',
-        width: 108,
+        width: 160,
+        render: (_, row) => row.role === 'admin' ? 'admin · 全部权限' : row.netops_configure ? 'netops-config · 应用授权' : '普通用户',
       },
       {
         title: '状态',
@@ -216,6 +225,7 @@ const UsersPage: React.FC = () => {
                 editForm.setFieldsValue({
                   email: record.email,
                   role: record.role,
+                  netops_configure: record.netops_configure,
                   is_active: record.is_active,
                 })
               }}
@@ -260,6 +270,7 @@ const UsersPage: React.FC = () => {
       <Select
         className="grok-users-role-filter"
         allowClear
+        aria-label="平台角色筛选"
         placeholder="全部角色"
         value={roleFilter}
         onChange={(value) => setRoleFilter(value)}
@@ -280,31 +291,19 @@ const UsersPage: React.FC = () => {
       : '暂无用户，点击「新建用户」创建第一个账号'
 
   return (
-    <GrokShellLayout
-      title="账户管理"
+    <SystemLayout
+      title="用户"
       subtitle="创建用户、分配角色、启用/禁用账号与重置密码"
       toolbar={toolbar}
     >
-      <div className="grok-stat-grid grok-stat-grid-users">
-        <div className="grok-stat-card">
-          <div className="grok-stat-label">用户总数</div>
-          <div className="grok-stat-value">{isLoading ? '—' : users.length}</div>
-        </div>
-        <div className="grok-stat-card">
-          <div className="grok-stat-label">已启用</div>
-          <div className="grok-stat-value">{isLoading ? '—' : activeCount}</div>
-        </div>
-        <div className="grok-stat-card">
-          <div className="grok-stat-label">已禁用</div>
-          <div className="grok-stat-value">{isLoading ? '—' : users.length - activeCount}</div>
-        </div>
-      </div>
+      <div className="system-summary"><span>用户总数<strong>{isLoading || isError ? '—' : users.length}</strong></span><span>已启用<strong>{isLoading || isError ? '—' : activeCount}</strong></span><span>已停用<strong>{isLoading || isError ? '—' : users.length - activeCount}</strong></span></div>
+      {isError && <Alert type="error" showIcon message="用户列表加载失败" description={error instanceof Error ? error.message : '请稍后重试'} action={<Button onClick={() => refetch()}>重试</Button>} />}
 
       <GrokInfoBar>
         <span>密码需满足复杂度要求；新建或重置密码时可在表单中查看详细策略</span>
       </GrokInfoBar>
 
-      <section className="grok-panel grok-panel-flush">
+      <section className="grok-panel grok-panel-flush" hidden={isError}>
         <Table
           className="grok-table grok-table-users"
           rowKey="id"
@@ -333,6 +332,7 @@ const UsersPage: React.FC = () => {
         }}
         onOk={() => createForm.submit()}
         confirmLoading={createMutation.isLoading}
+        maskClosable={false}
         destroyOnClose
       >
         <Form
@@ -355,7 +355,7 @@ const UsersPage: React.FC = () => {
           >
             <Input.Password autoComplete="new-password" />
           </Form.Item>
-          <Form.Item name="role" label="角色" rules={[{ required: true }]}>
+          <Form.Item name="role" label="平台角色" extra="应用使用权在应用授权页单独配置；获得 App 授权后可使用全部业务功能。" rules={[{ required: true }]}>
             <Select options={ROLE_OPTIONS} />
           </Form.Item>
         </Form>
@@ -370,6 +370,7 @@ const UsersPage: React.FC = () => {
         }}
         onOk={() => editForm.submit()}
         confirmLoading={updateMutation.isLoading}
+        maskClosable={false}
         destroyOnClose
       >
         <Form
@@ -383,9 +384,10 @@ const UsersPage: React.FC = () => {
           <Form.Item name="email" label="邮箱">
             <Input type="email" />
           </Form.Item>
-          <Form.Item name="role" label="角色" rules={[{ required: true }]}>
+          <Form.Item name="role" label="平台角色" extra="应用使用权在应用授权页单独配置；获得 App 授权后可使用全部业务功能。" rules={[{ required: true }]}>
             <Select options={ROLE_OPTIONS} />
           </Form.Item>
+          <Form.Item name="netops_configure" label="应用授权管理员（netops-config）" valuePropName="checked" extra="可为用户和用户组授权应用，不能管理账号或提升系统权限。"><Switch /></Form.Item>
           <Form.Item name="is_active" label="启用" valuePropName="checked">
             <Switch checkedChildren="启用" unCheckedChildren="禁用" />
           </Form.Item>
@@ -401,6 +403,7 @@ const UsersPage: React.FC = () => {
         }}
         onOk={() => resetForm.submit()}
         confirmLoading={resetMutation.isLoading}
+        maskClosable={false}
         destroyOnClose
       >
         <Form
@@ -421,8 +424,7 @@ const UsersPage: React.FC = () => {
           </Form.Item>
         </Form>
       </Modal>
-      <AppAccessPanel />
-    </GrokShellLayout>
+    </SystemLayout>
   )
 }
 

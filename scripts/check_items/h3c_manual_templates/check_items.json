@@ -1,0 +1,1180 @@
+[
+  {
+    "id": "device.subslot_inventory",
+    "name": "板卡子槽位信息",
+    "version": 1,
+    "category": "device",
+    "description": "依据本批 H3C 原文和 NTC 字段定义；保持命令的实际粒度与单位。缺失不补零、不推断健康。",
+    "result_mode": "structured",
+    "assessment_mode": "evidence",
+    "report_projection": "auto@1",
+    "canonical_contract": {
+      "entity_type": "device_subslot_inventory",
+      "identity_dimensions": [
+        "SLOT",
+        "SUBSLOT",
+        "COMPONENT"
+      ],
+      "value_contract": "same-name/v1",
+      "observations": [
+        {
+          "observation_type": "device.subslot_inventory.detail",
+          "canonical_field": "DETAIL",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "子槽位原文规格或硬件、驱动、CPLD 版本，不覆盖同槽位的其他组件",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        }
+      ],
+      "reference_revision": "h3c-manual-2026-09-23",
+      "value_references": [],
+      "identity_dimension_rules": {
+        "SLOT": {
+          "kind": "identifier"
+        },
+        "SUBSLOT": {
+          "kind": "identifier"
+        },
+        "COMPONENT": {
+          "kind": "identifier"
+        }
+      }
+    },
+    "empty_result_policy": {
+      "classification": "invalid"
+    },
+    "coverage_policy": {
+      "model": "non_exhaustive",
+      "require_rule_evaluation": false
+    }
+  },
+  {
+    "id": "device.manufacture_inventory",
+    "name": "设备制造与部件信息",
+    "version": 1,
+    "category": "device",
+    "description": "依据本批 H3C 原文和 NTC 字段定义；保持命令的实际粒度与单位。缺失不补零、不推断健康。",
+    "result_mode": "structured",
+    "assessment_mode": "evidence",
+    "report_projection": "auto@1",
+    "canonical_contract": {
+      "entity_type": "device_manufacture_inventory",
+      "identity_dimensions": [
+        "SCOPE",
+        "SLOT_TYPE",
+        "SLOT_ID"
+      ],
+      "value_contract": "same-name/v1",
+      "observations": [
+        {
+          "observation_type": "device.manufacture_inventory.device_name",
+          "canonical_field": "DEVICE_NAME",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "设备或部件型号原文",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        },
+        {
+          "observation_type": "device.manufacture_inventory.device_serial_number",
+          "canonical_field": "DEVICE_SERIAL_NUMBER",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "部件序列号；NONE 保留原文，不视为有效序列号",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        },
+        {
+          "observation_type": "device.manufacture_inventory.mac_address",
+          "canonical_field": "MAC_ADDRESS",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "部件 MAC 地址",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        },
+        {
+          "observation_type": "device.manufacture_inventory.manufacturing_date",
+          "canonical_field": "MANUFACTURING_DATE",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "制造日期",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        },
+        {
+          "observation_type": "device.manufacture_inventory.vendor_name",
+          "canonical_field": "VENDOR_NAME",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "制造商",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        },
+        {
+          "observation_type": "device.manufacture_inventory.product_id",
+          "canonical_field": "PRODUCT_ID",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "产品订货号",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        },
+        {
+          "observation_type": "device.manufacture_inventory.support_status",
+          "canonical_field": "SUPPORT_STATUS",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "不支持制造信息时保留设备提示，不编造资产信息",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        }
+      ],
+      "reference_revision": "h3c-manual-2026-09-23",
+      "value_references": [
+        "hp_comware_display_device_manuinfo.textfsm"
+      ],
+      "identity_dimension_rules": {
+        "SCOPE": {
+          "kind": "identifier"
+        },
+        "SLOT_TYPE": {
+          "kind": "identifier"
+        },
+        "SLOT_ID": {
+          "kind": "identifier"
+        }
+      }
+    },
+    "empty_result_policy": {
+      "classification": "invalid"
+    },
+    "coverage_policy": {
+      "model": "non_exhaustive",
+      "require_rule_evaluation": false
+    }
+  },
+  {
+    "id": "environment.fan_speed_level",
+    "name": "风扇档位",
+    "version": 1,
+    "category": "environment",
+    "description": "依据本批 H3C 原文和 NTC 字段定义；保持命令的实际粒度与单位。缺失不补零、不推断健康。",
+    "result_mode": "structured",
+    "assessment_mode": "evidence",
+    "report_projection": "auto@1",
+    "canonical_contract": {
+      "entity_type": "environment_fan_speed_level",
+      "identity_dimensions": [
+        "FAN"
+      ],
+      "value_contract": "same-name/v1",
+      "observations": [
+        {
+          "observation_type": "environment.fan_speed_level.speed_level",
+          "canonical_field": "SPEED_LEVEL",
+          "semantic_type": "gauge",
+          "value_type": "number",
+          "unit": null,
+          "required": false,
+          "description": "风扇离散档位，原文 Speedlevel；不是 RPM 转速",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        }
+      ],
+      "reference_revision": "h3c-manual-2026-09-23",
+      "value_references": [],
+      "identity_dimension_rules": {
+        "FAN": {
+          "kind": "identifier"
+        }
+      }
+    },
+    "empty_result_policy": {
+      "classification": "invalid"
+    },
+    "coverage_policy": {
+      "model": "non_exhaustive",
+      "require_rule_evaluation": false
+    }
+  },
+  {
+    "id": "interface.link_brief",
+    "name": "接口链路简表",
+    "version": 1,
+    "category": "interface",
+    "description": "依据本批 H3C 原文和 NTC 字段定义；保持命令的实际粒度与单位。缺失不补零、不推断健康。",
+    "result_mode": "structured",
+    "assessment_mode": "evidence",
+    "report_projection": "auto@1",
+    "canonical_contract": {
+      "entity_type": "interface_link_brief",
+      "identity_dimensions": [
+        "INTERFACE"
+      ],
+      "value_contract": "same-name/v1",
+      "observations": [
+        {
+          "observation_type": "interface.link_brief.link",
+          "canonical_field": "LINK",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "链路状态 UP、DOWN、ADM、Stby 原文",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        },
+        {
+          "observation_type": "interface.link_brief.protocol",
+          "canonical_field": "PROTOCOL",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "路由模式协议状态，保留 spoofing 标记",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        },
+        {
+          "observation_type": "interface.link_brief.main_ip",
+          "canonical_field": "MAIN_IP",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "路由模式主 IP 地址",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        },
+        {
+          "observation_type": "interface.link_brief.speed",
+          "canonical_field": "SPEED",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "桥接模式速率，保留 G/M 与自动协商标记",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        },
+        {
+          "observation_type": "interface.link_brief.duplex",
+          "canonical_field": "DUPLEX",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "双工原文 F/H/A",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        },
+        {
+          "observation_type": "interface.link_brief.type",
+          "canonical_field": "TYPE",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "桥接端口 A/T/H 模式",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        },
+        {
+          "observation_type": "interface.link_brief.vlan_id",
+          "canonical_field": "VLAN_ID",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "桥接端口 PVID",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        },
+        {
+          "observation_type": "interface.link_brief.description",
+          "canonical_field": "DESCRIPTION",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "接口描述",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        }
+      ],
+      "reference_revision": "h3c-manual-2026-09-23",
+      "value_references": [
+        "hp_comware_display_interface_brief.textfsm"
+      ],
+      "identity_dimension_rules": {
+        "INTERFACE": {
+          "kind": "identifier"
+        }
+      }
+    },
+    "empty_result_policy": {
+      "classification": "invalid"
+    },
+    "coverage_policy": {
+      "model": "non_exhaustive",
+      "require_rule_evaluation": false
+    }
+  },
+  {
+    "id": "interface.ip_brief",
+    "name": "接口 IP 与 VPN 简表",
+    "version": 1,
+    "category": "interface",
+    "description": "依据本批 H3C 原文和 NTC 字段定义；保持命令的实际粒度与单位。缺失不补零、不推断健康。",
+    "result_mode": "structured",
+    "assessment_mode": "evidence",
+    "report_projection": "auto@1",
+    "canonical_contract": {
+      "entity_type": "interface_ip_brief",
+      "identity_dimensions": [
+        "INTERFACE"
+      ],
+      "value_contract": "same-name/v1",
+      "observations": [
+        {
+          "observation_type": "interface.ip_brief.physical",
+          "canonical_field": "PHYSICAL",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "物理状态原文",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        },
+        {
+          "observation_type": "interface.ip_brief.protocol",
+          "canonical_field": "PROTOCOL",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "协议状态原文，含 spoofing 标记",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        },
+        {
+          "observation_type": "interface.ip_brief.ip_address",
+          "canonical_field": "IP_ADDRESS",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "接口 IP；未分配时缺失",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        },
+        {
+          "observation_type": "interface.ip_brief.prefix_length",
+          "canonical_field": "PREFIX_LENGTH",
+          "semantic_type": "gauge",
+          "value_type": "number",
+          "unit": null,
+          "required": false,
+          "description": "仅在原文 /Mask 明示时提取前缀长度",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        },
+        {
+          "observation_type": "interface.ip_brief.vpn_instance",
+          "canonical_field": "VPN_INSTANCE",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "VPN 名称；-- 不推断为某个命名 VPN",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        },
+        {
+          "observation_type": "interface.ip_brief.description",
+          "canonical_field": "DESCRIPTION",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "接口描述",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        }
+      ],
+      "reference_revision": "h3c-manual-2026-09-23",
+      "value_references": [
+        "hp_comware_display_ip_interface.textfsm"
+      ],
+      "identity_dimension_rules": {
+        "INTERFACE": {
+          "kind": "identifier"
+        }
+      }
+    },
+    "empty_result_policy": {
+      "classification": "invalid"
+    },
+    "coverage_policy": {
+      "model": "non_exhaustive",
+      "require_rule_evaluation": false
+    }
+  },
+  {
+    "id": "network.arp_entries",
+    "name": "ARP 邻居明细",
+    "version": 1,
+    "category": "network",
+    "description": "依据本批 H3C 原文和 NTC 字段定义；保持命令的实际粒度与单位。缺失不补零、不推断健康。",
+    "result_mode": "structured",
+    "assessment_mode": "evidence",
+    "report_projection": "auto@1",
+    "canonical_contract": {
+      "entity_type": "network_arp_entries",
+      "identity_dimensions": [
+        "IP_ADDRESS",
+        "VLAN_ID",
+        "INTERFACE"
+      ],
+      "value_contract": "same-name/v1",
+      "observations": [
+        {
+          "observation_type": "network.arp_entries.mac_address",
+          "canonical_field": "MAC_ADDRESS",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "邻居 MAC 地址",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        },
+        {
+          "observation_type": "network.arp_entries.aging",
+          "canonical_field": "AGING",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "原文 Aging 数值，单位未标时不推断",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        },
+        {
+          "observation_type": "network.arp_entries.type",
+          "canonical_field": "TYPE",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "原文 D/S 等类型；VLAN/VSI 与 VRF 不混用",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        }
+      ],
+      "reference_revision": "h3c-manual-2026-09-23",
+      "value_references": [
+        "hp_comware_display_arp.textfsm"
+      ],
+      "identity_dimension_rules": {
+        "IP_ADDRESS": {
+          "kind": "identifier"
+        },
+        "VLAN_ID": {
+          "kind": "identifier"
+        },
+        "INTERFACE": {
+          "kind": "identifier"
+        }
+      }
+    },
+    "empty_result_policy": {
+      "classification": "invalid"
+    },
+    "coverage_policy": {
+      "model": "non_exhaustive",
+      "require_rule_evaluation": false
+    }
+  },
+  {
+    "id": "network.mac_forwarding",
+    "name": "MAC 转发表端口明细",
+    "version": 1,
+    "category": "network",
+    "description": "依据本批 H3C 原文和 NTC 字段定义；保持命令的实际粒度与单位。缺失不补零、不推断健康。",
+    "result_mode": "structured",
+    "assessment_mode": "evidence",
+    "report_projection": "auto@1",
+    "canonical_contract": {
+      "entity_type": "network_mac_forwarding",
+      "identity_dimensions": [
+        "VLAN_ID",
+        "MAC_ADDRESS",
+        "INTERFACE"
+      ],
+      "value_contract": "same-name/v1",
+      "observations": [
+        {
+          "observation_type": "network.mac_forwarding.state",
+          "canonical_field": "STATE",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "转发表状态原文；同 VLAN/MAC 可在多个端口出现，全部保留",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        },
+        {
+          "observation_type": "network.mac_forwarding.aging",
+          "canonical_field": "AGING",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "原文 Y/N 老化标志，不冒充老化时间",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        }
+      ],
+      "reference_revision": "h3c-manual-2026-09-23",
+      "value_references": [
+        "hp_comware_display_mac-address.textfsm"
+      ],
+      "identity_dimension_rules": {
+        "VLAN_ID": {
+          "kind": "identifier"
+        },
+        "MAC_ADDRESS": {
+          "kind": "identifier"
+        },
+        "INTERFACE": {
+          "kind": "identifier"
+        }
+      }
+    },
+    "empty_result_policy": {
+      "classification": "invalid"
+    },
+    "coverage_policy": {
+      "model": "non_exhaustive",
+      "require_rule_evaluation": false
+    }
+  },
+  {
+    "id": "redundancy.irf_members",
+    "name": "IRF 成员角色",
+    "version": 1,
+    "category": "redundancy",
+    "description": "依据本批 H3C 原文和 NTC 字段定义；保持命令的实际粒度与单位。缺失不补零、不推断健康。",
+    "result_mode": "structured",
+    "assessment_mode": "evidence",
+    "report_projection": "auto@1",
+    "canonical_contract": {
+      "entity_type": "redundancy_irf_members",
+      "identity_dimensions": [
+        "MEMBER_ID"
+      ],
+      "value_contract": "same-name/v1",
+      "observations": [
+        {
+          "observation_type": "redundancy.irf_members.role",
+          "canonical_field": "ROLE",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "Master/Standby 角色，不冒充成员健康状态",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        },
+        {
+          "observation_type": "redundancy.irf_members.priority",
+          "canonical_field": "PRIORITY",
+          "semantic_type": "gauge",
+          "value_type": "number",
+          "unit": null,
+          "required": false,
+          "description": "成员优先级原值",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        },
+        {
+          "observation_type": "redundancy.irf_members.cpu_mac",
+          "canonical_field": "CPU_MAC",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "成员 CPU MAC",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        },
+        {
+          "observation_type": "redundancy.irf_members.description",
+          "canonical_field": "DESCRIPTION",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "成员描述",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        }
+      ],
+      "reference_revision": "h3c-manual-2026-09-23",
+      "value_references": [],
+      "identity_dimension_rules": {
+        "MEMBER_ID": {
+          "kind": "identifier"
+        }
+      }
+    },
+    "empty_result_policy": {
+      "classification": "invalid"
+    },
+    "coverage_policy": {
+      "model": "non_exhaustive",
+      "require_rule_evaluation": false
+    }
+  },
+  {
+    "id": "configuration.startup_files",
+    "name": "启动配置文件选择",
+    "version": 1,
+    "category": "configuration",
+    "description": "依据本批 H3C 原文和 NTC 字段定义；保持命令的实际粒度与单位。缺失不补零、不推断健康。",
+    "result_mode": "structured",
+    "assessment_mode": "evidence",
+    "report_projection": "auto@1",
+    "canonical_contract": {
+      "entity_type": "configuration_startup_files",
+      "identity_dimensions": [
+        "BOARD"
+      ],
+      "value_contract": "same-name/v1",
+      "observations": [
+        {
+          "observation_type": "configuration.startup_files.current_file",
+          "canonical_field": "CURRENT_FILE",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "当前启动配置文件路径，保留 (*) 标记",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        },
+        {
+          "observation_type": "configuration.startup_files.next_main_file",
+          "canonical_field": "NEXT_MAIN_FILE",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "下次主启动配置文件路径",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        },
+        {
+          "observation_type": "configuration.startup_files.next_backup_file",
+          "canonical_field": "NEXT_BACKUP_FILE",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "下次备启动配置文件路径；NULL 不代表配置正文",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        }
+      ],
+      "reference_revision": "h3c-manual-2026-09-23",
+      "value_references": [],
+      "identity_dimension_rules": {
+        "BOARD": {
+          "kind": "identifier"
+        }
+      }
+    },
+    "empty_result_policy": {
+      "classification": "invalid"
+    },
+    "coverage_policy": {
+      "model": "non_exhaustive",
+      "require_rule_evaluation": false
+    }
+  },
+  {
+    "id": "redundancy.mlag_system",
+    "name": "M-LAG 系统信息",
+    "version": 1,
+    "category": "redundancy",
+    "description": "依据本批 H3C 原文和 NTC 字段定义；保持命令的实际粒度与单位。缺失不补零、不推断健康。",
+    "result_mode": "structured",
+    "assessment_mode": "evidence",
+    "report_projection": "auto@1",
+    "canonical_contract": {
+      "entity_type": "redundancy_mlag_system",
+      "identity_dimensions": [
+        "LOCAL_NUMBER"
+      ],
+      "value_contract": "same-name/v1",
+      "observations": [
+        {
+          "observation_type": "redundancy.mlag_system.peer_number",
+          "canonical_field": "PEER_NUMBER",
+          "semantic_type": "gauge",
+          "value_type": "number",
+          "unit": null,
+          "required": false,
+          "description": "对端系统号",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        },
+        {
+          "observation_type": "redundancy.mlag_system.local_mac",
+          "canonical_field": "LOCAL_MAC",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "本端系统 MAC",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        },
+        {
+          "observation_type": "redundancy.mlag_system.peer_mac",
+          "canonical_field": "PEER_MAC",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "对端系统 MAC",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        },
+        {
+          "observation_type": "redundancy.mlag_system.local_priority",
+          "canonical_field": "LOCAL_PRIORITY",
+          "semantic_type": "gauge",
+          "value_type": "number",
+          "unit": null,
+          "required": false,
+          "description": "本端优先级",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        },
+        {
+          "observation_type": "redundancy.mlag_system.peer_priority",
+          "canonical_field": "PEER_PRIORITY",
+          "semantic_type": "gauge",
+          "value_type": "number",
+          "unit": null,
+          "required": false,
+          "description": "对端优先级",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        },
+        {
+          "observation_type": "redundancy.mlag_system.local_bridge_mac",
+          "canonical_field": "LOCAL_BRIDGE_MAC",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "本端桥 MAC",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        },
+        {
+          "observation_type": "redundancy.mlag_system.peer_bridge_mac",
+          "canonical_field": "PEER_BRIDGE_MAC",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "对端桥 MAC",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        },
+        {
+          "observation_type": "redundancy.mlag_system.local_role",
+          "canonical_field": "LOCAL_ROLE",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "本端有效角色",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        },
+        {
+          "observation_type": "redundancy.mlag_system.peer_role",
+          "canonical_field": "PEER_ROLE",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "对端有效角色",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        },
+        {
+          "observation_type": "redundancy.mlag_system.health_level",
+          "canonical_field": "HEALTH_LEVEL",
+          "semantic_type": "gauge",
+          "value_type": "number",
+          "unit": null,
+          "required": false,
+          "description": "设备报告的健康等级，不转换成健康结论",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        },
+        {
+          "observation_type": "redundancy.mlag_system.split_mode",
+          "canonical_field": "SPLIT_MODE",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "分裂时独立模式配置",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        },
+        {
+          "observation_type": "redundancy.mlag_system.standalone",
+          "canonical_field": "STANDALONE",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "当前是否独立模式原文",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        }
+      ],
+      "reference_revision": "h3c-manual-2026-09-23",
+      "value_references": [],
+      "identity_dimension_rules": {
+        "LOCAL_NUMBER": {
+          "kind": "identifier"
+        }
+      }
+    },
+    "empty_result_policy": {
+      "classification": "invalid"
+    },
+    "coverage_policy": {
+      "model": "non_exhaustive",
+      "require_rule_evaluation": false
+    }
+  },
+  {
+    "id": "redundancy.mlag_timers",
+    "name": "M-LAG 定时器",
+    "version": 1,
+    "category": "redundancy",
+    "description": "依据本批 H3C 原文和 NTC 字段定义；保持命令的实际粒度与单位。缺失不补零、不推断健康。",
+    "result_mode": "structured",
+    "assessment_mode": "evidence",
+    "report_projection": "auto@1",
+    "canonical_contract": {
+      "entity_type": "redundancy_mlag_timers",
+      "identity_dimensions": [
+        "TIMER"
+      ],
+      "value_contract": "same-name/v1",
+      "observations": [
+        {
+          "observation_type": "redundancy.mlag_timers.state",
+          "canonical_field": "STATE",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "定时器启用状态原文",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        },
+        {
+          "observation_type": "redundancy.mlag_timers.value_seconds",
+          "canonical_field": "VALUE_SECONDS",
+          "semantic_type": "gauge",
+          "value_type": "number",
+          "unit": "seconds",
+          "required": false,
+          "description": "配置时长，单位秒；- 保持缺失",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        },
+        {
+          "observation_type": "redundancy.mlag_timers.remaining_seconds",
+          "canonical_field": "REMAINING_SECONDS",
+          "semantic_type": "gauge",
+          "value_type": "number",
+          "unit": "seconds",
+          "required": false,
+          "description": "剩余秒数；- 保持缺失",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        }
+      ],
+      "reference_revision": "h3c-manual-2026-09-23",
+      "value_references": [],
+      "identity_dimension_rules": {
+        "TIMER": {
+          "kind": "identifier"
+        }
+      }
+    },
+    "empty_result_policy": {
+      "classification": "invalid"
+    },
+    "coverage_policy": {
+      "model": "non_exhaustive",
+      "require_rule_evaluation": false
+    }
+  },
+  {
+    "id": "operations.syslog_records",
+    "name": "设备日志条目",
+    "version": 1,
+    "category": "operations",
+    "description": "依据本批 H3C 原文和 NTC 字段定义；保持命令的实际粒度与单位。缺失不补零、不推断健康。",
+    "result_mode": "structured",
+    "assessment_mode": "evidence",
+    "report_projection": "auto@1",
+    "canonical_contract": {
+      "entity_type": "operations_syslog_records",
+      "identity_dimensions": [
+        "TIMESTAMP",
+        "FACILITY",
+        "MNEMONIC",
+        "MESSAGE"
+      ],
+      "value_contract": "same-name/v1",
+      "observations": [
+        {
+          "observation_type": "operations.syslog_records.host",
+          "canonical_field": "HOST",
+          "semantic_type": "text",
+          "value_type": "text",
+          "unit": null,
+          "required": false,
+          "description": "设备日志主机名",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        },
+        {
+          "observation_type": "operations.syslog_records.severity",
+          "canonical_field": "SEVERITY",
+          "semantic_type": "gauge",
+          "value_type": "number",
+          "unit": null,
+          "required": false,
+          "description": "原文 syslog 严重级别 0–7，不自动生成健康规则",
+          "assessment_roles": [
+            "evidence"
+          ],
+          "event_on_change": false,
+          "change_tracking": false
+        }
+      ],
+      "reference_revision": "h3c-manual-2026-09-23",
+      "value_references": [],
+      "identity_dimension_rules": {
+        "TIMESTAMP": {
+          "kind": "identifier"
+        },
+        "FACILITY": {
+          "kind": "identifier"
+        },
+        "MNEMONIC": {
+          "kind": "identifier"
+        },
+        "MESSAGE": {
+          "kind": "identifier"
+        }
+      }
+    },
+    "empty_result_policy": {
+      "classification": "invalid"
+    },
+    "coverage_policy": {
+      "model": "non_exhaustive",
+      "require_rule_evaluation": false
+    }
+  }
+]

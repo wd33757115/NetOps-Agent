@@ -259,12 +259,10 @@ def direct_projection_manifest(
 ) -> dict[str, Any]:
     """Return the governed V2 projection manifest for one CheckItem target."""
 
-    normalized = validate_adapter_spec(
-        raw,
-        check_item_ids=(check_item_id,),
-        check_items={check_item_id: check_item},
-        require_pinned_check_item_versions=require_pinned_check_item_version,
-    )
+    # Validate the entire adapter's structure, then the requested target's
+    # contract. Sibling CheckItems are legitimate outputs, not unlinked targets;
+    # their contracts are validated by their own plans and by catalog approval.
+    normalized = validate_adapter_spec(raw)
     if normalized.get("schema_version") != ADAPTER_SCHEMA_VERSION:
         raise CommandAdapterError("direct projection requires command-adapter/v2")
     outputs = [
@@ -276,6 +274,12 @@ def direct_projection_manifest(
         raise CommandAdapterError(
             f"command-adapter/v2 has no output for {check_item_id}"
         )
+    validate_adapter_spec(
+        {**normalized, "outputs": outputs},
+        check_item_ids=(check_item_id,),
+        check_items={check_item_id: check_item},
+        require_pinned_check_item_versions=require_pinned_check_item_version,
+    )
     observation_by_field = {
         str(item.get("canonical_field") or "").strip(): str(
             item.get("observation_type") or ""
@@ -1035,7 +1039,11 @@ def _validate_target_contract(
     field_specs = _field_specs(check_item)
     if (check_item.get("canonical_contract") or {}).get("value_contract") == "same-name/v1":
         for name, binding in fields.items():
-            if dict(binding) != {"source": name}:
+            expected = {"source": name}
+            dimensions = field_specs.get(name, {}).get("dimensions") or []
+            if dimensions:
+                expected["dimensions"] = {dimension: {"field": dimension} for dimension in dimensions}
+            if dict(binding) != expected:
                 raise CommandAdapterError(f"同名 Value {name} 不允许改名或转换；请修正 TextFSM")
     primary_keys = set(_primary_keys(check_item))
     allowed = set(field_specs) | primary_keys
@@ -1158,8 +1166,25 @@ def _normalize_mapped_record(
     normalized = dict(record)
     for field, spec in field_specs.items():
         value = normalized.get(field)
+        if spec.get("collection") == "list":
+            if value is None or value == "":
+                value = []
+            if not isinstance(value, list) or any(
+                not isinstance(item, str) or not item.strip() for item in value
+            ):
+                raise CommandAdapterError(f"canonical field requires a list of non-empty text: {field}")
+            normalized[field] = [item.strip() for item in value]
+            if spec.get("unique_items") and len(set(normalized[field])) != len(value):
+                raise CommandAdapterError(f"duplicate child identifiers: {field}")
+            if _required_for_record(spec, normalized) and not value:
+                raise CommandAdapterError(f"required canonical field is empty: {field}")
+            continue
         if _required_for_record(spec, normalized) and (
             value is None or (isinstance(value, str) and not value.strip())
+            or value == []
+            or (isinstance(value, str) and value.strip().casefold() in {
+                str(item).casefold() for item in spec.get("unavailable_values", [])
+            })
         ):
             raise CommandAdapterError(f"required canonical field is empty: {field}")
         if value is None or (isinstance(value, str) and not value.strip()):
@@ -1194,6 +1219,13 @@ def _normalize_mapped_record(
             raise CommandAdapterError(
                 f"canonical field is outside allowed values: {field}={normalized[field]!r}"
             )
+    for field, spec in field_specs.items():
+        paired = spec.get("paired_with")
+        if spec.get("collection") == "list" and paired:
+            if paired not in field_specs or field_specs[paired].get("collection") != "list":
+                raise CommandAdapterError(f"invalid paired list declaration: {field}")
+            if len(normalized[field]) != len(normalized[paired]):
+                raise CommandAdapterError(f"child lists must have equal lengths: {field}, {paired}")
     return normalized
 
 

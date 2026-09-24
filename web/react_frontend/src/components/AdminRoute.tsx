@@ -6,7 +6,7 @@ import { Navigate } from 'react-router-dom'
 import { Spin } from 'antd'
 import { useAuth } from '../context/AuthContext'
 
-const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+const AdminRoute: React.FC<{ children: React.ReactNode; appGrants?: boolean }> = ({ children, appGrants = false }) => {
   const { user, loading } = useAuth()
 
   if (loading) {
@@ -17,7 +17,7 @@ const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     )
   }
 
-  if (user?.role !== 'admin') {
+  if (user?.role !== 'admin' && !(appGrants && user?.permissions?.includes('apps.manage'))) {
     return <Navigate to="/chat" replace />
   }
 

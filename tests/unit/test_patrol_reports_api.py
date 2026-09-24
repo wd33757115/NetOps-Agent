@@ -19,6 +19,7 @@ def client(monkeypatch):
         "report_context",
         lambda job_id, **kwargs: ({"assessment": {"status": "需复核"}, "metrics": {}}, {}),
     )
+    monkeypatch.setattr(reports, "load_detail_source", lambda job_id, **kwargs: {})
     return TestClient(app)
 
 
@@ -59,16 +60,29 @@ def test_excel_authorizes_before_loading_private_snapshots(client, monkeypatch):
         raise PermissionError("other owner")
     def forbidden(*args, **kwargs):
         raise AssertionError("private snapshots accessed before authorization")
-    monkeypatch.setattr(reports, "report_context", denied)
+    monkeypatch.setattr(reports, "load_detail_source", denied)
     monkeypatch.setattr(reports, "load_detail_data", forbidden)
     assert client.get("/api/v1/patrol/offline-jobs/job/report/details").status_code == 403
 
 
 def test_excel_export_uses_binary_response_and_no_ai(client, monkeypatch):
+    def forbidden(*args, **kwargs):
+        raise AssertionError("raw Excel must not build a health report")
+    monkeypatch.setattr(reports, "report_context", forbidden)
+    monkeypatch.setattr(reports.drafting, "provider_config", forbidden)
     monkeypatch.setattr(reports, "load_detail_data", lambda source: {"definitions": {}, "snapshots": []})
     response = client.get("/api/v1/patrol/offline-jobs/job/report/details")
     assert response.status_code == 200 and response.content[:2] == b"PK"
     assert response.headers["content-type"] == reports.XLSX
+
+
+def test_word_validation_error_is_readable_instead_of_server_error(client, monkeypatch):
+    def invalid(*args, **kwargs):
+        raise ValueError("报告模板内容无效")
+    monkeypatch.setattr(reports, "render_report", invalid)
+    response = client.post("/api/v1/patrol/offline-jobs/job/report/export", json={})
+    assert response.status_code == 409
+    assert response.json()["detail"] == "报告模板内容无效"
 
 
 def test_unknown_metadata_and_draft_scopes_rejected(client):
@@ -96,6 +110,26 @@ def test_full_evidence_rejects_stale_version(client):
     assert response.status_code == 409
 
 
+def test_full_reference_evidence_keeps_scope_digest_and_authorization(client, monkeypatch):
+    def load(job_id, reference, **kwargs):
+        assert job_id == "job" and reference == "change"
+        assert kwargs == {"owner_id": "owner", "is_admin": False}
+        return {"source_digest": "a" * 64, "items": [
+            {"id": "CLI-001", "full_source": {"baseline": "old", "current": "new"}},
+        ]}
+    monkeypatch.setattr(reports, "reference_evidence", load)
+    monkeypatch.setattr(reports, "report_context", lambda *a, **kw: pytest.fail("whole report"))
+    url = "/api/v1/patrol/offline-jobs/job/report/evidence/CLI-001/full"
+    assert client.get(url, params={"reference": "change", "source_digest": "a" * 64}).json() == {
+        "baseline": "old", "current": "new",
+    }
+    assert client.get(url, params={"reference": "change", "source_digest": "b" * 64}).status_code == 409
+    def denied(*a, **kw):
+        raise PermissionError("other owner")
+    monkeypatch.setattr(reports, "reference_evidence", denied)
+    assert client.get(url, params={"reference": "change", "source_digest": "a" * 64}).status_code == 403
+
+
 def test_evidence_filters_reference_before_pagination_and_never_sends_full_cli(client, monkeypatch):
     entries = [
         {
@@ -106,7 +140,11 @@ def test_evidence_filters_reference_before_pagination_and_never_sends_full_cli(c
         }
         for i in range(15)
     ]
-    monkeypatch.setattr(reports, "build_excerpts", lambda _: entries)
+    def scoped(jid, reference, **kwargs):
+        assert kwargs == {"owner_id": "owner", "is_admin": False}
+        return {"source_digest": "a" * 64, "items": [e for e in entries if reference in e["match_references"]]}
+    monkeypatch.setattr(reports, "reference_evidence", scoped)
+    monkeypatch.setattr(reports, "report_context", lambda *a, **kw: pytest.fail("must not render full report"))
     for ref in ("obs-14", "change-14", "event-14"):
         r = client.get("/api/v1/patrol/offline-jobs/job/report/evidence", params={"reference": ref})
         assert r.status_code == 200

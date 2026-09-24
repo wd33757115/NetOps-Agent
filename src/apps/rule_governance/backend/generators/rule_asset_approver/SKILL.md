@@ -22,7 +22,7 @@ inputs:
   - name: job_id
     type: string
     required: true
-    description: Pending RuleGenerationJob id created by rule-asset-submitter or rule-asset-persister.
+    description: Pending rule draft job created from approved CheckItem semantics.
   - name: actor
     type: string
     required: false

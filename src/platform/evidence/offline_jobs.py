@@ -20,6 +20,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from sqlalchemy import or_
+from sqlalchemy.orm import defer, load_only
 
 from src.core.check_items.command_adapter import is_direct_projection_adapter
 from src.core.check_items.numeric_health import policy_rule
@@ -50,7 +51,6 @@ from src.infrastructure.db.models import (
     EventRuleVersionRecord,
     FileMetadata,
     NetworkDevice,
-    ObservationContractRecord,
     OfflinePatrolDeviceBindingRecord,
     OfflinePatrolJobRecord,
     OfflinePatrolPeriodRecord,
@@ -228,6 +228,23 @@ def _normalized_preview(preview: dict[str, Any] | None) -> dict[str, Any]:
         totals["device_period_count"] = device_period_count
     result["totals"] = totals
     return result
+
+
+def _execution_counts(status: str, target_count: int) -> dict[str, int | float]:
+    """Each target belongs to exactly one execution state, never failed AND skipped."""
+    completed = target_count if status == "completed" else 0
+    launched = status in JOB_ACTIVE_STATUSES | JOB_TERMINAL_STATUSES
+    return {
+        "target_count": target_count,
+        "launched_count": target_count if launched else 0,
+        "completed_count": completed,
+        "failed_count": target_count if status == "failed" else 0,
+        "cancelled_count": target_count if status == "cancelled" else 0,
+        "active_count": target_count if status in JOB_ACTIVE_STATUSES else 0,
+        "skipped_count": 0 if launched else target_count,
+        "preflight_failed_count": 0,
+        "execution_coverage_rate": completed / target_count if target_count else 0.0,
+    }
 
 
 def _recount_period_preview(preview: dict[str, Any]) -> dict[str, Any]:
@@ -598,7 +615,10 @@ class OfflinePatrolJobService:
         page = max(1, int(page))
         page_size = max(1, min(int(page_size), 100))
         with get_db_session() as db:
-            query = db.query(OfflinePatrolJobRecord)
+            query = db.query(OfflinePatrolJobRecord).options(
+                defer(OfflinePatrolJobRecord.result_json),
+                defer(OfflinePatrolJobRecord.artifacts_json),
+            )
             if not is_admin:
                 query = query.filter(OfflinePatrolJobRecord.owner_id == owner_id)
             if purpose:
@@ -629,6 +649,20 @@ class OfflinePatrolJobService:
             self._sync_workflow_rows(db, rows)
             items = [self._serialize_job_summary(row) for row in rows]
         return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+    def check_access(
+        self, job_id: str, *, owner_id: str | None = None,
+        is_admin: bool = False, purpose: str | None = None,
+    ) -> None:
+        """Authorize by identity only, without loading task evidence or results."""
+        with get_db_session() as db:
+            row = db.query(OfflinePatrolJobRecord).options(load_only(
+                OfflinePatrolJobRecord.id, OfflinePatrolJobRecord.owner_id,
+                OfflinePatrolJobRecord.purpose,
+            )).filter(OfflinePatrolJobRecord.id == job_id).one_or_none()
+            self._assert_access(row, owner_id=owner_id, is_admin=is_admin)
+            if purpose and row.purpose != purpose:
+                raise KeyError("offline job not found in this workspace")
 
     def get_job(
         self,
@@ -1583,15 +1617,14 @@ class OfflinePatrolJobService:
             raise ValueError("offline patrol job has not produced a patrol run")
         if kind == "excel":
             if detail.get("purpose") == "offline_patrol":
-                from src.core.patrol.detail_data import load_detail_data
+                from src.core.patrol.detail_data import load_detail_data, load_detail_source
                 from src.core.patrol.detail_workbook import render_detail_workbook
-                from src.core.patrol.report_service import report_context
 
-                report, source = report_context(job_id, owner_id=detail["owner_id"])
+                source = load_detail_source(job_id, owner_id=detail["owner_id"])
                 return (
                     "patrol-details.xlsx",
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    render_detail_workbook(report, source, load_detail_data(source)),
+                    render_detail_workbook({}, source, load_detail_data(source)),
                 )
             summary = self._build_offline_leadership_summary(detail, run_id)
             return (
@@ -1911,7 +1944,7 @@ class OfflinePatrolJobService:
                 db.query(StateObservationRecord)
                 .filter(StateObservationRecord.run_id == run_id)
                 .order_by(StateObservationRecord.observed_at)
-                .all()
+                .yield_per(500)
             )
             attempt_query = db.query(PatrolAnalysisAttemptRecord).filter(
                 PatrolAnalysisAttemptRecord.run_id == run_id,
@@ -2025,7 +2058,7 @@ class OfflinePatrolJobService:
                 for row in (
                     db.query(StateObservationRecord)
                     .filter(StateObservationRecord.run_id == next(iter(baseline_run_ids)))
-                    .all()
+                    .yield_per(500)
                 ):
                     metadata = dict(row.metadata_json or {})
                     baseline_facts.append(
@@ -2343,7 +2376,6 @@ class OfflinePatrolJobService:
             parse_failed_commands=parse_failed_commands,
         )
         target_count = len(current_bindings) or len(device_ids)
-        completed_count = target_count if detail.get("status") == "completed" else 0
         job_name = str(detail.get("name") or "").strip()
         if not job_name or "?" in job_name or "\ufffd" in job_name:
             period_dates = {
@@ -2390,15 +2422,7 @@ class OfflinePatrolJobService:
                 "target_type": "offline_import",
                 "target_label": job_name,
                 "selector": {"job_id": detail.get("id"), "period_role": current_role},
-                "target_count": target_count,
-                "launched_count": target_count,
-                "skipped_count": max(0, target_count - completed_count),
-                "preflight_failed_count": 0,
-                "completed_count": completed_count,
-                "failed_count": 0 if detail.get("status") == "completed" else target_count,
-                "cancelled_count": 0,
-                "active_count": 0,
-                "execution_coverage_rate": completed_count / target_count if target_count else 0.0,
+                **_execution_counts(str(detail.get("status") or "unknown"), target_count),
             },
             "quality": quality,
             "change_count": len(changes),
@@ -2937,88 +2961,12 @@ class OfflinePatrolJobService:
                                 }
                             )
 
-                # Keep the old Contract route only for templates which have not
-                # been migrated to CommandAdapter V2.  This makes the quality
-                # gate compatible during the repository's incremental cutover
-                # without requiring a production dual-run path.
-                legacy_template_ids = active_template_ids - direct_template_ids
-                contracts = (
-                    db.query(ObservationContractRecord)
-                    .filter(
-                        ObservationContractRecord.source_template_id.in_(
-                            legacy_template_ids
-                        ),
-                        ObservationContractRecord.status == "active",
-                    )
-                    .all()
-                    if legacy_template_ids
-                    else []
-                )
-                contract_templates = {str(item.source_template_id) for item in contracts}
-                missing_contracts = sorted(legacy_template_ids - contract_templates)
-                for template_id in missing_contracts:
-                    blockers.append(
-                        {
-                            "code": "observation_contract_missing",
-                            "template_id": template_id,
-                            "message": f"Parser 模板 {template_id} 缺少 active ObservationContract",
-                        }
-                    )
-                targets: list[tuple[str, str]] = []
-                for contract in contracts:
-                    semantics = contract.state_semantics_json or {}
-                    if not isinstance(semantics, dict):
-                        continue
-                    for field_name, field_semantics in semantics.items():
-                        if not isinstance(field_semantics, dict):
-                            continue
-                        observation_type = str(
-                            field_semantics.get("observation_type") or ""
-                        ).strip()
-                        semantic_type = str(field_semantics.get("semantic_type") or "").strip()
-                        if observation_type and semantic_type not in {"", "identity"}:
-                            targets.append((str(field_name), observation_type))
-                target_types = {item[1] for item in targets}
-                active_policies = (
-                    {
-                        str(item.observation_type)
-                        for item in db.query(ChangePolicyVersionRecord)
-                        .filter(
-                            ChangePolicyVersionRecord.status == "active",
-                            ChangePolicyVersionRecord.observation_type.in_(target_types),
-                        )
-                        .all()
-                    }
-                    if target_types
-                    else set()
-                )
-                active_rules = (
-                    db.query(EventRuleVersionRecord)
-                    .filter(EventRuleVersionRecord.status == "active")
-                    .all()
-                )
-                for field_name, observation_type in sorted(set(targets)):
-                    if observation_type not in active_policies:
-                        blockers.append(
-                            {
-                                "code": "change_policy_missing",
-                                "observation_type": observation_type,
-                                "field_name": field_name,
-                                "message": f"{observation_type} 缺少 active ChangePolicy",
-                            }
-                        )
-                    if not any(
-                        self._rule_mentions_target(rule, field_name, observation_type)
-                        for rule in active_rules
-                    ):
-                        blockers.append(
-                            {
-                                "code": "event_rule_missing",
-                                "observation_type": observation_type,
-                                "field_name": field_name,
-                                "message": f"{observation_type} 缺少匹配的 active EventRule",
-                            }
-                        )
+                for template_id in sorted(active_template_ids - direct_template_ids):
+                    blockers.append({
+                        "code": "command_adapter_v2_required",
+                        "template_id": template_id,
+                        "message": "请关联检查项并发布 V2 命令适配器。",
+                    })
         return blockers
 
     @staticmethod

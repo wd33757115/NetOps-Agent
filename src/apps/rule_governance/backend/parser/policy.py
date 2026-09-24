@@ -208,6 +208,11 @@ class ParserPolicy:
             asset_mode=self._asset_mode("raw_hash_diff"),
         )
 
+    def has_explicit_policy(self, command: str) -> bool:
+        canonical = self.normalize_command(command)
+        commands = self.policy.get("commands") or self.policy.get("_global") or {}
+        return canonical in commands or self._matching_unstructured_rule(canonical) is not None
+
     @staticmethod
     def _asset_mode(handling: str, configured: Any = None) -> str:
         defaults = {

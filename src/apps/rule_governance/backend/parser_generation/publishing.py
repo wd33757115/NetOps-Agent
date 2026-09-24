@@ -261,6 +261,13 @@ def latest_reusable_candidate(
     ):
         template_text = str(attempt.get("template_text") or "")
         validation = dict(attempt.get("validation_report_json") or {})
+        # Automatic NTC selection is retired. Keep historical provenance, but
+        # never silently seed a new run from an old automatically selected NTC asset.
+        provenance = dict(validation.get("candidate_provenance") or {})
+        if (provenance.get("provider") == "ntc_templates"
+                or attempt.get("model_provider") == "ntc_templates"
+                or attempt.get("action") == "seed:ntc_templates"):
+            continue
         generation = dict(validation.get("generation") or {})
         acceptance = validation.get("acceptance")
         if not template_text or generation.get("passed") is not True:
@@ -589,7 +596,6 @@ def _persist_attempt(
         model_provider=(
             attempt.candidate.provider
             if attempt.stage.startswith("llm_")
-            or attempt.candidate.provider == "ntc_templates"
             else "platform"
         ),
         model_name=attempt.candidate.model_name,

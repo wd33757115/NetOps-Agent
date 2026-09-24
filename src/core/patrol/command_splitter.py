@@ -180,7 +180,13 @@ def _split_command_report(text: str, device_name: str | None) -> list[CommandBlo
         # output of the next labelled command. In that case the device prompts
         # are the authoritative command boundaries. Keep any real prefix as the
         # labelled command output, then split the embedded transcript normally.
-        embedded_markers = _prompt_markers(body_lines)
+        # Configuration exports own their entire labelled body. Prompt-like
+        # lines inside them must not manufacture separate operational samples.
+        configuration = canonicalize_command(command) in {
+            "show running-config", "show startup-config",
+            "display current-configuration", "display saved-configuration",
+        }
+        embedded_markers = [] if configuration else _prompt_markers(body_lines)
         if embedded_markers:
             prefix_end = embedded_markers[0][0]
             prefix_body = _clean_body(body_lines[:prefix_end])

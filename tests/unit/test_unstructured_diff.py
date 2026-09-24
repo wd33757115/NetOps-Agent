@@ -116,7 +116,7 @@ def test_log_preview_prioritizes_current_messages_and_redacts_identifiers():
     assert "Overwritten messages" not in preview
 
 
-def test_policy_pattern_routes_logbuffer_to_non_structured_comparison():
+def test_log_records_use_structured_evidence_and_keep_historical_diff_profile():
     decision = ParserPolicy(repository=_PolicyRepository()).decide(
         vendor="H3C",
         model="S5130S",
@@ -125,11 +125,15 @@ def test_policy_pattern_routes_logbuffer_to_non_structured_comparison():
     )
     profile = resolve_unstructured_diff_profile("display logbuffer level 3")
 
-    assert decision.enabled is False
-    assert decision.handling == "raw_hash_diff"
-    assert decision.comparison_profile == "log_window"
-    assert decision.comparison_profile_version == 1
+    assert decision.enabled is True
+    assert decision.handling == "structured"
+    assert decision.asset_mode == "observation_only"
     assert profile and profile["mode"] == "rolling_window"
+    fallback = ParserPolicy(repository=_PolicyRepository()).decide(
+        vendor="H3C", model="S5130S", family="Comware7", command="display logbuffer level 0",
+    )
+    assert fallback.handling == "raw_hash_diff"
+    assert fallback.comparison_profile == "log_window"
 
 
 def test_snapshot_change_keeps_hashes_and_adds_safe_diff_evidence():

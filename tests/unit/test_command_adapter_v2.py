@@ -91,6 +91,39 @@ def test_v2_maps_vendor_enum_and_pins_check_item_version() -> None:
     assert len(batches[0].evidence["adapter_projection_digest"]) == 64
 
 
+def test_projection_manifest_scopes_one_target_in_multi_check_adapter() -> None:
+    sibling = {
+        **INTERFACE_SPEC["outputs"][0],
+        "check_item_id": "interface.second_status",
+        "check_item_version_id": "second-v1",
+        "source_record_set": "second_interfaces",
+    }
+    spec = {**INTERFACE_SPEC, "outputs": [*INTERFACE_SPEC["outputs"], sibling]}
+    first = direct_projection_manifest(
+        spec, check_item_id="interface.oper_status", check_item=INTERFACE_CHECK_ITEM,
+    )
+    second = direct_projection_manifest(
+        spec, check_item_id="interface.second_status",
+        check_item={**INTERFACE_CHECK_ITEM, "version_id": "second-v1"},
+    )
+    assert first["source_record_sets"] == ["interfaces"]
+    assert second["source_record_sets"] == ["second_interfaces"]
+    assert first["digest"] == second["digest"]
+    with pytest.raises(CommandAdapterError):
+        direct_projection_manifest(
+            spec, check_item_id="interface.second_status", check_item=INTERFACE_CHECK_ITEM,
+        )
+    with pytest.raises(CommandAdapterError, match="no output"):
+        direct_projection_manifest(
+            spec, check_item_id="missing", check_item=INTERFACE_CHECK_ITEM,
+        )
+    with pytest.raises(CommandAdapterError):
+        direct_projection_manifest(
+            {**spec, "outputs": [*INTERFACE_SPEC["outputs"], {**sibling, "projection": {}}]},
+            check_item_id="interface.oper_status", check_item=INTERFACE_CHECK_ITEM,
+        )
+
+
 def test_v2_allows_one_check_item_to_project_distinct_record_sets() -> None:
     spec = {
         **INTERFACE_SPEC,
@@ -334,15 +367,7 @@ def test_v2_normalizer_does_not_resolve_observation_contract(monkeypatch) -> Non
         lambda _self, _version_id: (implementation, (check_item,)),
     )
 
-    class ContractRepositoryShouldNotBeUsed:
-        def __init__(self, *_args, **_kwargs):
-            raise AssertionError("V2 adapter must bypass ObservationContract")
-
-    monkeypatch.setattr(
-        normalizer,
-        "ObservationContractRepository",
-        ContractRepositoryShouldNotBeUsed,
-    )
+    assert not hasattr(normalizer, "ObservationContractRepository")
 
     observations = normalizer.observations_from_snapshot(
         {
@@ -445,43 +470,9 @@ def test_post_cutover_production_rejects_legacy_contract_runtime(monkeypatch) ->
             dataset_id=None,
         )
 
-    assert normalizer._legacy_contract_runtime_retired("parser_validation") is False
+    assert not hasattr(normalizer, "_legacy_contract_runtime_retired")
 
 
-def test_post_cutover_replay_does_not_recreate_a_missing_legacy_contract(monkeypatch) -> None:
-    monkeypatch.setattr(
-        normalizer,
-        "get_settings",
-        lambda: SimpleNamespace(ADAPTER_PROJECTION_CUTOVER_ENFORCED=True),
-    )
-
-    class ContractRepository:
-        def get_active_validation_dict(self, **_kwargs):
-            return None
-
-        def upsert_from_parser_template(self, *_args, **_kwargs):
-            raise AssertionError("cutover replay must not write ObservationContract")
-
-    monkeypatch.setattr(normalizer, "ObservationContractRepository", ContractRepository)
-    monkeypatch.setattr(
-        normalizer.ParserTemplateRepository,
-        "get_template",
-        lambda _self, _template_id: SimpleNamespace(
-            id="legacy-parser-v1",
-            status="active",
-            category="interface",
-            contract_version=4,
-            validation_json={"state_semantics": {}},
-        ),
-    )
-
-    assert normalizer._template_contract("legacy-parser-v1") == {
-        "state_semantics": {},
-        "entity_type": "interface",
-        "contract_version": 4,
-        "schema_id": "legacy-parser-v1",
-        "source_type": "cli",
-    }
 
 
 def test_direct_projection_asset_profile_replaces_observation_contract() -> None:
@@ -497,7 +488,7 @@ def test_direct_projection_asset_profile_replaces_observation_contract() -> None
     )
 
     assert profile["requirements"]["command_adapter_projection"]["required"] is True
-    assert profile["requirements"]["observation_contract"]["required"] is False
+    assert "observation_contract" not in profile["requirements"]
 
 
 def test_structured_comparison_contract_freezes_projection_not_observation_contract() -> None:

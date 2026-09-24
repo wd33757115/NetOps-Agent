@@ -60,6 +60,10 @@ def sqlite_repository(monkeypatch, tmp_path):
         "database_clocks",
         lambda db: (datetime.now(timezone.utc), datetime.now()),
     )
+    # Recovery timing is independent of association; association guards have SQLite integration tests.
+    monkeypatch.setattr(parser_repository, "require_parser_check_item", lambda *args, **kwargs: {
+        "check_item_id": "interface.state", "version_id": "v1", "digest": "digest",
+    })
     return ParserJobRepository(), session_factory
 
 
@@ -140,6 +144,9 @@ def test_retry_preserves_adopted_semantic_plan_and_clears_run_state(sqlite_repos
         job = db.get(ParserTemplateJob, job_id)
         job.agent_state_json = {
             "parser_spec_suggestion": semantic_suggestion,
+            "parser_spec_check_item": {
+                "check_item_id": "interface.state", "version_id": "v1", "digest": "digest",
+            },
             "generation_run_id": "old-run",
             "last_diagnostic": "old failure",
         }
@@ -151,6 +158,9 @@ def test_retry_preserves_adopted_semantic_plan_and_clears_run_state(sqlite_repos
     assert retried["status"] == "pending"
     assert retried["agent_state_json"] == {
         "parser_spec_suggestion": semantic_suggestion,
+        "parser_spec_check_item": {
+            "check_item_id": "interface.state", "version_id": "v1", "digest": "digest",
+        },
         "execution_identity": {"user_id": None, "display": None, "task_id": None},
     }
     assert retried["agent_budget_json"] is None
@@ -518,6 +528,7 @@ def _insert_suggestion_job(session_factory, *, suggestion_minutes_ago: int):
                     "parser_spec_suggestion": {
                         "status": "running",
                         "task_id": "old-task",
+                        "check_item_binding": {"check_item_id": "interface.state", "version_id": "v1", "digest": "digest"},
                         "requested_at": requested_at,
                         "updated_at": requested_at,
                     }

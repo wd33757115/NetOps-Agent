@@ -35,7 +35,6 @@ docxtpl>=0.16.7
 
 pyyaml>=6.0
 textfsm==2.1.0
-ntc-templates==9.1.0
 netmiko>=4.7.0,<5.0.0
 
 

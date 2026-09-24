@@ -27,6 +27,11 @@
 ## 技术参考
 
 - [检查项与适配器](patrol-rule-architecture.md)、[解析生成](parser-generation-guide.md)、[规则资产治理](rule-asset-control-plane-guide.md)
+- [思科样本检查项 Value 与语义](check-item-cisco-values.md)
+- [Cisco 手工 TextFSM 与脱敏样本导入](cisco-manual-textfsm-import.md)
+- [H3C 手工 TextFSM 与脱敏样本导入](h3c-manual-textfsm-import.md)
+- [检查项变化策略与事件规则重建](check-item-semantic-rule-refresh.md)
+- [检查项字段语义编辑与实施计划](check-item-semantic-editor.md)
 - [变化和事件](patrol-change-event-pipeline.md)、[报告证据](patrol-report-guide.md)
 - [样本与生产边界](patrol-parser-dual-mode-guide.md)、[文本比较](patrol-text-comparison-guide.md)
 - [Skill 开发](SKILL_CREATION_GUIDE.md)、[过程与观测](observability-guide.md)

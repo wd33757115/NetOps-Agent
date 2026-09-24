@@ -15,7 +15,6 @@ from src.infrastructure.db.models import (
     CommandProfileVersionRecord,
     DeviceReadinessProjection,
     EventRuleVersionRecord,
-    ObservationContractRecord,
     ParserTemplate,
 )
 from src.infrastructure.db.postgres import get_db_session
@@ -71,7 +70,6 @@ class DeviceReadinessProjectionRepository:
     def asset_revision(self) -> str:
         models = (
             ParserTemplate,
-            ObservationContractRecord,
             ChangePolicyVersionRecord,
             EventRuleVersionRecord,
             CommandProfileVersionRecord,

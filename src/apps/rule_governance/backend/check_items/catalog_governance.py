@@ -44,6 +44,7 @@ from src.infrastructure.db.models import (
     CheckItemCatalogChangeRecord,
     CheckItemImplementationLinkRecord,
     CheckItemRecord,
+    CheckItemRuntimeBundleRecord,
     CheckItemRuntimeBundleVersionRecord,
     CheckItemVersionRecord,
     CollectionImplementationRecord,
@@ -786,7 +787,13 @@ class CheckItemCatalogGovernanceService:
                     "idempotent_replay": True,
                 }
 
-            root = db.get(CollectionImplementationRecord, implementation_id)
+            # Shared with runtime activation: serialize deletion and reactivation.
+            root = (
+                db.query(CollectionImplementationRecord)
+                .filter(CollectionImplementationRecord.id == implementation_id)
+                .with_for_update()
+                .first()
+            )
             if root is None:
                 raise ValueError("collection implementation not found")
             versions = (
@@ -807,13 +814,23 @@ class CheckItemCatalogGovernanceService:
                         version_ids or [""]
                     ),
                 )
+                .with_for_update()
                 .all()
             )
-            if active_runtime:
-                raise CatalogGovernanceConflictError(
-                    "collection implementation is referenced by active RuntimeBundle "
-                    f"versions: {sorted(str(item.id) for item in active_runtime)}"
-                )
+            retired_bundle_ids = sorted(str(item.id) for item in active_runtime)
+            for bundle in active_runtime:
+                bundle.status = "deprecated"
+                bundle.deprecated_at = now
+            # Keep frozen bundle contents and execution evidence intact; only remove
+            # this implementation's bundles from production selection.
+            for bundle_root in (
+                db.query(CheckItemRuntimeBundleRecord)
+                .filter(CheckItemRuntimeBundleRecord.implementation_id == implementation_id)
+                .with_for_update()
+                .all()
+            ):
+                bundle_root.status = "deprecated"
+                bundle_root.updated_at = now
 
             pending_changes = (
                 db.query(CheckItemCatalogChangeRecord)
@@ -843,6 +860,7 @@ class CheckItemCatalogGovernanceService:
             detail = {
                 "implementation_id": implementation_id,
                 "version_ids": version_ids,
+                "retired_runtime_bundle_version_ids": retired_bundle_ids,
                 "cancelled_change_count": len(pending_changes),
                 "reason": reason,
             }

@@ -1,8 +1,46 @@
 """Load only the selected patrol periods and their immutable check-item definitions."""
 
-import json
-
 from src.core.check_items.presentation import check_item_display_name
+
+
+def load_detail_source(job_id, *, owner_id=None, is_admin=False):
+    """Authorize and load period IDs without building a health report or CLI preview."""
+    from sqlalchemy.orm import load_only
+
+    from src.infrastructure.db.models import OfflinePatrolJobRecord, OfflinePatrolPeriodRecord
+    from src.infrastructure.db.postgres import get_db_session
+    from src.platform.evidence.offline_jobs import OfflinePatrolJobService
+
+    with get_db_session() as db:
+        job = (
+            db.query(OfflinePatrolJobRecord)
+            .options(
+                load_only(
+                    OfflinePatrolJobRecord.id,
+                    OfflinePatrolJobRecord.owner_id,
+                    OfflinePatrolJobRecord.status,
+                    OfflinePatrolJobRecord.purpose,
+                )
+            )
+            .filter_by(id=job_id)
+            .first()
+        )
+        OfflinePatrolJobService._assert_access(job, owner_id=owner_id, is_admin=is_admin)
+        if job.purpose != "offline_patrol":
+            raise KeyError("offline job not found in this workspace")
+        if job.status != "completed":
+            raise ValueError("任务完成后才能导出巡检数据")
+        periods = (
+            db.query(
+                OfflinePatrolPeriodRecord.role,
+                OfflinePatrolPeriodRecord.observed_at,
+                OfflinePatrolPeriodRecord.patrol_run_id,
+            )
+            .filter_by(job_id=job_id)
+            .order_by(OfflinePatrolPeriodRecord.observed_at)
+            .all()
+        )
+        return {"periods": [dict(p._mapping) for p in periods]}
 
 
 def load_detail_data(source):
@@ -25,7 +63,12 @@ def load_detail_data(source):
     with get_db_session() as db:
         snapshots = [
             s.to_dict()
-            for s in db.query(CommandSnapshot).filter(CommandSnapshot.run_id.in_(run_roles)).all()
+            for s in db.query(CommandSnapshot)
+            .filter(CommandSnapshot.run_id.in_(run_roles))
+            .order_by(
+                CommandSnapshot.device_id, CommandSnapshot.canonical_command, CommandSnapshot.id
+            )
+            .all()
         ]
         for s in snapshots:
             s["period"] = run_roles[s["run_id"]]
@@ -74,71 +117,19 @@ def load_detail_data(source):
             else {}
         )
     for snapshot in snapshots:
-        prepare_detail_records(snapshot, definitions, adapters)
-    return {"snapshots": snapshots, "definitions": definitions}
-
-
-def prepare_detail_records(snapshot, definitions, adapters):
-    """Replay the exact pinned adapter over complete parser records, never state facts.
-
-    This is historical compatibility, not a new alias mapper. A modern same-name
-    parser passes through its pinned identity projection. Invalid old bindings are
-    rejected; exporting must not quietly replace them with today's active adapter.
-    """
-    from src.core.check_items.command_adapter import CommandAdapterError, execute_adapter
-
-    from src.core.patrol.detail_workbook import record_sets
-
-    snapshot["detail_records"] = {}
-    snapshot["detail_errors"] = {}
-    bindings = (snapshot.get("metadata_json") or {}).get("check_item_bindings") or []
-    for binding in bindings:
-        version = binding.get("check_item_version_id")
-        definition = definitions.get(version)
-        if not definition or definition["mode"] != "structured":
-            continue
-        adapter_id = binding.get("implementation_version_id")
-        spec = adapters.get(adapter_id)
-        try:
-            if not spec or (spec.get("parser") or {}).get("template_id") != snapshot.get(
-                "parser_template_id"
-            ):
-                raise CommandAdapterError("检查项关联的解析版本不可用")
+        # Only use historical bindings to select the record set. Never replay a
+        # projection or reject saved parser data because today's rules changed.
+        selections = {}
+        for binding in (snapshot.get("metadata_json") or {}).get("check_item_bindings") or []:
+            spec = adapters.get(binding.get("implementation_version_id")) or {}
             outputs = [
-                o for o in spec.get("outputs", []) if o.get("check_item_id") == definition["id"]
+                o
+                for o in spec.get("outputs", [])
+                if o.get("check_item_id") == binding.get("check_item_id")
             ]
-            batches = execute_adapter(
-                {**spec, "outputs": outputs},
-                record_sets=record_sets(snapshot.get("structured_json")),
-                check_items={
-                    definition["id"]: {
-                        "id": definition["id"],
-                        "version_id": version,
-                        "canonical_contract": definition["contract"],
-                    }
-                },
-                device_id=snapshot["device_id"],
-                adapter_version_id=adapter_id,
-                observed_at=snapshot.get("observed_at"),
-                require_pinned_check_item_versions=True,
-            )
-            records = []
-            for batch in batches:
-                if batch.quality_status not in {"complete", "valid_empty", "not_applicable"}:
-                    raise CommandAdapterError("解析或字段校验未通过")
-                for i, record in enumerate(batch.records):
-                    # Keep all canonical columns, including fields not emitted as facts.
-                    dims = batch.projection_dimensions[i] if batch.projection_dimensions else {}
-                    by_dimensions = {}
-                    common = {k: v for k, v in record.items() if k not in dims}
-                    for field, dimensions in dims.items():
-                        key = json.dumps(dimensions, sort_keys=True)
-                        by_dimensions.setdefault(key, {**common, **dimensions})[field] = record.get(
-                            field
-                        )
-                    records.extend(by_dimensions.values() if by_dimensions else [record])
-            snapshot["detail_records"][version] = records
-        except (CommandAdapterError, ValueError, TypeError):
-            snapshot["detail_errors"][version] = (
-                "解析记录与检查项定义不一致，请修正规则后重新分析。"
-            )
+            if outputs:
+                selections[binding["check_item_version_id"]] = list(
+                    dict.fromkeys(o.get("source_record_set", "default") for o in outputs)
+                )
+        snapshot["detail_record_sets"] = selections
+    return {"snapshots": snapshots, "definitions": definitions}

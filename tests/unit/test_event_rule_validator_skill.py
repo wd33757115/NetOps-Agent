@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from src.core.patrol.event_rules import default_event_rule_definitions
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SKILL_SCRIPT = PROJECT_ROOT / "src" / "skills" / "event-rule-validator" / "scripts" / "run.py"
 
@@ -30,7 +32,7 @@ def test_event_rule_validator_skill_validates_builtin_pack(tmp_path: Path):
 
     assert result["success"] is True
     assert result["mode"] == "builtin"
-    assert result["validation_report"]["rule_count"] >= 10
+    assert result["validation_report"]["rule_count"] == len(default_event_rule_definitions())
     assert result["agent_loop"]["ready_for_approval"] is True
     assert result["agent_loop"]["attempts"][0]["stage"] == "event_rule_validation"
     assert result["agent_loop"]["attempts"][0]["success"] is True

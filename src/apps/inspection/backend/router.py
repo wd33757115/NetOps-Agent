@@ -20,7 +20,7 @@ for source, old, new in (
     for route in source.routes:
         suffix = route.path.removeprefix(old)
         if source is inventory.router:
-            # Inventory mutations belong to rule-governance. Inspection selects and reads devices.
+            # Inventory mutations belong to device-management. Inspection selects and reads devices.
             allowed = (
                 route.methods == {"GET"}
                 or suffix in {"/patrol/preview", "/patrol/launch"}

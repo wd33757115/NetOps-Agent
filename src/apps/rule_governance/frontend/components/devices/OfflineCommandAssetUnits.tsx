@@ -41,7 +41,6 @@ import {
 import ParserGenerationStep, {
   type ParserProjectionAdapterDraft,
 } from '../skills/parser/ParserGenerationStep'
-import RuleAssetProductionStep from '../skills/parser/RuleAssetProductionStep'
 import CommandAutopilotPanel from '../skills/parser/CommandAutopilotPanel'
 
 const stageOptions = [
@@ -50,7 +49,7 @@ const stageOptions = [
   ['parser_generation', 'Parser 生成'],
   ['parser_validation', 'Parser 全样本验证'],
   ['structured_quality', '结构化数据质量'],
-  ['observation_contract', 'A→B Projection / 命令适配器'],
+  ['adapter_projection', 'A→B Projection / 命令适配器'],
   ['change_policy', 'Change Policy'],
   ['event_rule', 'Event Rule'],
   ['validation_review', '验证、回放与工程复核'],
@@ -132,7 +131,7 @@ const AssetFlowStatus: React.FC<{ unit: OfflineCommandAssetUnit }> = ({ unit }) 
   <div className="command-asset-unit__asset-states">
     {[
       ['parser_generation', 'Parser'],
-      ['observation_contract', (unit.candidate_check_item_id || unit.check_item_id) ? 'Projection' : 'Contract'],
+      ['adapter_projection', 'Projection'],
       ['change_policy', 'Policy'],
       ['event_rule', 'Event'],
     ].map(([key, label]) => (
@@ -409,17 +408,6 @@ export const CommandAssetDetail: React.FC<{
                   />
                 ),
               }] : []),
-              ...(detail.candidate_check_item_id || detail.check_item_id ? [] : [{
-                key: 'generation',
-                label: '规则资产生产',
-                children: (
-                  <RuleAssetProductionStep
-                    unit={detail}
-                    onChanged={onChanged}
-                    onOpenEvidence={() => setActiveTab('evidence')}
-                  />
-                ),
-              }]),
               {
                 key: 'evidence',
                 label: `证据样本 (${detail.evidence_pagination.total})`,

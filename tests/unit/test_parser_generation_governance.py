@@ -14,7 +14,6 @@ from src.core.parser.repository import (
     ParserJobStateError,
     ParserRepository,
     ParserTemplateRepository,
-    _deprecate_rule_generation_seeds,
     _normalize_parser_spec_payload,
     _parser_spec_digest,
     _simple_parser_readiness,
@@ -30,7 +29,6 @@ from src.core.parser.textfsm_dialect import (
 from src.infrastructure.db.models import (
     AuditLogRecord,
     CommandSnapshot,
-    ObservationContractRecord,
     ParserCandidateSampleEvidence,
     ParserGenerationAttempt,
     ParserJobSample,
@@ -577,9 +575,7 @@ def test_generated_parser_requires_separate_approval_unless_admin_override_is_ex
             db.query(AuditLogRecord).filter(
                 AuditLogRecord.resource_id == template_id
             ).delete(synchronize_session=False)
-            db.query(ObservationContractRecord).filter(
-                ObservationContractRecord.source_template_id == template_id
-            ).delete(synchronize_session=False)
+            pass
             db.query(ParserTemplate).filter(ParserTemplate.id == template_id).delete(
                 synchronize_session=False
             )
@@ -827,9 +823,7 @@ def test_parser_spec_can_be_revised_after_generation_without_mutating_active_tem
             db.query(ParserSpecRevisionRecord).filter_by(job_id=job_id).delete(
                 synchronize_session=False
             )
-            db.query(ObservationContractRecord).filter(
-                ObservationContractRecord.source_template_id.in_([candidate_id, active_id])
-            ).delete(synchronize_session=False)
+            pass
             db.query(ParserTemplate).filter(
                 ParserTemplate.id.in_([candidate_id, active_id])
             ).delete(synchronize_session=False)
@@ -1039,43 +1033,5 @@ def test_generated_candidate_freezes_samples_and_new_evidence_invalidates_it():
                 PatrolRun.id.in_([run_id, second_run_id])
             ).delete(synchronize_session=False)
             db.query(PatrolDataset).filter_by(id=dataset_id).delete(
-                synchronize_session=False
-            )
-
-
-def test_deprecating_parser_source_retires_unpublished_rule_seed():
-    token = uuid.uuid4().hex
-    template_id = f"template-{token}"
-    rule_job_id = f"rule-job-{token}"
-    with get_db_session() as db:
-        db.add(
-            RuleGenerationJobRecord(
-                id=rule_job_id,
-                job_type="OBSERVATION_CONTRACT",
-                status="draft",
-                source_ref=f"parser_template:{template_id}",
-                payload_json={},
-                validation_report_json={},
-                approval_required=True,
-            )
-        )
-    try:
-        with get_db_session() as db:
-            assert (
-                _deprecate_rule_generation_seeds(
-                    db,
-                    template_id=template_id,
-                    actor="unit-test",
-                    reason="source candidate rejected",
-                )
-                == 1
-            )
-        with get_db_session() as db:
-            row = db.get(RuleGenerationJobRecord, rule_job_id)
-            assert row.status == "deprecated"
-            assert row.validation_report_json["source_asset_lifecycle"]["actor"] == "unit-test"
-    finally:
-        with get_db_session() as db:
-            db.query(RuleGenerationJobRecord).filter_by(id=rule_job_id).delete(
                 synchronize_session=False
             )

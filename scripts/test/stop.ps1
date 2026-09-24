@@ -33,7 +33,7 @@ if (Test-Path $pidFile) {
     Stop-RecordedProjectLaunchers -Records $pids -ProjectRoot $ProjectRoot
     Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
 }
-Remove-Item (Join-Path $ProjectRoot ".runtime\test\celery-beat.pid") -Force -ErrorAction SilentlyContinue
+Clear-StaleProjectBeatPid -ProjectRoot $ProjectRoot
 
 Write-ColorOutput "[Step 2/3] Free ports 8000 / 8001 / 3000..." "Yellow"
 # 3001 留给 Langfuse（deployment / docker/langfuse），勿释放以免误杀 Docker 转发进程

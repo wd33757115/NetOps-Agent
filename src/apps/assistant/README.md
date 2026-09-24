@@ -1,5 +1,8 @@
 # Assistant 知识问答应用
 
+0.6.2：删除独立知识问答页面及其专用测试，问答统一从 `/chat` 使用；旧页面地址
+`/apps/assistant` 仅保留跳转。共用的问答 API、DSH 执行器、App 权限、会话记录和引用保持不变。
+
 0.6.1：修复完整配置回答被旧 1500 token 上限截断的问题。SDK 和模型适配层统一使用
 8192 token 输出上限；引用核对草稿最多 24000 字符。该值是上限，不预先消耗对应 token。
 仍保持每轮 90 秒、12 次工具和 8 轮模型的现有预算，不扩大全文入模范围。
@@ -33,10 +36,11 @@ P6-C 已接入正式 DSH 执行器、自注册清单、资料修订、会话与�
 有 assistant 使用权的用户共用资料库；个人会话只允许其所有者访问。
 当前开发环境已按该流程安装、迁移并启用；普通账号仍需管理员授予 assistant 使用权。
 
-- `backend/documents.py` / `library.py`：Markdown/text 导入、元数据过滤、检索、分段阅读；更新保留旧修订。
+- `../materials/backend/`：资料导入与发布归属 Materials；Assistant 只读取已发布资料。
 - `backend/history.py`：复用平台会话和消息表；旧聊天入口现在使用同一 App 权限与所有者边界。
 - `backend/turns.py`：请求去重、单会话活动轮次、持久状态、取消、超时恢复及停用排空。
-- `backend/api.py` / `frontend/`：自动注册 API 和页面；历史引用只能打开本人会话实际保存的来源修订。
+- `backend/api.py`：自动注册共用问答 API；历史引用只能打开本人会话实际保存的来源修订。
+- `frontend/`：只保留旧页面地址到 `/chat` 的兼容跳转。
 - `backend/workspace.py`：将修订快照在本地呈现为文件，映射实际读取行到原文引用。
 - `migrations/`：资料、修订、问答轮次三张包内表；不新增任务执行器，固定业务仍使用各 App 的 Python/Celery。
 

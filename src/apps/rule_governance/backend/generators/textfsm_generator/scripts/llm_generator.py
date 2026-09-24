@@ -1055,7 +1055,7 @@ request_engineer_review with reason_code=contract_conflict instead of inventing 
 Expected values are literal capture targets, not semantic labels. Do not emit normalized
 constants such as present, healthy, unsupported, primary, or active unless that exact
 token occurs in the corresponding source record. Capture the visible source phrase and
-leave enum normalization to the later ObservationContract.
+leave enum normalization to the later CheckItem / CommandAdapter V2.
 For number or percent fields with unavailable_tokens, capture both numeric values and
 the declared source tokens exactly. The runtime maps those tokens to unavailable/null
 semantics after parsing; do not replace them with 0 and do not change the field to text.
