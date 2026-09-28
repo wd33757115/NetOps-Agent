@@ -14,7 +14,28 @@
 
 构建默认离线读取 `.runtime/ietf-study/reproducible-audit/sources`，缓存缺失时加 `--fetch` 下载并校验固定来源。可用 `--cache` 和 `--output` 指定空目录复现。基础来源锁在 `docs/ietf-model-audit/sources.lock.json`，OSPF 及其依赖在本目录 `additional-sources.lock.json`。原文审计因为 SIMAP 原文错误仍退出 1，兼容包的结果单独记录。研究依赖固定为 pyang 2.7.1、yangson 1.6.3；不安装到应用环境。
 
-输出 `.runtime/ietf-study/model-package/` 包含 41 个完整模块/子模块、独立保留的 SIMAP 原文、校验清单、两个验证用 YANG Library、展开树和实例结果。不裁剪模块源码。profile 只选择本次实例验证的模块和 feature，不是宣告所有设备或应用支持这些能力；未来模块仍需按来源、版本及约束纳入。固定的 41 文件清单及本轮结果在 `reports/`，不把下载缓存提交进仓库。
+输出 `.runtime/ietf-study/model-package/` 包含 45 个完整模块/子模块（IETF-1.8 起；此前为 41 个）、独立保留的 SIMAP 原文、校验清单、两个验证用 YANG Library、展开树和实例结果。不裁剪模块源码。profile 只选择本次实例验证的模块和 feature，不是宣告所有设备或应用支持这些能力；未来模块仍需按来源、版本及约束纳入。固定的文件清单及本轮结果在 `reports/`，不把下载缓存提交进仓库。
+
+## 实验场景的模型覆盖（IETF-1.8）
+
+按路线图 11.0 的迷你北极星实验及故障集 v0 列出所需数据的原生落点。新增的 IEEE 802.1AB LLDP（2022-03-15）、LLDP 类型、IEEE 802.1Q Bridge（2023-10-26）、ieee802-types（2023-10-22）均取自已固定的 YangModels 提交 `0e28ed86`，锁在 `additional-sources.lock.json`。device profile 同时加入包内已有的 RFC 8519 ACL。“已建模”只表示模块完整编译、可装载；数据映射单独列出。
+
+| 场景数据 | 原生模块与路径 | 状态 |
+|---|---|---|
+| 拓扑节点/TP/链路 | RFC 8345 + SIMAP -03 + RFC 8944/8346：`N/D/T/L` | 已建模；LLDP 邻接已映射（IETF-2.1） |
+| 设备清单（虚拟 NE、软件版本） | inventory -19 + software -04：`network-element[ne-id]` | 已建模并映射；序列号的组件归属未闭合 |
+| 接口、IP 地址 | RFC 8343/8344：`/if:interfaces/interface`、`ip:ipv4/address` | 已建模；部分映射（缺计数器中断时间） |
+| ARP | RFC 8344：`ip:ipv4/neighbor[ip]/link-layer-address`（operational） | 已建模；未映射 |
+| LLDP 本地/远端 | IEEE 802.1AB：`/lldp/port[name dest-mac-address]/remote-systems-data[time-mark remote-index]` | **本轮加入**；未映射 |
+| access 口 VLAN、MAC 表 | IEEE 802.1Q：接口 `dot1q:bridge-port/pvid`；`/bridges/bridge/component/filtering-database/filtering-entry[database-id vids address]/port-map` | **本轮加入**；未映射 |
+| RIB、OSPF、静态/黑洞路由 | RFC 8349 + RFC 9129：`ribs/rib/routes/route`、special-next-hop | 已建模；RIB 子集已映射 |
+| VRF/NI 与挂载 | RFC 8529 + RFC 8528 | 已建模；libyang 验证；实验无 VPN 实例 |
+| ACL 与接口挂接 | RFC 8519：`/acls/acl`、`/acls/attachment-points/interface[interface-id]` | **本轮加入 profile**；未映射 |
+| VLAN 接口（SVI）与 VLAN 的绑定 | 固定模块中未找到 Vlan-interface↔VID 的标准节点；iana-if-type 只给出接口类型 | 缺口，不自定义 |
+| Hub、不可管理交换机、PC | 无采集证据；拓扑只能表示可观测对象 | 不建模推断实体（见 6.4 撤回的假设） |
+| 拓扑 node ↔ 清单 ↔ 设备树 | 无当前标准引用 | 缺口，见 [virtual-association](virtual-association/README.md)，负责人授权自定：模型内不建立关联 |
+
+TE（RFC 8795）、BGP 等不在当前实验场景内，不纳入本轮，避免过度建模；出现对应场景时再按同一方式加入。
 
 ## SIMAP 兼容补丁
 

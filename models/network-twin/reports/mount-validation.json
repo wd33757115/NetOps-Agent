@@ -40,7 +40,11 @@
             }
           }
         }
-      ]
+      ],
+      "input_preserved": null,
+      "validation_mode": "config",
+      "semantic_validation_performed": true,
+      "strict_complete_instance_proven": false
     },
     {
       "name": "cross-vrf-interface-rejected",
@@ -62,7 +66,11 @@
       "expected_valid": false,
       "matched": true,
       "diagnostic": "libyang err : Invalid leafref value \"eth1\" - no target instance \"/if:interfaces/if:interface/if:name\" with the same value. (/ietf-routing:routing/control-plane-protocols/control-plane-protocol[type='ietf-routing:static'][name='static']/static-routes/ietf-ipv4-unicast-routing:ipv4/route[destination-prefix='192.0.2.0/24']/next-hop/outgoing-interface)\nYANGLINT[E]: Failed to parse input data file \"/cases/cross-vrf.json\".\n",
-      "mounted_routes_retained": null
+      "mounted_routes_retained": null,
+      "input_preserved": null,
+      "validation_mode": "config",
+      "semantic_validation_performed": true,
+      "strict_complete_instance_proven": false
     },
     {
       "name": "missing-interface-rejected",
@@ -84,7 +92,11 @@
       "expected_valid": false,
       "matched": true,
       "diagnostic": "libyang err : Invalid leafref value \"absent\" - no target instance \"/if:interfaces/if:interface/if:name\" with the same value. (/ietf-routing:routing/control-plane-protocols/control-plane-protocol[type='ietf-routing:static'][name='static']/static-routes/ietf-ipv4-unicast-routing:ipv4/route[destination-prefix='192.0.2.0/24']/next-hop/outgoing-interface)\nYANGLINT[E]: Failed to parse input data file \"/cases/missing-interface.json\".\n",
-      "mounted_routes_retained": null
+      "mounted_routes_retained": null,
+      "input_preserved": null,
+      "validation_mode": "config",
+      "semantic_validation_performed": true,
+      "strict_complete_instance_proven": false
     },
     {
       "name": "no-parent-reference-rejected",
@@ -106,7 +118,11 @@
       "expected_valid": false,
       "matched": true,
       "diagnostic": "libyang err : Invalid leafref value \"eth1\" - no target instance \"/if:interfaces/if:interface/if:name\" with the same value. (/ietf-routing:routing/control-plane-protocols/control-plane-protocol[type='ietf-routing:static'][name='static']/static-routes/ietf-ipv4-unicast-routing:ipv4/route[destination-prefix='192.0.2.0/24']/next-hop/outgoing-interface)\nlibyang err : Invalid leafref value \"eth0\" - no target instance \"/if:interfaces/if:interface/if:name\" with the same value. (/ietf-routing:routing/control-plane-protocols/control-plane-protocol[type='ietf-routing:static'][name='static']/static-routes/ietf-ipv4-unicast-routing:ipv4/route[destination-prefix='192.0.2.0/24']/next-hop/outgoing-interface)\nYANGLINT[E]: Failed to parse input data file \"/cases/valid.json\".\n",
-      "mounted_routes_retained": null
+      "mounted_routes_retained": null,
+      "input_preserved": null,
+      "validation_mode": "config",
+      "semantic_validation_performed": true,
+      "strict_complete_instance_proven": false
     },
     {
       "name": "inline-no-parent-visibility",
@@ -128,7 +144,11 @@
       "expected_valid": false,
       "matched": true,
       "diagnostic": "libyang err : Invalid leafref value \"eth1\" - no target instance \"/if:interfaces/if:interface/if:name\" with the same value. (/ietf-routing:routing/control-plane-protocols/control-plane-protocol[type='ietf-routing:static'][name='static']/static-routes/ietf-ipv4-unicast-routing:ipv4/route[destination-prefix='192.0.2.0/24']/next-hop/outgoing-interface)\nlibyang err : Invalid leafref value \"eth0\" - no target instance \"/if:interfaces/if:interface/if:name\" with the same value. (/ietf-routing:routing/control-plane-protocols/control-plane-protocol[type='ietf-routing:static'][name='static']/static-routes/ietf-ipv4-unicast-routing:ipv4/route[destination-prefix='192.0.2.0/24']/next-hop/outgoing-interface)\nYANGLINT[E]: Failed to parse input data file \"/cases/valid.json\".\n",
-      "mounted_routes_retained": null
+      "mounted_routes_retained": null,
+      "input_preserved": null,
+      "validation_mode": "config",
+      "semantic_validation_performed": true,
+      "strict_complete_instance_proven": false
     },
     {
       "name": "inline-local-interface",
@@ -169,7 +189,11 @@
             }
           }
         }
-      ]
+      ],
+      "input_preserved": null,
+      "validation_mode": "config",
+      "semantic_validation_performed": true,
+      "strict_complete_instance_proven": false
     },
     {
       "name": "custom-field-rejected",
@@ -191,7 +215,11 @@
       "expected_valid": false,
       "matched": true,
       "diagnostic": "libyang err : Node \"project-confidence\" not found as a child of \"route\" node. (/ietf-network-instance:network-instances/network-instance[name='blue']/vrf-root/ietf-routing:routing/control-plane-protocols/control-plane-protocol[type='ietf-routing:static'][name='static']/static-routes/ietf-ipv4-unicast-routing:ipv4/route[destination-prefix='192.0.2.0/24']) (line 35)\nYANGLINT[E]: Failed to parse input data file \"/cases/custom-field.json\".\n",
-      "mounted_routes_retained": null
+      "mounted_routes_retained": null,
+      "input_preserved": null,
+      "validation_mode": "config",
+      "semantic_validation_performed": true,
+      "strict_complete_instance_proven": false
     },
     {
       "name": "unavailable-augmentation-in-child",
@@ -213,7 +241,11 @@
       "expected_valid": false,
       "matched": true,
       "diagnostic": "libyang err : Schema node \"/ietf-interfaces:interfaces/interface/ietf-network-instance:bind-ni-name\" not found in the target context.\nYANGLINT[E]: Failed to parse input data file \"/cases/valid.json\".\n",
-      "mounted_routes_retained": null
+      "mounted_routes_retained": null,
+      "input_preserved": null,
+      "validation_mode": "config",
+      "semantic_validation_performed": true,
+      "strict_complete_instance_proven": false
     }
   ],
   "packages": [
@@ -395,7 +427,7 @@
   "expectations_matched": true,
   "image_id": "sha256:5db3d7d18f7ae37a5422516fd38a2bf7df8ace6ffc352867dca496d2b2c91afe",
   "image_tag": "netops-ietf-mount-verify:5.8.6",
-  "cases_manifest_sha256": "3aa7fe3ff88dd6860b3ad07f0144d78756980f50f9809b7be35dff91adbbe520",
-  "scope": "Synthetic RFC 8528/8529 configuration mount; no device or production service",
+  "cases_manifest_sha256": "734a3d15128b7c07e2af804e4d0979868554c8d7a73ad4d71b906966c2b0122c",
+  "scope": "Synthetic configuration examples; not device capture or production service",
   "complete_digital_twin": false
 }

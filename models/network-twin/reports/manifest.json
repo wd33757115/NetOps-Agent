@@ -5,7 +5,7 @@
     "yangson": "1.6.3"
   },
   "sources_lock_sha256": "a202bd2694768f740b461a91e20bc67c6b164029c5bbd5271454cf6043d82c2a",
-  "additional_sources_lock_sha256": "f466e76461b33e50292c79472c28d6a6f29f8dc3a99a247b9fcd39ef6f5c97c0",
+  "additional_sources_lock_sha256": "b5556fe8b9ab150ff1cfc811e78d67103d71a4be272f21d0e75041b572685567",
   "patch": {
     "source_document": "draft-havel-nmop-simap-yang-03 section 9",
     "module": "ietf-simap-topology@2025-01-01.yang",
@@ -42,7 +42,11 @@
     "iana-hardware@2018-03-13.yang": "58f3f0f191fab251c9d90b0afdefccd12b15e23e6694f66cfed8965c513ef1ac",
     "iana-if-type@2014-05-08.yang": "e3b33c79dc9090ceb732155dc554e9975d1220a411c184cbe635216d9720820e",
     "iana-routing-types@2017-12-04.yang": "560eef90e2a7f51ed1f521824eb42558e6bb65135d2a33d62cf80a5af79643f4",
+    "ieee802-dot1ab-lldp@2022-03-15.yang": "a57d47d2ddfa6014d0ee634c947e0f3cd4fd637b1b6cd6e266cbf11573fc85e9",
+    "ieee802-dot1ab-types@2022-03-15.yang": "f2989e709e186a0f4f25c0b474ea253c77b70dd1ddcfe4ec0eac5d354e5b9009",
+    "ieee802-dot1q-bridge@2023-10-26.yang": "8a974aa99688b870ae99efd9554db96f3fa5efc81468659b0fac00f3021cfc48",
     "ieee802-dot1q-types@2023-10-26.yang": "019af9e03c5ac6e3e91eeb5a8ae76249cfd5f1d9435fb59c1514774a3dbf52d3",
+    "ieee802-types@2023-10-22.yang": "c88ae16c9c9b2bd58d781f84de8252c7c866b3c65554aba195befd9c6c28d7de",
     "ietf-access-control-list@2019-03-04.yang": "8647fcc24bb1632f363c610cad3e2e7829666c4ad91fbfe74c1262f85e83485d",
     "ietf-bfd-types@2022-09-22.yang": "65abd568987103be19342cdfb1611970f59577b97cf760455a553a6149c0fb88",
     "ietf-datastores@2018-02-14.yang": "eccd84d4c4831e787b808e0da154aef6b999e81f4380c3272190baf34a9529ce",
@@ -86,7 +90,11 @@
       "iana-hardware@2018-03-13.yang",
       "iana-if-type@2014-05-08.yang",
       "iana-routing-types@2017-12-04.yang",
+      "ieee802-dot1ab-lldp@2022-03-15.yang",
+      "ieee802-dot1ab-types@2022-03-15.yang",
+      "ieee802-dot1q-bridge@2023-10-26.yang",
       "ieee802-dot1q-types@2023-10-26.yang",
+      "ieee802-types@2023-10-22.yang",
       "ietf-access-control-list@2019-03-04.yang",
       "ietf-bfd-types@2022-09-22.yang",
       "ietf-datastores@2018-02-14.yang",
@@ -127,11 +135,11 @@
   },
   "profiles": {
     "topology": {
-      "library_sha256": "ada1cbb50ec324cff24b028688f5b18dc64844426df69f89c5245966b13b719e",
+      "library_sha256": "c9d13ffdbccb4044011d6b060c06383b17c42198521059aeed0195a11e4d405f",
       "model_loaded": true
     },
     "device": {
-      "library_sha256": "b13ae882637c79c137f988b378e8a446d2885db082607ef953ee3144342fb9e6",
+      "library_sha256": "7aef7765727563a2329063aef781eef7461bd1783414e170a06329a4ee7a6a56",
       "model_loaded": true
     }
   }

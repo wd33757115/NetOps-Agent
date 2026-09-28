@@ -1,6 +1,6 @@
 {
   "scope": "Synthetic configuration examples; not device capture or production service",
-  "model_package_sha256": "7742b84b1e7be26e2cf076cec78e959c2895203e80684e75ba08eea2a5c817ab",
+  "model_package_sha256": "0bde5e538572bd9266cfd8a8a64c4a4f506d9d3803a3a4c2aa9cb300cf9ef9c1",
   "files": {
     "cross-vrf.json": "7c719849f36ab887dd2f3ef39bc6f178b17db54e7624fc12b1f256a8dd2870a1",
     "custom-field.json": "dbe6cf9af4365a81917e7eead3e9b384b997b7bb2b3c0c82bf08ddcd3338762c",

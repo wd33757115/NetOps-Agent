@@ -1,6 +1,6 @@
 {
   "scope": "Audit of the pinned package and three historical candidates; not all IETF work",
-  "model_package_sha256": "7742b84b1e7be26e2cf076cec78e959c2895203e80684e75ba08eea2a5c817ab",
+  "model_package_sha256": "0bde5e538572bd9266cfd8a8a64c4a4f506d9d3803a3a4c2aa9cb300cf9ef9c1",
   "history_lock_sha256": "a8e2af5264c4f203b446871a8d3da909ab5451cd54cb82336ab7e3a9ca620639",
   "declarations_by_module": {
     "draft-relation@2025-08-01.yang": [],
@@ -9,7 +9,11 @@
     "iana-hardware@2018-03-13.yang": [],
     "iana-if-type@2014-05-08.yang": [],
     "iana-routing-types@2017-12-04.yang": [],
+    "ieee802-dot1ab-lldp@2022-03-15.yang": [],
+    "ieee802-dot1ab-types@2022-03-15.yang": [],
+    "ieee802-dot1q-bridge@2023-10-26.yang": [],
     "ieee802-dot1q-types@2023-10-26.yang": [],
+    "ieee802-types@2023-10-22.yang": [],
     "ietf-access-control-list@2019-03-04.yang": [],
     "ietf-bfd-types@2022-09-22.yang": [],
     "ietf-datastores@2018-02-14.yang": [],

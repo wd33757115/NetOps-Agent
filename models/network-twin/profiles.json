@@ -29,7 +29,10 @@
       "ietf-ipv6-unicast-routing",
       "ietf-network-instance",
       "iana-if-type",
-      "ietf-ospf"
+      "ietf-ospf",
+      "ieee802-dot1ab-lldp",
+      "ieee802-dot1q-bridge",
+      "ietf-access-control-list"
     ],
     "features": {}
   }

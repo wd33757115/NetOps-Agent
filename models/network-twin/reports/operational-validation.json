@@ -725,7 +725,7 @@
   "expectations_matched": true,
   "image_id": "sha256:5db3d7d18f7ae37a5422516fd38a2bf7df8ace6ffc352867dca496d2b2c91afe",
   "image_tag": "netops-ietf-mount-verify:5.8.6",
-  "cases_manifest_sha256": "5fa2f613710ad7f95572878dbf73b512f5090720e05690db1c561c673164d088",
+  "cases_manifest_sha256": "f4a77673d1d4bda1118242cd50db2b44c142e8346e2bccec0235aef704ec37a3",
   "scope": "Offline native operational mount tests and partial VSR observations; no live I/O",
   "complete_digital_twin": false
 }

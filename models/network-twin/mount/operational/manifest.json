@@ -1,6 +1,6 @@
 {
   "scope": "Offline native operational mount tests and partial VSR observations; no live I/O",
-  "model_package_sha256": "7742b84b1e7be26e2cf076cec78e959c2895203e80684e75ba08eea2a5c817ab",
+  "model_package_sha256": "0bde5e538572bd9266cfd8a8a64c4a4f506d9d3803a3a4c2aa9cb300cf9ef9c1",
   "observation_sources": {
     "models/network-twin/instances/vsr-1-interfaces.partial.json": "b91468d38fb18657eaf711c4a3282e21806766ea938f6c718cbcf24b1d3efcaf",
     "models/network-twin/instances/vsr-2-interfaces.partial.json": "1b6bfc6ad19dad4304d4987b1911ad7932de78aff299debd3cf3441aa40c7137"
