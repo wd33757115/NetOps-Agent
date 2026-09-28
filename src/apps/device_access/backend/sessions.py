@@ -44,7 +44,15 @@ def read_audit(owner, session_id):
 
 
 def open_session(
-    owner, connection_id, *, platform, purpose, budget=None, should_continue=None, required_vrf=None
+    owner,
+    connection_id,
+    *,
+    platform,
+    purpose,
+    budget=None,
+    should_continue=None,
+    required_vrf=None,
+    driver_kind="paramiko",
 ):
     """Caller supplies an identified platform, never a model-controlled platform hint.
 
@@ -64,7 +72,12 @@ def open_session(
 
     if guard() is False:
         raise DeviceAccessError("cancelled", "诊断会话已取消")
-    return service.access(owner, connection_id).open_session(
+    access = (
+        service.access(owner, connection_id)
+        if driver_kind == "paramiko"
+        else service.access(owner, connection_id, driver_kind=driver_kind, platform=platform)
+    )
+    return access.open_session(
         AccessContext(
             owner,
             service.APP_ID,

@@ -506,6 +506,13 @@ P1-2 实施细化（2026-09-28）：
 - 平台识别阶段（尚不知平台）使用 Paramiko 通用驱动；识别后可在同一会话内继续用 Paramiko；档案声明 `driver: netmiko` 时切换驱动需要重新登录一次，该次登录使用刚成功的同一凭据集，不计入凭据尝试次数。
 - 在实验环境对两个驱动跑同一组命令，结果写入档案 `verified`。
 
+P1-5 实施细化（2026-09-28）：
+
+- 独立适配 Netmiko 4.7.0，复用第三方库，不导入或修改巡检实现。驱动映射四平台，只有 H3C VSR1000 / Comware 7.1.064 Release 1362P12 完成实机验证；证据登记在 `src/platform/device_access/drivers/verification.yaml`，供 P2 档案引用，当前不全局自动切换驱动。
+- 识别平台后，两种驱动自动执行 `catalog.TERMINAL_PREPARATION` 中的本会话设置：Comware `screen-length disable`、IOS/NX-OS `terminal width 511` + `terminal length 0`、VRP `screen-length 0 temporary`。这属于驱动初始化，不要求模型或调用者额外发分页命令；请求审计记批准清单，打开成功审计记实际命令。分页关闭被设备拒绝时停止，不把残缺输出记为成功。
+- Netmiko 传输包装限制初始化白名单、每条命令、总字节数与时限；禁止自动 enable/config、改密确认、解析插件及会话日志，关闭时不额外发送厂商退出命令。主机密钥来自明确文件或域内数据库导出临时文件，拒绝未知密钥后才允许认证；不加载 ambient trust。
+- `VaultDriver.for_identified_driver()` 只复用刚成功的凭据集，再登录失败不轮换其他凭据；App 内部会话入口可选择已识别平台的 Netmiko，HTTP 和模型没有选择驱动/平台的新增参数。未知平台和人工终端仍用 Paramiko。
+
 ---
 
 ## 9. DSH 诊断 Agent
@@ -886,7 +893,13 @@ VSR-2 GE3/0(二层 access VLAN 100) ── Switch1(不可管理) ── PC1 1.1.
 - 测试：一次登录复用、命令分级/规范化/VRF、累计预算、空闲与总超时、主动关闭/取消、租约与授权撤销、审计失败关闭、输出和最终审计脱敏、本人证据隔离、真正 SSH 协议交互。
 - 验收：两台实验 H3C 每台一次登录完成版本/接口/受限 ping，L4 和 L3 均不发送；全部结果带审计证据引用且关闭释放会话。原聊天与固定采集路径回归通过。
 
-**P1-5 Netmiko 驱动** / **P1-6 授权入库**：按 8.5 节与 P1 表格编写，格式同上。
+**P1-5 Netmiko 驱动**
+- 范围：独立 Netmiko 适配器、凭据成功后切换、App 内部接线、两驱动临时终端初始化、验证档案和依赖声明。
+- 不做：巡检修改、未知型号预选驱动、P2 平台自动分派、人工终端更换协议。
+- 测试：真实回环 SSH、初始化白名单与拒绝、未知主机密钥先于认证、一次认证、原始输出/超时/输出上限、改密/配置拒绝、驱动切换凭据固定、库日志脱敏、会话关闭断流。
+- 验收：两台 H3C 的版本/接口/路由共 6 组双驱动对照，均由驱动自动关闭分页；固定批量路径也保留对照记录。其他厂商标记未验证。
+
+**P1-6 授权入库**：按 P1 表格展开，保持管理域/CIDR/动作及原权限边界，保留文件导入。
 
 > P2 以后的任务卡在进入该阶段时由执行者按模板从第 10 节表格展开，展开后先提交任务卡再开发。
 
@@ -903,6 +916,7 @@ VSR-2 GE3/0(二层 access VLAN 100) ── Switch1(不可管理) ── PC1 1.1.
 | P1-1 | 已完成（含实机补验） | 2026-09-28 | 初次 Python 570 项通过；实机修复后回归 590 项通过（另 PostgreSQL 2 项此前独立通过）；两台 H3C 自动登录/版本/日志采集成功，各仅一条本次错误用户认证日志；前端全量 261 与新增表单定向 7 项通过，构建通过 | 凭据库接入、0002 迁移；补修首次提示符 NUL 填充问题，见 E18；密码未写入源码、文档或运行报告 |
 | P1-2 | 已完成（密钥握手验收） | 2026-09-28 | Python 回归 589 项通过，另 PostgreSQL 并发 2 项通过；前端定向 9 项通过、构建通过；两台 H3C 握手基线与模拟变化拒绝均通过 | 0003 迁移、数据库密钥策略、管理员告警/核验；未发送密码、未改设备、未发布 |
 | P1-4 | 已完成 | 2026-09-28 | Python 620 项通过（新增会话 30 项）；前端定向 10 项通过、构建通过；两台 H3C 每台一次连接执行 L1/L2、拒绝 L4/挂起 L3，13 条审计事件/台 | 0004 迁移、公共会话 API、显式授权及审计读取；DSH 与审批交互按 P4 后续接入 |
+| P1-5 | 已完成 | 2026-09-28 | Python 650 项通过；Ruff、依赖合并、前端构建通过；两台 H3C 双驱动自动关闭分页，6 组采集结果一致 | App 0.5.0、独立 Netmiko、驱动验证档案；补齐 Paramiko 受控会话分页初始化，未发布 |
 
 ### P0-1 基线记录（2026-09-28）
 
@@ -1053,3 +1067,13 @@ P1-1 实机补验与驱动修复（2026-09-28）：
 - draft-ietf-nmop-simap-concept：https://datatracker.ietf.org/doc/draft-ietf-nmop-simap-concept/
 - draft-irtf-nmrg-network-digital-twin-arch：https://datatracker.ietf.org/doc/draft-irtf-nmrg-network-digital-twin-arch/
 - 首版实施记录：`docs/device-access-topology-plan.md`
+
+
+### P1-5 执行记录（2026-09-28）
+
+- 改动文件：公共 `drivers/netmiko_driver.py`、`drivers/verification.yaml`、`drivers/paramiko_driver.py`、`catalog.py`、`contracts.py`、`sessions.py`、`requirements.txt`、README；App `backend/{credentials,vault_driver,service,sessions}.py`、`requirements.lock`、`app.yaml`（0.5.0，迁移仍 0004）；前端注册生成文件；`tests/unit/test_device_access_{netmiko,credentials,sessions,ssh}.py`；本路线图。未触及旧巡检。
+- 新增/扩展测试：Netmiko 真实 SSH 和边界 23 项、成功凭据固定 1 项、Paramiko 平台初始化 6 项、关闭 EOF 清理 1 项；原会话实测断言补充初始化审计。完整设备访问测试集合本次共 650 项。
+- 命令：`venv/Scripts/python.exe -m pytest <rg --files tests/unit -g test_device_access*.py 的文件列表> -q --junitxml=.runtime/p1-5-tests.xml`：650 通过，2 条已有依赖弃用警告；Ruff 定向检查通过；`python -m src.platform.kernel.build_constraints --output .runtime/p1-5-app-requirements.lock` 通过；前端隔离构建到 `.runtime/p1-5/frontend-dist` 通过。
+- 实机：先发现未关闭分页的 Paramiko 受控会话在 VSR-2 路由表停页；固定命令包对照（显式分页 + 版本/接口/路由）8 组一致。根据负责人补充，修复新受控会话自动初始化后，`.runtime/p1-5-lab-session-compare.py` 使用加密内存凭据库和实际公共 SSH 租约，每台分别一次 Paramiko / 一次 Netmiko 登录，调用者只请求 3 条采集命令。全部成功，审计记录每会话 9 条且初始化均为 `screen-length disable`；6 组输出去空行/首尾空白/动态 uptime 后 SHA256 一致。报告 `.runtime/p1-5-lab-session-compare.json`，历史对照报告保留。第一次新验证脚本误传审计参数导致连接前关闭，修正脚本后重跑通过；没有额外认证失败。
+- 密码通过隐藏交互传入，报告/审计均断言不含密码；未写入源码、文档、日志或设备配置。可信实验密钥复用既有基线；没有切换生产域信任策略。
+- 未完成项：其他厂商实机验证、P2 档案自动选择、P4 DSH 新会话工具、App 发布仍为后续事项。下一卡 P1-6。

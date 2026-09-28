@@ -636,3 +636,43 @@ def test_upgrade_preserves_existing_connections(tmp_path):
             "app_device_access_device_credentials",
         }
     engine.dispose()
+
+
+def test_driver_switch_uses_only_the_just_successful_credential(vault):
+    from src.apps.device_access.backend.vault_driver import VaultDriver
+    from src.platform.device_access.contracts import ConnectionProfile, Target
+
+    create(vault, username="bad", priority=10)
+    good = create(vault, username="good", priority=0)
+    first_calls, switched_calls = [], []
+
+    class Driver:
+        name, version = "test", "1"
+
+        def connect(self, target, profile, **kwargs):
+            first_calls.append(profile.username)
+            if profile.username == "bad":
+                raise AuthenticationException("failed")
+            return SimpleNamespace(disconnect=lambda: None)
+
+    driver = VaultDriver(vault, "alice", driver=Driver())
+    with pytest.raises(DeviceAccessError):
+        driver.for_identified_driver(Driver())
+    target, profile = (
+        Target("t", "10.0.0.1", management_domain="lab"),
+        ConnectionProfile("p", "vault"),
+    )
+    driver.connect(target, profile).disconnect()
+    assert first_calls == ["bad", "good"] and driver.successful_credential_id == good["id"]
+    create(vault, username="new-high-priority", priority=100)
+
+    class Switched(Driver):
+        def connect(self, target, profile, **kwargs):
+            switched_calls.append(profile.username)
+            raise AuthenticationException("failed")
+
+    bound = driver.for_identified_driver(Switched())
+    with pytest.raises(DeviceAccessError) as error:
+        bound.connect(target, profile)
+    assert error.value.failure_code == "waiting_for_input"
+    assert switched_calls == ["good"]

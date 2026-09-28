@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 
+from src.platform.device_access.contracts import DeviceAccessError
 from src.platform.device_access.drivers.paramiko_driver import ParamikoDriver
 from src.platform.device_access.errors import CommandExecutionError, failure_code
 
@@ -33,6 +34,10 @@ class RedactedConnection:
     def find_prompt(self):
         return self._call("find_prompt")
 
+    @property
+    def initialization_commands(self):
+        return getattr(self._connection, "initialization_commands", ())
+
     def send_command(self, *args, **kwargs):
         return self._call("send_command", *args, **kwargs)
 
@@ -58,8 +63,14 @@ class VaultDriver:
         self.guard = guard
         self.driver = driver or ParamikoDriver()
         self.name, self.version = self.driver.name, self.driver.version
+        self.successful_credential_id = None
 
     def connect(self, target, profile, *, interactive=False):
+        self.successful_credential_id = None
+
+        def remember(identifier):
+            self.successful_credential_id = identifier
+
         def connect(material, remaining):
             resolved = replace(
                 profile,
@@ -85,4 +96,22 @@ class VaultDriver:
             credential_set_id=self.credential_set_id,
             budget_seconds=profile.session_setup_timeout,
             should_continue=self.guard,
+            on_success=remember,
         )
+
+    def for_identified_driver(self, driver):
+        """Reconnect after identification with only the just-successful credential."""
+        if self.successful_credential_id is None:
+            raise DeviceAccessError("credential_expired", "no successful identification login")
+        return VaultDriver(
+            self.vault,
+            self.owner,
+            temporary_ref=self.temporary_ref,
+            credential_set_id=self.successful_credential_id,
+            guard=self.guard,
+            driver=driver,
+        )
+
+    @property
+    def preparation_commands(self):
+        return getattr(self.driver, "preparation_commands", ())

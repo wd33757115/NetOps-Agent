@@ -1,7 +1,20 @@
 # 公共 SSH 设备访问
 
-独立的新模块，采用 Paramiko；原巡检及 Netmiko 路径保持原状，今后也不迁移。
-完整边界与后续阶段见 [实施方案](../../../docs/device-access-topology-plan.md)。
+独立的新模块，提供 Paramiko 与独立 Netmiko 适配器；原巡检及其 Netmiko 路径保持原状，今后也不迁移。
+完整边界与进度见 [数字孪生路线图](../../../docs/network-digital-twin-roadmap.md)。
+
+新增受控会话使用 `DeviceAccessService.open_session()` 与 `SessionBudget`，要求显式
+`device.session` grant、已识别的平台和持久化审计回调。L1/L2 在预算内执行，L3 等待审批，
+L4 拒绝；用上下文管理器或 `close()` 结束。原固定包 `execute_batch()` 接口仍保留。
+
+`NetmikoDriver(platform, known_hosts_provider=...)` 只用于已识别平台的后台采集。
+provider 从设备访问 App 密钥库生成该域/地址/端口的严格信任文件；未知主机不能自动接受。
+仅允许内置的临时终端宽度/分页初始化，不允许自动 enable、配置模式或配置写入；
+初始化命令写入会话审计。人工终端继续使用 Paramiko。验证版本和命令见
+[`drivers/verification.yaml`](drivers/verification.yaml)，Cisco/华为尚未实机验证。
+
+凭据库路径可用 `VaultDriver.for_identified_driver()` 切换驱动，切换只使用刚成功的凭据，
+不重新遍历凭据集；先关闭识别连接再重新登录。P2 平台档案依据验证记录选择驱动。
 
 ## 使用
 
@@ -35,12 +48,12 @@ result = service.execute_batch(
 
 `ConnectionProfile` 支持人工提交的用户名/密码，也支持服务端控制的 `credential_ref`。
 密码字段不出现在 repr 中。拓扑 App 与设备访问 App 已实现人工输入和临时引用；`security.py` 负责 Redis 加密、作用域与有效期，业务层管理人工介入流程。
-新的直接调用方默认只连接一次；认证和主机信任错误不会重试。拓扑必须保持 `connection_attempts=1`，所有连接失败交给人工。
+新的直接调用方默认只连接一次；凭据库最多尝试三个不同凭据，每个一次，只有认证失败继续下一集。主机信任或网络错误立即人工处理。首版拓扑临时凭据流程仍保持 `connection_attempts=1`。
 
 只支持严格主机密钥校验；可配置服务端 `known_hosts_file`。Windows 部署应显式配置该文件。
 连接配置控制提示符正则、编码、分页标记、输出上限；命令必须为单行且在精确白名单内。
 自动采集使用交互 shell，提示符超时、分页、断流和输出上限都视为不完整结果，不继续使用该流。
-不自动回答设备确认提示，不自动启用特权模式，也不自行发送分页设置命令。
+不自动回答设备改密/确认提示或启用特权模式。识别平台后的受控会话由两种驱动自动执行服务端白名单内的临时终端初始化（关闭分页、必要时设置行宽），并记录审计；初始化命令被拒绝则停止采集。未知平台先走识别流程，既有固定命令包仍包含分页命令。人工终端保持原始交互。
 
 结果中的 `output_complete` 表示已收到预期提示符且没有检测到分页、断流或超限，不能替代业务解析与覆盖校验。
 连接、授权、取消和预算等批次异常会抛出；已完成证据通过逐条回调保存。回调抛错会停止批次并关闭连接。
@@ -54,7 +67,7 @@ result = service.execute_batch(
 Redis 不可用时拒绝连接；Redis 关闭时仅提供新模块的进程内配额，不能承诺跨进程或与巡检合并计数。
 
 依赖清单为本目录 `requirements.txt`；Redis 模式还需要现有平台的 Redis 依赖和配置。
-公共终端与诊断 HTTP/WS 由独立 `device-access` App 注册，拓扑由 `topology` App 注册。两者有独立迁移和依赖锁文件；没有迁移旧巡检调用方或连接实际设备。部署和设备授权文件格式见实施方案第 11 节。
+公共终端与诊断 HTTP/WS 由独立 `device-access` App 注册，拓扑由 `topology` App 注册。两者有独立迁移和依赖锁文件；未迁移旧巡检调用方。已在两台实验 H3C 验证，部署状态与授权格式见路线图及首版实施记录。
 
 ## 验证
 

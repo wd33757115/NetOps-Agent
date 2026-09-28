@@ -303,7 +303,9 @@ def test_actual_paramiko_session_reuses_connection_and_blocks_configuration(tmp_
             assert session.run("display version").output_complete
             assert session.run("display interface brief").output_complete
             assert session.run("system-view").execution_status == "denied"
-        assert commands == ["display version", "display interface brief"]
+        assert commands == ["screen-length disable", "display version", "display interface brief"]
+        assert events[0]["approved_setup_commands"] == ["screen-length disable"]
+        assert events[1]["setup_commands"] == ["screen-length disable"]
         assert authentications == ["operator"]
         assert [e["kind"] for e in events].count("command_finished") == 3
 
@@ -420,3 +422,16 @@ def test_vault_secrets_remain_redacted_through_final_close_audit(harness):
     assert harness.events[-1]["purpose"] == "[redacted] [redacted]"
     assert PASSWORD not in json.dumps(harness.events)
     assert "enable-test-secret" not in json.dumps(harness.events)
+
+
+def test_peer_already_closed_still_releases_and_audits_once(harness):
+    def disconnect():
+        harness.closes += 1
+        raise EOFError()
+
+    harness.service.driver.disconnect = disconnect
+    session = harness.open()
+    session.close()
+    session.close()
+    assert harness.closes == harness.releases == 1
+    assert harness.events[-1]["kind"] == "closed"

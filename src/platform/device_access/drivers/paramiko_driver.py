@@ -13,6 +13,7 @@ from importlib.metadata import version
 from pathlib import Path
 from threading import Event, Timer
 
+from ..catalog import TERMINAL_PREPARATION
 from ..contracts import DeviceAccessError
 from ..errors import CommandExecutionError
 
@@ -26,6 +27,7 @@ class CLISession:
         self.client, self.channel, self.profile = client, channel, profile
         self.prompt = None
         self.usable = True
+        self.initialization_commands = ()
 
     def _read_to_prompt(self, timeout, *, initial=False):
         deadline = time.monotonic() + timeout
@@ -124,6 +126,10 @@ class ParamikoDriver:
 
         if not profile.ssh_strict:
             raise DeviceAccessError("host_key_rejected", "strict host-key verification is required")
+        if profile.platform is not None and profile.platform not in TERMINAL_PREPARATION:
+            raise DeviceAccessError(
+                "platform_unsupported", "unknown terminal initialization platform"
+            )
         if (
             self.host_key_verifier is None
             and profile.known_hosts_file
@@ -147,6 +153,7 @@ class ParamikoDriver:
         # PTY/shell request acknowledgement is not covered by recv's timeout.
         # Closing the transport unblocks those waits as well as a stalled login.
         timer = Timer(profile.session_setup_timeout, expire)
+        deadline = time.monotonic() + profile.session_setup_timeout
         timer.daemon = True
         timer.start()
         try:
@@ -177,6 +184,20 @@ class ParamikoDriver:
             session = CLISession(client, channel, profile)
             if not interactive:
                 session.initialize()
+                for command in TERMINAL_PREPARATION.get(profile.platform, ()):
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise DeviceAccessError("timeout", "terminal initialization timed out")
+                    output = session.send_command(command, min(profile.prompt_timeout, remaining))
+                    if re.search(
+                        r"(?i)(unrecognized command|incomplete command|wrong parameter|"
+                        r"%\s*invalid|not supported)",
+                        output,
+                    ):
+                        raise DeviceAccessError(
+                            "platform_unsupported", "terminal initialization rejected"
+                        )
+                    session.initialization_commands += (command,)
             return session
         except Exception:
             client.close()

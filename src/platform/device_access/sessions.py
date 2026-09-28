@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from threading import Lock, RLock, Timer
 from uuid import uuid4
 
+from .catalog import TERMINAL_PREPARATION
 from .command_policy import classify
 from .contracts import CommandResult, DeviceAccessError
 from .errors import failure_code
@@ -118,7 +119,10 @@ class SessionHandle:
     def _open(self):
         try:
             self._guard()
-            self._emit("opening")  # Audit failure must prevent network activity.
+            self._emit(
+                "opening",
+                approved_setup_commands=list(TERMINAL_PREPARATION[self._platform]),
+            )  # Audit failure must prevent network activity.
             self._lease = self._service.admission.hold(self._target, self._profile)
             try:
                 self._check_lease = self._lease.__enter__()
@@ -129,6 +133,7 @@ class SessionHandle:
             remaining = self._deadline - time.monotonic()
             profile = replace(
                 self._profile,
+                platform=self._platform,
                 connection_attempts=1,
                 conn_timeout=min(self._profile.conn_timeout, remaining),
                 auth_timeout=min(self._profile.auth_timeout, remaining),
@@ -138,7 +143,11 @@ class SessionHandle:
             )
             self._connection = self._service.driver.connect(self._target, profile)
             self._guard()
-            self._emit("opened", prompt=self._redact(self._connection.find_prompt()))
+            self._emit(
+                "opened",
+                prompt=self._redact(self._connection.find_prompt()),
+                setup_commands=list(getattr(self._connection, "initialization_commands", ())),
+            )
             with self._state:
                 self._total_timer = Timer(
                     max(0, self._deadline - time.monotonic()),
@@ -196,7 +205,10 @@ class SessionHandle:
                     timer.cancel()
         try:
             if self._connection is not None:
-                self._connection.disconnect()
+                try:
+                    self._connection.disconnect()
+                except (EOFError, OSError):
+                    pass  # The peer may have already closed the transport.
         finally:
             try:
                 if self._lease is not None:

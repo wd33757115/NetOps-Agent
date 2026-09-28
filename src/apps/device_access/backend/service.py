@@ -122,11 +122,27 @@ def revoke(owner, connection_id):
     return {"revoked": True}
 
 
-def access(owner, connection_id, action="device.collect"):
+def access(owner, connection_id, action="device.collect", *, driver_kind="paramiko", platform=None):
     settings, ref = connection(owner, connection_id, action)
     driver = None
     trust = HostKeyStore()
-    if trust.policy(settings["domain"]) is not None:
+    policy = trust.policy(settings["domain"])
+    if driver_kind == "netmiko":
+        from src.platform.device_access.drivers.netmiko_driver import NetmikoDriver
+
+        driver = NetmikoDriver(
+            platform,
+            known_hosts_provider=(
+                lambda target, port: trust.known_hosts(
+                    owner, target.management_domain, target.host, port
+                )
+            )
+            if policy is not None
+            else None,
+        )
+    elif driver_kind != "paramiko":
+        raise DeviceAccessError("invalid_request", "未知 SSH 驱动")
+    elif policy is not None:
         driver = ParamikoDriver(
             host_key_verifier=lambda target, port, key: trust.verify(owner, target, port, key)
         )
@@ -160,6 +176,7 @@ def access(owner, connection_id, action="device.collect"):
         port=settings["port"],
         known_hosts_file=os.getenv("DEVICE_ACCESS_KNOWN_HOSTS"),
         max_output_bytes=256 * 1024,
+        platform=platform,
     )
     target = Target(connection_id, settings["address"], management_domain=settings["domain"])
     return DeviceAccessService(

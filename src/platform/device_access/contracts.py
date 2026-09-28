@@ -57,6 +57,7 @@ class ConnectionProfile:
     known_hosts_file: str | None = None
     connection_attempts: int = 1
     retry_delay: float = 1
+    platform: str | None = None
 
 
 @dataclass(frozen=True)

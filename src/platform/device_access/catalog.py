@@ -2,6 +2,14 @@
 
 from .contracts import Command
 
+# Session-scoped terminal settings, selected only after platform identification.
+TERMINAL_PREPARATION = {
+    "comware": ("screen-length disable",),
+    "nxos": ("terminal width 511", "terminal length 0"),
+    "ios": ("terminal width 511", "terminal length 0"),
+    "vrp": ("screen-length 0 temporary",),
+}
+
 DISCOVERY_PROFILES = {
     "comware-lldp-v1": (
         Command("paging", "screen-length disable"),

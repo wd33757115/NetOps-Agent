@@ -27,6 +27,64 @@ class LocalAdmission:
         yield lambda: None
 
 
+@pytest.mark.parametrize(
+    "platform,expected",
+    [
+        (None, []),
+        ("comware", ["screen-length disable"]),
+        ("nxos", ["terminal width 511", "terminal length 0"]),
+        ("ios", ["terminal width 511", "terminal length 0"]),
+        ("vrp", ["screen-length 0 temporary"]),
+    ],
+)
+def test_identified_platform_prepares_terminal_before_collection(tmp_path, platform, expected):
+    from src.platform.device_access.drivers.paramiko_driver import ParamikoDriver
+
+    with ssh_server(tmp_path) as (port, known, commands, _):
+        connection = ParamikoDriver().connect(
+            Target("switch", "127.0.0.1"),
+            ConnectionProfile(
+                "manual",
+                "operator",
+                "password",
+                port=port,
+                known_hosts_file=str(known),
+                platform=platform,
+            ),
+        )
+        try:
+            assert list(connection.initialization_commands) == expected
+            connection.send_command("display version", 2)
+            assert commands == expected + ["display version"]
+        finally:
+            connection.disconnect()
+
+
+def test_rejected_terminal_preparation_stops_before_collection(tmp_path):
+    from src.platform.device_access.drivers.paramiko_driver import ParamikoDriver
+
+    with ssh_server(tmp_path, responses={"screen-length disable": "Unrecognized command"}) as (
+        port,
+        known,
+        commands,
+        _,
+    ):
+        with pytest.raises(DeviceAccessError) as error:
+            ParamikoDriver().connect(
+                Target("switch", "127.0.0.1"),
+                ConnectionProfile(
+                    "manual",
+                    "operator",
+                    "password",
+                    port=port,
+                    known_hosts_file=str(known),
+                    platform="comware",
+                ),
+            )
+        assert error.value.failure_code == "platform_unsupported"
+        assert commands == ["screen-length disable"]
+
+
 def test_real_human_terminal_preserves_banner_and_closes(tmp_path):
     with ssh_server(tmp_path) as (port, known_hosts, commands, _):
         access = DeviceAccessService(

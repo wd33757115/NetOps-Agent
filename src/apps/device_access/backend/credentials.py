@@ -267,6 +267,7 @@ class CredentialVault:
         credential_set_id=None,
         budget_seconds=30,
         should_continue=None,
+        on_success=None,
     ):
         """Server-only orchestration: caller supplies admission + strict SSH connect.
 
@@ -325,6 +326,8 @@ class CredentialVault:
                 # Only vault sets have a durable FK; env/temporary references are not persisted.
                 identifier = None if ":" in candidate.id else candidate.id
                 self._remember(owner, domain, key, identifier)
+                if on_success is not None:
+                    on_success(candidate.id)
             except Exception:
                 try:
                     connection.disconnect()
