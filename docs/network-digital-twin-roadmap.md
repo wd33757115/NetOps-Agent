@@ -482,6 +482,15 @@ P1-3 实施细化（2026-09-28）：
 - `strict`：仅 `verified` 可连接（首版行为）。
 - 策略按管理域配置。
 
+P1-2 实施细化（2026-09-28）：
+
+- 原表只有指纹无法生成 `known_hosts`，因此补充 `public_key` 公钥本体；按 `(domain, host, port)` 唯一固定，算法改变也视为密钥改变。补充 `revision`、核验人/时间、变化指纹/时间；独立的 `app_device_access_host_key_policies` 保存域策略与修改人。迁移为 `device_access_0003`。
+- 未配置域沿用已有文件严格校验；管理员可明确将实验域设置为 `tofu_pinned`，或生产域设置为 `strict`。不猜测环境、不自动改变现有生产域信任，Q3 仍待负责人确定。
+- Paramiko 在同一次 SSH 握手的密码认证前调用数据库校验；此路径不加载系统或文件密钥，以免命中旧缓存后跳过管理域校验。数据库同时提供按单个域/地址/端口生成的 `known_hosts` 文本，供后续文件型驱动使用。不能采用“先扫描密钥、再无条件信任另一次连接”的流程。
+- 首次固定有唯一约束，竞争者重新读取胜出的密钥；不同指纹不能都获准。严格模式可记录未核验密钥供管理员检查，但拒绝发送登录密码。出现变化后保留原公钥并隔离该端点，恢复到旧密钥也不自动解除告警。
+- 核验、更新或撤销仅管理员可操作；更新必须提供公钥、独立核验的指纹和当前修订号，服务端核对三者，拒绝覆盖过期界面记录。普通使用者获得 `host_key_changed` / `host_key_revoked` 等失败码，管理界面显示告警。
+- 当前接入设备访问 App 的凭据库与临时凭据两条 SSH 路径；拓扑调用与后续会话接口按对应任务卡接入。未改原巡检。
+
 ### 8.5 驱动（D10）
 
 - `drivers/netmiko_driver.py`：实现与 `ParamikoDriver` 相同的 `connect / send_command / find_prompt / disconnect` 接口；`device_type` 由平台档案映射（`hp_comware`、`cisco_nxos`、`cisco_ios`、`huawei`）；启用 `ssh_strict` 并传入由 8.4 生成的 known_hosts。
@@ -855,7 +864,13 @@ VSR-2 GE3/0(二层 access VLAN 100) ── Switch1(不可管理) ── PC1 1.1.
 - 测试：加密往返、作用域最长前缀、每设备记忆、最多 3 集、日志/异常中无明文、权限隔离。
 - 验收：见 P1 验收第 1、2、5 条。
 
-**P1-2 主机密钥库** / **P1-4 会话接口** / **P1-5 Netmiko 驱动** / **P1-6 授权入库**：按 8.4、8.1、8.5 节与 P1 表格编写，格式同上。
+**P1-2 主机密钥库**
+- 范围：公共 `host_keys.py` 校验/格式化与 Paramiko 握手回调、App 密钥/域策略表和迁移 0003、管理员维护 API/界面、现有设备访问连接接线。
+- 不做：生产域策略自动切换、原巡检改动、提前实施 Netmiko 驱动。
+- 测试：首次固定、严格模式、变更/撤销、域和端口隔离、先授权再固定、数据库并发首次固定、管理员权限、过期修订拒绝、真实回环 SSH 在发送密码前拒绝异常密钥、变化告警界面。
+- 验收：两台实验 H3C 的握手密钥与已有实验基线一致；使用隔离信任库模拟指纹变化并确认公共驱动拒绝；此验收无需密码且不修改设备密钥。P1 完整登录验收仍按 P1-1 待补。
+
+**P1-4 会话接口** / **P1-5 Netmiko 驱动** / **P1-6 授权入库**：按 8.1、8.5 节与 P1 表格编写，格式同上。
 
 > P2 以后的任务卡在进入该阶段时由执行者按模板从第 10 节表格展开，展开后先提交任务卡再开发。
 
@@ -870,6 +885,7 @@ VSR-2 GE3/0(二层 access VLAN 100) ── Switch1(不可管理) ── PC1 1.1.
 | P0-3 | 已完成 | 2026-09-28 | 首版文首已链接后续路线图且文件存在；`git ls-files scripts/topology/collect_lab_samples.py` 非空；`git diff --check` 通过 | 仅文档衔接；采样脚本在 P0-1 已纳入；按最新授权继续 P1-3 |
 | P1-3 | 已完成 | 2026-09-28 | 新增策略矩阵 458 项通过；连同现有设备访问回归共 525 项通过；Ruff 检查通过 | 新分类器与四平台 YAML；未接入 DSH、未改变 `authorize()`；见 8.3 实施细化 |
 | P1-1 | 实现完成，实机验收待补 | 2026-09-28 | Python 570 项通过（本卡新增 44 项）；前端全量 261 项通过，新增连接表单后定向 7 项通过；构建、Ruff 通过 | 迁移 0002、凭据集界面、公共 SSH 接入；实验密码当前不可用，未冒称两台 H3C 验收通过 |
+| P1-2 | 已完成（密钥握手验收） | 2026-09-28 | Python 回归 589 项通过，另 PostgreSQL 并发 2 项通过；前端定向 9 项通过、构建通过；两台 H3C 握手基线与模拟变化拒绝均通过 | 0003 迁移、数据库密钥策略、管理员告警/核验；未发送密码、未改设备、未发布 |
 
 ### P0-1 基线记录（2026-09-28）
 
@@ -963,6 +979,16 @@ VSR-2 GE3/0(二层 access VLAN 100) ── Switch1(不可管理) ── PC1 1.1.
 - `python -m ruff check` 本卡后端、迁移、公共凭据文件及测试通过；`git diff --check` 通过。未执行线上迁移、未发布、未 push。
 - 实机待验收：进程与项目 `.env` 都没有 `NETOPS_LAB_PASSWORD`；已请求账号来源，未收到补充，未读取或复用巡检账号。回环 SSH 仅证明协议认证顺序，不代表 H3C 实机验收。待取得实验凭据后，使用已核验主机密钥完成两台 H3C 登录、错后对认证日志及日志/模型/队列无明文验收。P1 阶段不得因此标为验收完成；可继续同阶段后续独立任务卡。
 - 回滚：回退代码提交并从已验证备份恢复本卡 App 数据；迁移不提供删除凭据数据的自动降级。凭据加密主密钥必须保留，否则只能人工重新录入。
+
+### P1-2 实施记录（2026-09-28）
+
+- 文件：新增公共 `src/platform/device_access/host_keys.py`、App `backend/host_keys.py`、`host_key_api.py`、`migrations/versions/0003_host_keys.py`、`frontend/HostKeys.tsx`；修改公共 Paramiko 驱动注入校验回调，App 模型/API/服务/错误码/页面/manifest 与前端生成清单。所有变更仅新设备访问链路。
+- 自动验证：新增 `tests/unit/test_device_access_host_keys.py` **19 项**（含 4 个真实回环 SSH 场景），与既有设备访问/迁移测试合计 **589 passed**；命令沿 P1-1 的 PowerShell 文件列表选择执行，报告 `.runtime/p1-2-tests.xml` 与日志 `.runtime/p1-2-tests.log`。
+- PostgreSQL 实测：新增 `tests/integration/test_device_access_host_key_postgres.py`，只允许显式提供 `NETOPS_HOSTKEY_TEST_DATABASE_URL` 且数据库名为 `netops_validation_*`。用 `postgres:16-alpine` 独立容器随机回环端口执行 `python -m pytest tests/integration/test_device_access_host_key_postgres.py -q --tb=short`，**2 passed**：相同密钥并发首次固定均成功且仅一条记录；不同密钥并发只有一个首次成功，另一方返回变化并隔离端点。迁移 0003 重复升级通过。验证后核对标签并停止自动删除容器，原运行服务未动。日志 `.runtime/p1-2-postgres.log`。
+- 前端新增 `HostKeys.test.tsx` **2 项**，与凭据集/连接表单共 **9 passed / 3 files**。首次测试使用了错误的默认英文提示定位，改为明确中文校验文案后通过。`npm run build -- --outDir ../../.runtime/p1-2/frontend-dist` 通过；Ruff 与 diff 检查通过。
+- 实验设备：执行 `.runtime/p1-2-lab-check.py`，对 `10.10.1.1`、`10.10.1.2` 在密码认证前读取握手公钥，分别与 `.runtime/lab-samples/known_hosts` 基线匹配并完成隔离库首次固定；随后仅替换隔离库的可信公钥，实际再次连接两台设备均返回 `host_key_changed`。没有发送密码、没有执行设备命令、没有修改设备密钥。结果 `.runtime/p1-2-lab-check.json`。这不替代 P1-1 的成功登录及设备认证日志验收。
+- 未完成项：尚未发布/升级本机已安装 App；完整 P1 登录依赖实验凭据；生产域策略 Q3 未选定，默认行为保持文件严格模式。接下来进入 P1-4；P1 阶段整体仍不能标为已验收。
+- 回滚：代码可回退；保留/备份密钥信任数据库，迁移不自动删除信任记录。未进行线上迁移或 push。
 
 **待决问题**
 

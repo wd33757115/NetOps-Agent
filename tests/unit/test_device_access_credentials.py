@@ -507,7 +507,7 @@ def test_vault_connection_service_rotates_and_redacts_evidence(vault, monkeypatc
             return PASSWORD + ENABLE
 
     monkeypatch.setattr(
-        service, "VaultDriver", lambda *a, **kw: VaultDriver(*a, **kw, driver=Driver())
+        service, "VaultDriver", lambda *a, driver=None, **kw: VaultDriver(*a, **kw, driver=Driver())
     )
     body = ConnectionRequest(
         domain="lab",

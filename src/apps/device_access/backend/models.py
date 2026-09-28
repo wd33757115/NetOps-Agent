@@ -69,3 +69,28 @@ class DeviceCredential(Base):
     credential_set_id = Column(String(32), ForeignKey(CredentialSet.id))
     last_success_at = Column(DateTime(timezone=True))
     last_failure_code = Column(String(64))
+
+
+class HostKey(Base):
+    __tablename__ = "app_device_access_host_keys"
+    domain = Column(String(64), primary_key=True)
+    host = Column(String(45), primary_key=True)
+    port = Column(Integer, primary_key=True)
+    key_type = Column(String(64), nullable=False)
+    public_key = Column(Text, nullable=False)
+    fingerprint_sha256 = Column(String(64), nullable=False)
+    first_seen = Column(DateTime(timezone=True), nullable=False, default=now)
+    status = Column(String(16), nullable=False)
+    revision = Column(Integer, nullable=False, default=1)
+    verified_by = Column(String(64))
+    verified_at = Column(DateTime(timezone=True))
+    observed_fingerprint = Column(String(64))
+    changed_at = Column(DateTime(timezone=True))
+
+
+class HostKeyPolicy(Base):
+    __tablename__ = "app_device_access_host_key_policies"
+    domain = Column(String(64), primary_key=True)
+    policy = Column(String(16), nullable=False)
+    updated_by = Column(String(64), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=now)

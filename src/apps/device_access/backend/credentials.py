@@ -306,6 +306,7 @@ class CredentialVault:
                     "timeout",
                     "host_key_rejected",
                     "host_key_changed",
+                    "host_key_revoked",
                     "not_authorized",
                     "cancelled",
                     "budget_exceeded",

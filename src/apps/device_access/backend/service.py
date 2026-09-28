@@ -17,10 +17,12 @@ from src.platform.authorization.client import authorize_worker
 from src.platform.device_access import AccessContext, AccessGrant, BatchRequest, DeviceAccessService
 from src.platform.device_access.catalog import DIAGNOSTIC_PROFILES
 from src.platform.device_access.contracts import ConnectionProfile, DeviceAccessError, Target
+from src.platform.device_access.drivers.paramiko_driver import ParamikoDriver
 from src.platform.device_access.security import CredentialStore, authorize_address
 from src.platform.kernel.migrations import business_engine
 
 from .credentials import CredentialVault
+from .host_keys import HostKeyStore
 from .models import Connection, Operation, now
 from .vault_driver import VaultDriver
 
@@ -123,6 +125,11 @@ def revoke(owner, connection_id):
 def access(owner, connection_id, action="device.collect"):
     settings, ref = connection(owner, connection_id, action)
     driver = None
+    trust = HostKeyStore()
+    if trust.policy(settings["domain"]) is not None:
+        driver = ParamikoDriver(
+            host_key_verifier=lambda target, port, key: trust.verify(owner, target, port, key)
+        )
     if settings.get("credential_mode") == "vault":
         username, password = "credential-vault", None
 
@@ -140,6 +147,7 @@ def access(owner, connection_id, action="device.collect"):
             temporary_ref=ref or None,
             credential_set_id=settings.get("credential_set_id"),
             guard=guard,
+            driver=driver,
         )
     else:
         username, password = CredentialStore().get(

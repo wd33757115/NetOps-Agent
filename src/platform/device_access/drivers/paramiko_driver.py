@@ -108,6 +108,9 @@ class CLISession:
 class ParamikoDriver:
     name = "paramiko"
 
+    def __init__(self, *, host_key_verifier=None):
+        self.host_key_verifier = host_key_verifier
+
     @property
     def version(self):
         return version("paramiko")
@@ -119,7 +122,11 @@ class ParamikoDriver:
 
         if not profile.ssh_strict:
             raise DeviceAccessError("host_key_rejected", "strict host-key verification is required")
-        if profile.known_hosts_file and not Path(profile.known_hosts_file).is_file():
+        if (
+            self.host_key_verifier is None
+            and profile.known_hosts_file
+            and not Path(profile.known_hosts_file).is_file()
+        ):
             raise DeviceAccessError(
                 "host_key_rejected", "configured known-hosts file is unavailable"
             )
@@ -141,10 +148,17 @@ class ParamikoDriver:
         timer.daemon = True
         timer.start()
         try:
-            client.load_system_host_keys()
-            if profile.known_hosts_file:
-                client.load_host_keys(profile.known_hosts_file)
-            client.set_missing_host_key_policy(paramiko.RejectPolicy())
+            if self.host_key_verifier is None:
+                client.load_system_host_keys()
+                if profile.known_hosts_file:
+                    client.load_host_keys(profile.known_hosts_file)
+                client.set_missing_host_key_policy(paramiko.RejectPolicy())
+            else:
+                from ..host_keys import DatabaseHostKeyPolicy
+
+                client.set_missing_host_key_policy(
+                    DatabaseHostKeyPolicy(target, profile, self.host_key_verifier)
+                )
             client.connect(
                 hostname=target.host,
                 port=profile.port,
