@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from src.apps.topology.backend.collectors.parse import parse_generic
+from src.apps.topology.backend.collectors.parse import parse
 from src.apps.topology.backend.model.builder import build_topology
 
 ROOT = Path(__file__).resolve().parents[1] / "fixtures/topology/h3c/vsr1000-7.1.064"
@@ -25,7 +25,7 @@ def lab_facts(device):
     facts = {"platform": "comware"}
     for capability, name in FILES.items():
         raw = (ROOT / device / f"{name}.txt").read_text(encoding="utf-8")
-        result = parse_generic({"os_family": "comware"}, capability, raw)
+        result = parse({"os_family": "comware"}, capability, raw)
         assert result.status == "complete", (device, capability, result.warnings)
         facts[capability] = result.summary if capability == "lldp_local" else result.records
     return facts

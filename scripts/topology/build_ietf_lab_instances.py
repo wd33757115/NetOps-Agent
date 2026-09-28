@@ -262,14 +262,17 @@ TOPOLOGY_INPUTS = {
 def topology(source, devices):
     """One implementation: the App's parsers and SIMAP builder, never a second copy."""
     sys.path.insert(0, str(ROOT))
-    from src.apps.topology.backend.collectors.parse import parse_generic
+    from src.apps.topology.backend.collectors import parse as parsers
     from src.apps.topology.backend.model.builder import build_topology
+
+    # Topology inputs only need the generic tier; later tiers are not installed here.
+    parse = getattr(parsers, "parse_generic", parsers.parse)
 
     facts = {}
     for device in devices:
         entry = {"platform": "comware"}
         for capability, name in TOPOLOGY_INPUTS.items():
-            result = parse_generic({"os_family": "comware"}, capability, source(device, name))
+            result = parse({"os_family": "comware"}, capability, source(device, name))
             if result.status != "complete":
                 raise ValueError(f"{device} {capability} did not parse completely")
             entry[capability] = result.summary if capability == "lldp_local" else result.records
