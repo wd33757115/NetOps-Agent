@@ -93,14 +93,58 @@
         "dest-mac-address": "01-80-C2-00-00-0E",
         "port-id-subtype": "interface-name",
         "port-id": "GigabitEthernet1/0",
-        "port-desc": "GigabitEthernet1/0 Interface"
+        "port-desc": "GigabitEthernet1/0 Interface",
+        "remote-systems-data": [
+          {
+            "time-mark": 11600,
+            "remote-index": 1,
+            "chassis-id-subtype": "mac-address",
+            "chassis-id": "74-25-8A-E4-12-52",
+            "port-id-subtype": "interface-name",
+            "port-id": "GigabitEthernet1/0",
+            "port-desc": "GigabitEthernet1/0 Interface",
+            "system-name": "H3C",
+            "management-address": [
+              {
+                "address-subtype": "ietf-routing:ipv4",
+                "address": "0A0A0102",
+                "if-subtype": "port-ref",
+                "if-id": 17
+              }
+            ],
+            "system-capabilities-supported": "bridge router cvlan-component svlan-component",
+            "system-capabilities-enabled": "bridge router cvlan-component"
+          }
+        ]
       },
       {
         "name": "GE2/0",
         "dest-mac-address": "01-80-C2-00-00-0E",
         "port-id-subtype": "interface-name",
         "port-id": "GigabitEthernet2/0",
-        "port-desc": "GigabitEthernet2/0 Interface"
+        "port-desc": "GigabitEthernet2/0 Interface",
+        "remote-systems-data": [
+          {
+            "time-mark": 267800,
+            "remote-index": 1,
+            "chassis-id-subtype": "mac-address",
+            "chassis-id": "74-25-8A-E4-12-52",
+            "port-id-subtype": "interface-name",
+            "port-id": "GigabitEthernet2/0",
+            "port-desc": "GigabitEthernet2/0 Interface",
+            "system-name": "H3C",
+            "management-address": [
+              {
+                "address-subtype": "ietf-routing:ipv4",
+                "address": "02020201",
+                "if-subtype": "port-ref",
+                "if-id": 33
+              }
+            ],
+            "system-capabilities-supported": "bridge router cvlan-component svlan-component",
+            "system-capabilities-enabled": "bridge router cvlan-component"
+          }
+        ]
       },
       {
         "name": "GE3/0",

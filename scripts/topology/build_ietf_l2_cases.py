@@ -30,6 +30,9 @@ def build() -> dict[str, bytes]:
         "iana-if-type",
         "ietf-interfaces",
         "ietf-ip",
+        # LLDP management-address subtype uses ietf-routing identities; libyang only
+        # resolves identity values from implemented modules.
+        "ietf-routing",
         "ieee802-dot1q-bridge",
         "ieee802-dot1ab-lldp",
     ]
@@ -126,6 +129,14 @@ def build() -> dict[str, bytes]:
         lambda t: t["ieee802-dot1ab-lldp:lldp"]["port"][0].update(
             {"dest-mac-address": "0180-c200-000e"}
         ),
+    )
+    mutate(
+        "lldp-management-address-dotted",
+        "get",
+        '"10.10.1.2" does not match',
+        lambda t: t["ieee802-dot1ab-lldp:lldp"]["port"][0]["remote-systems-data"][0][
+            "management-address"
+        ][0].update(address="10.10.1.2"),
     )
     mutate(
         "custom-field",

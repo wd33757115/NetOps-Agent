@@ -329,7 +329,31 @@
       "returncode": 1,
       "expected_valid": false,
       "matched": true,
-      "diagnostic": "libyang err : Unsatisfied pattern - \"0180-c200-000e\" does not match \"[0-9a-fA-F]{2}(-[0-9a-fA-F]{2}){5}\". (/ieee802-dot1ab-lldp:port[name='GE1/0']/dest-mac-address) (line 92)\nlibyang err : List instance is missing its key \"dest-mac-address\". (/ieee802-dot1ab-lldp:port[name='GE1/0']) (line 96)\nYANGLINT[E]: Failed to parse input data file \"/cases/lldp-dest-mac-dotted.json\".\nlibyang warn: String \"GigabitEthernet1/0 Interface\" not freed from the dictionary, refcount 1.\nlibyang warn: String \"GE1/0\" not freed from the dictionary, refcount 1.\nlibyang warn: String \"interface-name\" not freed from the dictionary, refcount 1.\nlibyang warn: String \"GigabitEthernet1/0\" not freed from the dictionary, refcount 1.\n",
+      "diagnostic": "libyang err : Unsatisfied pattern - \"0180-c200-000e\" does not match \"[0-9a-fA-F]{2}(-[0-9a-fA-F]{2}){5}\". (/ieee802-dot1ab-lldp:port[name='GE1/0']/dest-mac-address) (line 92)\nlibyang err : List instance is missing its key \"dest-mac-address\". (/ieee802-dot1ab-lldp:port[name='GE1/0']) (line 118)\nYANGLINT[E]: Failed to parse input data file \"/cases/lldp-dest-mac-dotted.json\".\nlibyang warn: String \"1\" not freed from the dictionary, refcount 1.\nlibyang warn: String \"GigabitEthernet1/0 Interface\" not freed from the dictionary, refcount 2.\nlibyang warn: String \"17\" not freed from the dictionary, refcount 1.\nlibyang warn: String \"H3C\" not freed from the dictionary, refcount 1.\nlibyang warn: String \"74-25-8A-E4-12-52\" not freed from the dictionary, refcount 1.\nlibyang warn: String \"0A0A0102\" not freed from the dictionary, refcount 1.\nlibyang warn: String \"mac-address\" not freed from the dictionary, refcount 1.\nlibyang warn: String \"GE1/0\" not freed from the dictionary, refcount 1.\nlibyang warn: String \"interface-name\" not freed from the dictionary, refcount 2.\nlibyang warn: String \"ietf-routing:ipv4\" not freed from the dictionary, refcount 1.\nlibyang warn: String \"GigabitEthernet1/0\" not freed from the dictionary, refcount 2.\nlibyang warn: String \"11600\" not freed from the dictionary, refcount 1.\nlibyang warn: String \"port-ref\" not freed from the dictionary, refcount 1.\n",
+      "mounted_routes_retained": null,
+      "input_preserved": null,
+      "validation_mode": "get",
+      "semantic_validation_performed": false,
+      "strict_complete_instance_proven": false
+    },
+    {
+      "name": "lldp-management-address-dotted-rejected",
+      "command": [
+        "yanglint",
+        "-p",
+        "/modules",
+        "-Y",
+        "/cases/parent-library.json",
+        "-t",
+        "get",
+        "-f",
+        "json",
+        "/cases/lldp-management-address-dotted.json"
+      ],
+      "returncode": 1,
+      "expected_valid": false,
+      "matched": true,
+      "diagnostic": "libyang err : Unsatisfied pattern - \"10.10.1.2\" does not match \"[0-9A-F]{2}([0-9A-F]{2}){0,30}\". (/ieee802-dot1ab-lldp:management-address[address-subtype='ietf-routing:ipv4']/address) (line 109)\nlibyang err : List instance is missing its key \"address\". (/ieee802-dot1ab-lldp:management-address[address-subtype='ietf-routing:ipv4']) (line 113)\nYANGLINT[E]: Failed to parse input data file \"/cases/lldp-management-address-dotted.json\".\nlibyang warn: String \"17\" not freed from the dictionary, refcount 1.\nlibyang warn: String \"ietf-routing:ipv4\" not freed from the dictionary, refcount 1.\nlibyang warn: String \"port-ref\" not freed from the dictionary, refcount 1.\n",
       "mounted_routes_retained": null,
       "input_preserved": null,
       "validation_mode": "get",
@@ -540,7 +564,7 @@
   "expectations_matched": true,
   "image_id": "sha256:5db3d7d18f7ae37a5422516fd38a2bf7df8ace6ffc352867dca496d2b2c91afe",
   "image_tag": "netops-ietf-mount-verify:5.8.6",
-  "cases_manifest_sha256": "579d112e3db970658657f995674f6a4774c8c5c925d5d8e938b04f6b2e5b4992",
+  "cases_manifest_sha256": "d4a8621d321c09a2e0368b78b5b3dd3ddf64658bcef1a0ec38988c4ec016b20f",
   "scope": "Offline VSR ARP/VLAN/LLDP partial observations; no live I/O",
   "complete_digital_twin": false
 }

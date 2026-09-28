@@ -66,7 +66,7 @@
         "name": "ietf-routing",
         "revision": "2018-03-13",
         "namespace": "urn:ietf:params:xml:ns:yang:ietf-routing",
-        "conformance-type": "import"
+        "conformance-type": "implement"
       },
       {
         "name": "ietf-yang-library",
@@ -83,7 +83,7 @@
     ]
   },
   "ietf-yang-library:yang-library": {
-    "content-id": "6b8caca3a716070d6ada9e3baf66972e7b182af8e315f556736517e55e5ddbdf",
+    "content-id": "f1c19f150e5d150890d953d87d70bc0f06f2e6fa6389a02ad2539181a87c42d2",
     "module-set": [
       {
         "name": "l2",
@@ -119,6 +119,11 @@
             "namespace": "urn:ietf:params:xml:ns:yang:ietf-ip"
           },
           {
+            "name": "ietf-routing",
+            "revision": "2018-03-13",
+            "namespace": "urn:ietf:params:xml:ns:yang:ietf-routing"
+          },
+          {
             "name": "ietf-yang-library",
             "revision": "2019-01-04",
             "namespace": "urn:ietf:params:xml:ns:yang:ietf-yang-library"
@@ -144,11 +149,6 @@
             "name": "ietf-inet-types",
             "revision": "2025-12-22",
             "namespace": "urn:ietf:params:xml:ns:yang:ietf-inet-types"
-          },
-          {
-            "name": "ietf-routing",
-            "revision": "2018-03-13",
-            "namespace": "urn:ietf:params:xml:ns:yang:ietf-routing"
           },
           {
             "name": "ietf-yang-types",

@@ -25,7 +25,7 @@
     },
     {
       "file": "vsr-1-l2.partial.json",
-      "sha256": "f3bbc304d64a66b1d8f2214ddb088a22dfb0903a0bd8ff922fc93f84d518bb73",
+      "sha256": "16a3b6067da5e6c2d52743a6ae6dba20844e84bf5c8a7484015b20ea61d6c292",
       "profile": "device",
       "expected_valid": false,
       "expected_diagnostic": "missing-data: expected 'statistics'",
@@ -59,7 +59,7 @@
     },
     {
       "file": "vsr-2-l2.partial.json",
-      "sha256": "158d667698e02ec21d6b7b3a0ca0d465f00c496294e364af747672289a52df85",
+      "sha256": "892bf7a0cb8db736a02c84f671f52fbf24850e092968793c3292a3b6bc0d7cb8",
       "profile": "device",
       "expected_valid": false,
       "expected_diagnostic": "missing-data: expected 'statistics'",
@@ -432,9 +432,9 @@
     "LLDP serial number is retained in capture; no invented physical component for the VM.",
     "Hub, unmanaged switches, IPv6, counters and physical wiring remain outside these subsets.",
     "ARP rows on VLAN interfaces are placed on the unique L3 interface whose captured subnet contains the neighbor; the physical port stays in evidence.",
-    "LLDP remote-systems-data is keyed by time-mark (sysUpTime at change). CLI 'Update time' exceeds the 121 s TTL, so it is not a receive age, but it may be uptime-at-change or time-since-change; unverified, so no remote entries.",
+    "LLDP remote entries use Update time as time-mark: a P2-11 live check showed it constant across rounds while uptime grew (sysUpTime at change, second resolution as displayed).",
     "MAC filtering entries need database-id and a bridge port number; the CLI shows an interface name only, so the MAC table is not synthesized.",
-    "Bridge address is mandatory but not captured; bridge/component keys are projection labels; the l2 subsets therefore remain partial.",
-    "Only the nearest-bridge LLDP agent is mapped; multi-line system description and management-address TLVs stay in evidence."
+    "Bridge address (the MAC STP bridge identifiers derive from) has no source: VSR rejects display stp; bridge/component keys are projection labels.",
+    "Only the nearest-bridge LLDP agent is mapped; multi-line system descriptions and local management-address TLVs stay in evidence."
   ]
 }

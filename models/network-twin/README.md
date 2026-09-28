@@ -26,7 +26,7 @@
 | 设备清单（虚拟 NE、软件版本） | inventory -19 + software -04：`network-element[ne-id]` | 已建模并映射；序列号的组件归属未闭合 |
 | 接口、IP 地址 | RFC 8343/8344：`/if:interfaces/interface`、`ip:ipv4/address` | 已建模；部分映射（缺计数器中断时间） |
 | ARP | RFC 8344：`ip:ipv4/neighbor[ip]/link-layer-address`（operational） | **已映射（IETF-2.2）**：每台 4 条；VLAN 终端按唯一包含其地址的三层接口子网归到 Vlan 接口，物理口留在溯源清单 |
-| LLDP 本地/远端 | IEEE 802.1AB：`/lldp/local-system-data`、`/lldp/port[name dest-mac-address]/remote-systems-data[time-mark remote-index]` | 本地系统与 3 个端口的 nearest-bridge 代理**已映射**；远端表主键 time-mark 是变化时的 sysUpTime。CLI 的 “Update time” 超过 121 秒 TTL，不是收包间隔；但它是“变化时的开机时长”还是“距变化的时长”尚未核实，**不映射**（邻接仍在拓扑实例中） |
+| LLDP 本地/远端 | IEEE 802.1AB：`/lldp/local-system-data`、`/lldp/port[name dest-mac-address]/remote-systems-data[time-mark remote-index]` | 本地系统、3 个端口的 nearest-bridge 代理、每台 2 条远端邻居**已映射**。time-mark 取 CLI “Update time”，经 P2-11 实机核实（两轮不变、开机时长增长）为变化时的开机时长，按显示的秒精度 ×100；远端管理地址按模型要求写成十六进制字节串，IfIndex 对应枚举值 2（port-ref） |
 | access 口 VLAN、MAC 表 | IEEE 802.1Q：接口 `dot1q:bridge-port/{bridge-name,component-name,pvid}`；`component/bridge-vlan/vlan[vid]`；`filtering-database/filtering-entry[database-id vids address]/port-map[port-ref]` | PVID、VLAN 及成员**已映射**（pvid 的 when 要求引用非 D-bridge 组件）；MAC 表需要 database-id 和桥端口号，CLI 只有接口名，**不映射** |
 | RIB、OSPF、静态/黑洞路由 | RFC 8349 + RFC 9129：`ribs/rib/routes/route`、special-next-hop | 已建模；RIB 子集已映射 |
 | VRF/NI 与挂载 | RFC 8529 + RFC 8528 | 已建模；libyang 验证；实验无 VPN 实例 |
@@ -35,7 +35,7 @@
 | Hub、不可管理交换机、PC | 无采集证据；拓扑只能表示可观测对象 | 不建模推断实体（见 6.4 撤回的假设） |
 | 拓扑 node ↔ 清单 ↔ 设备树 | 无当前标准引用 | 缺口，见 [virtual-association](virtual-association/README.md)，负责人授权自定：模型内不建立关联 |
 
-**模型要求而当前采集缺少的证据**（供之后重排采集任务使用）：接口 `statistics/discontinuity-time`；bridge `address`；LLDP “Update time” 的语义（间隔采两次即可区分）；FDB 的 database-id 与桥端口号（接口名到桥端口号的对应，样本中 LLDP 端口号 17/33/49 与 ifIndex 一致，但不等于已证明是 802.1Q 桥端口号）；LLDP 其他代理和管理地址 TLV。路由出接口在样本中已有，是映射时因 NULL0/InLoop0 等接口类型未核定而暂缓，不属于采集缺口。SVI↔VID 的绑定属于模型缺口，不是采集缺口。
+**缺证据清单与 P2-11 实机结论**（证据见 `evidence/p2-11/`）：LLDP “Update time” 语义——**已解决**，已映射远端表；接口 `statistics/discontinuity-time`——各口 “Last clearing of counters: Never”，按 RFC 8343 应取管理子系统初始化时刻，但设备只给出分钟级开机时长，**精度不足，继续缺失**；bridge `address`——模型定义为 STP 桥标识所用 MAC，VSR 不支持 `display stp`，**本设备无来源**（Vlan 接口 MAC 与 LLDP 机箱 ID 相同，但不能据此认定）；FDB 的 database-id 与桥端口号——同样无 STP/桥端口输出，**本设备无来源**，MAC 表继续不映射。另外 GE3/0 详情直接显示 “Untagged VLANs: 100”，证实 VLAN 成员映射。路由出接口在样本中已有，是映射时因 NULL0/InLoop0 等接口类型未核定而暂缓，不属于采集缺口。SVI↔VID 的绑定属于模型缺口。
 
 TE（RFC 8795）、BGP 等不在当前实验场景内，不纳入本轮，避免过度建模；出现对应场景时再按同一方式加入。
 
@@ -72,7 +72,7 @@ TE（RFC 8795）、BGP 等不在当前实验场景内，不纳入本轮，避免
 | `inventory.json` | 2 个 ne-virtual、软件版本及名称 | Schema 通过；虚拟属性依据 GNS3 实验部署。同名 H3C 不合并，未虚构硬件组件承载序列号 |
 | `vsr-1-routes.json` / `vsr-2-routes.json` | 18 / 19 条路由：目的前缀、协议类别、优先级、下一跳地址 | 原生 IPv4 unicast RIB 子集通过；保留 0.0.0.0/32 和特殊地址行，不擅改成默认路由或丢弃动作 |
 | `vsr-1-interfaces.partial.json` / `vsr-2-interfaces.partial.json` | 各 6 条 IP 接口行的类型、状态、地址/掩码 | **严格完整性检查失败**：缺 statistics/discontinuity-time；部分解析通过并逐字段保留，不能称完整 operational datastore |
-| `vsr-1-l2.partial.json` / `vsr-2-l2.partial.json` | 同一设备树的另一子集：GE1/0～GE3/0 与 Vlan 接口、4 条 ARP、GE3/0 access PVID、VLAN 1 与业务 VLAN 成员、LLDP 本地系统及 3 个端口 | Yangson 首个诊断为缺 statistics；libyang 15 项检查（`l2-cases/`、`reports/l2-validation.json`）：严格模式的缺项正好是 4 个计数器中断时间和 bridge address（另有工具带出的 yang-library 必填项）；operational 模式解析 LLDP/VLAN 成员接口引用并通过；parse-only 往返一致；7 个反例（未知接口引用 ×2、PVID 越界、VLAN 接口挂 bridge-port、MAC 格式 ×2、自定义字段）按预期拒绝 |
+| `vsr-1-l2.partial.json` / `vsr-2-l2.partial.json` | 同一设备树的另一子集：GE1/0～GE3/0 与 Vlan 接口、4 条 ARP、GE3/0 access PVID、VLAN 1 与业务 VLAN 成员、LLDP 本地系统、3 个端口及远端邻居 | Yangson 首个诊断为缺 statistics；libyang 16 项检查（`l2-cases/`、`reports/l2-validation.json`）：严格模式的缺项正好是 4 个计数器中断时间和 bridge address（另有工具带出的 yang-library 必填项）；operational 模式解析 LLDP/VLAN 成员接口引用并通过；parse-only 往返一致；8 个反例（未知接口引用 ×2、PVID 越界、VLAN 接口挂 bridge-port、MAC 格式 ×2、管理地址写成点分格式、自定义字段）按预期拒绝 |
 
 二层子集的 libyang 复现（需验证镜像）：
 

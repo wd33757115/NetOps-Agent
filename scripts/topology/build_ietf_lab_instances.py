@@ -140,14 +140,17 @@ def layer2(device, source, ip_interfaces):
             }
         )
 
+    def capabilities(text):
+        return {
+            kind: " ".join(
+                CAPABILITIES[c.strip()]
+                for c in re.search(rf"System capabilities {kind}\s*:\s*(.+)", text)[1].split(",")
+            )
+            for kind in ("supported", "enabled")
+        }
+
     local = source(device, "lldp_local")
-    caps = {
-        kind: [
-            CAPABILITIES[c.strip()]
-            for c in re.search(rf"System capabilities {kind}\s*:\s*(.+)", local)[1].split(",")
-        ]
-        for kind in ("supported", "enabled")
-    }
+    caps = capabilities(local)
     ports = []
     for block in re.split(r"\nLLDP local-information of port ", local)[1:]:
         match = re.match(r"\d+\[GigabitEthernet(\d+/\d+)\]:", block)
@@ -166,6 +169,51 @@ def layer2(device, source, ip_interfaces):
                 "port-desc": re.search(r"Port description\s*:\s*(.+)", block)[1].strip(),
             }
         )
+    by_port = {p["name"]: p for p in ports}
+    for block in re.split(
+        r"(?:^|\n)LLDP neighbor-information of port ", source(device, "lldp_verbose")
+    )[1:]:
+        name = "GE" + re.match(r"\d+\[GigabitEthernet(\d+/\d+)\]:", block)[1]
+
+        def field(label, text=block):
+            return re.search(rf"\n {label}\s*: *(.*)", text)[1].strip()
+
+        if block.split("\n")[1] != "LLDP agent nearest-bridge:":
+            raise ValueError("Unreviewed LLDP agent")
+        if (field("Chassis type"), field("Port ID type")) != ("MAC address", "Interface name"):
+            raise ValueError("Unreviewed LLDP remote ID subtypes")
+        # P2-11 live check: 'Update time' stayed constant across rounds while uptime grew,
+        # so it is sysUpTime at the last change, i.e. the time-mark (seconds as displayed).
+        d, h, m, s = map(int, re.findall(r"\d+", field("Update time")))
+        address = ipaddress.IPv4Address(field("Management address"))
+        if (field("Management address type"), field("Management address interface type")) != (
+            "IPv4",
+            "IfIndex",
+        ):
+            raise ValueError("Unreviewed LLDP management address")
+        remote = {
+            "time-mark": (((d * 24 + h) * 60 + m) * 60 + s) * 100,
+            "remote-index": int(field("LLDP neighbor index")),
+            "chassis-id-subtype": "mac-address",
+            "chassis-id": ieee_mac(field("Chassis ID")),
+            "port-id-subtype": "interface-name",
+            "port-id": field("Port ID"),
+            "port-desc": field("Port description"),
+            "system-name": field("System name"),
+            "management-address": [
+                {
+                    "address-subtype": "ietf-routing:ipv4",
+                    "address": address.packed.hex().upper(),
+                    # LLDP-MIB ifIndex(2) is the value-2 enum renamed port-ref in YANG.
+                    "if-subtype": "port-ref",
+                    "if-id": int(field("Management address interface ID")),
+                }
+            ],
+        }
+        caps_remote = capabilities(block)
+        remote["system-capabilities-supported"] = caps_remote["supported"]
+        remote["system-capabilities-enabled"] = caps_remote["enabled"]
+        by_port[name].setdefault("remote-systems-data", []).append(remote)
     tree = {
         "ietf-interfaces:interfaces": {"interface": [selected[n] for n in sorted(selected)]},
         "ieee802-dot1ab-lldp:lldp": {
@@ -173,8 +221,8 @@ def layer2(device, source, ip_interfaces):
                 "chassis-id-subtype": "mac-address",
                 "chassis-id": ieee_mac(re.search(r"Chassis ID\s*:\s*(\S+)", local)[1]),
                 "system-name": re.search(r"System name\s*:\s*(\S+)", local)[1],
-                "system-capabilities-supported": " ".join(caps["supported"]),
-                "system-capabilities-enabled": " ".join(caps["enabled"]),
+                "system-capabilities-supported": caps["supported"],
+                "system-capabilities-enabled": caps["enabled"],
             },
             "port": ports,
         },
@@ -444,15 +492,15 @@ def render() -> dict[str, bytes]:
             "remain outside these subsets.",
             "ARP rows on VLAN interfaces are placed on the unique L3 interface whose "
             "captured subnet contains the neighbor; the physical port stays in evidence.",
-            "LLDP remote-systems-data is keyed by time-mark (sysUpTime at change). CLI "
-            "'Update time' exceeds the 121 s TTL, so it is not a receive age, but it may be "
-            "uptime-at-change or time-since-change; unverified, so no remote entries.",
+            "LLDP remote entries use Update time as time-mark: a P2-11 live check showed it "
+            "constant across rounds while uptime grew (sysUpTime at change, second "
+            "resolution as displayed).",
             "MAC filtering entries need database-id and a bridge port number; the CLI shows "
             "an interface name only, so the MAC table is not synthesized.",
-            "Bridge address is mandatory but not captured; bridge/component keys are "
-            "projection labels; the l2 subsets therefore remain partial.",
-            "Only the nearest-bridge LLDP agent is mapped; multi-line system description "
-            "and management-address TLVs stay in evidence.",
+            "Bridge address (the MAC STP bridge identifiers derive from) has no source: VSR "
+            "rejects display stp; bridge/component keys are projection labels.",
+            "Only the nearest-bridge LLDP agent is mapped; multi-line system descriptions and "
+            "local management-address TLVs stay in evidence.",
         ],
     }
     outputs["manifest.json"] = (json.dumps(report, ensure_ascii=False, indent=2) + "\n").encode()

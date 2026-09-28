@@ -1,0 +1,468 @@
+{
+  "scope": "P2-11 read-only live probe, two rounds about 97 s apart; cleaned text, raw bytes kept in .runtime only",
+  "source_batches": [
+    ".runtime/lab-samples/20260928-232120-p2-11-a",
+    ".runtime/lab-samples/20260928-232120-p2-11-b"
+  ],
+  "credentials": "not recorded; supplied via NETOPS_LAB_PASSWORD for the run only",
+  "sessions": [
+    {
+      "round": "a",
+      "device": "vsr-1",
+      "status": "ok",
+      "host_key": {
+        "type": "ecdsa-sha2-nistp256",
+        "fingerprint_sha256": "SHA256:7JleSvr9NA/o6oOt/iUEWsZ9wcPGXk1e6NBocAwH7RI"
+      },
+      "server_version": "SSH-2.0-Comware-7.1.064",
+      "commands": [
+        {
+          "id": "paging",
+          "command": "screen-length disable",
+          "status": "ok",
+          "finished_at": "2026-09-28T15:21:24.144556+00:00"
+        },
+        {
+          "id": "clock",
+          "command": "display clock",
+          "status": "ok",
+          "finished_at": "2026-09-28T15:21:24.196000+00:00"
+        },
+        {
+          "id": "version",
+          "command": "display version",
+          "status": "ok",
+          "finished_at": "2026-09-28T15:21:24.248007+00:00"
+        },
+        {
+          "id": "lldp_verbose",
+          "command": "display lldp neighbor-information verbose",
+          "status": "ok",
+          "finished_at": "2026-09-28T15:21:24.300602+00:00"
+        },
+        {
+          "id": "if_ge1",
+          "command": "display interface GigabitEthernet1/0",
+          "status": "ok",
+          "finished_at": "2026-09-28T15:21:24.352218+00:00"
+        },
+        {
+          "id": "if_ge3",
+          "command": "display interface GigabitEthernet3/0",
+          "status": "ok",
+          "finished_at": "2026-09-28T15:21:24.403719+00:00"
+        },
+        {
+          "id": "if_vlan100",
+          "command": "display interface Vlan-interface100",
+          "status": "rejected_by_device",
+          "finished_at": "2026-09-28T15:21:24.455067+00:00"
+        },
+        {
+          "id": "if_vlan200",
+          "command": "display interface Vlan-interface200",
+          "status": "ok",
+          "finished_at": "2026-09-28T15:21:24.506656+00:00"
+        },
+        {
+          "id": "stp",
+          "command": "display stp",
+          "status": "rejected_by_device",
+          "finished_at": "2026-09-28T15:21:24.557877+00:00"
+        },
+        {
+          "id": "stp_brief",
+          "command": "display stp brief",
+          "status": "rejected_by_device",
+          "finished_at": "2026-09-28T15:21:24.609534+00:00"
+        },
+        {
+          "id": "clock_end",
+          "command": "display clock",
+          "status": "ok",
+          "finished_at": "2026-09-28T15:21:24.660880+00:00"
+        }
+      ]
+    },
+    {
+      "round": "a",
+      "device": "vsr-2",
+      "status": "ok",
+      "host_key": {
+        "type": "ssh-rsa",
+        "fingerprint_sha256": "SHA256:JzZMsdINfUYwWArFR+sWqlXXnACZ0J2W6LcRSlB67RA"
+      },
+      "server_version": "SSH-2.0-Comware-7.1.064",
+      "commands": [
+        {
+          "id": "paging",
+          "command": "screen-length disable",
+          "status": "ok",
+          "finished_at": "2026-09-28T15:21:27.945809+00:00"
+        },
+        {
+          "id": "clock",
+          "command": "display clock",
+          "status": "ok",
+          "finished_at": "2026-09-28T15:21:27.997015+00:00"
+        },
+        {
+          "id": "version",
+          "command": "display version",
+          "status": "ok",
+          "finished_at": "2026-09-28T15:21:28.048842+00:00"
+        },
+        {
+          "id": "lldp_verbose",
+          "command": "display lldp neighbor-information verbose",
+          "status": "ok",
+          "finished_at": "2026-09-28T15:21:28.100198+00:00"
+        },
+        {
+          "id": "if_ge1",
+          "command": "display interface GigabitEthernet1/0",
+          "status": "ok",
+          "finished_at": "2026-09-28T15:21:28.151914+00:00"
+        },
+        {
+          "id": "if_ge3",
+          "command": "display interface GigabitEthernet3/0",
+          "status": "ok",
+          "finished_at": "2026-09-28T15:21:28.204099+00:00"
+        },
+        {
+          "id": "if_vlan100",
+          "command": "display interface Vlan-interface100",
+          "status": "ok",
+          "finished_at": "2026-09-28T15:21:28.255730+00:00"
+        },
+        {
+          "id": "if_vlan200",
+          "command": "display interface Vlan-interface200",
+          "status": "rejected_by_device",
+          "finished_at": "2026-09-28T15:21:28.307231+00:00"
+        },
+        {
+          "id": "stp",
+          "command": "display stp",
+          "status": "rejected_by_device",
+          "finished_at": "2026-09-28T15:21:28.358966+00:00"
+        },
+        {
+          "id": "stp_brief",
+          "command": "display stp brief",
+          "status": "rejected_by_device",
+          "finished_at": "2026-09-28T15:21:28.410294+00:00"
+        },
+        {
+          "id": "clock_end",
+          "command": "display clock",
+          "status": "ok",
+          "finished_at": "2026-09-28T15:21:28.461985+00:00"
+        }
+      ]
+    },
+    {
+      "round": "b",
+      "device": "vsr-1",
+      "status": "ok",
+      "host_key": {
+        "type": "ecdsa-sha2-nistp256",
+        "fingerprint_sha256": "SHA256:7JleSvr9NA/o6oOt/iUEWsZ9wcPGXk1e6NBocAwH7RI"
+      },
+      "server_version": "SSH-2.0-Comware-7.1.064",
+      "commands": [
+        {
+          "id": "paging",
+          "command": "screen-length disable",
+          "status": "ok",
+          "finished_at": "2026-09-28T15:23:01.670599+00:00"
+        },
+        {
+          "id": "clock",
+          "command": "display clock",
+          "status": "ok",
+          "finished_at": "2026-09-28T15:23:01.722160+00:00"
+        },
+        {
+          "id": "version",
+          "command": "display version",
+          "status": "ok",
+          "finished_at": "2026-09-28T15:23:01.774177+00:00"
+        },
+        {
+          "id": "lldp_verbose",
+          "command": "display lldp neighbor-information verbose",
+          "status": "ok",
+          "finished_at": "2026-09-28T15:23:01.825516+00:00"
+        },
+        {
+          "id": "if_ge1",
+          "command": "display interface GigabitEthernet1/0",
+          "status": "ok",
+          "finished_at": "2026-09-28T15:23:01.877287+00:00"
+        },
+        {
+          "id": "if_ge3",
+          "command": "display interface GigabitEthernet3/0",
+          "status": "ok",
+          "finished_at": "2026-09-28T15:23:01.928564+00:00"
+        },
+        {
+          "id": "if_vlan100",
+          "command": "display interface Vlan-interface100",
+          "status": "rejected_by_device",
+          "finished_at": "2026-09-28T15:23:01.980987+00:00"
+        },
+        {
+          "id": "if_vlan200",
+          "command": "display interface Vlan-interface200",
+          "status": "ok",
+          "finished_at": "2026-09-28T15:23:02.033925+00:00"
+        },
+        {
+          "id": "stp",
+          "command": "display stp",
+          "status": "rejected_by_device",
+          "finished_at": "2026-09-28T15:23:02.085029+00:00"
+        },
+        {
+          "id": "stp_brief",
+          "command": "display stp brief",
+          "status": "rejected_by_device",
+          "finished_at": "2026-09-28T15:23:02.136423+00:00"
+        },
+        {
+          "id": "clock_end",
+          "command": "display clock",
+          "status": "ok",
+          "finished_at": "2026-09-28T15:23:02.187933+00:00"
+        }
+      ]
+    },
+    {
+      "round": "b",
+      "device": "vsr-2",
+      "status": "ok",
+      "host_key": {
+        "type": "ssh-rsa",
+        "fingerprint_sha256": "SHA256:JzZMsdINfUYwWArFR+sWqlXXnACZ0J2W6LcRSlB67RA"
+      },
+      "server_version": "SSH-2.0-Comware-7.1.064",
+      "commands": [
+        {
+          "id": "paging",
+          "command": "screen-length disable",
+          "status": "ok",
+          "finished_at": "2026-09-28T15:23:05.397577+00:00"
+        },
+        {
+          "id": "clock",
+          "command": "display clock",
+          "status": "ok",
+          "finished_at": "2026-09-28T15:23:05.448964+00:00"
+        },
+        {
+          "id": "version",
+          "command": "display version",
+          "status": "ok",
+          "finished_at": "2026-09-28T15:23:05.501600+00:00"
+        },
+        {
+          "id": "lldp_verbose",
+          "command": "display lldp neighbor-information verbose",
+          "status": "ok",
+          "finished_at": "2026-09-28T15:23:05.553354+00:00"
+        },
+        {
+          "id": "if_ge1",
+          "command": "display interface GigabitEthernet1/0",
+          "status": "ok",
+          "finished_at": "2026-09-28T15:23:05.605153+00:00"
+        },
+        {
+          "id": "if_ge3",
+          "command": "display interface GigabitEthernet3/0",
+          "status": "ok",
+          "finished_at": "2026-09-28T15:23:05.656583+00:00"
+        },
+        {
+          "id": "if_vlan100",
+          "command": "display interface Vlan-interface100",
+          "status": "ok",
+          "finished_at": "2026-09-28T15:23:05.708091+00:00"
+        },
+        {
+          "id": "if_vlan200",
+          "command": "display interface Vlan-interface200",
+          "status": "rejected_by_device",
+          "finished_at": "2026-09-28T15:23:05.759598+00:00"
+        },
+        {
+          "id": "stp",
+          "command": "display stp",
+          "status": "rejected_by_device",
+          "finished_at": "2026-09-28T15:23:05.810952+00:00"
+        },
+        {
+          "id": "stp_brief",
+          "command": "display stp brief",
+          "status": "rejected_by_device",
+          "finished_at": "2026-09-28T15:23:05.862315+00:00"
+        },
+        {
+          "id": "clock_end",
+          "command": "display clock",
+          "status": "ok",
+          "finished_at": "2026-09-28T15:23:05.913962+00:00"
+        }
+      ]
+    }
+  ],
+  "files": {
+    "a/vsr-1/clock.txt": {
+      "sha256": "69b20f9f98a034c75e0d0450fa8777432bc28e8a3eaa48b4d042d3d9c93b364e",
+      "raw_sha256": "41e2c841de2caafc69cbd1940a86d02d109059454b40201157e402ec3f5508b1"
+    },
+    "a/vsr-1/version.txt": {
+      "sha256": "a9c4579fba32c5375178a76f714658649f93a75e64efe9d3618cd3ee76a87a09",
+      "raw_sha256": "a365518220b32d5fea4c88419cb2dbad50a2d4ea596086c3df7106397865a042"
+    },
+    "a/vsr-1/lldp_verbose.txt": {
+      "sha256": "8cf860755654b1915950a4eef7afcf6804281f114d270916238374ff8c2b012b",
+      "raw_sha256": "6d4e49b09f4557118a6d0be1ffb440add4af4a486d97218f9647ec39a1433e3e"
+    },
+    "a/vsr-1/if_ge1.txt": {
+      "sha256": "928218322aa8c6afc64a03be3784b5c806b78117e5d28dd949a06c13ca3b952b",
+      "raw_sha256": "6eacfdad010bc36a6ef3fb8dcf7fa85d7602d74ed280f2908dbea762bb7c25a6"
+    },
+    "a/vsr-1/if_ge3.txt": {
+      "sha256": "26e56e9b2d04bdb94dbdc5d40b51be99890d46c6a6adb2a831a7442080c3e904",
+      "raw_sha256": "b273a89b1ad7f20527fc61a3429b32dffb37fda591408f480738d0fffdd838df"
+    },
+    "a/vsr-1/if_vlan100.txt": {
+      "sha256": "a4f2344f7d11684a84bf15ad8bb8b1c841235948990ca07444b4ceebff156156",
+      "raw_sha256": "771f0199d824a71211a9d24a02785f9911ed7ecedac5a9db9847929cd2a447d3"
+    },
+    "a/vsr-1/if_vlan200.txt": {
+      "sha256": "dee91b7805eb52ef59080394ed7f274d7f2cd053f653f6725174c5d2c201729c",
+      "raw_sha256": "4c80ce908294041e32ff5de825e6fe12fdf84bbcd11e07c24b78adc50c099125"
+    },
+    "a/vsr-1/stp.txt": {
+      "sha256": "50bc41e182a42eed9ed333620f6007248d3c54cb664d64a94e5f0f9a2d14441b",
+      "raw_sha256": "67688af950639f4db1dcdf427bc7eeb189bb8314ef3b089eea70e7833eb7b491"
+    },
+    "a/vsr-1/clock_end.txt": {
+      "sha256": "69b20f9f98a034c75e0d0450fa8777432bc28e8a3eaa48b4d042d3d9c93b364e",
+      "raw_sha256": "41e2c841de2caafc69cbd1940a86d02d109059454b40201157e402ec3f5508b1"
+    },
+    "a/vsr-2/clock.txt": {
+      "sha256": "81b7da680c3ab9a988f2578c6cd04a350f567a404d891f771f2740bdb3da878c",
+      "raw_sha256": "44dff1bcc00de6840bd6181ca0fa72bdcaa9a29743742c4fe2d443bfc7df0d95"
+    },
+    "a/vsr-2/version.txt": {
+      "sha256": "a9c4579fba32c5375178a76f714658649f93a75e64efe9d3618cd3ee76a87a09",
+      "raw_sha256": "a365518220b32d5fea4c88419cb2dbad50a2d4ea596086c3df7106397865a042"
+    },
+    "a/vsr-2/lldp_verbose.txt": {
+      "sha256": "5199179587cf30e53cadd62bf88d0ee4a54eaadab4f0373e3c371a693051cd8a",
+      "raw_sha256": "26c21044f2e8342cfd2a819c1e8fae5ba42df8a7cd794d1e35d738da518cb24f"
+    },
+    "a/vsr-2/if_ge1.txt": {
+      "sha256": "fb89df74f4f24b2c5cb58562143ef128659d8a6075e3863247e798218e3f4187",
+      "raw_sha256": "493ca26502eef5bed7b48a6a584a6843d02d61630ea68c798b58bfe9dac51277"
+    },
+    "a/vsr-2/if_ge3.txt": {
+      "sha256": "10a671e89f2cef51c6f22eac8d999a6cad8dc81c8a32fbe046170533498fff3f",
+      "raw_sha256": "a76c1b373868699e23b14aa78377b0f928a1de131fee3d63ae43d46fb972c1b3"
+    },
+    "a/vsr-2/if_vlan100.txt": {
+      "sha256": "a8bec93e07bd8ad3da04659e444add45a1f806d0d583d5803152530c59f794de",
+      "raw_sha256": "e57b5c4e600240c124e16f6eceb83af96ab6e85c96a3447cd8da4ad270be9927"
+    },
+    "a/vsr-2/if_vlan200.txt": {
+      "sha256": "a4f2344f7d11684a84bf15ad8bb8b1c841235948990ca07444b4ceebff156156",
+      "raw_sha256": "ca85c6c5767d6df8caeeec1395d2755c6b81b78b2e8f0c6da345e5dc414bc4bc"
+    },
+    "a/vsr-2/stp.txt": {
+      "sha256": "50bc41e182a42eed9ed333620f6007248d3c54cb664d64a94e5f0f9a2d14441b",
+      "raw_sha256": "67688af950639f4db1dcdf427bc7eeb189bb8314ef3b089eea70e7833eb7b491"
+    },
+    "a/vsr-2/clock_end.txt": {
+      "sha256": "81b7da680c3ab9a988f2578c6cd04a350f567a404d891f771f2740bdb3da878c",
+      "raw_sha256": "44dff1bcc00de6840bd6181ca0fa72bdcaa9a29743742c4fe2d443bfc7df0d95"
+    },
+    "b/vsr-1/clock.txt": {
+      "sha256": "97a8fb0d967ac99b483d52f0e974cbf5d8446547dd6166e5e463f19a8062cf7d",
+      "raw_sha256": "2c874669d1d84b378edb4c8673208e00e619c843643227b4d37a53d29080ed9a"
+    },
+    "b/vsr-1/version.txt": {
+      "sha256": "c913395b5dd5b4ab59de9b7613cf279a0fe89207debc952a8ca45c50fc7c0d7d",
+      "raw_sha256": "f356be36d6856d06a38fa276115ed340944a086a9dfe71abb1bfbcbdf212ae99"
+    },
+    "b/vsr-1/lldp_verbose.txt": {
+      "sha256": "8cf860755654b1915950a4eef7afcf6804281f114d270916238374ff8c2b012b",
+      "raw_sha256": "6d4e49b09f4557118a6d0be1ffb440add4af4a486d97218f9647ec39a1433e3e"
+    },
+    "b/vsr-1/if_ge1.txt": {
+      "sha256": "77c3ac160cecc482502ddc1b9b99b67d14bd9a7e3913c17ea0165b0eb9360896",
+      "raw_sha256": "58e743a2a60456c037aba16f143f8eb3908727a4fa3c11a50d68bacdb040e07c"
+    },
+    "b/vsr-1/if_ge3.txt": {
+      "sha256": "ca7881b54f4f7d3e25dd0543aa2f4e5cc7dae5d8af485efbb4a0acd197091bc6",
+      "raw_sha256": "bb6d5ebe2c4a1eae85a3b5c5ce42d5b2a1d9a99bc1c3749f932a710ba729dec3"
+    },
+    "b/vsr-1/if_vlan100.txt": {
+      "sha256": "a4f2344f7d11684a84bf15ad8bb8b1c841235948990ca07444b4ceebff156156",
+      "raw_sha256": "771f0199d824a71211a9d24a02785f9911ed7ecedac5a9db9847929cd2a447d3"
+    },
+    "b/vsr-1/if_vlan200.txt": {
+      "sha256": "519f3fcf70447eec19d6611cd3b80ea5bd2242a55082e6572b88c8abd81e773b",
+      "raw_sha256": "1a1ad5f9b0e4eb99cedfb3fa74d562f8a2614508f518c94d9935631e67c7c578"
+    },
+    "b/vsr-1/stp.txt": {
+      "sha256": "50bc41e182a42eed9ed333620f6007248d3c54cb664d64a94e5f0f9a2d14441b",
+      "raw_sha256": "67688af950639f4db1dcdf427bc7eeb189bb8314ef3b089eea70e7833eb7b491"
+    },
+    "b/vsr-1/clock_end.txt": {
+      "sha256": "64d0b73790ac24662e6ee1e08567059fb0c89b6127385a05e5c787e84ef5e637",
+      "raw_sha256": "6c2042c055a8291f88978db2af51ebd388b1039a7f7a3ed075cd640e4737374b"
+    },
+    "b/vsr-2/clock.txt": {
+      "sha256": "5eb250e56a247df0b8c91b14cbda12f67f0b5d84fbe4d655e00b1cbee4d7effa",
+      "raw_sha256": "9b4711c8de4fff7df88c4e6d9ef13dbf70c501e5035f37366a974d59186e4330"
+    },
+    "b/vsr-2/version.txt": {
+      "sha256": "c913395b5dd5b4ab59de9b7613cf279a0fe89207debc952a8ca45c50fc7c0d7d",
+      "raw_sha256": "f356be36d6856d06a38fa276115ed340944a086a9dfe71abb1bfbcbdf212ae99"
+    },
+    "b/vsr-2/lldp_verbose.txt": {
+      "sha256": "5199179587cf30e53cadd62bf88d0ee4a54eaadab4f0373e3c371a693051cd8a",
+      "raw_sha256": "26c21044f2e8342cfd2a819c1e8fae5ba42df8a7cd794d1e35d738da518cb24f"
+    },
+    "b/vsr-2/if_ge1.txt": {
+      "sha256": "3204f2ad88e66ade7a5102e922164b83d4762a534b0159f9e8e41b59202d11a6",
+      "raw_sha256": "5257a48e651c4b0de88419a09167940a098824ebda743a49c57bfed0bee7b147"
+    },
+    "b/vsr-2/if_ge3.txt": {
+      "sha256": "2b1954cd8f06fc5a10ee0af866dcad052def5495a03e54f9637f1e7143b2334b",
+      "raw_sha256": "2d4af9d00b5268eae01d12f7b6d0ba916dedb4997c2fdf63cf45031ea10d8f49"
+    },
+    "b/vsr-2/if_vlan100.txt": {
+      "sha256": "01780ccbb966ed4271ba6dd9855ec4320b153a035b74095f563844926f873966",
+      "raw_sha256": "d005e9b714f1fbe7ae68a05c232a90bf365cbf818fbb01163b1671bc4c46c0a3"
+    },
+    "b/vsr-2/if_vlan200.txt": {
+      "sha256": "a4f2344f7d11684a84bf15ad8bb8b1c841235948990ca07444b4ceebff156156",
+      "raw_sha256": "ca85c6c5767d6df8caeeec1395d2755c6b81b78b2e8f0c6da345e5dc414bc4bc"
+    },
+    "b/vsr-2/stp.txt": {
+      "sha256": "50bc41e182a42eed9ed333620f6007248d3c54cb664d64a94e5f0f9a2d14441b",
+      "raw_sha256": "67688af950639f4db1dcdf427bc7eeb189bb8314ef3b089eea70e7833eb7b491"
+    },
+    "b/vsr-2/clock_end.txt": {
+      "sha256": "5eb250e56a247df0b8c91b14cbda12f67f0b5d84fbe4d655e00b1cbee4d7effa",
+      "raw_sha256": "9b4711c8de4fff7df88c4e6d9ef13dbf70c501e5035f37366a974d59186e4330"
+    }
+  }
+}

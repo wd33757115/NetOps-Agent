@@ -2,21 +2,22 @@
   "scope": "Offline VSR ARP/VLAN/LLDP partial observations; no live I/O",
   "model_package_sha256": "0bde5e538572bd9266cfd8a8a64c4a4f506d9d3803a3a4c2aa9cb300cf9ef9c1",
   "observation_sources": {
-    "models/network-twin/instances/vsr-1-l2.partial.json": "f3bbc304d64a66b1d8f2214ddb088a22dfb0903a0bd8ff922fc93f84d518bb73",
-    "models/network-twin/instances/vsr-2-l2.partial.json": "158d667698e02ec21d6b7b3a0ca0d465f00c496294e364af747672289a52df85"
+    "models/network-twin/instances/vsr-1-l2.partial.json": "16a3b6067da5e6c2d52743a6ae6dba20844e84bf5c8a7484015b20ea61d6c292",
+    "models/network-twin/instances/vsr-2-l2.partial.json": "892bf7a0cb8db736a02c84f671f52fbf24850e092968793c3292a3b6bc0d7cb8"
   },
   "parse_only_is_full_validation": false,
   "files": {
-    "bridge-port-on-vlan-interface.json": "5b3430f72c2a8ce684902954caa40a2ec4a8750ad44573fd39944f6ec5eec5a0",
-    "custom-field.json": "7a592a29c7365901c9303ce526de6fcde29eacdc7a9c73ebc966ccb4763fdef1",
-    "lldp-dest-mac-dotted.json": "17a8912f44ee14973fb66c1c93f2e3805bd401abd65f3baa448b492cb4e1319b",
-    "lldp-port-unknown-interface.json": "7dd371513a1bcfc34040f2a0a979191806cdb78f63e72942d28652adaa4c15ed",
-    "neighbor-invalid-mac.json": "fbe63dbb78b692d8ebb75604284efe6f5f05bf8ee53028c1adc484a376f172b2",
-    "parent-library.json": "f30e7fdaa491e7159543e685402737ee76c4851ac669a59125316cbf8a8a2084",
-    "pvid-out-of-range.json": "2225839ca3e72d761ba55c2d6e86d7402835f88d47f3a2090ee6ca9f5e05532d",
-    "vlan-member-unknown-interface.json": "563ef22dd45678409dd550a7da6c62c15ba931987d98fc73690fc500a84b9279",
-    "vsr-1-l2.partial.json": "f3bbc304d64a66b1d8f2214ddb088a22dfb0903a0bd8ff922fc93f84d518bb73",
-    "vsr-2-l2.partial.json": "158d667698e02ec21d6b7b3a0ca0d465f00c496294e364af747672289a52df85"
+    "bridge-port-on-vlan-interface.json": "daf85cca53bf4bd3fcfc45671e7a4f03a3b064afa5b28326fdc023e5c0e1f3b2",
+    "custom-field.json": "14c14d50817d56d9a80bc626357d4c5ce948be0472a2d814719274bf881313a2",
+    "lldp-dest-mac-dotted.json": "c4f86e22fffdaec329ce457107e26d9eaad75f417a578e5e9decee3fd682e011",
+    "lldp-management-address-dotted.json": "a5f11d92b3680fbd416d97f5e8cefab29e291cd4f079fdb2c34dd2d22232b7cf",
+    "lldp-port-unknown-interface.json": "20cad414649e38e6acba1d94e602d0b531622431729e085247ced442a0405a3f",
+    "neighbor-invalid-mac.json": "e831972a9423ea403d2864735d0e470abe5991d1801751d7e851c6cf7e6307e4",
+    "parent-library.json": "1059578c1d02550f298ba46baeaf776c4c876644bce29ca3e8743f358fefe12b",
+    "pvid-out-of-range.json": "04e7b6302b60b393367233b1788116ea935a7c704b74829a27fb470d81e605b3",
+    "vlan-member-unknown-interface.json": "5d63603c136cf2baeac2e3dfa860867af09b4fb60e56d9153c678f159574a3f6",
+    "vsr-1-l2.partial.json": "16a3b6067da5e6c2d52743a6ae6dba20844e84bf5c8a7484015b20ea61d6c292",
+    "vsr-2-l2.partial.json": "892bf7a0cb8db736a02c84f671f52fbf24850e092968793c3292a3b6bc0d7cb8"
   },
   "cases": [
     {
@@ -116,6 +117,13 @@
       "type": "get",
       "expected_valid": false,
       "diagnostic": "dest-mac-address"
+    },
+    {
+      "name": "lldp-management-address-dotted-rejected",
+      "data": "lldp-management-address-dotted.json",
+      "type": "get",
+      "expected_valid": false,
+      "diagnostic": "\"10.10.1.2\" does not match"
     },
     {
       "name": "custom-field-rejected",
