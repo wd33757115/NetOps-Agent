@@ -47,6 +47,7 @@ def test_progress_persists_for_each_answer_without_raw_payloads(database):
                 success=True,
                 value="PRIVATE",
                 summary="读取 20 行",
+                output={"text": "1: BGP EVPN requires RR", "truncated": False},
             )
             yield event(run, "text_delta", text="回答")
             yield event(run, "completed")
@@ -60,6 +61,7 @@ def test_progress_persists_for_each_answer_without_raw_payloads(database):
     assert result["progress"]["steps"][0]["status"] == "completed"
     assert '"offset": 1' in result["progress"]["steps"][0]["operation"]
     assert result["progress"]["steps"][0]["summary"] == "读取 20 行"
+    assert result["progress"]["steps"][0]["output"]["text"] == "1: BGP EVPN requires RR"
     assert result["progress"]["ended_at"]
     assert "PRIVATE" not in json.dumps(result)
     turns.begin("alice", run["conversation_id"], turns.Question(request_id="two", text="下一题"))

@@ -50,6 +50,7 @@ exports.apply = (ctx) => {
     await call('/after', {
       name: exec.name, call_id: exec.callId, arguments: exec.arguments,
       ok: !result.isError, value: exec.name === 'read' && !result.isError ? result.value : null,
+      output: exec.name === 'mcp__netops__submit_answer' ? null : JSON.stringify(result.value ?? result).slice(0, 64000),
       summary,
     }, exec.signal)
     return result

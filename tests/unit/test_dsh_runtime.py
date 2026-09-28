@@ -103,11 +103,38 @@ def test_native_read_and_verified_reference(workspace):
     assert len(requests) == 2
     assert any(e.kind == "citation" for e in events)
     assert any(e.kind == "tool_finished" and e.data["success"] for e in events)
+    output = next(e.data["output"] for e in events if e.kind == "tool_finished")
+    assert "BGP EVPN requires a route reflector." in output["text"]
+    assert str(workspace.root) not in output["text"]
     metrics = next(e.data for e in events if e.kind == "metrics")
     assert metrics["authorization_checks"] > 0
     assert {"authorization", "tools", "setup", "citation_validation"} <= metrics[
         "timings_ms"
     ].keys()
+
+
+def test_native_grep_exposes_matched_content(workspace):
+    calls = []
+
+    async def model(body):
+        calls.append(body)
+        if len(calls) == 1:
+            return response({"role": "assistant", "tool_calls": [{
+                "index": 0, "id": "search1", "type": "function",
+                "function": {"name": "grep", "arguments": json.dumps({"pattern": "EVPN", "include": "*.txt"})},
+            }]}, "tool_calls")
+        return response({"content": "搜索完成"}, "stop")
+
+    async def run():
+        return [e async for e in DshRuntime(transport=model).start(
+            RunContext("grep", "alice", "conv", timeout_seconds=20),
+            [{"role": "user", "content": "查找 EVPN"}], workspace,
+        )]
+
+    events = asyncio.run(run())
+    output = next(e.data["output"] for e in events if e.kind == "tool_finished")
+    assert "BGP EVPN requires a route reflector." in output["text"]
+    assert str(workspace.root) not in output["text"]
 
 
 def test_citation_guidance_preserves_gaps_and_does_not_authorize_new_lines(workspace, tmp_path):
@@ -545,7 +572,7 @@ def test_sdk_recovers_citations_before_publishing(workspace, outcome):
     assert requests[-1]["tool_choice"]["function"]["name"] == "mcp__netops__submit_answer"
     answer = next(e.data["text"] for e in events if e.kind == "text_delta")
     assert "模型最后" not in answer and "未经证实" not in answer
-    assert ("配置 RR" in answer) if outcome == "repair" else ("资料不足" in answer)
+    assert ("配置 RR" in answer) if outcome == "repair" else ("证据不足" in answer)
     assert any(e.kind == "tool_finished" and "未实际读取" in e.data["summary"] for e in events)
     assert any(e.kind == "tool_finished" and e.data["summary"] == "读取 2 行" for e in events)
     starts = [e.data["operation"] for e in events if e.kind == "tool_started"]

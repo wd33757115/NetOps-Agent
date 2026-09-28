@@ -61,10 +61,17 @@ def submit(workspace, arguments):
         return {"accepted": False, "code": "invalid_answer", "message": "回答参数无效。"}
     if arguments["status"] == "insufficient_evidence":
         # No model-authored factual claims escape validation under a refusal label.
-        text = (
-            "当前已发布资料不足以回答这个问题。搜索到的目录、标题或概述不能替代相关章节正文。"
-            "请在资料管理中确认相关章节已经发布，或补充产品版本、设备及问题范围后再提问。"
-        )
+        if any(workspace.observed.values()) or workspace.business_evidence:
+            text = (
+                "本轮已读取资料或业务记录，但现有证据不足以支持可靠结论。"
+                "这不代表资料未发布或检索失败。请补充与问题相关的详细说明或验证依据，"
+                "也可以进一步明确想了解的内容。"
+            )
+        else:
+            text = (
+                "本轮未读取到可用于回答问题的正文或业务证据。"
+                "请在资料管理中确认相关资料已发布，或调整关键词和问题范围后重试。"
+            )
         workspace.prepared_answer = (text, [])
         workspace.validation_issue = None
         return {"accepted": True, "status": "insufficient_evidence", "message": "已记录资料不足。"}

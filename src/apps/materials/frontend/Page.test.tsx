@@ -19,8 +19,7 @@ afterEach(cleanup)
 
 it('browses the exact revision and actual section identifier', async () => {
   render(<Page />)
-  fireEvent.click(await screen.findByRole('button', { name: '查看修订' }))
-  fireEvent.click(await screen.findByRole('button', { name: '接口说明' }))
+  fireEvent.click(await screen.findByRole('button', { name: '查看资料' }))
   expect(await screen.findByText('第42行原文')).toBeInTheDocument()
   expect(mocks.get).toHaveBeenCalledWith('/apps/materials/documents/doc/sections/line-42',
     { params: { revision: document.revision, limit: 4000 } })
@@ -44,8 +43,7 @@ it('reads subsequent excerpts from the selected immutable revision', async () =>
     return { data: { citation: { excerpt: config?.params?.offset ? '后续正文' : '首段正文' }, next_offset: config?.params?.offset ? null : 4000 } }
   })
   render(<Page />)
-  fireEvent.click(await screen.findByRole('button', { name: '查看修订' }))
-  fireEvent.click(await screen.findByRole('button', { name: '接口说明' }))
+  fireEvent.click(await screen.findByRole('button', { name: '查看资料' }))
   expect(await screen.findByText('首段正文')).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: '下一段' }))
   expect(await screen.findByText('后续正文')).toBeInTheDocument()
@@ -58,9 +56,43 @@ it('reads subsequent excerpts from the selected immutable revision', async () =>
 
 it('distinguishes an empty filtered view from an empty library', async () => {
   render(<Page />)
-  await screen.findByRole('button', { name: '查看修订' })
+  await screen.findByRole('button', { name: '查看资料' })
   fireEvent.click(screen.getByRole('button', { name: /含 Word 原件/ }))
   expect(await screen.findByText('没有匹配的资料，试试其他关键词或分类')).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: /全部资料/ }))
-  expect(await screen.findByRole('button', { name: '查看修订' })).toBeInTheDocument()
+  expect(await screen.findByRole('button', { name: '查看资料' })).toBeInTheDocument()
+})
+
+it('opens the first section directly when clicking the document title', async () => {
+  render(<Page />)
+  fireEvent.click(await screen.findByRole('button', { name: '接口手册' }))
+  expect(await screen.findByText('第42行原文')).toBeInTheDocument()
+})
+
+it('shows a readable loading state immediately and allows retry after a failed read', async () => {
+  const original = mocks.get.getMockImplementation()!
+  mocks.get.mockImplementation(async (url: string) => {
+    if (url.endsWith('/line-42')) throw new Error('temporarily unavailable')
+    return original(url)
+  })
+  render(<Page />)
+  fireEvent.click(await screen.findByRole('button', { name: '查看资料' }))
+  expect(screen.getByLabelText('资料正文预览')).toHaveAttribute('aria-busy', 'true')
+  await waitFor(() => expect(screen.getByRole('button', { name: '重新加载资料' })).toBeEnabled())
+  mocks.get.mockImplementation(original)
+  fireEvent.click(screen.getByRole('button', { name: '重新加载资料' }))
+  expect(await screen.findByText('第42行原文')).toBeInTheDocument()
+})
+
+it('does not reopen the reader when a closed request finishes', async () => {
+  const original = mocks.get.getMockImplementation()!
+  let finish!: (value: unknown) => void
+  mocks.get.mockImplementation((url: string) => url.endsWith('/sections')
+    ? new Promise(resolve => { finish = resolve }) : original(url))
+  render(<Page />)
+  fireEvent.click(await screen.findByRole('button', { name: '查看资料' }))
+  fireEvent.click(screen.getByRole('button', { name: /关闭|Close/ }))
+  finish({ data: { items: [{ section_id: 'line-42', title_path: ['接口说明'] }], next_offset: null } })
+  await waitFor(() => expect(screen.queryByRole('button', { name: '接口说明' })).not.toBeInTheDocument())
+  expect(mocks.get.mock.calls.some(([url]) => url.endsWith('/line-42'))).toBe(false)
 })

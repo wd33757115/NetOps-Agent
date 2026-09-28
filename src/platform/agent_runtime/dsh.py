@@ -26,6 +26,7 @@ from src.apps.assistant.backend import answer_gate, tool_trace
 
 from .base import AgentEvent
 from .usage import Usage
+from .session_store import session_home, scope_key, key, native_logs
 
 ROOT = Path(__file__).resolve().parents[3]
 PROMPT = """你是 NetOps 数据中心网络助手。使用提供的工具按需搜索和阅读资料，也可查询已授权业务数据。
@@ -61,6 +62,10 @@ CATALOG.md 只列已发布章节；正文里的书籍目录可能含尚未发布
 资料或业务问答结束前必须调用 mcp__netops__submit_answer，提交带原文引用的完整回答，status=answered。
 若引用检查未通过，按照工具反馈补读必要原文或修正草稿，然后再次调用该工具。
 仅回答已读正文支持的内容，概述能支持部分答案时说明适用范围，不引用目录来补齐细节。
+用户仅给出产品或主题名称时，先概括已读资料能支持的信息，必要时询问想了解的方面。
+短描述也是正文，不能仅因篇幅短或主题不是网络就认定未检索到资料。
+区分“资料记载了某个宣称”和“宣称已被证实”：来源中的宣传不能自动作为事实结论。
+已读资料仅有未经支持的宣称时，可引用正文说明资料的局限和缺少的依据，以 answered 提交；不要编造证实信息。
 没有足够正文支持答案时调用 mcp__netops__submit_answer，status=insufficient_evidence、answer=""。
 必须使用工具列表中的完整名称（包含 mcp__netops__ 前缀）；校验通过后由服务端发布草稿。
 """
@@ -197,6 +202,7 @@ class Bridge:
                         "call_id": data["call_id"],
                         "success": success,
                         "summary": summary,
+                        "output": tool_trace.result_preview(self.catalog.root, data.get("output")) if data["name"] in NATIVE else None,
                     },
                 )
             )
@@ -248,7 +254,10 @@ class Bridge:
             else:
                 messages.insert(0, {"role": "system", "content": guidance})
             body["messages"] = messages
-            if self.rounds >= self.context.max_model_rounds or len(json.dumps(body)) > 160000:
+            if len(json.dumps(body)) > 160000:
+                self.failure_code = "session_context_full"
+                raise ValueError("Session context budget exceeded")
+            if self.rounds >= self.context.max_model_rounds:
                 self.failure_code = self.catalog.validation_issue or "run_budget_exceeded"
                 raise ValueError("Model request budget exceeded")
             self.rounds += 1
@@ -340,7 +349,7 @@ class Bridge:
                     description=t["description"],
                     inputSchema=t["input_schema"],
                     annotations=types.ToolAnnotations(
-                        readOnlyHint=True,
+                        readOnlyHint=not t.get("mutates", False),
                         destructiveHint=False,
                         idempotentHint=True,
                         openWorldHint=False,
@@ -359,8 +368,11 @@ class Bridge:
                     result = await asyncio.to_thread(self.catalog.submit_answer, arguments)
                     self.answer_feedback = result
                 else:
+                    live = name == "device_access__collect" and getattr(self.catalog, "active_diagnostics", False)
+                    remaining = self.context.timeout_seconds - (time.monotonic() - self.started_at)
                     result = await asyncio.wait_for(
-                        asyncio.to_thread(self.catalog.invoke, name, arguments), 10
+                        asyncio.to_thread(self.catalog.invoke, name, arguments),
+                        max(0.001, min(75 if live else 10, remaining)),
                     )
             except Exception:
                 raise ValueError(
@@ -386,7 +398,7 @@ class Bridge:
         return app
 
 
-def patch_file(home, port):
+def patch_file(home, port, *, active_diagnostics=False, durable=False):
     import yaml
 
     rows = [
@@ -409,6 +421,10 @@ def patch_file(home, port):
             },
         }
     )
+    # Session logs stay on our server, never uploaded as an extra provider API.
+    rows.append({"id": "session-log-deepseek", "disabled": True})
+    if durable:
+        rows.append({"insert": [{"id": "netops-session", "name": str(Path(__file__).with_name("dsh_session.cjs"))}]})
     rows.append(
         {
             "insert": [
@@ -439,7 +455,7 @@ def patch_file(home, port):
                         "serverName": "netops",
                         "url": f"http://127.0.0.1:{port}/mcp",
                         "headers": {"Authorization": "__RUN_TOKEN__"},
-                        "toolCallTimeoutMs": 10000,
+                        "toolCallTimeoutMs": 80000 if active_diagnostics else 10000,
                         "failOnStartupError": True,
                         "reconnect": {"enabled": False},
                     },
@@ -458,8 +474,11 @@ def patch_file(home, port):
 
 
 class DshRuntime:
-    def __init__(self, *, transport=None):
+    def __init__(self, *, transport=None, sessions_root=None):
         self.transport = transport
+        self.sessions_root = sessions_root if sessions_root is not None else (
+            ROOT / ".runtime/assistant-sessions" if transport is None else None
+        )
         self.active = {}
 
     async def cancel(self, run_id, *, actor_id):
@@ -515,6 +534,9 @@ class DshRuntime:
 
     async def _run(self, context, messages, bridge):
         async with _slots:
+            if self.sessions_root is not None:
+                with session_home(self.sessions_root, context.actor_id, context.session_id) as home:
+                    return await self._run_at(context, messages, bridge, home, durable=True)
             run_root = (ROOT / ".runtime/assistant-runs").resolve()
             run_root.mkdir(parents=True, exist_ok=True)
             with tempfile.TemporaryDirectory(
@@ -525,11 +547,27 @@ class DshRuntime:
                     raise RuntimeError("Invalid temporary run directory")
                 return await self._run_at(context, messages, bridge, home)
 
-    async def _run_at(self, context, messages, bridge, home):
+    async def _run_at(self, context, messages, bridge, home, *, durable=False):
         setup_started = time.monotonic()
         workspace = home / "documents"
         await asyncio.to_thread(bridge.catalog.prepare, workspace)
         app = await bridge.application()
+        runtime_home = home
+        if durable:
+            runtime_home = home / "scopes" / scope_key(bridge.catalog, bridge.allowed)
+            runtime_home.mkdir(parents=True, exist_ok=True)
+        session_id = key(context.actor_id + ":" + context.session_id) if durable else "netops"
+        continued = durable and any(native_logs(runtime_home / "sessions"))
+        trace_path = None
+        if durable:
+            runs = runtime_home / "runs"
+            runs.mkdir(exist_ok=True)
+            trace_path = runs / (key(context.run_id) + ".jsonl")
+            trace_path.with_suffix(".json").write_text(json.dumps({
+                "run_id": context.run_id, "conversation_id": context.session_id,
+                "session_id": session_id, "continued": continued,
+                "started_at": time.time(),
+            }), encoding="utf-8")
         sock = socket.socket()
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
@@ -548,7 +586,7 @@ class DshRuntime:
                 await asyncio.sleep(0.02)
             if not server.started:
                 raise RuntimeError("Tool server startup timed out")
-            patch = patch_file(home, port)
+            patch = patch_file(runtime_home, port, active_diagnostics=getattr(bridge.catalog, "active_diagnostics", False), durable=durable)
             env = {
                 k: v
                 for k, v in os.environ.items()
@@ -558,13 +596,18 @@ class DshRuntime:
                 NETOPS_DSH_RUN_TOKEN=bridge.token,
                 NETOPS_DSH_CALLBACK=f"http://127.0.0.1:{port}",
                 NETOPS_DSH_TOOLS=json.dumps(sorted(bridge.allowed)),
-                DSH_SYSTEM_PROMPT=PROMPT,
+                NETOPS_DSH_SESSION_ID=session_id,
+                DSH_SYSTEM_PROMPT=(PROMPT.replace(
+                    "当前业务工具只查询已有记录；不能声称已执行采集、生成规则或修改配置。",
+                    "本轮允许调用 device_access__collect 对人工选定连接执行固定诊断命令；仅成功结果能证明已采集。不得生成规则或修改配置。"
+                ).replace("只可建议操作，不声称已执行。", "只可建议配置变更；主动采集必须引用本次工具证据，失败后等待人工。")
+                if getattr(bridge.catalog, "active_diagnostics", False) else PROMPT),
             )
             from src.common.config import get_settings
 
             config = {
                 "harness": {
-                    "dsh_home": str(home),
+                    "dsh_home": str(runtime_home),
                     "profile": "sdk-minimal",
                     "patches": [str(patch)],
                     "cwd": str(workspace),
@@ -577,8 +620,9 @@ class DshRuntime:
                     "request_timeout_seconds": context.timeout_seconds,
                 },
                 "timeout": context.timeout_seconds,
-                "session_id": "netops",
-                "prompt": json.dumps(messages, ensure_ascii=False),
+                "trace_path": str(trace_path) if trace_path else None,
+                "session_id": session_id,
+                "prompt": messages[-1]["content"] if continued else json.dumps(messages, ensure_ascii=False),
             }
             proc = await asyncio.create_subprocess_exec(
                 sys.executable,

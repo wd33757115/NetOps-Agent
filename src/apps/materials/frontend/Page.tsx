@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useState } from 'react'
-import { Alert, Button, Drawer, Empty, Input, List, Select, Space, Table, Tabs } from 'antd'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { Alert, Button, Drawer, Empty, Input, List, Select, Space, Spin, Table, Tabs } from 'antd'
 import { ArrowLeftOutlined, BookOutlined, FileTextOutlined, FileWordOutlined, FolderOpenOutlined, PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons'
 import { api } from '@netops/config/api'
 import WordImport, { type Target } from './WordImport'
@@ -38,6 +38,7 @@ export default function Materials() {
   const [activeSection, setActiveSection] = useState<Section>()
   const [offset, setOffset] = useState(0)
   const [nextExcerpt, setNextExcerpt] = useState<number | null>(null)
+  const readerRequest = useRef(0)
   const refresh = useCallback(async () => {
     setLoading(true)
     try { const result = await api.get<Document[]>(base + '/documents'); setDocuments(result.data) }
@@ -48,20 +49,37 @@ export default function Materials() {
   function openImport(document?: Document) {
     setTarget(document); setTitle(document?.title || ''); setText(''); setImporting(true); setError('')
   }
-  async function loadRevisions(document: Document, offset = 0) {
+  async function loadRevisions(document: Document, offset = 0, request = readerRequest.current) {
     const result = await api.get<{ items: Revision[]; next_offset: number | null }>(base + '/documents/' + document.id + '/revisions', { params: { offset } })
+    if (request !== readerRequest.current) return
     setRevisions(previous => offset ? [...previous, ...result.data.items] : result.data.items); setNextRevision(result.data.next_offset)
   }
-  async function loadSections(document: Document, version: string, offset = 0) {
+  async function loadSections(document: Document, version: string, offset = 0, request = readerRequest.current) {
     const result = await api.get<{ items: Section[]; next_offset: number | null }>(base + '/documents/' + document.id + '/sections', { params: { revision: version, offset } })
+    if (request !== readerRequest.current) return []
     setSections(previous => offset ? [...previous, ...result.data.items] : result.data.items); setNextSection(result.data.next_offset)
+    return result.data.items
   }
   async function inspect(document: Document) {
+    const request = ++readerRequest.current
     setReading(true)
-    setFocusedId(document.id); setDetail(undefined); setExcerpt(''); setActiveSection(undefined); setNextExcerpt(null); setSections([]); setRevisions([]); setError('')
-    try { await Promise.all([loadRevisions(document), loadSections(document, document.revision)]); setRevision(document.revision); setDetail(document) }
-    catch { setError('无法读取资料修订。') }
-    finally { setReading(false) }
+    setFocusedId(document.id); setDetail(document); setRevision(document.revision); setExcerpt(''); setActiveSection(undefined); setNextExcerpt(null); setSections([]); setRevisions([]); setNextRevision(null); setNextSection(null); setError('')
+    try {
+      const [, items] = await Promise.all([loadRevisions(document, 0, request), loadSections(document, document.revision, 0, request)])
+      if (request === readerRequest.current && items[0]) await readSection(items[0], 0, document, document.revision, request)
+    }
+    catch { if (request === readerRequest.current) setError('无法读取资料，请重试。') }
+    finally { if (request === readerRequest.current) setReading(false) }
+  }
+  async function selectRevision(value: string) {
+    if (!detail) return
+    const request = ++readerRequest.current
+    setReading(true); setRevision(value); setSections([]); setNextSection(null); setExcerpt(''); setActiveSection(undefined); setNextExcerpt(null); setError('')
+    try {
+      const items = await loadSections(detail, value, 0, request)
+      if (request === readerRequest.current && items[0]) await readSection(items[0], 0, detail, value, request)
+    } catch { if (request === readerRequest.current) setError('无法读取该修订。') }
+    finally { if (request === readerRequest.current) setReading(false) }
   }
   async function saveText() {
     setSaving(true); setError('')
@@ -81,15 +99,16 @@ export default function Materials() {
       link.href = url; link.download = '资料原文件.docx'; link.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000)
     } catch { setError('无法下载原文件，请检查权限和文件状态。') }
   }
-  async function readSection(section: Section, start = 0) {
-    if (!detail) return
+  async function readSection(section: Section, start = 0, document = detail, version = revision, request = readerRequest.current) {
+    if (!document) return
     setReading(true); setError('')
     try {
-      const r = await api.get<{ citation: { excerpt: string }; next_offset: number | null }>(base + '/documents/' + detail.id + '/sections/' + section.section_id,
-        { params: { revision, limit: 4000, ...(start ? { offset: start } : {}) } })
+      const r = await api.get<{ citation: { excerpt: string }; next_offset: number | null }>(base + '/documents/' + document.id + '/sections/' + section.section_id,
+        { params: { revision: version, limit: 4000, ...(start ? { offset: start } : {}) } })
+      if (request !== readerRequest.current) return
       setExcerpt(r.data.citation.excerpt); setActiveSection(section); setOffset(start); setNextExcerpt(r.data.next_offset ?? null)
-    } catch { setError('章节读取失败，请重试。') }
-    finally { setReading(false) }
+    } catch { if (request === readerRequest.current) setError('章节读取失败，请重试。') }
+    finally { if (request === readerRequest.current) setReading(false) }
   }
   const filtered = documents.filter(d => (status === 'all' || d.status === status) && (kind === 'all' || (kind === 'word' ? d.has_original : !d.has_original))
     && (!vendor || d.metadata.vendor === vendor)
@@ -125,10 +144,10 @@ export default function Materials() {
           rowClassName={d => d.id === focused?.id ? 'materials-row-selected' : ''}
           locale={{ emptyText: <Empty description={documents.length ? '没有匹配的资料，试试其他关键词或分类' : '尚无已发布资料，先导入一份手册'} /> }}
           columns={[
-            { title: '资料名称', key: 'title', render: (_, d) => <div className="materials-document"><span className="materials-file-icon">{d.has_original ? <FileWordOutlined /> : <FileTextOutlined />}</span><div><button onClick={() => setFocusedId(d.id)}>{d.title}</button><small>{[d.metadata.vendor, d.metadata.product, d.metadata.software_version].filter(Boolean).join(' · ') || '未填写产品信息'}</small></div></div> },
+            { title: '资料名称', key: 'title', render: (_, d) => <div className="materials-document"><span className="materials-file-icon">{d.has_original ? <FileWordOutlined /> : <FileTextOutlined />}</span><div><button onClick={() => void inspect(d)}>{d.title}</button><small>{[d.metadata.vendor, d.metadata.product, d.metadata.software_version].filter(Boolean).join(' · ') || '未填写产品信息'}</small></div></div> },
             { title: '发布范围', width: 130, key: 'scope', render: (_, d) => <span className="materials-scope">{d.sections} 个章节<small>{d.status === 'inactive' ? '已停用' : d.publication_scope === 'legacy_selection' ? '旧版按章节发布' : '整份文件'}</small></span> },
             { title: '更新日期', width: 130, responsive: ['xl'], key: 'date', render: (_, d) => d.created_at ? new Date(d.created_at).toLocaleDateString('zh-CN') : '—' },
-            { title: '操作', width: 176, key: 'actions', render: (_, d) => <div className="materials-row-actions"><Button type="link" disabled={reading} onClick={() => void inspect(d)}>查看修订</Button><Button type="link" onClick={() => openImport(d)}>更新修订</Button></div> },
+            { title: '操作', width: 176, key: 'actions', render: (_, d) => <div className="materials-row-actions"><Button type="link" disabled={reading} onClick={() => void inspect(d)}>查看资料</Button><Button type="link" onClick={() => openImport(d)}>更新修订</Button></div> },
           ]} />
       </div><aside className="materials-inspector" aria-label="资料概况">
         <span className="materials-eyebrow">{focused ? '当前资料' : '发布说明'}</span><h2>{focused?.title || '让资料进入问答'}</h2>
@@ -148,18 +167,18 @@ export default function Materials() {
       ]} /></div>}
       </main>
     </div>
-    <Drawer rootClassName="materials-reader" title={detail?.title || '资料修订'} width="min(1200px, 100vw)" open={!!detail} onClose={() => setDetail(undefined)}>
-      {error && <Alert type="error" message={error} />}
+    <Drawer rootClassName="materials-reader" title={detail?.title || '查看资料'} width="min(1200px, 100vw)" open={!!detail} onClose={() => { ++readerRequest.current; setDetail(undefined); setReading(false); setError('') }}>
+      {error && <Alert type="error" message={error} action={<Button disabled={reading} onClick={() => detail && void inspect(detail)}>重新加载资料</Button>} />}
       {detail && <Space direction="vertical" style={{ width: '100%' }}>
         <Select aria-label="资料修订" disabled={reading} style={{ width: '100%' }} value={revision}
           options={revisions.map(r => ({ value: r.revision, label: r.created_at + ' · ' + r.revision.slice(0, 12) + (r.revision === detail.revision ? ' · 当前' : '') }))}
-          onChange={async value => { setReading(true); setRevision(value); setSections([]); setExcerpt(''); setActiveSection(undefined); setNextExcerpt(null); try { await loadSections(detail, value) } catch { setError('无法读取该修订。') } finally { setReading(false) } }} />
+          onChange={value => void selectRevision(value)} />
         {nextRevision !== null && <Button disabled={reading} onClick={async () => { setReading(true); try { await loadRevisions(detail, nextRevision) } catch { setError('修订加载失败。') } finally { setReading(false) } }}>更多修订</Button>}
         {revisions.find(r => r.revision === revision)?.has_original && <Button disabled={reading} onClick={() => void download()}>下载此修订的完整 Word 原文件</Button>}
         <div className="materials-reading-layout"><div className="materials-chapters"><h2>已发布章节</h2>
         <List dataSource={sections} renderItem={s => <List.Item className={activeSection?.section_id === s.section_id ? 'is-active' : ''}><Button type="link" disabled={reading} style={{ whiteSpace: 'normal', height: 'auto', textAlign: 'left' }} onClick={() => void readSection(s)}>{s.title_path.join(' / ') || '正文'}</Button></List.Item>} />
         {nextSection !== null && <Button disabled={reading} onClick={async () => { setReading(true); try { await loadSections(detail, revision, nextSection) } catch { setError('章节加载失败。') } finally { setReading(false) } }}>更多章节</Button>}
-        </div><section className="materials-excerpt" aria-label="资料正文预览">{excerpt && activeSection ? <><h2>{activeSection.title_path.join(' / ') || '正文'}</h2><p>字符 {offset + 1}–{offset + excerpt.length} · 按段阅读原修订</p><pre>{excerpt}</pre><Space><Button disabled={reading || offset === 0} onClick={() => void readSection(activeSection, Math.max(0, offset - 4000))}>上一段</Button><Button disabled={reading || nextExcerpt === null} onClick={() => nextExcerpt !== null && void readSection(activeSection, nextExcerpt)}>下一段</Button></Space></> : <Empty description="选择左侧章节，阅读已发布正文" />}</section></div>
+        </div><section className="materials-excerpt" aria-label="资料正文预览" aria-busy={reading}>{reading ? <Spin tip="正在读取资料正文"><div style={{ minHeight: 180 }} /></Spin> : excerpt && activeSection ? <><h2>{activeSection.title_path.join(' / ') || '正文'}</h2><p>字符 {offset + 1}–{offset + excerpt.length} · 按段阅读原修订</p><pre>{excerpt}</pre><Space><Button disabled={reading || offset === 0} onClick={() => void readSection(activeSection, Math.max(0, offset - 4000))}>上一段</Button><Button disabled={reading || nextExcerpt === null} onClick={() => nextExcerpt !== null && void readSection(activeSection, nextExcerpt)}>下一段</Button></Space></> : <Empty description={error ? '正文暂未加载，请重试' : '选择左侧章节，阅读已发布正文'} />}</section></div>
         <RevisionCompare key={detail.id + revision} documentId={detail.id} revision={revision} revisions={revisions} />
       </Space>}
     </Drawer>

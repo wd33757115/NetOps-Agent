@@ -18,6 +18,10 @@
 .agent-step-content small { display: block; font-size: 12px; margin-top: 3px; color: #637185; }
 .agent-step-operation { margin: 6px 0; padding: 8px 10px; border-radius: 6px; background: #f4f6f8; color: #465366; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.6; }
 .agent-step-operation code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+.agent-step-result { margin-top: 8px; color: #56667e; font-size: 12px; }
+.agent-step-result summary { cursor: pointer; width: fit-content; padding: 3px 0; }
+.agent-step-result summary:focus-visible { outline: 2px solid #4384d6; outline-offset: 3px; }
+.agent-step-result pre { max-height: 360px; overflow: auto; padding: 12px; background: #f6f8fa; border: 1px solid #e5eaf0; border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; }
 .agent-step-state { font-size: 12px; white-space: nowrap; color: #637185; }
 @keyframes agent-pulse { 50% { opacity: .3; } }
 @media (prefers-reduced-motion: reduce) { .agent-progress-dot.is-running { animation: none; } }

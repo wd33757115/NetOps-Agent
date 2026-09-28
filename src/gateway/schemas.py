@@ -22,6 +22,7 @@ class TaskStatus(str, Enum):
 
 
 class ChatRequest(BaseModel):
+    diagnostic_connections: list[str] = Field(default_factory=list, max_length=2)
     query: str = Field(..., description="用户查询", examples=["交换机端口Down了如何处理？"])
     thread_id: str | None = Field(None, description="对话线程ID（用于多轮持久化）")
     user_id: str | None = Field(None, description="用户ID")

@@ -1,4 +1,4 @@
-"""Bounded operational details from tool calls; never reasoning or result bodies."""
+"""Bounded, redacted tool operations and result previews; never model reasoning."""
 
 import json
 import re
@@ -77,3 +77,36 @@ def summary(name, data, success):
             "；结果已截断，可缩小搜索范围" if data.get("truncated") else ""
         )
     return ""
+
+
+def result_preview(root, output):
+    if not isinstance(output, str):
+        return None
+    # Native payloads are JSON. Preserve their line numbers and object structure,
+    # but never render HTML or reveal host paths or credential fields.
+    secret = re.compile(r"(?i)password|passwd|secret|token|authorization|api[_-]?key")
+
+    def scrub(value):
+        if isinstance(value, dict):
+            return {
+                key: "[redacted]" if secret.search(key) else scrub(item)
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [scrub(item) for item in value]
+        if isinstance(value, str):
+            for prefix in (str(root), str(root).replace("\\", "/")):
+                value = value.replace(prefix + "\\", "").replace(prefix + "/", "")
+            value = re.sub(
+                r"(?i)((?:password|passwd|secret|token|authorization|api[_-]?key)\s*[:=]\s*)[^\s,;]+",
+                r"\1[redacted]",
+                value,
+            )
+            return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\u202a-\u202e\u2066-\u2069]", "", value)
+        return value
+
+    try:
+        text = json.dumps(scrub(json.loads(output)), ensure_ascii=False, indent=2)
+    except (ValueError, TypeError):
+        text = scrub(output)
+    return {"text": text[:12000], "truncated": len(text) > 12000 or len(output) >= 64000}

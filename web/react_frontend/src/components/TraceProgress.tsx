@@ -7,6 +7,7 @@ export interface AgentStep {
   detail?: string
   operation?: string
   summary?: string
+  output?: { text: string; truncated: boolean }
   status: string
   started_at: string
   ended_at?: string
@@ -55,6 +56,11 @@ export default function TraceProgress({ progress, onCancel }: { progress: AgentP
         <div className="agent-step-content"><span>{step.label}</span>{step.detail && <small>{step.detail}</small>}
           {step.operation && <pre className="agent-step-operation"><code>{step.operation}</code></pre>}
           {step.summary && <small>{step.summary}</small>}
+          {step.output && <details className="agent-step-result">
+            <summary>查看执行结果</summary>
+            <pre><code>{step.output.text}</code></pre>
+            {step.output.truncated && <small>结果较长，仅展示前 12,000 字符；完整执行记录由服务端保存。</small>}
+          </details>}
         </div>
         <span className="agent-step-state">{labels[step.status] || '已结束'} · {duration(step.started_at, step.ended_at, now)}</span>
       </li>)}</ol> : <p>{running ? '准备就绪后会显示搜索、阅读与业务查询记录。' : '本轮没有工具调用记录。'}</p>}

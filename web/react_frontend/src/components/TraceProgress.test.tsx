@@ -28,3 +28,16 @@ it('retains real operations and result summaries in completed history', () => {
   expect(screen.getByText('读取 20 行')).toBeInTheDocument()
   expect(screen.getByText('已完成 · 不足 1 秒')).toBeInTheDocument()
 })
+
+it('exposes a collapsed, plain-text execution result inside saved steps', () => {
+  render(<TraceProgress progress={{ ...progress, steps: [{ ...progress.steps[0],
+    output: { text: 'manual.txt:3 精油 <script>bad()</script>', truncated: true } }] }} />)
+  const toggle = screen.getByText('查看执行结果')
+  const details = toggle.closest('details')!
+  expect(details).not.toHaveAttribute('open')
+  fireEvent.click(toggle)
+  expect(details).toHaveAttribute('open')
+  expect(screen.getByText('manual.txt:3 精油 <script>bad()</script>')).toBeInTheDocument()
+  expect(details.querySelector('script')).toBeNull()
+  expect(screen.getByText(/仅展示前 12,000 字符/)).toBeInTheDocument()
+})

@@ -1,4 +1,4 @@
-"""Bounded, user-visible execution summaries, not model reasoning or tool payloads."""
+"""Bounded execution summaries and redacted file-tool previews, not reasoning."""
 
 from copy import deepcopy
 from datetime import timezone
@@ -27,9 +27,9 @@ STATUS = {
     "interrupted": "运行已中断，可重新提问",
 }
 ERRORS = {
+    "session_context_full": "本会话上下文已达到容量上限，请新建聊天继续；现有记录已保留",
     "model_output_truncated": (
-        "回答达到单次输出上限，未发布被截断的配置。"
-        "请指定设备角色或拆分配置范围"
+        "回答达到单次输出上限，未发布被截断的配置。请指定设备角色或拆分配置范围"
     ),
     "dsh_run_failed": "Agent 执行异常，未发布答案；可使用本次运行编号排查",
     "citation_validation_failed": "回答引用未通过原文校验，请重新提问",
@@ -118,5 +118,11 @@ def advance(row, event):
                     ended_at=stamp(),
                     summary=str(event.data.get("summary") or "")[:240],
                 )
+                output = event.data.get("output")
+                if isinstance(output, dict) and isinstance(output.get("text"), str):
+                    step["output"] = {
+                        "text": output["text"][:12000],
+                        "truncated": bool(output.get("truncated")),
+                    }
     row.progress_json = data
     return data
