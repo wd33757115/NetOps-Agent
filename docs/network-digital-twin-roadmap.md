@@ -326,7 +326,8 @@ capabilities:
   vrfs:       { command: "display ip vpn-instance",                template: H3C/Comware7/display_ip_vpn_instance }
   irf:        { command: "display irf",                            template: H3C/Comware7/display_irf }
 field_map:        # TextFSM 字段 → 事实表字段
-  arp: { IP_ADDRESS: ip, MAC_ADDRESS: mac, INTERFACE: ifname, VLAN: vlan, TYPE: type, AGING: age_s }
+  arp: { IP_ADDRESS: ip, MAC_ADDRESS: mac, INTERFACE: ifname, VLAN: vlan, TYPE: type }
+  # AGING 不可直接映射 age_s；须由已核实的格式/单位转换，未知单位保留原值。
 verified:         # 实验环境验证记录，未验证的能力不得宣称支持
   # 实测采集成功（解析器尚未验证）：
   - { model: VSR1000, version: "7.1.064 R1362P12", lab: gns3, collected: [version, lldp_local, lldp, interfaces, ip, arp, mac, vlan, lag, routes, vrfs], unsupported: [inventory, irf], serial_source: lldp_local }
@@ -377,10 +378,12 @@ verified:         # 实验环境验证记录，未验证的能力不得宣称支
 - `generic_arp` / `generic_mac`：按“形状”识别行，不依赖表头与列位置：一行同时含 IPv4/IPv6 与 MAC（支持 `aabb-ccdd-eeff`、`aabb.ccdd.eeff`、`aa:bb:..`）→ ARP 项；含 MAC + 接口名（通用接口名正则 + 5.4 规范化表）+ 可选 VLAN 数字 → MAC 项。
 - `generic_ifbrief`：接口名 + up/down/adm down 等状态词。实测 Comware `display interface brief` 在同一输出里有两张列结构不同的表（`route mode` 与 `bridge mode`，后者含 Type A/T/H 与 PVID），需按小标题切换列解释；二层口不会出现在 `display ip interface brief` 中。
 - `generic_ipif`：接口名 + IPv4 地址 + 掩码（`/len` 或点分掩码，或同行 `a.b.c.d/len`）+ 可选状态 → 接口 IP（路径计算依赖该数据，必须实现）。
+  - 无掩码的简表不能补默认 `/24` 或 `/32`；该能力保留缺口并交后续档案/模板获取明确前缀。IPv6 同样要求显式前缀。
 - `generic_version`：从版本输出中抽取主机名、型号、软件版本、序列号候选（关键词 + 行模式），供身份归并。
 - 这是主力解析层，**首批必须在以下命令风格上通过样本测试**：H3C Comware、华为 VRP、Cisco IOS、Cisco NX-OS、锐捷（可取 ntc-templates 测试样本与实验设备输出）。同义词表、接口名正则按样本持续扩充，扩充即加回放用例。
 - 路由表各厂商差异大，**不做通用解析**；未确认平台或无模板时走 ⑤ 的“抽样生成模板”路径。
 - 通用解析结果 `confidence=medium`；④ 的每条记录也保存来源行号，便于证据定位。
+  - 行号相对于统一行尾后的解析副本，从 1 开始；原始证据仍保留。P2-8 使用 FactSet.summary 的 `parse_metadata.sources` 保存逐行 raw、行号和置信度，不扩充 typed 表列。调用方传入传输完整性，清除分页字符不代表采集完整。陌生表行、残缺记录、计数不符不能视为全表成功。
 - 可用总数做完整性校验时必须用：实测 H3C 路由表首行 `Destinations : 10\tRoutes : 10`（含制表符）。
 
 **⑤ LLM Schema 抽取（兜底）+ 模板沉淀**
@@ -982,6 +985,7 @@ P2-9 根据 Q5 取消，不引入 SNMP。P3 及后续仍在进入阶段时展开
 | P2-1 | 已完成 | 2026-09-28 | 新增事实仓储 30 通过；设备访问/拓扑全量 773 通过、1 跳过；PostgreSQL 并发/迁移 1 通过；前端构建通过 | Q7 团队共享；topology 0.3.0，0002 迁移；尚未发布 |
 | P2-4 | 已完成 | 2026-09-28 | 新增规范化 76 通过；连同实机夹具和原拓扑回归 142 通过；Ruff 通过 | 未接线旧解析器；保留原文、未知名称和分页标志 |
 | P2-7 | 已完成 | 2026-09-28 | 新增识别 29 通过；设备访问/拓扑 878 通过、1 跳过；两台 H3C 一次登录识别并执行对应 LLDP；构建通过 | topology 0.3.2；其他签名仅样本验证；未发布 |
+| P2-8 | 已完成 | 2026-09-28 | 通用解析新增 83 通过、真实样本事实库往返新增 14 通过；设备访问/拓扑全量 975 通过、1 跳过；Ruff 通过 | topology 0.3.3；两台 VSR 原始/规范化样本；五风格合成样本，不等同实机支持 |
 
 ### P0-1 基线记录（2026-09-28）
 
@@ -1182,6 +1186,16 @@ P1-1 实机补验与驱动修复（2026-09-28）：
 - `python -m pytest <rg 选出的 test_device_access*.py 和 test_topology*.py> -q --junitxml=.runtime/p2-7-tests.xml`：878 通过、1 可选 YANG 跳过；新增 29 项。后续收紧主版本行与手工指定状态后，识别相关 42 项再次通过。Ruff 通过；隔离前端构建 `.runtime/p2-7/frontend-dist` 通过。
 - 实机 `.runtime/p2-7-lab-identify.py`：两台 H3C 经隔离授权/凭据库、已有可信密钥和实际公共并发租约，各一次 Paramiko 连接，顺序为 `display version`、`screen-length disable`、`display lldp neighbor-information verbose`；都识别为 Comware / h3c-comware7，不发送 show 探测。报告 `.runtime/p2-7-lab-identify.json`，密码不进入结果或元数据。
 - 未完成项：平台档案执行范围扩展、通用解析、LLDP 提示的扩散接线按后续卡；原巡检不变，无上线。下一卡 P2-8 通用解析器。
+
+### P2-8 执行记录（2026-09-28）
+
+- 文件：`collectors/parse.py`、`tiers/{common,generic_lldp,generic_lldp_local,generic_arp,generic_mac,generic_ifbrief,generic_ipif,generic_version}.py`、完整键同义词 YAML、README；`tests/unit/test_topology_generic_parsers.py`、事实仓储新增往返测试、`tests/fixtures/topology/synthetic/generic-styles.json`；App 0.3.3、前端注册、本文。
+- 不加载型号档案可解析 LLDP、LLDP-MED、本机版本、ARP、MAC、接口双表和 IP/掩码；七项能力在两台 VSR 的 raw/clean 上事实一致。序列号来自本地 LLDP-MED，不编造 version 的序列号；同一机箱不同管理地址保持逐端口观测。ARP 年龄没有单位时不写 age_s；IP 无掩码不猜前缀；bridge PVID 不当作 trunk 的 access VLAN；下线状态不自动判定为管理员关闭。修正 7.1 示例直接将 AGING 映射 age_s 的逻辑错误。
+- 只读调用已有 OutputClassifier，并在 App 内补充实测不支持命令和合法空表规则，未改旧解析器行为。分页/截断/传输不完整、广告总数不符、残缺邻居/表行和陌生表行保留 partial/failed，不能当完整事实；路由不提供通用正则。输入最大 8 MiB；大小/字段/地址非法有明确失败结果。
+- 每行保存 raw 与规范化副本中的一基行号、tier/confidence/告警；`fact_summary()` 放入既有 FactSet JSON summary，不改变 typed 行结构或迁移。原始终端回显只在调用方明确提供实际 command/prompt 且首尾精确匹配时移除，以空行保持行号。
+- 83 项通用解析测试：两台实测各七能力、五厂商 CLI 风格（明确手写合成）、空表与未知数据、完整键、多行描述、IPv6/VRF、掩码、错误命令、分页/截断、数量、残缺/多邻居、无档案与证据。事实仓储额外 14 项将真实 raw 经生产解析器写入，并由第二账号重放记录与原始证据；不是测试专用解析转换。
+- `venv/Scripts/python.exe -m pytest tests/unit/test_topology_generic_parsers.py tests/unit/test_topology_facts.py -q`：127 通过。全量设备访问/拓扑测试 `--junitxml=.runtime/p2-8-tests.xml`：975 通过、1 条已有可选 YANG 跳过，日志 `.runtime/p2-8-tests.log`；Ruff、注册生成及 `git diff --check` 通过。
+- 未完成项：结构化/模板/LLM 层与现场多能力事实接线按后续卡；旧线上 LLDP 解析保留，未声称其他厂商通过实机测试；原巡检未改、未执行运行库迁移、未发布。下一卡 P2-2 平台档案。
 
 ## 参考
 

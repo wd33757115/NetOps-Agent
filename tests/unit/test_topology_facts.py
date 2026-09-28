@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from src.apps.device_access.backend.grants import GrantCreate, GrantState, GrantStore
 from src.apps.device_access.backend.models import Base as AccessBase
+from src.apps.topology.backend.collectors.parse import parse
 from src.apps.topology.backend.facts.models import ARP, FactSet
 from src.apps.topology.backend.facts.repository import FactInput, FactRepository
 from src.apps.topology.backend.models import Base, Network, Run, Snapshot
@@ -24,6 +25,42 @@ from src.platform.kernel.migrations import configuration
 from src.platform.kernel.registry import discover
 
 WHEN = datetime(2026, 9, 28, 8, 32, tzinfo=timezone.utc)
+
+
+@pytest.mark.parametrize("device", ["vsr-1", "vsr-2"])
+@pytest.mark.parametrize(
+    "capability", ["lldp", "lldp_local", "arp", "mac", "interfaces", "ip", "version"]
+)
+def test_parsed_real_facts_share_and_retain_evidence(env, device, capability):
+    directory = Path(__file__).parents[1] / "fixtures/topology/h3c/vsr1000-7.1.064" / device
+    filename = {"lldp": "lldp_verbose", "ip": "ip_interfaces"}.get(capability, capability)
+    raw = (directory / (filename + ".raw.txt")).read_bytes().decode("utf-8")
+    result = parse(
+        {"os_family": "comware"}, capability, raw, command=raw.splitlines()[0], prompt="<H3C>"
+    )
+    uid = env.repo().create_device("lab", ["10.10.1.1" if device == "vsr-1" else "10.10.1.2"])[
+        "device_uid"
+    ]
+    payload = {"domain": "lab", "device_uid": uid, "outputs": {capability: raw}}
+    digest = hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()
+    ).hexdigest()
+    key = f"apps/topology/facts/{uid}/generic-test/{digest}.json"
+    env.evidence[key] = payload
+    body = env.body(
+        device_uid=uid,
+        capability=capability,
+        records=result.records,
+        summary=result.fact_summary(),
+        parser_ref=result.parser_ref,
+        evidence_ref=key,
+    )
+    written = env.repo().append("lab", uid, body)
+    shared = env.repo("bob").current("lab", uid, capability)["current"]
+    assert shared["fact_set"]["id"] == written["id"]
+    assert shared["fact_set"]["summary"] == result.fact_summary()
+    assert len(shared["records"]) == len(result.records)
+    assert env.evidence[shared["fact_set"]["evidence_ref"]]["outputs"][capability] == raw
 
 
 @pytest.fixture
