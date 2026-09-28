@@ -18,10 +18,11 @@ from src.platform.device_access import AccessContext, AccessGrant, BatchRequest,
 from src.platform.device_access.catalog import DIAGNOSTIC_PROFILES
 from src.platform.device_access.contracts import ConnectionProfile, DeviceAccessError, Target
 from src.platform.device_access.drivers.paramiko_driver import ParamikoDriver
-from src.platform.device_access.security import CredentialStore, authorize_address
+from src.platform.device_access.security import CredentialStore
 from src.platform.kernel.migrations import business_engine
 
 from .credentials import CredentialVault
+from .grants import authorize_address
 from .host_keys import HostKeyStore
 from .models import Connection, Operation, now
 from .vault_driver import VaultDriver

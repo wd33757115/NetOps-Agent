@@ -4,6 +4,7 @@ import { api } from '@netops/config/api'
 import DeviceTerminal, { ConnectionForm, DeviceConnection, profiles } from '@netops/platform/terminal/DeviceTerminal'
 import CredentialSets from './CredentialSets'
 import HostKeys from './HostKeys'
+import Grants from './Grants'
 import { useAuth } from '@netops/context/AuthContext'
 
 function ConnectionsPage() {
@@ -45,5 +46,6 @@ export default function Page() {
     { key: 'connections', label: '连接授权', children: <ConnectionsPage /> },
     { key: 'credentials', label: '凭据集', children: <CredentialSets /> },
     ...(user?.role === 'admin' ? [{ key: 'host-keys', label: '主机密钥', children: <HostKeys /> }] : []),
+    ...(user?.role === 'admin' ? [{ key: 'grants', label: '访问范围', children: <Grants /> }] : []),
   ]} />
 }

@@ -8,6 +8,7 @@ from src.platform.device_access.contracts import DeviceAccessError
 from . import service
 from .credential_api import CredentialRoute
 from .credential_api import router as credential_router
+from .grant_api import router as grant_router
 from .host_key_api import router as host_key_router
 from .schemas import Collect, ConnectionRequest, Ticket
 from .sessions import read_audit
@@ -15,6 +16,7 @@ from .sessions import read_audit
 router = APIRouter(tags=["Device access"], route_class=CredentialRoute)
 router.include_router(credential_router)
 router.include_router(host_key_router)
+router.include_router(grant_router)
 actor = require_app("device-access")
 
 

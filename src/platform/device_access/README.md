@@ -69,6 +69,8 @@ Redis 不可用时拒绝连接；Redis 关闭时仅提供新模块的进程内�
 依赖清单为本目录 `requirements.txt`；Redis 模式还需要现有平台的 Redis 依赖和配置。
 公共终端与诊断 HTTP/WS 由独立 `device-access` App 注册，拓扑由 `topology` App 注册。两者有独立迁移和依赖锁文件；未迁移旧巡检调用方。已在两台实验 H3C 验证，部署状态与授权格式见路线图及首版实施记录。
 
+device-access 0.6.0 / topology 0.2.1 使用 App 数据库授权。升级先执行包内迁移 0005，再由管理员在“访问范围”导入原 `DEVICE_ACCESS_GRANTS_FILE` JSON 文件；不会自动导入或在数据库拒绝时回退文件。管理员维护账号 ID、管理域、CIDR、collect/terminal 动作；受控诊断仍需连接上显式开启。重复导入不会恢复撤销项，撤销在下一次授权检查生效。平台内原独立文件授权函数保留兼容，两个 App 不再使用它。
+
 ## 验证
 
 ```text

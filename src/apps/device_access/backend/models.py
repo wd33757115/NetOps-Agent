@@ -105,3 +105,24 @@ class SessionAudit(Base):
     event_kind = Column(String(32), nullable=False)
     payload = Column(JSON, nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, default=now)
+
+
+class AddressGrant(Base):
+    __tablename__ = "app_device_access_address_grants"
+    id = Column(String(64), primary_key=True)
+    owner_id = Column(String(64), nullable=False, index=True)
+    domain = Column(String(64), nullable=False)
+    cidr = Column(String(49), nullable=False)
+    action = Column(String(32), nullable=False)
+    enabled = Column(Boolean, nullable=False, default=True)
+    revision = Column(Integer, nullable=False, default=1)
+
+
+class GrantAudit(Base):
+    __tablename__ = "app_device_access_grant_audit"
+    id = Column(String(32), primary_key=True)
+    actor_id = Column(String(64), nullable=False)
+    grant_id = Column(String(64), nullable=False, index=True)
+    operation = Column(String(16), nullable=False)
+    payload = Column(JSON, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=now)

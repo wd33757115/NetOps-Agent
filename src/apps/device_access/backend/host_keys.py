@@ -8,8 +8,8 @@ from sqlalchemy.exc import IntegrityError
 
 from src.platform.device_access.contracts import DeviceAccessError
 from src.platform.device_access.host_keys import fingerprint, known_hosts_line, parse_public_key
-from src.platform.device_access.security import authorize_address
 
+from .grants import authorize_address
 from .models import HostKey, HostKeyPolicy, now
 
 

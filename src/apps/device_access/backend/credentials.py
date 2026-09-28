@@ -17,10 +17,10 @@ from src.platform.device_access.security import (
     CredentialCandidate,
     CredentialMaterial,
     CredentialStore,
-    authorize_address,
     credential_order,
 )
 
+from .grants import authorize_address
 from .models import CredentialSet, DeviceCredential, now
 
 

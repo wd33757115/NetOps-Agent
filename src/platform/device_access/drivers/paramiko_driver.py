@@ -105,6 +105,9 @@ class CLISession:
         self.usable = False
         try:
             self.channel.close()
+        except (EOFError, OSError):
+            # The peer can close between channel EOF and our close acknowledgement.
+            pass
         finally:
             self.client.close()
 

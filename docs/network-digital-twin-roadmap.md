@@ -899,7 +899,12 @@ VSR-2 GE3/0(二层 access VLAN 100) ── Switch1(不可管理) ── PC1 1.1.
 - 测试：真实回环 SSH、初始化白名单与拒绝、未知主机密钥先于认证、一次认证、原始输出/超时/输出上限、改密/配置拒绝、驱动切换凭据固定、库日志脱敏、会话关闭断流。
 - 验收：两台 H3C 的版本/接口/路由共 6 组双驱动对照，均由驱动自动关闭分页；固定批量路径也保留对照记录。其他厂商标记未验证。
 
-**P1-6 授权入库**：按 P1 表格展开，保持管理域/CIDR/动作及原权限边界，保留文件导入。
+**P1-6 授权入库**
+- 范围：App `grants.py`、管理员维护/文件导入 API 与界面、授权和审计表、包内迁移 0005；设备访问、凭据、主机信任和拓扑统一调用公开授权服务。
+- 边界：保留原 `device.collect` / `device.terminal` 范围语义；受控会话仍要求 collect 范围 + 连接上的 `allow_session`，再签发内部 `device.session` grant。不把旧 collect 自动变成启用会话，不修改巡检。
+- 导入：读取原 `{账号: [{domain, cidrs, actions}]}` JSON，在事务中整批校验与写入；重复跳过，已撤销不恢复；运行时只查数据库，无文件兜底。账号/域/网段/动作不可就地扩大，范围变更采用新增和撤销；启用/撤销带修订号并与审计同事务。
+- 测试：角色与本人元数据隔离、IPv4/IPv6、域与动作隔离、严格 CIDR、导入幂等/原子性、撤销复查、数据库失败关闭、迁移及 PostgreSQL 并发 CAS；前端文件导入和撤销交互。
+- 验收：两台 H3C 经数据库授权、凭据库分别用双驱动采集；撤销后同一会话下一条命令不发送且立即关闭。代码发布时先迁移和显式导入，当前不改运行环境。
 
 > P2 以后的任务卡在进入该阶段时由执行者按模板从第 10 节表格展开，展开后先提交任务卡再开发。
 
@@ -917,6 +922,7 @@ VSR-2 GE3/0(二层 access VLAN 100) ── Switch1(不可管理) ── PC1 1.1.
 | P1-2 | 已完成（密钥握手验收） | 2026-09-28 | Python 回归 589 项通过，另 PostgreSQL 并发 2 项通过；前端定向 9 项通过、构建通过；两台 H3C 握手基线与模拟变化拒绝均通过 | 0003 迁移、数据库密钥策略、管理员告警/核验；未发送密码、未改设备、未发布 |
 | P1-4 | 已完成 | 2026-09-28 | Python 620 项通过（新增会话 30 项）；前端定向 10 项通过、构建通过；两台 H3C 每台一次连接执行 L1/L2、拒绝 L4/挂起 L3，13 条审计事件/台 | 0004 迁移、公共会话 API、显式授权及审计读取；DSH 与审批交互按 P4 后续接入 |
 | P1-5 | 已完成 | 2026-09-28 | Python 650 项通过；Ruff、依赖合并、前端构建通过；两台 H3C 双驱动自动关闭分页，6 组采集结果一致 | App 0.5.0、独立 Netmiko、驱动验证档案；补齐 Paramiko 受控会话分页初始化，未发布 |
+| P1-6 | 已完成 | 2026-09-28 | 设备访问/拓扑 Python 699 通过、1 条可选 YANG 跳过；PostgreSQL 并发 1 通过；前端 10 通过、构建通过；双 H3C 双驱动采集/会话撤销成功 | 0005 迁移、数据库授权及导入界面；device-access 0.6.0 / topology 0.2.1；未发布 |
 
 ### P0-1 基线记录（2026-09-28）
 
@@ -1077,3 +1083,15 @@ P1-1 实机补验与驱动修复（2026-09-28）：
 - 实机：先发现未关闭分页的 Paramiko 受控会话在 VSR-2 路由表停页；固定命令包对照（显式分页 + 版本/接口/路由）8 组一致。根据负责人补充，修复新受控会话自动初始化后，`.runtime/p1-5-lab-session-compare.py` 使用加密内存凭据库和实际公共 SSH 租约，每台分别一次 Paramiko / 一次 Netmiko 登录，调用者只请求 3 条采集命令。全部成功，审计记录每会话 9 条且初始化均为 `screen-length disable`；6 组输出去空行/首尾空白/动态 uptime 后 SHA256 一致。报告 `.runtime/p1-5-lab-session-compare.json`，历史对照报告保留。第一次新验证脚本误传审计参数导致连接前关闭，修正脚本后重跑通过；没有额外认证失败。
 - 密码通过隐藏交互传入，报告/审计均断言不含密码；未写入源码、文档、日志或设备配置。可信实验密钥复用既有基线；没有切换生产域信任策略。
 - 未完成项：其他厂商实机验证、P2 档案自动选择、P4 DSH 新会话工具、App 发布仍为后续事项。下一卡 P1-6。
+
+
+### P1-6 执行记录（2026-09-28）
+
+- 文件：`src/apps/device_access/backend/{grants,grant_api,api,models,service,credentials,host_keys}.py`、迁移 `0005_address_grants.py`、`frontend/{Grants,Grants.test,Page}.tsx`、App 清单；拓扑 `backend/service.py` 与清单（声明 device-access >=0.6.0 依赖）；前端生成注册；公共 README；新 `tests/unit/test_device_access_grants.py`、`tests/integration/test_device_access_grants_postgres.py`。回归发现公共 Paramiko 通道关闭遇到对端先发 EOF 的竞态，补修 `drivers/paramiko_driver.py` 并在 `test_device_access_ssh.py` 加确定性回归，未触及巡检。
+- 24 项新增授权测试覆盖实际 API 角色隔离、本人元数据、IPv4/IPv6、CIDR 严格校验、跨域/动作拒绝、原子导入、幂等与不恢复撤销、CAS、审计失败回滚、数据库故障关闭、旧文件不兜底、存量连接实时复查及隔离迁移。前端新增 3 项文件选择/显式导入、无效文件及撤销修订测试。
+- `venv/Scripts/python.exe -m pytest <rg 选出的 test_device_access*.py 和 test_topology*.py> -q --junitxml=.runtime/p1-6-tests.xml`：最终 699 通过、1 可选 YANG 跳过；中途一次真实 SSH 关闭 EOF 已定位修复，最终完整回归通过。Ruff 与 `git diff --check` 通过。
+- 隔离 PostgreSQL 16 容器：迁移 0003→0005，两个并发相同修订更新仅一个成功，失败者 409，只有一条更新审计；`tests/integration/test_device_access_grants_postgres.py` 1 通过。初次指定端口被 Windows 保留区阻止，改用 Docker 动态本机端口后通过；容器已停止并自动删除，没有访问运行环境数据库。
+- 前端：`npm test -- ../../src/apps/device_access/frontend/{Grants,HostKeys,CredentialSets}.test.tsx` 对应三个实际文件运行，10 通过；`npm run build -- --outDir ../../.runtime/p1-6/frontend-dist` 通过。
+- 实机：`.runtime/p1-6-lab-grants.py` 使用隔离授权数据库、加密凭据库、已核验密钥及实际公共 SSH 租约，两台 H3C × Paramiko/Netmiko 共 4 个会话均自动关闭分页并完成版本/接口/路由，6 组对照一致；每个会话随后撤销数据库 grant，下一条命令在发送前被拒绝并关闭连接。报告 `.runtime/p1-6-lab-grants.json`；密码未进入文件/审计/日志。
+- P1 阶段验收：两台 H3C 凭据自动登录、错误凭据一次后正确登录（P1-1）、密钥变化拒绝与界面告警（P1-2）、命令策略（P1-3）、受控会话（P1-4）、双驱动与关闭分页（P1-5）、数据库权限撤销（本卡）均有对应记录；多厂商扩充仍待 Q6，不宣称已验收其他厂商。
+- 未完成项：发布及运行环境迁移/原授权文件导入尚未执行；本卡交付源码、隔离构建和实机访问验证。Q3 生产信任策略保持待定。下一阶段先展开并提交 P2 任务卡，再实施 P2-0。

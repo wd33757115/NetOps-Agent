@@ -27,6 +27,23 @@ class LocalAdmission:
         yield lambda: None
 
 
+def test_disconnect_after_peer_eof_still_closes_transport():
+    from types import SimpleNamespace
+
+    closed = []
+
+    def peer_closed():
+        raise EOFError()
+
+    connection = CLISession(
+        SimpleNamespace(close=lambda: closed.append(True)),
+        SimpleNamespace(close=peer_closed),
+        ConnectionProfile("test", "operator"),
+    )
+    connection.disconnect()
+    assert closed == [True] and not connection.usable
+
+
 @pytest.mark.parametrize(
     "platform,expected",
     [

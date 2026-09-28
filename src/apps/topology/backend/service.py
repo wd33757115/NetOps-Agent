@@ -12,6 +12,7 @@ from uuid import uuid4
 from fastapi import HTTPException
 from sqlalchemy import delete, func, select, update
 
+from src.apps.device_access.backend.grants import authorize_address
 from src.platform.device_access import AccessContext, AccessGrant, BatchRequest, DeviceAccessService
 from src.platform.device_access.contracts import (
     ConnectionProfile,
@@ -21,7 +22,7 @@ from src.platform.device_access.contracts import (
     Target as AccessTarget,
 )
 from src.platform.device_access.detection import DiscoveryPlan
-from src.platform.device_access.security import CredentialStore, authorize_address
+from src.platform.device_access.security import CredentialStore
 
 from . import storage
 from .models import (
