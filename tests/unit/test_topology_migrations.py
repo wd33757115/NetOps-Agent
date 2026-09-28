@@ -19,7 +19,7 @@ def test_independent_migrations_create_only_owned_tables(tmp_path):
             command.upgrade(config, manifest.data["database"]["head"])
         tables = set(inspect(connection).get_table_names())
         assert all(
-            name.startswith(("app_topology_", "app_device_access_", "alembic_app_"))
+            name.startswith(("app_topology_", "app_twin_", "app_device_access_", "alembic_app_"))
             for name in tables
         )
         assert len(inspect(connection).get_foreign_keys("app_topology_links")) == 2
