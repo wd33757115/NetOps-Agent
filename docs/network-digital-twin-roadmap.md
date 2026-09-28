@@ -769,6 +769,7 @@ VSR-2 GE3/0(二层 access VLAN 100) ── Switch1(不可管理) ── PC1 1.1.
 | E15 | `display interface brief` 同一输出含 route mode / bridge mode 两张表；二层口不出现在 `display ip interface brief` | 通用接口解析器分表处理 | 7.3 ④ |
 | E16 | ARP 表对 VLAN 接口子网给出物理口（`GE3/0`）与 VLAN（`200`） | 定位可直接得到物理接入口，再用 MAC 表核对 | 9.3 |
 | E17 | 现有配置中 VSR-1 缺少 3.3.3.3/32 路由 | 天然的非对称路由验收样例 | 9.4 |
+| E18 | 2026-09-28 凭据库实机验收：两台 VSR 首次提示符为 `NUL + <H3C>`，后续为普通 `<H3C>` | 公共 Paramiko 驱动过滤 NUL 终端填充，避免把它存入提示符导致首条命令超时；已加真实回环 SSH 回归 | P1-1 实机补验 |
 
 **迷你故障集 v0（负责人在 GNS3 中手工注入；每次只注入一个，测完恢复）**
 
@@ -884,7 +885,7 @@ VSR-2 GE3/0(二层 access VLAN 100) ── Switch1(不可管理) ── PC1 1.1.
 | P0-2 | 已完成（基线非全绿） | 2026-09-28 | Python 主集 2396 通过 / 162 失败 / 3 跳过；包内另 24 通过；YANG 补跑 2 通过；前端单测 256 通过、构建通过；BFF、浏览器及视觉失败详见下方 | 只记录基线，不修改业务代码或测试预期；剩余未验证项为可选语义模型及 Linux 专属测试 |
 | P0-3 | 已完成 | 2026-09-28 | 首版文首已链接后续路线图且文件存在；`git ls-files scripts/topology/collect_lab_samples.py` 非空；`git diff --check` 通过 | 仅文档衔接；采样脚本在 P0-1 已纳入；按最新授权继续 P1-3 |
 | P1-3 | 已完成 | 2026-09-28 | 新增策略矩阵 458 项通过；连同现有设备访问回归共 525 项通过；Ruff 检查通过 | 新分类器与四平台 YAML；未接入 DSH、未改变 `authorize()`；见 8.3 实施细化 |
-| P1-1 | 实现完成，实机验收待补 | 2026-09-28 | Python 570 项通过（本卡新增 44 项）；前端全量 261 项通过，新增连接表单后定向 7 项通过；构建、Ruff 通过 | 迁移 0002、凭据集界面、公共 SSH 接入；实验密码当前不可用，未冒称两台 H3C 验收通过 |
+| P1-1 | 已完成（含实机补验） | 2026-09-28 | 初次 Python 570 项通过；实机修复后回归 590 项通过（另 PostgreSQL 2 项此前独立通过）；两台 H3C 自动登录/版本/日志采集成功，各仅一条本次错误用户认证日志；前端全量 261 与新增表单定向 7 项通过，构建通过 | 凭据库接入、0002 迁移；补修首次提示符 NUL 填充问题，见 E18；密码未写入源码、文档或运行报告 |
 | P1-2 | 已完成（密钥握手验收） | 2026-09-28 | Python 回归 589 项通过，另 PostgreSQL 并发 2 项通过；前端定向 9 项通过、构建通过；两台 H3C 握手基线与模拟变化拒绝均通过 | 0003 迁移、数据库密钥策略、管理员告警/核验；未发送密码、未改设备、未发布 |
 
 ### P0-1 基线记录（2026-09-28）
@@ -977,8 +978,16 @@ VSR-2 GE3/0(二层 access VLAN 100) ── Switch1(不可管理) ── PC1 1.1.
 - 实际命令：PowerShell 用 `rg --files tests` 选择 `test_device_access*.py` 与 `test_topology_migrations.py` 后传入 `venv/Scripts/python.exe -m pytest ... -q --tb=short --junitxml=.runtime/p1-1-tests.xml`，**570 passed**；第一次直接传通配符未展开（0 项），修正后完整执行。日志 `.runtime/p1-1-tests.log`。
 - 前端 `npm run test:unit -- --reporter=dot` **261 passed / 61 files**；随后新增连接表单测试，与凭据集测试定向执行 **7 passed / 2 files**。日志 `.runtime/p1-1-ui.log`、`p1-1-ui-focused.log`。`npm run build -- --outDir ../../.runtime/p1-1/frontend-dist` 通过（隔离产物，不替换正在运行的页面）。
 - `python -m ruff check` 本卡后端、迁移、公共凭据文件及测试通过；`git diff --check` 通过。未执行线上迁移、未发布、未 push。
-- 实机待验收：进程与项目 `.env` 都没有 `NETOPS_LAB_PASSWORD`；已请求账号来源，未收到补充，未读取或复用巡检账号。回环 SSH 仅证明协议认证顺序，不代表 H3C 实机验收。待取得实验凭据后，使用已核验主机密钥完成两台 H3C 登录、错后对认证日志及日志/模型/队列无明文验收。P1 阶段不得因此标为验收完成；可继续同阶段后续独立任务卡。
+- 初次实机验收因实验凭据不可用暂挂；负责人随后提供账号，现已补验完成（详见下面补验记录）。未读取或复用巡检账号。
 - 回滚：回退代码提交并从已验证备份恢复本卡 App 数据；迁移不提供删除凭据数据的自动降级。凭据加密主密钥必须保留，否则只能人工重新录入。
+
+P1-1 实机补验与驱动修复（2026-09-28）：
+
+- 负责人提供的实验密码仅通过隐藏终端输入传入验证进程，凭据库使用隔离 SQLite 内存库与临时加密主密钥；没有把密码写入源码、文档、环境文件、命令行参数或报告。
+- `.runtime/p1-1-lab-login.py` 使用真实公共 `DeviceAccessService`、`VaultDriver` 和原有并发租约；首次在两台 H3C 上各尝试一次本次生成的错误用户，再成功使用 admin 登录。初次采集暴露 E18：首次提示符含 NUL，后续正常提示符无法匹配。只修复新公共 Paramiko 驱动的 NUL 过滤，未改巡检或 Netmiko。
+- 新增 `test_comware_nul_padded_first_prompt_does_not_break_next_command` 真实回环 SSH 测试。修复后仅使用正确凭据复测，两台设备 `screen-length disable`、`display version`、`display logbuffer` 全部成功；确认 Comware 7.1.064 Release 1362P12，设备记忆指向成功凭据。
+- 设备日志分别只有 **1 条**本次错误用户名 `invalid-24020468` 的认证失败（VSR-2 另有更早的 admin 失败记录，未计入本次）。原始尝试次数在 `.runtime/p1-1-lab-login-first.json`；NUL 故障证据在 `p1-1-lab-nul-failure.json`；成功命令状态和设备日志在 `p1-1-lab-login.json`。脚本在写报告前校验实际密码不出现在序列化结果与报告中；本验收链路未调用模型或 Celery，不向其传递凭据。
+- 回归命令沿本卡文件选择规则，报告 `.runtime/p1-1-lab-regression.xml`：**590 passed、2 skipped**。两项跳过是新增 PostgreSQL 并发测试未传隔离数据库 URL；它们已在 P1-2 独立 PostgreSQL 实测 **2 passed**。非“全部厂商已验证”，仅这两台实验 H3C 与回环协议场景。
 
 ### P1-2 实施记录（2026-09-28）
 
@@ -987,7 +996,7 @@ VSR-2 GE3/0(二层 access VLAN 100) ── Switch1(不可管理) ── PC1 1.1.
 - PostgreSQL 实测：新增 `tests/integration/test_device_access_host_key_postgres.py`，只允许显式提供 `NETOPS_HOSTKEY_TEST_DATABASE_URL` 且数据库名为 `netops_validation_*`。用 `postgres:16-alpine` 独立容器随机回环端口执行 `python -m pytest tests/integration/test_device_access_host_key_postgres.py -q --tb=short`，**2 passed**：相同密钥并发首次固定均成功且仅一条记录；不同密钥并发只有一个首次成功，另一方返回变化并隔离端点。迁移 0003 重复升级通过。验证后核对标签并停止自动删除容器，原运行服务未动。日志 `.runtime/p1-2-postgres.log`。
 - 前端新增 `HostKeys.test.tsx` **2 项**，与凭据集/连接表单共 **9 passed / 3 files**。首次测试使用了错误的默认英文提示定位，改为明确中文校验文案后通过。`npm run build -- --outDir ../../.runtime/p1-2/frontend-dist` 通过；Ruff 与 diff 检查通过。
 - 实验设备：执行 `.runtime/p1-2-lab-check.py`，对 `10.10.1.1`、`10.10.1.2` 在密码认证前读取握手公钥，分别与 `.runtime/lab-samples/known_hosts` 基线匹配并完成隔离库首次固定；随后仅替换隔离库的可信公钥，实际再次连接两台设备均返回 `host_key_changed`。没有发送密码、没有执行设备命令、没有修改设备密钥。结果 `.runtime/p1-2-lab-check.json`。这不替代 P1-1 的成功登录及设备认证日志验收。
-- 未完成项：尚未发布/升级本机已安装 App；完整 P1 登录依赖实验凭据；生产域策略 Q3 未选定，默认行为保持文件严格模式。接下来进入 P1-4；P1 阶段整体仍不能标为已验收。
+- 未完成项：尚未发布/升级本机已安装 App；P1-1 登录验收后已补齐（见上）；生产域策略 Q3 未选定，默认行为保持文件严格模式。接下来进入 P1-4；P1 阶段整体尚有任务卡待完成。
 - 回滚：代码可回退；保留/备份密钥信任数据库，迁移不自动删除信任记录。未进行线上迁移或 push。
 
 **待决问题**

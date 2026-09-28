@@ -62,7 +62,9 @@ class CLISession:
                     "output_limit", "SSH output exceeds configured byte limit", output
                 )
             output += decoder.decode(chunk)
-            normalized = _ANSI.sub("", output).replace("\r", "")
+            # Comware may prefix only the first prompt with terminal NUL padding.
+            # It is not part of the hostname and must not become the remembered prompt.
+            normalized = _ANSI.sub("", output).replace("\x00", "").replace("\r", "")
             if any(marker in normalized for marker in self.profile.paging_markers):
                 raise CommandExecutionError(
                     "output_incomplete", "SSH output stopped at a paging prompt", output

@@ -67,7 +67,9 @@ def test_terminal_authorization_rechecked_after_admission_before_connect():
 
 
 @contextmanager
-def ssh_server(tmp_path, *, known=True, password="password", responses=None):
+def ssh_server(
+    tmp_path, *, known=True, password="password", responses=None, banner=b"Welcome\r\n<SW1>"
+):
     key = paramiko.RSAKey.generate(2048)
     listener = socket.socket()
     listener.bind(("127.0.0.1", 0))
@@ -119,7 +121,7 @@ def ssh_server(tmp_path, *, known=True, password="password", responses=None):
             if channel is None or not shell.wait(3):
                 return
             channel.settimeout(0.2)
-            channel.sendall(b"Welcome\r\n<SW1>")
+            channel.sendall(banner)
             pending = b""
             while not stopped.is_set():
                 try:
@@ -154,6 +156,32 @@ def ssh_server(tmp_path, *, known=True, password="password", responses=None):
         thread.join(6)
         assert not thread.is_alive()
         assert not errors
+
+
+def test_comware_nul_padded_first_prompt_does_not_break_next_command(tmp_path):
+    from src.platform.device_access.drivers.paramiko_driver import ParamikoDriver
+
+    with ssh_server(tmp_path, banner=b"Welcome\r\n\x00<SW1>") as (port, known, commands, _):
+        connection = ParamikoDriver().connect(
+            Target("switch", "127.0.0.1"),
+            ConnectionProfile(
+                "manual",
+                "operator",
+                "password",
+                port=port,
+                known_hosts_file=str(known),
+                prompt_timeout=2,
+            ),
+        )
+        try:
+            assert connection.find_prompt() == "<SW1>"
+            assert connection.send_command("screen-length disable", 2) == (
+                "result for screen-length disable\n"
+            )
+            assert "display version" in connection.send_command("display version", 2)
+        finally:
+            connection.disconnect()
+        assert commands == ["screen-length disable", "display version"]
 
 
 def execute(port, known_hosts):
