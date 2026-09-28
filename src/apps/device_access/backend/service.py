@@ -20,7 +20,9 @@ from src.platform.device_access.contracts import ConnectionProfile, DeviceAccess
 from src.platform.device_access.security import CredentialStore, authorize_address
 from src.platform.kernel.migrations import business_engine
 
+from .credentials import CredentialVault
 from .models import Connection, Operation, now
+from .vault_driver import VaultDriver
 
 APP_ID = "device-access"
 TICKET_PREFIX = "netops:device-access:terminal-ticket:"
@@ -63,10 +65,16 @@ def create_connection(owner, body):
     authorize_address(owner, body.domain, body.address)
     if body.allow_terminal:
         authorize_address(owner, body.domain, body.address, "device.terminal")
-    store = CredentialStore()
-    ref = store.put(
-        owner, body.domain, [body.address], body.username, body.password.get_secret_value()
-    )
+    ref = ""
+    if body.credential_mode == "vault" and body.password is None:
+        if not CredentialVault().candidates(
+            owner, body.domain, body.address, credential_set_id=body.credential_set_id
+        ):
+            raise DeviceAccessError("waiting_for_input", "没有适用凭据，请创建凭据集或提供临时凭据")
+    if body.password is not None:
+        ref = CredentialStore().put(
+            owner, body.domain, [body.address], body.username, body.password.get_secret_value()
+        )
     try:
         with sessions() as session:
             row = Connection(
@@ -83,7 +91,8 @@ def create_connection(owner, body):
                 **row.settings,
             }
     except Exception:
-        store.revoke(ref)
+        if ref:
+            CredentialStore().revoke(ref)
         raise
     return result
 
@@ -106,13 +115,36 @@ def revoke(owner, connection_id):
         row = _owned(session, Connection, connection_id, owner)
         row.expires_at = now()
         ref = row.credential_ref
-    CredentialStore().revoke(ref)
+    if ref:
+        CredentialStore().revoke(ref)
     return {"revoked": True}
 
 
 def access(owner, connection_id, action="device.collect"):
     settings, ref = connection(owner, connection_id, action)
-    username, password = CredentialStore().get(ref, owner, settings["domain"], settings["address"])
+    driver = None
+    if settings.get("credential_mode") == "vault":
+        username, password = "credential-vault", None
+
+        def guard():
+            checkpoint.get()()
+            user = authorize_worker(owner, APP_ID)
+            if not user.can_execute_skills():
+                raise DeviceAccessError("not_authorized", "账号不能执行设备访问")
+            connection(owner, connection_id, action)
+            return True
+
+        driver = VaultDriver(
+            CredentialVault(),
+            owner,
+            temporary_ref=ref or None,
+            credential_set_id=settings.get("credential_set_id"),
+            guard=guard,
+        )
+    else:
+        username, password = CredentialStore().get(
+            ref, owner, settings["domain"], settings["address"]
+        )
     profile = ConnectionProfile(
         connection_id,
         username,
@@ -122,7 +154,9 @@ def access(owner, connection_id, action="device.collect"):
         max_output_bytes=256 * 1024,
     )
     target = Target(connection_id, settings["address"], management_domain=settings["domain"])
-    return DeviceAccessService(target_resolver=lambda _: target, profile_resolver=lambda _: profile)
+    return DeviceAccessService(
+        target_resolver=lambda _: target, profile_resolver=lambda _: profile, driver=driver
+    )
 
 
 def read(owner, operation_id):

@@ -15,18 +15,24 @@ export interface DeviceConnection { connection_id: string; address: string; doma
 export function ConnectionForm({ address, domain, terminal = false, onCreated }: { address?: string; domain?: string; terminal?: boolean; onCreated: (value: DeviceConnection) => void }) {
   const [form] = Form.useForm()
   const [busy, setBusy] = useState(false)
-  return <Form form={form} layout="vertical" initialValues={{ address, domain: domain || 'default', port: 22, profiles: ['comware-lldp-v1'], allow_terminal: terminal }}
+  const credentialMode = Form.useWatch('credential_mode', form) || 'temporary'
+  return <Form form={form} layout="vertical" initialValues={{ address, domain: domain || 'default', port: 22, credential_mode: 'temporary', profiles: ['comware-lldp-v1'], allow_terminal: terminal }}
     onFinish={async values => {
       setBusy(true)
-      try { const { data } = await api.post<DeviceConnection>('/apps/device-access/connections', values); form.resetFields(['password', 'username']); onCreated(data) }
+      const payload = { ...values }
+      if (payload.credential_mode === 'vault') { delete payload.username; delete payload.password }
+      try { const { data } = await api.post<DeviceConnection>('/apps/device-access/connections', payload); form.resetFields(['password', 'username']); onCreated(data) }
       catch (error) { message.error(error instanceof Error ? error.message : '连接授权失败') }
       finally { form.setFieldValue('password', ''); setBusy(false) }
     }}>
     <Form.Item label="管理域" name="domain" rules={[{ required: true }]}><Input maxLength={64} /></Form.Item>
     <Space align="start"><Form.Item label="设备地址" name="address" rules={[{ required: true }]}><Input placeholder="10.10.1.1" /></Form.Item>
       <Form.Item label="SSH 端口" name="port"><InputNumber min={1} max={65535} /></Form.Item></Space>
-    <Form.Item label="用户名" name="username" rules={[{ required: true }]}><Input autoComplete="off" /></Form.Item>
-    <Form.Item label="密码" name="password" rules={[{ required: true }]}><Input.Password autoComplete="new-password" /></Form.Item>
+    <Form.Item label="凭据来源" name="credential_mode"><Select options={[{ value: 'temporary', label: '人工输入临时凭据' }, { value: 'vault', label: '按设备作用域选择凭据集' }]} onChange={() => form.resetFields(['username', 'password'])} /></Form.Item>
+    {credentialMode === 'temporary' ? <>
+      <Form.Item label="用户名" name="username" preserve={false} rules={[{ required: true }]}><Input autoComplete="off" /></Form.Item>
+      <Form.Item label="密码" name="password" preserve={false} rules={[{ required: true }]}><Input.Password autoComplete="new-password" /></Form.Item>
+    </> : <Alert type="info" message="使用本账号在该管理域和设备范围内的凭据集，最多尝试 3 集，每集一次。全部认证失败或无法连接时等待人工处理。" style={{ marginBottom: 16 }} />}
     <Form.Item label="允许的诊断命令集" name="profiles" rules={[{ required: true }]}><Select mode="multiple" options={profiles} /></Form.Item>
     <Form.Item label="允许人工 SSH 终端" name="allow_terminal" valuePropName="checked"><Switch disabled={terminal} /></Form.Item>
     <p style={{ color: '#667085' }}>授权有效期 1 小时，仅限本账号及此设备。密码不会保存在浏览器。主机密钥须由管理员预先核验。</p>

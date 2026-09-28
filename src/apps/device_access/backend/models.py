@@ -1,6 +1,16 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, Column, DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
@@ -32,3 +42,30 @@ class Operation(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=now)
     finished_at = Column(DateTime(timezone=True))
     __table_args__ = (UniqueConstraint("owner_id", "request_id"),)
+
+
+class CredentialSet(Base):
+    __tablename__ = "app_device_access_credential_sets"
+    id = Column(String(32), primary_key=True)
+    owner_id = Column(String(64), nullable=False, index=True)
+    domain = Column(String(64), nullable=False, index=True)
+    name = Column(String(128), nullable=False)
+    username = Column(String(128), nullable=False)
+    secret_ciphertext = Column(Text, nullable=False)
+    enable_secret_ciphertext = Column(Text)
+    scope_kind = Column(String(16), nullable=False)
+    scope_value = Column(String(256), nullable=False)
+    priority = Column(Integer, nullable=False, default=0)
+    disabled = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=now)
+    rotated_at = Column(DateTime(timezone=True), nullable=False, default=now)
+
+
+class DeviceCredential(Base):
+    __tablename__ = "app_device_access_device_credentials"
+    owner_id = Column(String(64), primary_key=True)
+    domain = Column(String(64), primary_key=True)
+    device_key = Column(String(256), primary_key=True)
+    credential_set_id = Column(String(32), ForeignKey(CredentialSet.id))
+    last_success_at = Column(DateTime(timezone=True))
+    last_failure_code = Column(String(64))

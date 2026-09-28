@@ -1,6 +1,7 @@
 import ipaddress
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
 
 class Schema(BaseModel):
@@ -11,10 +12,21 @@ class ConnectionRequest(Schema):
     domain: str = Field(default="default", min_length=1, max_length=64)
     address: str
     port: int = Field(default=22, ge=1, le=65535)
-    username: str = Field(min_length=1, max_length=128)
-    password: SecretStr = Field(min_length=1, max_length=1024)
+    credential_mode: Literal["temporary", "vault"] = "temporary"
+    credential_set_id: str | None = Field(default=None, min_length=1, max_length=32)
+    username: str | None = Field(default=None, min_length=1, max_length=128)
+    password: SecretStr | None = Field(default=None, min_length=1, max_length=1024)
     profiles: list[str] = Field(min_length=1, max_length=6)
     allow_terminal: bool = False
+
+    @model_validator(mode="after")
+    def credentials(self):
+        if (self.username is None) != (self.password is None):
+            raise ValueError("username and password must be supplied together")
+        if self.credential_mode == "temporary":
+            if self.password is None or self.credential_set_id is not None:
+                raise ValueError("temporary mode requires credentials and no vault selection")
+        return self
 
     @field_validator("address")
     @classmethod

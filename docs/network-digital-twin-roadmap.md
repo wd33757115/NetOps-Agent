@@ -18,7 +18,7 @@
 2. **不推翻已有代码**。首版的 `src/platform/device_access/`、`src/apps/topology/`、`src/apps/device_access/`、终端组件、DSH 诊断接入都保留，在其上演进。需要删除或重写的点在第 4 节逐条列出，未列出的不要动。
 3. **原巡检链路（`src/core/patrol`、`src/core/ingestion`、Netmiko 实现）不修改**。但**可以只读复用**以下资产：TextFSM 模板库（`src/skills/shared/textfsm-templates/`）、解析运行时（`src/core/parser`、`src/apps/rule_governance`）、设备资产表 `netops_devices`、身份识别器 `DeviceIdentityResolver`。复用方式是调用公开函数或读取模板文件，不改它们的行为。模板只是分层解析中的一层（7.3），主力是通用解析器。
 4. **每个阶段结束必须能在实验环境跑通该阶段的验收场景**；不以“单元测试通过”代替验收。实验环境见第 11 节。
-5. 每张任务卡结束时给出：改动文件清单、新增测试、实际运行的命令与结果、未完成项。不得声称未验证的厂商/版本“已支持”。
+5. 每张任务卡结束时在第 14 节记录：改动文件清单、新增测试、实际运行的命令与结果、未完成项。按负责人最新要求不再逐卡发送汇报。不得声称未验证的厂商/版本“已支持”。
 6. 所有数据库变更使用 App 包内迁移（`src/apps/<app>/migrations/versions/`），不改全局迁移目录。
 7. 遇到本文未覆盖且会影响数据模型或安全边界的决定，先在第 14 节“待决问题”记录并停下，不自行扩大范围。
 8. 开工前先做 P0（第 10 节 P0）：当前工作区有大量未提交改动，`src/apps/topology/` 与 `src/apps/device_access/` 仍是未跟踪文件，必须先建立可回滚基线。
@@ -437,6 +437,15 @@ class DeviceAccessService:
 - 全部认证失败 → 该节点 `waiting_for_input`，提供“输入新凭据/指定凭据集/跳过”。
 - 权限：凭据集的创建/查看（仅元数据）/使用分离；使用权限 = 该用户对该管理域/CIDR 有 `device.collect` 授权。
 - 兼容：`netops_devices.credential_ref = env:XXX` 视作一个设备作用域凭据来源。
+
+P1-1 实施细化（2026-09-28）：
+
+- 凭据集显式保存 `domain`，设备记忆用 `(owner_id, domain, device_key)` 复合主键，防止不同用户、重叠地址管理域共用记忆或跨域匹配。设备作用域支持 IP 或 `uid:<标识>`；UID 只能由服务端已解析的设备身份传入。
+- 元数据仅所属账号可见；admin/operator 可创建、禁用、轮换自己的凭据，viewer 只能读取自己的元数据。使用仍须实时检查管理域、地址和动作授权；凭据存在不等于获得设备访问权。
+- 使用既有 `DEVICE_ACCESS_CREDENTIAL_KEY` 加密密码与可选特权密码；HTTP 校验错误也不回显请求内容。特权密码仅储存和脱敏，本卡不自动进入 enable 模式。
+- 新建连接支持 `credential_mode=vault`；由 App 内适配器在公共 SSH 服务的并发租约内按顺序尝试，每组仅一次、总计最多三组。只有认证失败继续下一组，网络/信任错误立即人工介入。成功命令输出、提示符及异常附带输出先脱敏再进入证据回调。
+- 首版 `temporary` 模式仍默认保留；vault 模式可带临时凭据作为最低优先级来源。手动指定 `credential_set_id` 只尝试该集，不绕过所属账号/管理域/设备范围校验。资产 `env:` 来源按管理域和 IP 唯一匹配，重复资产不猜选。
+- 本卡先接入设备访问 App 的采集与人工终端；拓扑递归任务、DSH 新会话接口沿后续任务卡接入。未修改原巡检，也未将凭据明文加入任务队列或模型输入。
 
 ### 8.3 命令策略引擎（D8）
 
@@ -860,7 +869,7 @@ VSR-2 GE3/0(二层 access VLAN 100) ── Switch1(不可管理) ── PC1 1.1.
 | P0-2 | 已完成（基线非全绿） | 2026-09-28 | Python 主集 2396 通过 / 162 失败 / 3 跳过；包内另 24 通过；YANG 补跑 2 通过；前端单测 256 通过、构建通过；BFF、浏览器及视觉失败详见下方 | 只记录基线，不修改业务代码或测试预期；剩余未验证项为可选语义模型及 Linux 专属测试 |
 | P0-3 | 已完成 | 2026-09-28 | 首版文首已链接后续路线图且文件存在；`git ls-files scripts/topology/collect_lab_samples.py` 非空；`git diff --check` 通过 | 仅文档衔接；采样脚本在 P0-1 已纳入；按最新授权继续 P1-3 |
 | P1-3 | 已完成 | 2026-09-28 | 新增策略矩阵 458 项通过；连同现有设备访问回归共 525 项通过；Ruff 检查通过 | 新分类器与四平台 YAML；未接入 DSH、未改变 `authorize()`；见 8.3 实施细化 |
-| P1-1 | 未开始 | | | |
+| P1-1 | 实现完成，实机验收待补 | 2026-09-28 | Python 570 项通过（本卡新增 44 项）；前端全量 261 项通过，新增连接表单后定向 7 项通过；构建、Ruff 通过 | 迁移 0002、凭据集界面、公共 SSH 接入；实验密码当前不可用，未冒称两台 H3C 验收通过 |
 
 ### P0-1 基线记录（2026-09-28）
 
@@ -944,6 +953,16 @@ VSR-2 GE3/0(二层 access VLAN 100) ── Switch1(不可管理) ── PC1 1.1.
 - `python -m ruff check src/platform/device_access/command_policy.py tests/unit/test_device_access_command_policy.py` 与 `git diff --check` 通过；使用 Ruff 格式化，环境未安装 Black，未声称 Black 检查通过。
 - 方案逻辑修正：自由文本不能自行成为 L0、未写参数必须显式补齐预算、毫秒/秒不能混用、不能给未知 Cisco traceroute 语法推定 L2；累计配额与执行审批属于后续会话层。未进行本阶段最终实机验收，未宣称多厂商实机已支持。
 - 回滚：回退本卡提交即可；无迁移和执行路径接线。按持续执行授权进入 P1-1。
+
+### P1-1 实施记录（2026-09-28）
+
+- 改动文件：新增 `backend/credentials.py`、`credential_schemas.py`、`credential_api.py`、`vault_driver.py`、`migrations/versions/0002_credentials.py`、`frontend/CredentialSets.tsx`（以上均在 `src/apps/device_access/`）；修改同 App 的 `models.py`、`schemas.py`、`service.py`、`api.py`、`frontend/Page.tsx`、`app.yaml`；公共层仅 `src/platform/device_access/security.py` 增加纯解析顺序；共享 `DeviceTerminal.tsx` 增加凭据来源选择；更新前端 App 生成清单。原巡检目录无修改。
+- 新增测试：`tests/unit/test_device_access_credentials.py` 44 项，覆盖密文往返、CIDR 最长前缀、记忆优先且先查范围、禁用/轮换、最多三集各一次、显式选集、所有者/域隔离、错误及 HTTP 校验不泄密、真实回环 SSH 认证、公共服务完整证据回调脱敏、0001→0002 保留旧连接且重复升级安全。前端 `CredentialSets.test.tsx` 5 项、`DeviceTerminal.test.tsx` 2 项，验证管理权限、写入后清空密码、切换来源不提交遗留密码。
+- 实际命令：PowerShell 用 `rg --files tests` 选择 `test_device_access*.py` 与 `test_topology_migrations.py` 后传入 `venv/Scripts/python.exe -m pytest ... -q --tb=short --junitxml=.runtime/p1-1-tests.xml`，**570 passed**；第一次直接传通配符未展开（0 项），修正后完整执行。日志 `.runtime/p1-1-tests.log`。
+- 前端 `npm run test:unit -- --reporter=dot` **261 passed / 61 files**；随后新增连接表单测试，与凭据集测试定向执行 **7 passed / 2 files**。日志 `.runtime/p1-1-ui.log`、`p1-1-ui-focused.log`。`npm run build -- --outDir ../../.runtime/p1-1/frontend-dist` 通过（隔离产物，不替换正在运行的页面）。
+- `python -m ruff check` 本卡后端、迁移、公共凭据文件及测试通过；`git diff --check` 通过。未执行线上迁移、未发布、未 push。
+- 实机待验收：进程与项目 `.env` 都没有 `NETOPS_LAB_PASSWORD`；已请求账号来源，未收到补充，未读取或复用巡检账号。回环 SSH 仅证明协议认证顺序，不代表 H3C 实机验收。待取得实验凭据后，使用已核验主机密钥完成两台 H3C 登录、错后对认证日志及日志/模型/队列无明文验收。P1 阶段不得因此标为验收完成；可继续同阶段后续独立任务卡。
+- 回滚：回退代码提交并从已验证备份恢复本卡 App 数据；迁移不提供删除凭据数据的自动降级。凭据加密主密钥必须保留，否则只能人工重新录入。
 
 **待决问题**
 

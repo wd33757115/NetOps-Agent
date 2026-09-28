@@ -1,7 +1,7 @@
 manifest_version: 1
 id: device-access
 name: 设备访问
-version: 0.1.0
+version: 0.2.0
 platform_api: '>=1.0,<2.0'
 icon: terminal
 dependencies: {}
@@ -14,5 +14,5 @@ agent:
 database:
   mode: package
   migrations: migrations
-  head: device_access_0001
-  tables: [app_device_access_connections, app_device_access_operations]
+  head: device_access_0002
+  tables: [app_device_access_connections, app_device_access_operations, app_device_access_credential_sets, app_device_access_device_credentials]

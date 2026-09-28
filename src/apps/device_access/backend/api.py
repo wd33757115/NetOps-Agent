@@ -6,9 +6,12 @@ from src.platform.authorization.client import require_app
 from src.platform.device_access.contracts import DeviceAccessError
 
 from . import service
+from .credential_api import CredentialRoute
+from .credential_api import router as credential_router
 from .schemas import Collect, ConnectionRequest, Ticket
 
-router = APIRouter(tags=["Device access"])
+router = APIRouter(tags=["Device access"], route_class=CredentialRoute)
+router.include_router(credential_router)
 actor = require_app("device-access")
 
 
