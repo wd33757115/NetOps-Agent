@@ -1,0 +1,148 @@
+{
+  "scope": "Audit of the pinned package and three historical candidates; not all IETF work",
+  "model_package_sha256": "7742b84b1e7be26e2cf076cec78e959c2895203e80684e75ba08eea2a5c817ab",
+  "history_lock_sha256": "a8e2af5264c4f203b446871a8d3da909ab5451cd54cb82336ab7e3a9ca620639",
+  "declarations_by_module": {
+    "draft-relation@2025-08-01.yang": [],
+    "draft-template@2025-08-01.yang": [],
+    "iana-bfd-types@2021-10-21.yang": [],
+    "iana-hardware@2018-03-13.yang": [],
+    "iana-if-type@2014-05-08.yang": [],
+    "iana-routing-types@2017-12-04.yang": [],
+    "ieee802-dot1q-types@2023-10-26.yang": [],
+    "ietf-access-control-list@2019-03-04.yang": [],
+    "ietf-bfd-types@2022-09-22.yang": [],
+    "ietf-datastores@2018-02-14.yang": [],
+    "ietf-ethertypes@2019-03-04.yang": [],
+    "ietf-hardware@2018-03-13.yang": [],
+    "ietf-inet-types@2025-12-22.yang": [],
+    "ietf-interfaces@2018-02-20.yang": [],
+    "ietf-ip@2018-02-22.yang": [],
+    "ietf-ipv4-unicast-routing@2018-03-13.yang": [],
+    "ietf-ipv6-router-advertisements@2018-03-13.yang": [],
+    "ietf-ipv6-unicast-routing@2018-03-13.yang": [],
+    "ietf-key-chain@2017-06-15.yang": [],
+    "ietf-l2-topology@2020-11-15.yang": [],
+    "ietf-l3-unicast-topology@2018-02-26.yang": [],
+    "ietf-logical-network-element@2019-01-25.yang": [
+      {
+        "extension": [
+          "yangmnt",
+          "mount-point"
+        ],
+        "label": "root",
+        "declaration_path": [
+          "ietf-logical-network-element",
+          "logical-network-elements",
+          "logical-network-element",
+          "root"
+        ],
+        "line": 95
+      }
+    ],
+    "ietf-netconf-acm@2018-02-14.yang": [],
+    "ietf-network-instance@2019-01-21.yang": [
+      {
+        "extension": [
+          "yangmnt",
+          "mount-point"
+        ],
+        "label": "vrf-root",
+        "declaration_path": [
+          "ietf-network-instance",
+          "network-instances",
+          "network-instance",
+          "root-type",
+          "vrf-root"
+        ],
+        "line": 119
+      },
+      {
+        "extension": [
+          "yangmnt",
+          "mount-point"
+        ],
+        "label": "vsi-root",
+        "declaration_path": [
+          "ietf-network-instance",
+          "network-instances",
+          "network-instance",
+          "root-type",
+          "vsi-root"
+        ],
+        "line": 128
+      },
+      {
+        "extension": [
+          "yangmnt",
+          "mount-point"
+        ],
+        "label": "vv-root",
+        "declaration_path": [
+          "ietf-network-instance",
+          "network-instances",
+          "network-instance",
+          "root-type",
+          "vv-root"
+        ],
+        "line": 137
+      }
+    ],
+    "ietf-network-inventory-sw-ext@2026-07-06.yang": [],
+    "ietf-network-inventory-topology@2026-09-11.yang": [],
+    "ietf-network-inventory@2026-09-16.yang": [],
+    "ietf-network-topology@2018-02-26.yang": [],
+    "ietf-network@2018-02-26.yang": [],
+    "ietf-origin@2018-02-14.yang": [],
+    "ietf-ospf@2022-10-19.yang": [],
+    "ietf-packet-fields@2019-03-04.yang": [],
+    "ietf-routing-types@2017-12-04.yang": [],
+    "ietf-routing@2018-03-13.yang": [],
+    "ietf-sap-ntw@2023-06-20.yang": [],
+    "ietf-simap-topology@2025-01-01.yang": [],
+    "ietf-vpn-common@2022-02-11.yang": [],
+    "ietf-yang-library@2019-01-04.yang": [],
+    "ietf-yang-metadata@2016-08-05.yang": [],
+    "ietf-yang-schema-mount@2019-01-14.yang": [],
+    "ietf-yang-types@2025-12-22.yang": []
+  },
+  "historical_candidates": [
+    {
+      "source": "https://www.ietf.org/archive/id/draft-ietf-ivy-network-inventory-topology-00.txt",
+      "module": "ietf-network-inventory-topology@2024-04-29.yang",
+      "sha256": "6cc55c59bb17ccc4ce5585a927e2c08c8c98105f66a439c32d273f4b821f353f",
+      "syntax_parsed": true,
+      "diagnostics": [],
+      "mount_declarations": [],
+      "scope": "Syntax/declaration audit only; historical dependencies not compiled"
+    },
+    {
+      "source": "https://www.ietf.org/archive/id/draft-ietf-ivy-network-inventory-topology-01.txt",
+      "module": "ietf-network-inventory-topology@2025-02-04.yang",
+      "sha256": "ab58b48b29e326a02ac37e158d89ce3b3ceba77fe5deedb3fffed8a342563bf7",
+      "syntax_parsed": true,
+      "diagnostics": [],
+      "mount_declarations": [],
+      "scope": "Syntax/declaration audit only; historical dependencies not compiled"
+    },
+    {
+      "source": "https://www.ietf.org/archive/id/draft-clemm-netmod-peermount-01.txt",
+      "module": "ietf-peer-mount@2023-10-23.yang",
+      "sha256": "28e5da1548048e1100e3f87e8ca795c4bc9095f97cd60154deb2d4d975c1e75a",
+      "syntax_parsed": false,
+      "diagnostics": [
+        {
+          "line": 329,
+          "code": "INCOMPLETE_STATEMENT",
+          "arguments": [
+            "description",
+            "}"
+          ]
+        }
+      ],
+      "mount_declarations": null,
+      "scope": "Syntax/declaration audit only; historical dependencies not compiled"
+    }
+  ],
+  "virtual_end_to_end_mapping_closed": false
+}

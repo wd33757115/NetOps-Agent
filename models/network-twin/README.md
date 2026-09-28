@@ -31,7 +31,9 @@
 - 目前使用 RFC 7895 形式的验证库供 Yangson 装载，不代表实现了服务器的 RFC 8525 接口。
 - RFC 8528 挂载需要运行时装载及 parent-reference 处理。当前 Yangson 会拒绝直接塞进 vrf-root 的路由树；这个反例明确记录工具边界，不删除子树假装 mount 已通过。
 
-完整模型仍有未闭合项：虚拟 topology node→inventory/device 的标准关联、SIMAP 原文语义缺口、挂载运行时及全部 TE/协议扩展。缺口不以项目新字段填补。
+续轮已用 libyang 5.8.6 完成设备内配置级挂载的 8 个正反例，见 [挂载验证](mount/README.md)。它不会改变上述 Yangson 的工具边界。
+
+完整模型仍有未闭合项：虚拟 topology node→inventory/device 的标准关联、SIMAP 原文语义缺口、生产挂载服务及 operational 验证、全部 TE/协议扩展。缺口不以项目新字段填补。
 
 ## 实验实例和验证边界
 

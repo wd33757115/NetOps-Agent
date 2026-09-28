@@ -31,3 +31,7 @@
 
 # CLI fixtures preserve captured CR CR LF and exact byte hashes on every OS.
 tests/fixtures/topology/**/*.txt -text whitespace=-blank-at-eol
+
+# Keep generated mount inputs byte-identical to their locked hashes on Windows.
+models/network-twin/mount/cases/*.xml text eol=lf
+models/network-twin/mount/Dockerfile* text eol=lf
