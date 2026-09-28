@@ -35,6 +35,7 @@ export function ConnectionForm({ address, domain, terminal = false, onCreated }:
     </> : <Alert type="info" message="使用本账号在该管理域和设备范围内的凭据集，最多尝试 3 集，每集一次。全部认证失败或无法连接时等待人工处理。" style={{ marginBottom: 16 }} />}
     <Form.Item label="允许的诊断命令集" name="profiles" rules={[{ required: true }]}><Select mode="multiple" options={profiles} /></Form.Item>
     <Form.Item label="允许人工 SSH 终端" name="allow_terminal" valuePropName="checked"><Switch disabled={terminal} /></Form.Item>
+    <Form.Item label="允许受控诊断会话" name="allow_session" valuePropName="checked"><Switch /></Form.Item>
     <p style={{ color: '#667085' }}>授权有效期 1 小时，仅限本账号及此设备。密码不会保存在浏览器。主机密钥须由管理员预先核验。</p>
     <Button type="primary" htmlType="submit" loading={busy}>创建连接授权</Button>
   </Form>

@@ -429,6 +429,15 @@ class DeviceAccessService:
 - `SessionHandle` 只存在于后端；模型拿到的是 `session_id`（不透明字符串）。
 - 会话空闲 60 s 自动关闭，诊断会话结束时全部关闭。
 
+P1-4 实施细化（2026-09-28）：
+
+- 新公共入口要求服务端签发的 `device.session` grant；原固定包 `device.collect` 或人工终端 grant 不自动升级为任意只读命令授权。设备访问连接新增默认关闭的 `allow_session`，用户明确启用后，App 服务端入口再签发该 grant，并在每次命令前后复查账号、连接期限与设备范围。
+- 调用方传入已识别的平台、目的、审计写入器和 `SessionBudget`；平台来源是服务端识别/档案，不新增让模型选择平台的 HTTP 参数。预算上限：总时长 600 秒、空闲 60 秒、60 次命令请求（含拒绝与待审批）、10 次 L2 探测。空闲计时不打断正在执行的命令，总时长计时会中断；同一会话不并行执行命令。
+- 每条自由命令按 P1-3 分类，只发送规范化后的 L1/L2；L4 返回 `denied`，L3 返回 `pending_approval` 并写审计。审批交互与一次性批准执行仍在 P4-4 接入，本卡不提供绕过审批的执行参数；固定 L0 发现包保留原路径。
+- `SessionHandle` 由后端工作进程持有，可用上下文管理器或 `close()` 结束；空闲/总预算/取消/租约丢失/命令流损坏均关闭连接并释放租约。后续 P4 工作进程必须在诊断结束的 finally 中关闭全部 handle；当前不提供跨 worker 传输活连接的 API。
+- App 迁移 `device_access_0004` 增加只追加的 `app_device_access_session_audit`；保存开关会话、原始/规范化命令、策略级别、脱敏结果与输出 SHA256。执行前先持久化请求审计，完成后持久化结果再返回证据引用；审计不可用即关闭，不继续发送命令或发布未审计输出。未解析凭据前不记录自由文本目的，关闭时仍保留脱敏能力。
+- `GET /sessions/{session_id}/audit` 仅返回本人的审计证据。会话执行入口是服务端 Python API；DSH 工具接线与多设备诊断按 P4 实施，不改变现有聊天页。
+
 ### 8.2 凭据库（D6）
 
 - 表 `app_device_access_credential_sets`：`id`、`name`、`username`、`secret_ciphertext`、`enable_secret_ciphertext`(nullable)、`scope_kind`(domain/cidr/device)、`scope_value`、`priority`、`owner_id`、`created_at`、`rotated_at`、`disabled`。
@@ -871,7 +880,13 @@ VSR-2 GE3/0(二层 access VLAN 100) ── Switch1(不可管理) ── PC1 1.1.
 - 测试：首次固定、严格模式、变更/撤销、域和端口隔离、先授权再固定、数据库并发首次固定、管理员权限、过期修订拒绝、真实回环 SSH 在发送密码前拒绝异常密钥、变化告警界面。
 - 验收：两台实验 H3C 的握手密钥与已有实验基线一致；使用隔离信任库模拟指纹变化并确认公共驱动拒绝；此验收无需密码且不修改设备密钥。P1 完整登录验收仍按 P1-1 待补。
 
-**P1-4 会话接口** / **P1-5 Netmiko 驱动** / **P1-6 授权入库**：按 8.1、8.5 节与 P1 表格编写，格式同上。
+**P1-4 会话接口**
+- 范围：公共 `sessions.py`、`DeviceAccessService.open_session()`、App 审计写入/本人读取、迁移 0004、连接授权显式启用受控会话。
+- 不做：DSH 新工具接线、跨 worker 活连接传输、L3 审批交互（P4-4）、改变原固定命令包授权。
+- 测试：一次登录复用、命令分级/规范化/VRF、累计预算、空闲与总超时、主动关闭/取消、租约与授权撤销、审计失败关闭、输出和最终审计脱敏、本人证据隔离、真正 SSH 协议交互。
+- 验收：两台实验 H3C 每台一次登录完成版本/接口/受限 ping，L4 和 L3 均不发送；全部结果带审计证据引用且关闭释放会话。原聊天与固定采集路径回归通过。
+
+**P1-5 Netmiko 驱动** / **P1-6 授权入库**：按 8.5 节与 P1 表格编写，格式同上。
 
 > P2 以后的任务卡在进入该阶段时由执行者按模板从第 10 节表格展开，展开后先提交任务卡再开发。
 
@@ -887,6 +902,7 @@ VSR-2 GE3/0(二层 access VLAN 100) ── Switch1(不可管理) ── PC1 1.1.
 | P1-3 | 已完成 | 2026-09-28 | 新增策略矩阵 458 项通过；连同现有设备访问回归共 525 项通过；Ruff 检查通过 | 新分类器与四平台 YAML；未接入 DSH、未改变 `authorize()`；见 8.3 实施细化 |
 | P1-1 | 已完成（含实机补验） | 2026-09-28 | 初次 Python 570 项通过；实机修复后回归 590 项通过（另 PostgreSQL 2 项此前独立通过）；两台 H3C 自动登录/版本/日志采集成功，各仅一条本次错误用户认证日志；前端全量 261 与新增表单定向 7 项通过，构建通过 | 凭据库接入、0002 迁移；补修首次提示符 NUL 填充问题，见 E18；密码未写入源码、文档或运行报告 |
 | P1-2 | 已完成（密钥握手验收） | 2026-09-28 | Python 回归 589 项通过，另 PostgreSQL 并发 2 项通过；前端定向 9 项通过、构建通过；两台 H3C 握手基线与模拟变化拒绝均通过 | 0003 迁移、数据库密钥策略、管理员告警/核验；未发送密码、未改设备、未发布 |
+| P1-4 | 已完成 | 2026-09-28 | Python 620 项通过（新增会话 30 项）；前端定向 10 项通过、构建通过；两台 H3C 每台一次连接执行 L1/L2、拒绝 L4/挂起 L3，13 条审计事件/台 | 0004 迁移、公共会话 API、显式授权及审计读取；DSH 与审批交互按 P4 后续接入 |
 
 ### P0-1 基线记录（2026-09-28）
 
@@ -998,6 +1014,16 @@ P1-1 实机补验与驱动修复（2026-09-28）：
 - 实验设备：执行 `.runtime/p1-2-lab-check.py`，对 `10.10.1.1`、`10.10.1.2` 在密码认证前读取握手公钥，分别与 `.runtime/lab-samples/known_hosts` 基线匹配并完成隔离库首次固定；随后仅替换隔离库的可信公钥，实际再次连接两台设备均返回 `host_key_changed`。没有发送密码、没有执行设备命令、没有修改设备密钥。结果 `.runtime/p1-2-lab-check.json`。这不替代 P1-1 的成功登录及设备认证日志验收。
 - 未完成项：尚未发布/升级本机已安装 App；P1-1 登录验收后已补齐（见上）；生产域策略 Q3 未选定，默认行为保持文件严格模式。接下来进入 P1-4；P1 阶段整体尚有任务卡待完成。
 - 回滚：代码可回退；保留/备份密钥信任数据库，迁移不自动删除信任记录。未进行线上迁移或 push。
+
+### P1-4 实施记录（2026-09-28）
+
+- 文件：新增公共 `src/platform/device_access/sessions.py`、App `backend/sessions.py`、`migrations/versions/0004_session_audit.py`；修改公共 `service.py`、App 模型/schema/API/vault 脱敏生命周期/manifest、前端连接表单与 App 生成清单。没有修改巡检、现有 `authorize()` 或聊天入口。
+- 新增 `tests/unit/test_device_access_sessions.py` **30 项**，包括真实 Paramiko 会话与后台定时器、关闭后审计脱敏、审计失败在不同节点阻止执行/输出、明示 grant、原连接默认不升级授权、设备权限/租约失效、输出上限和本人审计 HTTP 隔离。前端连接表单增加明确启用会话的测试。
+- 实际命令：PowerShell 用 `rg --files tests/unit` 选取 `test_device_access*.py` 与 `test_topology_migrations.py` 后运行 `python -m pytest ... -q --tb=short --junitxml=.runtime/p1-4-tests.xml`，**620 passed**。之后仅调整正常关闭事件的原因字段并定向复跑会话 **30 passed**。日志 `.runtime/p1-4-tests.log`。
+- 前端 `npm run test:unit -- ../../src/apps/device_access/frontend src/platform/terminal/DeviceTerminal.test.tsx --reporter=dot` **10 passed / 3 files**；隔离 `npm run build -- --outDir ../../.runtime/p1-4/frontend-dist` 通过。Ruff、diff 检查通过；没有重复运行已知不相关的全仓失败集。
+- 实机执行 `.runtime/p1-4-lab-session.py`，密码仅隐藏输入、凭据/审计使用隔离内存库，使用真实公共并发租约与 `VaultDriver`：两台 H3C 每台 **1 次 SSH 登录**；`display version`、`display interface brief` 成功；对端管理 IP 单包 ping 成功；`system-view` 返回 L4 denied、`display diagnostic-information` 返回 L3 pending_approval，驱动发送记录中均不存在这两条命令。每台 **13 条持久化到验证库的审计事件**，五次命令请求均有证据引用，最终关闭；序列化审计不含实际密码。报告 `.runtime/p1-4-lab-session.json`。
+- 未完成项：App 版本 0.4.0 尚未发布或在运行环境迁移；L3 一次性审批流程及 DSH 会话工具属于 P4。下一卡 P1-5；本卡没有自动更改生产信任或设备配置。
+- 回滚：回退代码并保留审计数据库备份；迁移禁止自动删除审计表。未 push。
 
 **待决问题**
 

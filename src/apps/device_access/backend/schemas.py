@@ -18,6 +18,7 @@ class ConnectionRequest(Schema):
     password: SecretStr | None = Field(default=None, min_length=1, max_length=1024)
     profiles: list[str] = Field(min_length=1, max_length=6)
     allow_terminal: bool = False
+    allow_session: bool = False
 
     @model_validator(mode="after")
     def credentials(self):

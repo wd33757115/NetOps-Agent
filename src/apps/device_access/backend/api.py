@@ -10,6 +10,7 @@ from .credential_api import CredentialRoute
 from .credential_api import router as credential_router
 from .host_key_api import router as host_key_router
 from .schemas import Collect, ConnectionRequest, Ticket
+from .sessions import read_audit
 
 router = APIRouter(tags=["Device access"], route_class=CredentialRoute)
 router.include_router(credential_router)
@@ -56,3 +57,8 @@ def read(operation_id: str, user: CurrentUser = Depends(actor)):
 @router.post("/terminal-tickets")
 def ticket(body: Ticket, user: CurrentUser = Depends(actor)):
     return call(user, service.ticket, body)
+
+
+@router.get("/sessions/{session_id}/audit")
+def session_audit(session_id: str, user: CurrentUser = Depends(actor)):
+    return read_audit(user.user_id, session_id)

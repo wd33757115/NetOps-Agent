@@ -19,6 +19,9 @@ class RedactedConnection:
             value = value.replace(secret, "[redacted]")
         return value
 
+    def redact(self, value):
+        return self._redact(value)
+
     def _call(self, method, *args, **kwargs):
         try:
             return self._redact(getattr(self._connection, method)(*args, **kwargs))
@@ -39,10 +42,9 @@ class RedactedConnection:
         return self._connection.channel
 
     def disconnect(self):
-        try:
-            self._connection.disconnect()
-        finally:
-            self._secrets = ()
+        # Closing a transport may precede the final audit write; keep the redactor
+        # until this backend-only wrapper is released, as with the driver's profile.
+        self._connection.disconnect()
 
 
 class VaultDriver:

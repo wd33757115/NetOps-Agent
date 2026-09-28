@@ -26,6 +26,11 @@ class DeviceAccessService:
         self.driver = driver or ParamikoDriver()
         self.admission = admission or SSHAdmission()
 
+    def open_session(self, context, target_ref, **kwargs):
+        from .sessions import open_session
+
+        return open_session(self, context, target_ref, **kwargs)
+
     @contextmanager
     def terminal(self, context, target_ref, profile_id, *, should_continue=None):
         """A separately authorized human channel; never share a batch SSH session."""

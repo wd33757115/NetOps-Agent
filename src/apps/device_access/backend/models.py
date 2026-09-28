@@ -94,3 +94,14 @@ class HostKeyPolicy(Base):
     policy = Column(String(16), nullable=False)
     updated_by = Column(String(64), nullable=False)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=now)
+
+
+class SessionAudit(Base):
+    __tablename__ = "app_device_access_session_audit"
+    id = Column(String(32), primary_key=True)
+    owner_id = Column(String(64), nullable=False, index=True)
+    session_id = Column(String(32), nullable=False, index=True)
+    target_ref = Column(String(256), nullable=False)
+    event_kind = Column(String(32), nullable=False)
+    payload = Column(JSON, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=now)

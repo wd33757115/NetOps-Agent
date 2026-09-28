@@ -38,3 +38,13 @@ it('keeps the original manual flow and clears the password after failure', async
   await waitFor(() => expect(api.post).toHaveBeenCalledWith('/apps/device-access/connections', expect.objectContaining({ credential_mode: 'temporary', username: 'operator', password: 'temporary-password' })))
   await waitFor(() => expect(screen.getByLabelText('密码')).toHaveValue(''))
 })
+
+it('requires an explicit opt-in for controlled diagnostic sessions', async () => {
+  render(<ConnectionForm address="10.0.0.1" onCreated={vi.fn()} />)
+  expect(screen.getByLabelText('允许受控诊断会话')).not.toBeChecked()
+  fireEvent.change(screen.getByLabelText('用户名'), { target: { value: 'operator' } })
+  fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'temporary-password' } })
+  fireEvent.click(screen.getByLabelText('允许受控诊断会话'))
+  fireEvent.click(screen.getByRole('button', { name: '创建连接授权' }))
+  await waitFor(() => expect(api.post).toHaveBeenCalledWith('/apps/device-access/connections', expect.objectContaining({ allow_session: true })))
+})
