@@ -1,0 +1,9 @@
+*down: administratively down
+(s): spoofing  (l): loopback
+Interface          Physical Protocol IP address/Mask    VPN instance Description
+GE1/0              up       up       10.10.1.1/24       --           --         
+GE2/0              up       up       2.2.2.2/24         --           --         
+GE4/0              down     down     --                 --           --         
+GE5/0              down     down     --                 --           --         
+Loop0              up       up(s)    4.4.4.4/32         --           --         
+Vlan200            up       up       192.168.1.1/24     --           --         

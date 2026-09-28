@@ -245,7 +245,7 @@
 - 并发：同一 run 默认 8 个并发目标（受现有全局/站点配额约束，沿用 `concurrency.py`）。
 - 单节点采集预算默认 120 s；路由表大的核心设备可在档案中覆盖（如 300 s）。
 - 某能力命令失败或不支持（实测：VSR 上 `display irf` 返回 `% Incomplete command found at '^' position.`，`display device manuinfo` 返回 `The operation is not supported on the specified slot or subslot.`）只让该能力 fact_set 为 `unsupported/failed`，不影响其他能力，也不阻止扩散。
-- 同一对设备之间有多条并行链路时（实测：两台 VSR 的 GE1/0↔GE1/0、GE2/0↔GE2/0），LLDP 会从多个本地端口报告同一邻居与同一管理地址：邻居按机箱 ID 去重只入队一次，链路按 (本端 TP, 对端机箱, 对端端口) 分别建立。
+- 同一对设备之间有多条并行链路时（实测：两台 VSR 的 GE1/0↔GE1/0、GE2/0↔GE2/0），LLDP 会从多个本地端口报告同一邻居机箱，但通告地址可不同（GE1/0 为 10.10.1.x，GE2/0 为 2.2.2.x）：邻居按机箱 ID 去重只入队一次，链路按 (本端 TP, 对端机箱, 对端端口) 分别建立。
 - 能力清单可按任务选择：`fast`（version+lldp_local+lldp+interfaces）、`standard`（+inventory+ip+arp+mac+vlan+lag）、`full`（+routes+vrfs+irf/mlag+vxlan）。默认 `standard`，诊断路径计算需要 `full`。
 
 ### 6.2 身份归并
@@ -637,7 +637,7 @@ trace(src, dst, vrf?):
 
 | 任务 | 内容 |
 |---|---|
-| P2-0 | 实验样本转测试夹具：把 `.runtime/lab-samples/20260928-163159/`（含 `*.raw.txt` 原始字节，优先使用）的真实输出经 `scripts/scan_sensitive_device_data.py` 检查后复制到 `tests/fixtures/topology/h3c/vsr1000-7.1.064/<capability>.txt`，同时保留原始字节版本（`*.raw.txt`，由新版采集脚本生成）；为 11.0 列出的每条实测结论写对应测试 |
+| P2-0 | 实验样本转测试夹具：把 `.runtime/lab-samples/20260928-163159/`（含保留行尾的 `*.raw.txt`，优先使用）的真实输出经 `scripts/scan_sensitive_device_data.py` 检查后复制到 `tests/fixtures/topology/h3c/vsr1000-7.1.064/{vsr-1,vsr-2}/<capability>.txt`，同时保留 `*.raw.txt` 并记录源文件字节摘要；历史采样器先 UTF-8 解码，不能把它称为任意编码的无损网络字节抓取；为 11.0 列出的每条实测结论写对应测试 |
 | P2-1 | 事实层表与迁移 `topology_0002`（5.2），仓储函数与“当前视图”查询 |
 | P2-2 | 平台档案加载器与 `h3c-comware7`、`cisco-nxos`、`cisco-ios` 三个档案（7.1），识别逻辑替换 `detection.py` 中的硬编码签名（保留兼容） |
 | P2-3 | 解析适配（7.3）：复用现有 TextFSM 模板；缺失的 LLDP、VLAN、LAG、路由模板用 textfsm-generator 生成并以实验样本人工校验；每档案×能力有样本回放测试 |
@@ -757,7 +757,7 @@ VSR-2 GE3/0(二层 access VLAN 100) ── Switch1(不可管理) ── PC1 1.1.
 
 **样本采集**
 - 脚本：`scripts/topology/collect_lab_samples.py`（只发送固定 `display` 命令；主机密钥 TOFU 固定；首次登录遇到改密等交互问题时停止，不自动回答）。
-- 输出：`.runtime/lab-samples/<时间戳>/<host>/<capability>.txt`（规范化）、`<capability>.raw.txt`（原始字节）与 `meta.json`（被 `.gitignore` 忽略）。**基准批次：`20260928-163159`**（早期批次 `20260928-160324` 为改配置前数据、无 raw，仅作参考）。
+- 输出：`.runtime/lab-samples/<时间戳>/<host>/<capability>.txt`（规范化）、`<capability>.raw.txt`（采集器保存的 UTF-8 原始回显，保留行尾）与 `meta.json`（被 `.gitignore` 忽略）。**基准批次：`20260928-163159`**（早期批次 `20260928-160324` 为改配置前数据、无 raw，仅作参考）。
   ```powershell
   $env:NETOPS_LAB_PASSWORD = "<密码>"
   venv\Scripts\python.exe scripts\topology\collect_lab_samples.py 10.10.1.1 10.10.1.2 --username admin
@@ -771,15 +771,15 @@ VSR-2 GE3/0(二层 access VLAN 100) ── Switch1(不可管理) ── PC1 1.1.
 | E1 | 两台设备主机名均为默认 `H3C` | 主机名不能作为身份键 | D2、6.2 |
 | E2 | VSR 不支持 `display device manuinfo`；但 `display lldp local-information` 的 LLDP-MED 部分有 `SerialNum`、`Model name` | 序列号与机箱 ID 都从 lldp_local 取 | D2、7.1、7.3 ④ |
 | E3 | LLDP verbose 的本地端口在标题行 `…of port 17[GigabitEthernet1/0]:` | 通用 LLDP 解析器需支持标题取本地端口 | 7.3 ④ |
-| E4 | 同一块内有 4 个以 `Management address` 开头的键 | 同义词必须完整键名精确匹配 | 7.3 ④ |
+| E4 | 同一块内有 5 个以 `Management address` 开头的键（type、地址本身、interface type、interface ID、OID） | 同义词必须完整键名精确匹配 | 7.3 ④ |
 | E5 | `System description` 为多行缩进值 | 需续行拼接 | 7.3 ④ |
-| E6 | GE1/0、GE2/0 都报告同一邻居；GE1/0 实际经过 Hub1，GE2/0 才是直连 | 邻居按机箱去重，链路分别建立；LLDP 双向可见**不能证明直连** | 6.1、6.4 |
+| E6 | GE1/0、GE2/0 都报告同一邻居机箱、不同管理地址；GE1/0 实际经过 Hub1，GE2/0 才是直连 | 邻居按机箱去重，链路分别建立；LLDP 双向可见**不能证明直连** | 6.1、6.4 |
 | E7 | 接口简写 `GE1/0` 与 LLDP 全称 `GigabitEthernet1/0` 并存；两段式编号；`Vlan200`、`Loop0` 等逻辑口 | 接口名规范化 | 5.4 |
 | E8 | 原始行尾 `\r\r\n` | 行尾规范化；证据存原始字节 | 5.4 |
 | E9 | `display irf` → `% Incomplete command…`；manuinfo → `The operation is not supported…` | 分类为 unsupported，不影响其他能力 | 6.1、7.3 |
-| E10 | `No link aggregation group exists.`、`L3VPN is not configured.` | 合法空结果 | 7.3 |
+| E10 | `No link aggregation group exists.`；基准批次 VRF 为 `Total VPN-Instances configured : 0`（并带许可信息） | 合法空结果 | 7.3 |
 | E11 | 路由表首行 `Destinations : 18\tRoutes : 18`；协议 `Direct`/`O_INTRA`；含 `NULL0`、`InLoop0`、127/8、224/4 | 条数校验；黑洞与本机路由处理 | 7.3 ④、9.4 |
-| E12 | 登录后需回车唤醒提示符 | 驱动唤醒逻辑 | 8.5、P1-5 |
+| E12 | 采样工具支持登录后空闲时回车唤醒；基准批次未保存唤醒事件，不能断言每次登录必需 | 以合成传输回归验证条件唤醒，禁止回答改密提示 | 8.5、P1-5 |
 | E13 | 路由口 GE1/0 的 ARP 同时有对端 VSR 和不发 LLDP 的 10.10.1.254 | 共享网段推断 S2/S5 | 6.4 |
 | E14 | Switch1/Switch2 不可 SSH、不发 LLDP，MAC 表中 GE3/0 只有 1 个 MAC | S4：endpoint 直连、置信度 medium | 6.4、9.3 |
 | E15 | `display interface brief` 同一输出含 route mode / bridge mode 两张表；二层口不出现在 `display ip interface brief` | 通用接口解析器分表处理 | 7.3 ④ |
@@ -976,6 +976,8 @@ P2-9 根据 Q5 取消，不引入 SNMP。P3 及后续仍在进入阶段时展开
 | P1-4 | 已完成 | 2026-09-28 | Python 620 项通过（新增会话 30 项）；前端定向 10 项通过、构建通过；两台 H3C 每台一次连接执行 L1/L2、拒绝 L4/挂起 L3，13 条审计事件/台 | 0004 迁移、公共会话 API、显式授权及审计读取；DSH 与审批交互按 P4 后续接入 |
 | P1-5 | 已完成 | 2026-09-28 | Python 650 项通过；Ruff、依赖合并、前端构建通过；两台 H3C 双驱动自动关闭分页，6 组采集结果一致 | App 0.5.0、独立 Netmiko、驱动验证档案；补齐 Paramiko 受控会话分页初始化，未发布 |
 | P1-6 | 已完成 | 2026-09-28 | 设备访问/拓扑 Python 699 通过、1 条可选 YANG 跳过；PostgreSQL 并发 1 通过；前端 10 通过、构建通过；双 H3C 双驱动采集/会话撤销成功 | 0005 迁移、数据库授权及导入界面；device-access 0.6.0 / topology 0.2.1；未发布 |
+| P2-0 | 已完成 | 2026-09-28 | 新增样本回放 44 通过，连同 SSH/拓扑回归 87 通过；56 个数据文件 Git 索引摘要一致，扫描无命中 | 两台 VSR ×14 能力 ×规范化/raw；修正文档 E4/E6/E10/E12 与 raw 证据表述 |
+| P2-1 | 待确认身份隔离范围 | — | 尚未建表；见 Q7 | §0.7 要求：未覆盖的数据模型/安全边界决定先明确 |
 
 ### P0-1 基线记录（2026-09-28）
 
@@ -1108,25 +1110,9 @@ P1-1 实机补验与驱动修复（2026-09-28）：
 | Q4 | 设备侧是否可以为 AI 配置专用只读账号（强烈建议） | 2026-09-28 | |
 | Q5 | 现网是否开放 SNMP 只读（v2c/v3）到平台服务器？有则发现以 SNMP 标准 MIB 为主、SSH 补充；无则以 SSH + 通用解析器 + LLM 兜底为主 | 2026-09-28 | **已定（2026-09-28）：以 SSH + 通用解析器为主、LLM 兜底，不使用 SNMP** |
 | Q6 | 实验环境扩充：H3C 交换机镜像 ≥ 3 台 + VPCS 终端、Cisco IOS/NX-OS 镜像、1 台无模板设备（锐捷/华为）。MAC 逐跳定位与评测集 v1 依赖此项 | 2026-09-28 | 部分完成：迷你北极星实验已搭好（11.0）；可管理交换机链（≥ 3 台）与多厂商、无模板设备仍待补 |
+| Q7 | 新事实层的设备身份/事实在账号、管理域、发现网络之间如何隔离和复用；5.2 只有 domain，原表按 owner/network 隔离 | 2026-09-28 | 已询问：推荐按账号＋管理域隔离、同账号同域跨发现网络复用身份；也可继续每网络隔离或另设计管理域跨账号共享。确认前暂停 P2-1 建表，不改变现有可见性 |
 
 ---
-
-## 参考
-
-- RFC 8345 A YANG Data Model for Network Topologies：https://datatracker.ietf.org/doc/rfc8345/
-- RFC 8944 A YANG Data Model for Layer 2 Network Topologies：https://datatracker.ietf.org/doc/rfc8944/
-- RFC 8346 A YANG Data Model for Layer 3 Topologies：https://datatracker.ietf.org/doc/rfc8346/
-- RFC 9408 A YANG Network Data Model for Service Attachment Points (SAPs)：https://datatracker.ietf.org/doc/rfc9408/
-- RFC 8343 / 8344 / 8349 接口、IP、路由管理模型：https://datatracker.ietf.org/doc/rfc8343/ 、https://datatracker.ietf.org/doc/rfc8344/ 、https://datatracker.ietf.org/doc/rfc8349/
-- RFC 8342 NMDA：https://datatracker.ietf.org/doc/rfc8342/
-- RFC 7951 JSON Encoding of YANG Data：https://datatracker.ietf.org/doc/rfc7951/
-- RFC 8345 修订讨论（Digital Map 建模缺口）：https://datatracker.ietf.org/meeting/interim-2024-nmop-01/materials/slides-interim-2024-nmop-01-sessa-rfc8345-gaps-for-digital-map-modelling-00
-- Some Refinements to Network Topologies (RFC 8345)：https://datatracker.ietf.org/doc/draft-davis-nmop-some-refinements-to-rfc8345/00/
-- draft-havel-nmop-simap-yang：https://datatracker.ietf.org/doc/draft-havel-nmop-simap-yang/
-- draft-ietf-nmop-simap-concept：https://datatracker.ietf.org/doc/draft-ietf-nmop-simap-concept/
-- draft-irtf-nmrg-network-digital-twin-arch：https://datatracker.ietf.org/doc/draft-irtf-nmrg-network-digital-twin-arch/
-- 首版实施记录：`docs/device-access-topology-plan.md`
-
 
 ### P1-5 执行记录（2026-09-28）
 
@@ -1148,3 +1134,30 @@ P1-1 实机补验与驱动修复（2026-09-28）：
 - 实机：`.runtime/p1-6-lab-grants.py` 使用隔离授权数据库、加密凭据库、已核验密钥及实际公共 SSH 租约，两台 H3C × Paramiko/Netmiko 共 4 个会话均自动关闭分页并完成版本/接口/路由，6 组对照一致；每个会话随后撤销数据库 grant，下一条命令在发送前被拒绝并关闭连接。报告 `.runtime/p1-6-lab-grants.json`；密码未进入文件/审计/日志。
 - P1 阶段验收：两台 H3C 凭据自动登录、错误凭据一次后正确登录（P1-1）、密钥变化拒绝与界面告警（P1-2）、命令策略（P1-3）、受控会话（P1-4）、双驱动与关闭分页（P1-5）、数据库权限撤销（本卡）均有对应记录；多厂商扩充仍待 Q6，不宣称已验收其他厂商。
 - 未完成项：发布及运行环境迁移/原授权文件导入尚未执行；本卡交付源码、隔离构建和实机访问验证。Q3 生产信任策略保持待定。下一阶段先展开并提交 P2 任务卡，再实施 P2-0。
+
+
+### P2-0 执行记录（2026-09-28）
+
+- P2 全部任务卡先展开并提交（`fed14f0`）再开始本卡。新增 `scripts/topology/import_lab_fixtures.py`、`.gitattributes` CLI 夹具字节保留规则、`tests/fixtures/topology/h3c/vsr1000-7.1.064/` 的 56 个输出文件及 manifest/expected/README、`tests/unit/test_topology_lab_fixtures.py`；更新本路线图。
+- 固定批次 20260928-163159，两台实验设备各 14 能力；设备子目录避免同名能力覆盖。导入前复用既有敏感数据文件扫描，并补直接字节检查，覆盖原扫描器跳过 NUL 文件的情况。通过隐藏输入提供扫描密码，输出只有文件/设备/能力数和零命中，不输出扫描项；源码与夹具不保存密码。
+- manifest 记录原始文件/规范化副本的 SHA256、字节数、时间、命令与预期能力状态；源 inventory 的 transport_status=ok 仍对应 unsupported，避免后续把 CLI 错误当成功事实。raw 是历史采集器保存的 UTF-8 回显，保留 CR CR LF；该采集器先解码再写文件，不能承诺任意编码网络字节无损。此批次实际内容全为 ASCII。
+- `python scripts/topology/import_lab_fixtures.py`：57 个生成文件（56 输出 + manifest），扫描零命中；另增加人工审阅的 expected.json 和 README。`git show :<path>` 对全部 56 文件逐个复算摘要，与源 manifest 完全一致；`git diff --cached --check` 通过。
+- `python -m pytest tests/unit/test_topology_lab_fixtures.py tests/unit/test_device_access_ssh.py tests/unit/test_topology_app.py -q --junitxml=.runtime/p2-0-tests.xml`：87 通过；新增夹具测试 44 通过。 importer 命令白名单补验后定向 44 再次通过；Ruff 通过。
+- 自动纠错：E4 实际 5 个 Management address 前缀字段；E6 同一机箱按端口通告不同 IP；E10 当前批次为 `Total VPN-Instances configured : 0`，不是旧示例句；E12 只能确认采样器支持条件回车唤醒，批次没有记录唤醒事件。E12 用明确标注合成来源的传输测试，E18 沿用 P1 初始 NUL 提示符测试；没有伪造登录原文。Hub/不可管理交换机来自实验配置，无法仅凭 LLDP 证明；expected 中明确区分该来源。
+- 未完成项：业务事实解析、当前视图、身份归并仍属于后续任务卡。本卡为离线真实证据回放，不重复登录设备、不发布服务。下一卡 P2-1 开始前需确认 Q7 身份隔离范围。
+
+## 参考
+
+- RFC 8345 A YANG Data Model for Network Topologies：https://datatracker.ietf.org/doc/rfc8345/
+- RFC 8944 A YANG Data Model for Layer 2 Network Topologies：https://datatracker.ietf.org/doc/rfc8944/
+- RFC 8346 A YANG Data Model for Layer 3 Topologies：https://datatracker.ietf.org/doc/rfc8346/
+- RFC 9408 A YANG Network Data Model for Service Attachment Points (SAPs)：https://datatracker.ietf.org/doc/rfc9408/
+- RFC 8343 / 8344 / 8349 接口、IP、路由管理模型：https://datatracker.ietf.org/doc/rfc8343/ 、https://datatracker.ietf.org/doc/rfc8344/ 、https://datatracker.ietf.org/doc/rfc8349/
+- RFC 8342 NMDA：https://datatracker.ietf.org/doc/rfc8342/
+- RFC 7951 JSON Encoding of YANG Data：https://datatracker.ietf.org/doc/rfc7951/
+- RFC 8345 修订讨论（Digital Map 建模缺口）：https://datatracker.ietf.org/meeting/interim-2024-nmop-01/materials/slides-interim-2024-nmop-01-sessa-rfc8345-gaps-for-digital-map-modelling-00
+- Some Refinements to Network Topologies (RFC 8345)：https://datatracker.ietf.org/doc/draft-davis-nmop-some-refinements-to-rfc8345/00/
+- draft-havel-nmop-simap-yang：https://datatracker.ietf.org/doc/draft-havel-nmop-simap-yang/
+- draft-ietf-nmop-simap-concept：https://datatracker.ietf.org/doc/draft-ietf-nmop-simap-concept/
+- draft-irtf-nmrg-network-digital-twin-arch：https://datatracker.ietf.org/doc/draft-irtf-nmrg-network-digital-twin-arch/
+- 首版实施记录：`docs/device-access-topology-plan.md`

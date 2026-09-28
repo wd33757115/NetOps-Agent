@@ -28,3 +28,6 @@
 *.pptx binary
 *.db binary
 *.sqlite binary
+
+# CLI fixtures preserve captured CR CR LF and exact byte hashes on every OS.
+tests/fixtures/topology/**/*.txt -text whitespace=-blank-at-eol
