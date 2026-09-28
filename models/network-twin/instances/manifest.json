@@ -72,16 +72,24 @@
       ]
     },
     {
-      "file": "topology-observed.json",
-      "sha256": "b08528d45258478d2db779aa70bcca117e48c73959debc0eb4bcb4e696f4b312",
+      "file": "topology.json",
+      "sha256": "eeb48408cd178081b9f3e6dca84dacbe2c5d6f7f5fe5c334abd486d8b80290d4",
       "profile": "topology",
       "expected_valid": true,
       "expected_diagnostic": null,
       "sources": [
         "vsr-1/lldp_local.txt",
         "vsr-1/lldp_list.txt",
+        "vsr-1/arp.txt",
+        "vsr-1/mac.txt",
         "vsr-2/lldp_local.txt",
-        "vsr-2/lldp_list.txt"
+        "vsr-2/lldp_list.txt",
+        "vsr-2/arp.txt",
+        "vsr-2/mac.txt",
+        "vsr-1/interfaces.txt",
+        "vsr-1/ip_interfaces.txt",
+        "vsr-2/interfaces.txt",
+        "vsr-2/ip_interfaces.txt"
       ]
     },
     {
@@ -418,6 +426,42 @@
       "reason": "filtering-entry needs database-id and bridge port number"
     }
   ],
+  "topology_evidence": {
+    "urn:example:vsr-lab:l2-link:1b88d29244b8": [
+      "vsr-1 arp 10.10.1.2 0c22-57e9-0000 -- GE1/0 11 D",
+      "vsr-1 arp 10.10.1.254 0015-5d01-0314 -- GE1/0 5 D",
+      "vsr-1 lldp GE1/0           7425-8ae4-1252  GigabitEthernet1/0              H3C",
+      "vsr-2 arp 10.10.1.1 0cd2-5bc5-0000 -- GE1/0 11 D",
+      "vsr-2 arp 10.10.1.254 0015-5d01-0314 -- GE1/0 3 D",
+      "vsr-2 lldp GE1/0           7425-8ae3-ee8e  GigabitEthernet1/0              H3C"
+    ],
+    "urn:example:vsr-lab:l2-link:fdf57640ffd8": [
+      "vsr-2 arp 1.1.1.2 0050-7966-6800 100 GE3/0 19 D",
+      "vsr-2 mac 0050-7966-6800 100 Learned GE3/0 Y"
+    ],
+    "urn:example:vsr-lab:l2-link:1994e7680d47": [
+      "vsr-1 arp 192.168.1.2 0050-7966-6801 200 GE3/0 19 D",
+      "vsr-1 mac 0050-7966-6801 200 Learned GE3/0 Y"
+    ],
+    "urn:example:vsr-lab:l2-link:1d6b5e598acd": [
+      "vsr-1 arp 2.2.2.1 0c22-57e9-0001 -- GE2/0 17 D",
+      "vsr-1 lldp GE2/0           7425-8ae4-1252  GigabitEthernet2/0              H3C",
+      "vsr-2 arp 2.2.2.2 0cd2-5bc5-0001 -- GE2/0 17 D",
+      "vsr-2 lldp GE2/0           7425-8ae3-ee8e  GigabitEthernet2/0              H3C"
+    ],
+    "urn:example:vsr-lab:l3-link:1.1.1.0/24": [
+      "subnet 1.1.1.0/24"
+    ],
+    "urn:example:vsr-lab:l3-link:2.2.2.0/24": [
+      "subnet 2.2.2.0/24"
+    ],
+    "urn:example:vsr-lab:l3-link:10.10.1.0/24": [
+      "subnet 10.10.1.0/24"
+    ],
+    "urn:example:vsr-lab:l3-link:192.168.1.0/24": [
+      "subnet 192.168.1.0/24"
+    ]
+  },
   "gaps": [
     "Interface statistics/discontinuity-time is absent; partial instances intentionally fail full validation.",
     "Six IP-interface rows per device only; bridge and special internal interfaces are not represented.",

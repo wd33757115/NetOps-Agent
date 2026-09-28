@@ -218,7 +218,7 @@
       "diagnostic": "SchemaError: {/ietf-interfaces:interfaces/interface[name=\"GE1/0\"]} missing-data: expected 'statistics'"
     },
     {
-      "name": "topology-observed.json",
+      "name": "topology.json",
       "accepted": true,
       "expected": true,
       "matched": true,
@@ -238,7 +238,7 @@
   ],
   "expectations_matched": true,
   "complete_digital_twin": false,
-  "instances_manifest_sha256": "0bbb46001a7ffc0d82356106cd4357d25d048ecf8a0806acf57018766e866eb7",
+  "instances_manifest_sha256": "cdedfdedf2e6af84d7d95bbdac91bcade78d6cdf746f2a9b662eb635235cedb2",
   "remaining": [
     "schema-mount runtime",
     "virtual topology-to-inventory/device association",
