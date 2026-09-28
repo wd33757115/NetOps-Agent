@@ -6,17 +6,13 @@
         "network-types": {
           "ietf-l2-topology:l2-topology": {}
         },
-        "ietf-simap-topology:name": "lab-l2",
         "ietf-simap-topology:network-category": "ietf-simap-topology:network-category-live",
         "node": [
           {
-            "node-id": "urn:example:vsr-lab:device:7425-8ae3-ee8e",
-            "ietf-l2-topology:l2-node-attributes": {
-              "name": "H3C"
-            },
+            "node-id": "urn:example:vsr-lab:device:74-25-8a-e3-ee-8e",
             "ietf-network-topology:termination-point": [
               {
-                "tp-id": "urn:example:vsr-lab:if:GE1-0",
+                "tp-id": "urn:example:vsr-lab:if:GigabitEthernet1%2F0",
                 "ietf-l2-topology:l2-termination-point-attributes": {
                   "interface-name": "GigabitEthernet1/0",
                   "encapsulation-type": "ietf-l2-topology:ethernet"
@@ -24,18 +20,18 @@
                 "ietf-simap-topology:linked-termination-point": [
                   {
                     "network-ref": "urn:example:vsr-lab:l2",
-                    "node-ref": "urn:example:vsr-lab:device:7425-8ae4-1252",
-                    "tp-ref": "urn:example:vsr-lab:if:GE1-0"
+                    "node-ref": "urn:example:vsr-lab:device:74-25-8a-e4-12-52",
+                    "tp-ref": "urn:example:vsr-lab:if:GigabitEthernet1%2F0"
                   },
                   {
                     "network-ref": "urn:example:vsr-lab:l2",
-                    "node-ref": "urn:example:vsr-lab:host:0015-5d01-0314",
-                    "tp-ref": "urn:example:vsr-lab:nic:0015-5d01-0314"
+                    "node-ref": "urn:example:vsr-lab:host:00-15-5d-01-03-14",
+                    "tp-ref": "urn:example:vsr-lab:nic:00-15-5d-01-03-14"
                   }
                 ]
               },
               {
-                "tp-id": "urn:example:vsr-lab:if:GE2-0",
+                "tp-id": "urn:example:vsr-lab:if:GigabitEthernet2%2F0",
                 "ietf-l2-topology:l2-termination-point-attributes": {
                   "interface-name": "GigabitEthernet2/0",
                   "encapsulation-type": "ietf-l2-topology:ethernet"
@@ -43,27 +39,27 @@
                 "ietf-simap-topology:linked-termination-point": [
                   {
                     "network-ref": "urn:example:vsr-lab:l2",
-                    "node-ref": "urn:example:vsr-lab:device:7425-8ae4-1252",
-                    "tp-ref": "urn:example:vsr-lab:if:GE2-0"
+                    "node-ref": "urn:example:vsr-lab:device:74-25-8a-e4-12-52",
+                    "tp-ref": "urn:example:vsr-lab:if:GigabitEthernet2%2F0"
                   }
                 ]
               },
               {
-                "tp-id": "urn:example:vsr-lab:if:GE4-0",
+                "tp-id": "urn:example:vsr-lab:if:GigabitEthernet4%2F0",
                 "ietf-l2-topology:l2-termination-point-attributes": {
                   "interface-name": "GigabitEthernet4/0",
                   "encapsulation-type": "ietf-l2-topology:ethernet"
                 }
               },
               {
-                "tp-id": "urn:example:vsr-lab:if:GE5-0",
+                "tp-id": "urn:example:vsr-lab:if:GigabitEthernet5%2F0",
                 "ietf-l2-topology:l2-termination-point-attributes": {
                   "interface-name": "GigabitEthernet5/0",
                   "encapsulation-type": "ietf-l2-topology:ethernet"
                 }
               },
               {
-                "tp-id": "urn:example:vsr-lab:if:GE3-0",
+                "tp-id": "urn:example:vsr-lab:if:GigabitEthernet3%2F0",
                 "ietf-l2-topology:l2-termination-point-attributes": {
                   "interface-name": "GigabitEthernet3/0",
                   "encapsulation-type": "ietf-l2-topology:ethernet"
@@ -71,35 +67,35 @@
                 "ietf-simap-topology:linked-termination-point": [
                   {
                     "network-ref": "urn:example:vsr-lab:l2",
-                    "node-ref": "urn:example:vsr-lab:host:0050-7966-6801",
-                    "tp-ref": "urn:example:vsr-lab:nic:0050-7966-6801"
+                    "node-ref": "urn:example:vsr-lab:host:00-50-79-66-68-01",
+                    "tp-ref": "urn:example:vsr-lab:nic:00-50-79-66-68-01"
                   }
                 ]
               }
             ],
+            "ietf-l2-topology:l2-node-attributes": {
+              "name": "H3C"
+            },
             "ietf-simap-topology:linked-node": [
               {
                 "network-ref": "urn:example:vsr-lab:l2",
-                "node-ref": "urn:example:vsr-lab:device:7425-8ae4-1252"
+                "node-ref": "urn:example:vsr-lab:device:74-25-8a-e4-12-52"
               },
               {
                 "network-ref": "urn:example:vsr-lab:l2",
-                "node-ref": "urn:example:vsr-lab:host:0015-5d01-0314"
+                "node-ref": "urn:example:vsr-lab:host:00-15-5d-01-03-14"
               },
               {
                 "network-ref": "urn:example:vsr-lab:l2",
-                "node-ref": "urn:example:vsr-lab:host:0050-7966-6801"
+                "node-ref": "urn:example:vsr-lab:host:00-50-79-66-68-01"
               }
             ]
           },
           {
-            "node-id": "urn:example:vsr-lab:device:7425-8ae4-1252",
-            "ietf-l2-topology:l2-node-attributes": {
-              "name": "H3C"
-            },
+            "node-id": "urn:example:vsr-lab:device:74-25-8a-e4-12-52",
             "ietf-network-topology:termination-point": [
               {
-                "tp-id": "urn:example:vsr-lab:if:GE1-0",
+                "tp-id": "urn:example:vsr-lab:if:GigabitEthernet1%2F0",
                 "ietf-l2-topology:l2-termination-point-attributes": {
                   "interface-name": "GigabitEthernet1/0",
                   "encapsulation-type": "ietf-l2-topology:ethernet"
@@ -107,18 +103,18 @@
                 "ietf-simap-topology:linked-termination-point": [
                   {
                     "network-ref": "urn:example:vsr-lab:l2",
-                    "node-ref": "urn:example:vsr-lab:device:7425-8ae3-ee8e",
-                    "tp-ref": "urn:example:vsr-lab:if:GE1-0"
+                    "node-ref": "urn:example:vsr-lab:device:74-25-8a-e3-ee-8e",
+                    "tp-ref": "urn:example:vsr-lab:if:GigabitEthernet1%2F0"
                   },
                   {
                     "network-ref": "urn:example:vsr-lab:l2",
-                    "node-ref": "urn:example:vsr-lab:host:0015-5d01-0314",
-                    "tp-ref": "urn:example:vsr-lab:nic:0015-5d01-0314"
+                    "node-ref": "urn:example:vsr-lab:host:00-15-5d-01-03-14",
+                    "tp-ref": "urn:example:vsr-lab:nic:00-15-5d-01-03-14"
                   }
                 ]
               },
               {
-                "tp-id": "urn:example:vsr-lab:if:GE2-0",
+                "tp-id": "urn:example:vsr-lab:if:GigabitEthernet2%2F0",
                 "ietf-l2-topology:l2-termination-point-attributes": {
                   "interface-name": "GigabitEthernet2/0",
                   "encapsulation-type": "ietf-l2-topology:ethernet"
@@ -126,27 +122,27 @@
                 "ietf-simap-topology:linked-termination-point": [
                   {
                     "network-ref": "urn:example:vsr-lab:l2",
-                    "node-ref": "urn:example:vsr-lab:device:7425-8ae3-ee8e",
-                    "tp-ref": "urn:example:vsr-lab:if:GE2-0"
+                    "node-ref": "urn:example:vsr-lab:device:74-25-8a-e3-ee-8e",
+                    "tp-ref": "urn:example:vsr-lab:if:GigabitEthernet2%2F0"
                   }
                 ]
               },
               {
-                "tp-id": "urn:example:vsr-lab:if:GE4-0",
+                "tp-id": "urn:example:vsr-lab:if:GigabitEthernet4%2F0",
                 "ietf-l2-topology:l2-termination-point-attributes": {
                   "interface-name": "GigabitEthernet4/0",
                   "encapsulation-type": "ietf-l2-topology:ethernet"
                 }
               },
               {
-                "tp-id": "urn:example:vsr-lab:if:GE5-0",
+                "tp-id": "urn:example:vsr-lab:if:GigabitEthernet5%2F0",
                 "ietf-l2-topology:l2-termination-point-attributes": {
                   "interface-name": "GigabitEthernet5/0",
                   "encapsulation-type": "ietf-l2-topology:ethernet"
                 }
               },
               {
-                "tp-id": "urn:example:vsr-lab:if:GE3-0",
+                "tp-id": "urn:example:vsr-lab:if:GigabitEthernet3%2F0",
                 "ietf-l2-topology:l2-termination-point-attributes": {
                   "interface-name": "GigabitEthernet3/0",
                   "encapsulation-type": "ietf-l2-topology:ethernet"
@@ -154,32 +150,35 @@
                 "ietf-simap-topology:linked-termination-point": [
                   {
                     "network-ref": "urn:example:vsr-lab:l2",
-                    "node-ref": "urn:example:vsr-lab:host:0050-7966-6800",
-                    "tp-ref": "urn:example:vsr-lab:nic:0050-7966-6800"
+                    "node-ref": "urn:example:vsr-lab:host:00-50-79-66-68-00",
+                    "tp-ref": "urn:example:vsr-lab:nic:00-50-79-66-68-00"
                   }
                 ]
               }
             ],
+            "ietf-l2-topology:l2-node-attributes": {
+              "name": "H3C"
+            },
             "ietf-simap-topology:linked-node": [
               {
                 "network-ref": "urn:example:vsr-lab:l2",
-                "node-ref": "urn:example:vsr-lab:device:7425-8ae3-ee8e"
+                "node-ref": "urn:example:vsr-lab:device:74-25-8a-e3-ee-8e"
               },
               {
                 "network-ref": "urn:example:vsr-lab:l2",
-                "node-ref": "urn:example:vsr-lab:host:0015-5d01-0314"
+                "node-ref": "urn:example:vsr-lab:host:00-15-5d-01-03-14"
               },
               {
                 "network-ref": "urn:example:vsr-lab:l2",
-                "node-ref": "urn:example:vsr-lab:host:0050-7966-6800"
+                "node-ref": "urn:example:vsr-lab:host:00-50-79-66-68-00"
               }
             ]
           },
           {
-            "node-id": "urn:example:vsr-lab:host:0015-5d01-0314",
+            "node-id": "urn:example:vsr-lab:host:00-15-5d-01-03-14",
             "ietf-network-topology:termination-point": [
               {
-                "tp-id": "urn:example:vsr-lab:nic:0015-5d01-0314",
+                "tp-id": "urn:example:vsr-lab:nic:00-15-5d-01-03-14",
                 "ietf-l2-topology:l2-termination-point-attributes": {
                   "mac-address": "00:15:5d:01:03:14",
                   "encapsulation-type": "ietf-l2-topology:ethernet"
@@ -187,13 +186,13 @@
                 "ietf-simap-topology:linked-termination-point": [
                   {
                     "network-ref": "urn:example:vsr-lab:l2",
-                    "node-ref": "urn:example:vsr-lab:device:7425-8ae3-ee8e",
-                    "tp-ref": "urn:example:vsr-lab:if:GE1-0"
+                    "node-ref": "urn:example:vsr-lab:device:74-25-8a-e3-ee-8e",
+                    "tp-ref": "urn:example:vsr-lab:if:GigabitEthernet1%2F0"
                   },
                   {
                     "network-ref": "urn:example:vsr-lab:l2",
-                    "node-ref": "urn:example:vsr-lab:device:7425-8ae4-1252",
-                    "tp-ref": "urn:example:vsr-lab:if:GE1-0"
+                    "node-ref": "urn:example:vsr-lab:device:74-25-8a-e4-12-52",
+                    "tp-ref": "urn:example:vsr-lab:if:GigabitEthernet1%2F0"
                   }
                 ]
               }
@@ -201,19 +200,19 @@
             "ietf-simap-topology:linked-node": [
               {
                 "network-ref": "urn:example:vsr-lab:l2",
-                "node-ref": "urn:example:vsr-lab:device:7425-8ae3-ee8e"
+                "node-ref": "urn:example:vsr-lab:device:74-25-8a-e3-ee-8e"
               },
               {
                 "network-ref": "urn:example:vsr-lab:l2",
-                "node-ref": "urn:example:vsr-lab:device:7425-8ae4-1252"
+                "node-ref": "urn:example:vsr-lab:device:74-25-8a-e4-12-52"
               }
             ]
           },
           {
-            "node-id": "urn:example:vsr-lab:host:0050-7966-6800",
+            "node-id": "urn:example:vsr-lab:host:00-50-79-66-68-00",
             "ietf-network-topology:termination-point": [
               {
-                "tp-id": "urn:example:vsr-lab:nic:0050-7966-6800",
+                "tp-id": "urn:example:vsr-lab:nic:00-50-79-66-68-00",
                 "ietf-l2-topology:l2-termination-point-attributes": {
                   "mac-address": "00:50:79:66:68:00",
                   "encapsulation-type": "ietf-l2-topology:ethernet"
@@ -221,8 +220,8 @@
                 "ietf-simap-topology:linked-termination-point": [
                   {
                     "network-ref": "urn:example:vsr-lab:l2",
-                    "node-ref": "urn:example:vsr-lab:device:7425-8ae4-1252",
-                    "tp-ref": "urn:example:vsr-lab:if:GE3-0"
+                    "node-ref": "urn:example:vsr-lab:device:74-25-8a-e4-12-52",
+                    "tp-ref": "urn:example:vsr-lab:if:GigabitEthernet3%2F0"
                   }
                 ]
               }
@@ -230,15 +229,15 @@
             "ietf-simap-topology:linked-node": [
               {
                 "network-ref": "urn:example:vsr-lab:l2",
-                "node-ref": "urn:example:vsr-lab:device:7425-8ae4-1252"
+                "node-ref": "urn:example:vsr-lab:device:74-25-8a-e4-12-52"
               }
             ]
           },
           {
-            "node-id": "urn:example:vsr-lab:host:0050-7966-6801",
+            "node-id": "urn:example:vsr-lab:host:00-50-79-66-68-01",
             "ietf-network-topology:termination-point": [
               {
-                "tp-id": "urn:example:vsr-lab:nic:0050-7966-6801",
+                "tp-id": "urn:example:vsr-lab:nic:00-50-79-66-68-01",
                 "ietf-l2-topology:l2-termination-point-attributes": {
                   "mac-address": "00:50:79:66:68:01",
                   "encapsulation-type": "ietf-l2-topology:ethernet"
@@ -246,8 +245,8 @@
                 "ietf-simap-topology:linked-termination-point": [
                   {
                     "network-ref": "urn:example:vsr-lab:l2",
-                    "node-ref": "urn:example:vsr-lab:device:7425-8ae3-ee8e",
-                    "tp-ref": "urn:example:vsr-lab:if:GE3-0"
+                    "node-ref": "urn:example:vsr-lab:device:74-25-8a-e3-ee-8e",
+                    "tp-ref": "urn:example:vsr-lab:if:GigabitEthernet3%2F0"
                   }
                 ]
               }
@@ -255,90 +254,90 @@
             "ietf-simap-topology:linked-node": [
               {
                 "network-ref": "urn:example:vsr-lab:l2",
-                "node-ref": "urn:example:vsr-lab:device:7425-8ae3-ee8e"
+                "node-ref": "urn:example:vsr-lab:device:74-25-8a-e3-ee-8e"
               }
             ]
           }
         ],
         "ietf-network-topology:link": [
           {
-            "link-id": "urn:example:vsr-lab:l2-link:1b88d29244b8",
+            "link-id": "urn:example:vsr-lab:l2-link:820983a72451",
             "ietf-simap-topology:link-direction": "ietf-simap-topology:link-direction-bi",
             "ietf-simap-topology:link-type": "ietf-simap-topology:link-type-mp2mp",
             "ietf-simap-topology:tp": [
               {
                 "network-ref": "urn:example:vsr-lab:l2",
-                "node-ref": "urn:example:vsr-lab:device:7425-8ae3-ee8e",
-                "tp-ref": "urn:example:vsr-lab:if:GE1-0",
+                "node-ref": "urn:example:vsr-lab:device:74-25-8a-e3-ee-8e",
+                "tp-ref": "urn:example:vsr-lab:if:GigabitEthernet1%2F0",
                 "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
               },
               {
                 "network-ref": "urn:example:vsr-lab:l2",
-                "node-ref": "urn:example:vsr-lab:device:7425-8ae4-1252",
-                "tp-ref": "urn:example:vsr-lab:if:GE1-0",
+                "node-ref": "urn:example:vsr-lab:device:74-25-8a-e4-12-52",
+                "tp-ref": "urn:example:vsr-lab:if:GigabitEthernet1%2F0",
                 "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
               },
               {
                 "network-ref": "urn:example:vsr-lab:l2",
-                "node-ref": "urn:example:vsr-lab:host:0015-5d01-0314",
-                "tp-ref": "urn:example:vsr-lab:nic:0015-5d01-0314",
+                "node-ref": "urn:example:vsr-lab:host:00-15-5d-01-03-14",
+                "tp-ref": "urn:example:vsr-lab:nic:00-15-5d-01-03-14",
                 "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
               }
             ]
           },
           {
-            "link-id": "urn:example:vsr-lab:l2-link:fdf57640ffd8",
+            "link-id": "urn:example:vsr-lab:l2-link:17ce155deb7d",
             "ietf-simap-topology:link-direction": "ietf-simap-topology:link-direction-bi",
             "ietf-simap-topology:link-type": "ietf-simap-topology:link-type-p2p",
             "ietf-simap-topology:tp": [
               {
                 "network-ref": "urn:example:vsr-lab:l2",
-                "node-ref": "urn:example:vsr-lab:device:7425-8ae4-1252",
-                "tp-ref": "urn:example:vsr-lab:if:GE3-0",
+                "node-ref": "urn:example:vsr-lab:device:74-25-8a-e4-12-52",
+                "tp-ref": "urn:example:vsr-lab:if:GigabitEthernet3%2F0",
                 "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
               },
               {
                 "network-ref": "urn:example:vsr-lab:l2",
-                "node-ref": "urn:example:vsr-lab:host:0050-7966-6800",
-                "tp-ref": "urn:example:vsr-lab:nic:0050-7966-6800",
+                "node-ref": "urn:example:vsr-lab:host:00-50-79-66-68-00",
+                "tp-ref": "urn:example:vsr-lab:nic:00-50-79-66-68-00",
                 "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
               }
             ]
           },
           {
-            "link-id": "urn:example:vsr-lab:l2-link:1994e7680d47",
+            "link-id": "urn:example:vsr-lab:l2-link:42eba472cb5c",
             "ietf-simap-topology:link-direction": "ietf-simap-topology:link-direction-bi",
             "ietf-simap-topology:link-type": "ietf-simap-topology:link-type-p2p",
             "ietf-simap-topology:tp": [
               {
                 "network-ref": "urn:example:vsr-lab:l2",
-                "node-ref": "urn:example:vsr-lab:device:7425-8ae3-ee8e",
-                "tp-ref": "urn:example:vsr-lab:if:GE3-0",
+                "node-ref": "urn:example:vsr-lab:device:74-25-8a-e3-ee-8e",
+                "tp-ref": "urn:example:vsr-lab:if:GigabitEthernet3%2F0",
                 "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
               },
               {
                 "network-ref": "urn:example:vsr-lab:l2",
-                "node-ref": "urn:example:vsr-lab:host:0050-7966-6801",
-                "tp-ref": "urn:example:vsr-lab:nic:0050-7966-6801",
+                "node-ref": "urn:example:vsr-lab:host:00-50-79-66-68-01",
+                "tp-ref": "urn:example:vsr-lab:nic:00-50-79-66-68-01",
                 "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
               }
             ]
           },
           {
-            "link-id": "urn:example:vsr-lab:l2-link:1d6b5e598acd",
+            "link-id": "urn:example:vsr-lab:l2-link:ab5fdec88427",
             "ietf-simap-topology:link-direction": "ietf-simap-topology:link-direction-bi",
             "ietf-simap-topology:link-type": "ietf-simap-topology:link-type-p2p",
             "ietf-simap-topology:tp": [
               {
                 "network-ref": "urn:example:vsr-lab:l2",
-                "node-ref": "urn:example:vsr-lab:device:7425-8ae3-ee8e",
-                "tp-ref": "urn:example:vsr-lab:if:GE2-0",
+                "node-ref": "urn:example:vsr-lab:device:74-25-8a-e3-ee-8e",
+                "tp-ref": "urn:example:vsr-lab:if:GigabitEthernet2%2F0",
                 "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
               },
               {
                 "network-ref": "urn:example:vsr-lab:l2",
-                "node-ref": "urn:example:vsr-lab:device:7425-8ae4-1252",
-                "tp-ref": "urn:example:vsr-lab:if:GE2-0",
+                "node-ref": "urn:example:vsr-lab:device:74-25-8a-e4-12-52",
+                "tp-ref": "urn:example:vsr-lab:if:GigabitEthernet2%2F0",
                 "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
               }
             ]
@@ -350,7 +349,6 @@
         "network-types": {
           "ietf-l3-unicast-topology:l3-unicast-topology": {}
         },
-        "ietf-simap-topology:name": "lab-l3",
         "ietf-simap-topology:network-category": "ietf-simap-topology:network-category-live",
         "supporting-network": [
           {
@@ -359,11 +357,11 @@
         ],
         "node": [
           {
-            "node-id": "urn:example:vsr-lab:device:7425-8ae3-ee8e",
+            "node-id": "urn:example:vsr-lab:device:74-25-8a-e3-ee-8e",
             "supporting-node": [
               {
                 "network-ref": "urn:example:vsr-lab:l2",
-                "node-ref": "urn:example:vsr-lab:device:7425-8ae3-ee8e"
+                "node-ref": "urn:example:vsr-lab:device:74-25-8a-e3-ee-8e"
               }
             ],
             "ietf-l3-unicast-topology:l3-node-attributes": {
@@ -384,8 +382,8 @@
             },
             "ietf-network-topology:termination-point": [
               {
-                "tp-id": "urn:example:vsr-lab:if:GE1-0",
-                "ietf-simap-topology:name": "GE1/0",
+                "tp-id": "urn:example:vsr-lab:if:GigabitEthernet1%2F0",
+                "ietf-simap-topology:name": "GigabitEthernet1/0",
                 "ietf-l3-unicast-topology:l3-termination-point-attributes": {
                   "ip-address": [
                     "10.10.1.1"
@@ -394,26 +392,26 @@
                 "supporting-termination-point": [
                   {
                     "network-ref": "urn:example:vsr-lab:l2",
-                    "node-ref": "urn:example:vsr-lab:device:7425-8ae3-ee8e",
-                    "tp-ref": "urn:example:vsr-lab:if:GE1-0"
+                    "node-ref": "urn:example:vsr-lab:device:74-25-8a-e3-ee-8e",
+                    "tp-ref": "urn:example:vsr-lab:if:GigabitEthernet1%2F0"
                   }
                 ],
                 "ietf-simap-topology:linked-termination-point": [
                   {
                     "network-ref": "urn:example:vsr-lab:l3",
-                    "node-ref": "urn:example:vsr-lab:device:7425-8ae4-1252",
-                    "tp-ref": "urn:example:vsr-lab:if:GE1-0"
+                    "node-ref": "urn:example:vsr-lab:device:74-25-8a-e4-12-52",
+                    "tp-ref": "urn:example:vsr-lab:if:GigabitEthernet1%2F0"
                   },
                   {
                     "network-ref": "urn:example:vsr-lab:l3",
-                    "node-ref": "urn:example:vsr-lab:host:0015-5d01-0314",
+                    "node-ref": "urn:example:vsr-lab:host:00-15-5d-01-03-14",
                     "tp-ref": "urn:example:vsr-lab:ip:10.10.1.254"
                   }
                 ]
               },
               {
-                "tp-id": "urn:example:vsr-lab:if:GE2-0",
-                "ietf-simap-topology:name": "GE2/0",
+                "tp-id": "urn:example:vsr-lab:if:GigabitEthernet2%2F0",
+                "ietf-simap-topology:name": "GigabitEthernet2/0",
                 "ietf-l3-unicast-topology:l3-termination-point-attributes": {
                   "ip-address": [
                     "2.2.2.2"
@@ -422,21 +420,21 @@
                 "supporting-termination-point": [
                   {
                     "network-ref": "urn:example:vsr-lab:l2",
-                    "node-ref": "urn:example:vsr-lab:device:7425-8ae3-ee8e",
-                    "tp-ref": "urn:example:vsr-lab:if:GE2-0"
+                    "node-ref": "urn:example:vsr-lab:device:74-25-8a-e3-ee-8e",
+                    "tp-ref": "urn:example:vsr-lab:if:GigabitEthernet2%2F0"
                   }
                 ],
                 "ietf-simap-topology:linked-termination-point": [
                   {
                     "network-ref": "urn:example:vsr-lab:l3",
-                    "node-ref": "urn:example:vsr-lab:device:7425-8ae4-1252",
-                    "tp-ref": "urn:example:vsr-lab:if:GE2-0"
+                    "node-ref": "urn:example:vsr-lab:device:74-25-8a-e4-12-52",
+                    "tp-ref": "urn:example:vsr-lab:if:GigabitEthernet2%2F0"
                   }
                 ]
               },
               {
-                "tp-id": "urn:example:vsr-lab:if:Loop0",
-                "ietf-simap-topology:name": "Loop0",
+                "tp-id": "urn:example:vsr-lab:if:LoopBack0",
+                "ietf-simap-topology:name": "LoopBack0",
                 "ietf-l3-unicast-topology:l3-termination-point-attributes": {
                   "ip-address": [
                     "4.4.4.4"
@@ -444,8 +442,8 @@
                 }
               },
               {
-                "tp-id": "urn:example:vsr-lab:if:Vlan200",
-                "ietf-simap-topology:name": "Vlan200",
+                "tp-id": "urn:example:vsr-lab:if:Vlan-interface200",
+                "ietf-simap-topology:name": "Vlan-interface200",
                 "ietf-l3-unicast-topology:l3-termination-point-attributes": {
                   "ip-address": [
                     "192.168.1.1"
@@ -454,14 +452,14 @@
                 "supporting-termination-point": [
                   {
                     "network-ref": "urn:example:vsr-lab:l2",
-                    "node-ref": "urn:example:vsr-lab:device:7425-8ae3-ee8e",
-                    "tp-ref": "urn:example:vsr-lab:if:GE3-0"
+                    "node-ref": "urn:example:vsr-lab:device:74-25-8a-e3-ee-8e",
+                    "tp-ref": "urn:example:vsr-lab:if:GigabitEthernet3%2F0"
                   }
                 ],
                 "ietf-simap-topology:linked-termination-point": [
                   {
                     "network-ref": "urn:example:vsr-lab:l3",
-                    "node-ref": "urn:example:vsr-lab:host:0050-7966-6801",
+                    "node-ref": "urn:example:vsr-lab:host:00-50-79-66-68-01",
                     "tp-ref": "urn:example:vsr-lab:ip:192.168.1.2"
                   }
                 ]
@@ -470,24 +468,24 @@
             "ietf-simap-topology:linked-node": [
               {
                 "network-ref": "urn:example:vsr-lab:l3",
-                "node-ref": "urn:example:vsr-lab:device:7425-8ae4-1252"
+                "node-ref": "urn:example:vsr-lab:device:74-25-8a-e4-12-52"
               },
               {
                 "network-ref": "urn:example:vsr-lab:l3",
-                "node-ref": "urn:example:vsr-lab:host:0015-5d01-0314"
+                "node-ref": "urn:example:vsr-lab:host:00-15-5d-01-03-14"
               },
               {
                 "network-ref": "urn:example:vsr-lab:l3",
-                "node-ref": "urn:example:vsr-lab:host:0050-7966-6801"
+                "node-ref": "urn:example:vsr-lab:host:00-50-79-66-68-01"
               }
             ]
           },
           {
-            "node-id": "urn:example:vsr-lab:device:7425-8ae4-1252",
+            "node-id": "urn:example:vsr-lab:device:74-25-8a-e4-12-52",
             "supporting-node": [
               {
                 "network-ref": "urn:example:vsr-lab:l2",
-                "node-ref": "urn:example:vsr-lab:device:7425-8ae4-1252"
+                "node-ref": "urn:example:vsr-lab:device:74-25-8a-e4-12-52"
               }
             ],
             "ietf-l3-unicast-topology:l3-node-attributes": {
@@ -508,8 +506,8 @@
             },
             "ietf-network-topology:termination-point": [
               {
-                "tp-id": "urn:example:vsr-lab:if:GE1-0",
-                "ietf-simap-topology:name": "GE1/0",
+                "tp-id": "urn:example:vsr-lab:if:GigabitEthernet1%2F0",
+                "ietf-simap-topology:name": "GigabitEthernet1/0",
                 "ietf-l3-unicast-topology:l3-termination-point-attributes": {
                   "ip-address": [
                     "10.10.1.2"
@@ -518,26 +516,26 @@
                 "supporting-termination-point": [
                   {
                     "network-ref": "urn:example:vsr-lab:l2",
-                    "node-ref": "urn:example:vsr-lab:device:7425-8ae4-1252",
-                    "tp-ref": "urn:example:vsr-lab:if:GE1-0"
+                    "node-ref": "urn:example:vsr-lab:device:74-25-8a-e4-12-52",
+                    "tp-ref": "urn:example:vsr-lab:if:GigabitEthernet1%2F0"
                   }
                 ],
                 "ietf-simap-topology:linked-termination-point": [
                   {
                     "network-ref": "urn:example:vsr-lab:l3",
-                    "node-ref": "urn:example:vsr-lab:device:7425-8ae3-ee8e",
-                    "tp-ref": "urn:example:vsr-lab:if:GE1-0"
+                    "node-ref": "urn:example:vsr-lab:device:74-25-8a-e3-ee-8e",
+                    "tp-ref": "urn:example:vsr-lab:if:GigabitEthernet1%2F0"
                   },
                   {
                     "network-ref": "urn:example:vsr-lab:l3",
-                    "node-ref": "urn:example:vsr-lab:host:0015-5d01-0314",
+                    "node-ref": "urn:example:vsr-lab:host:00-15-5d-01-03-14",
                     "tp-ref": "urn:example:vsr-lab:ip:10.10.1.254"
                   }
                 ]
               },
               {
-                "tp-id": "urn:example:vsr-lab:if:GE2-0",
-                "ietf-simap-topology:name": "GE2/0",
+                "tp-id": "urn:example:vsr-lab:if:GigabitEthernet2%2F0",
+                "ietf-simap-topology:name": "GigabitEthernet2/0",
                 "ietf-l3-unicast-topology:l3-termination-point-attributes": {
                   "ip-address": [
                     "2.2.2.1"
@@ -546,21 +544,21 @@
                 "supporting-termination-point": [
                   {
                     "network-ref": "urn:example:vsr-lab:l2",
-                    "node-ref": "urn:example:vsr-lab:device:7425-8ae4-1252",
-                    "tp-ref": "urn:example:vsr-lab:if:GE2-0"
+                    "node-ref": "urn:example:vsr-lab:device:74-25-8a-e4-12-52",
+                    "tp-ref": "urn:example:vsr-lab:if:GigabitEthernet2%2F0"
                   }
                 ],
                 "ietf-simap-topology:linked-termination-point": [
                   {
                     "network-ref": "urn:example:vsr-lab:l3",
-                    "node-ref": "urn:example:vsr-lab:device:7425-8ae3-ee8e",
-                    "tp-ref": "urn:example:vsr-lab:if:GE2-0"
+                    "node-ref": "urn:example:vsr-lab:device:74-25-8a-e3-ee-8e",
+                    "tp-ref": "urn:example:vsr-lab:if:GigabitEthernet2%2F0"
                   }
                 ]
               },
               {
-                "tp-id": "urn:example:vsr-lab:if:Loop0",
-                "ietf-simap-topology:name": "Loop0",
+                "tp-id": "urn:example:vsr-lab:if:LoopBack0",
+                "ietf-simap-topology:name": "LoopBack0",
                 "ietf-l3-unicast-topology:l3-termination-point-attributes": {
                   "ip-address": [
                     "3.3.3.3"
@@ -568,8 +566,8 @@
                 }
               },
               {
-                "tp-id": "urn:example:vsr-lab:if:Vlan100",
-                "ietf-simap-topology:name": "Vlan100",
+                "tp-id": "urn:example:vsr-lab:if:Vlan-interface100",
+                "ietf-simap-topology:name": "Vlan-interface100",
                 "ietf-l3-unicast-topology:l3-termination-point-attributes": {
                   "ip-address": [
                     "1.1.1.1"
@@ -578,14 +576,14 @@
                 "supporting-termination-point": [
                   {
                     "network-ref": "urn:example:vsr-lab:l2",
-                    "node-ref": "urn:example:vsr-lab:device:7425-8ae4-1252",
-                    "tp-ref": "urn:example:vsr-lab:if:GE3-0"
+                    "node-ref": "urn:example:vsr-lab:device:74-25-8a-e4-12-52",
+                    "tp-ref": "urn:example:vsr-lab:if:GigabitEthernet3%2F0"
                   }
                 ],
                 "ietf-simap-topology:linked-termination-point": [
                   {
                     "network-ref": "urn:example:vsr-lab:l3",
-                    "node-ref": "urn:example:vsr-lab:host:0050-7966-6800",
+                    "node-ref": "urn:example:vsr-lab:host:00-50-79-66-68-00",
                     "tp-ref": "urn:example:vsr-lab:ip:1.1.1.2"
                   }
                 ]
@@ -594,24 +592,24 @@
             "ietf-simap-topology:linked-node": [
               {
                 "network-ref": "urn:example:vsr-lab:l3",
-                "node-ref": "urn:example:vsr-lab:host:0050-7966-6800"
+                "node-ref": "urn:example:vsr-lab:host:00-50-79-66-68-00"
               },
               {
                 "network-ref": "urn:example:vsr-lab:l3",
-                "node-ref": "urn:example:vsr-lab:device:7425-8ae3-ee8e"
+                "node-ref": "urn:example:vsr-lab:device:74-25-8a-e3-ee-8e"
               },
               {
                 "network-ref": "urn:example:vsr-lab:l3",
-                "node-ref": "urn:example:vsr-lab:host:0015-5d01-0314"
+                "node-ref": "urn:example:vsr-lab:host:00-15-5d-01-03-14"
               }
             ]
           },
           {
-            "node-id": "urn:example:vsr-lab:host:0015-5d01-0314",
+            "node-id": "urn:example:vsr-lab:host:00-15-5d-01-03-14",
             "supporting-node": [
               {
                 "network-ref": "urn:example:vsr-lab:l2",
-                "node-ref": "urn:example:vsr-lab:host:0015-5d01-0314"
+                "node-ref": "urn:example:vsr-lab:host:00-15-5d-01-03-14"
               }
             ],
             "ietf-network-topology:termination-point": [
@@ -625,20 +623,20 @@
                 "supporting-termination-point": [
                   {
                     "network-ref": "urn:example:vsr-lab:l2",
-                    "node-ref": "urn:example:vsr-lab:host:0015-5d01-0314",
-                    "tp-ref": "urn:example:vsr-lab:nic:0015-5d01-0314"
+                    "node-ref": "urn:example:vsr-lab:host:00-15-5d-01-03-14",
+                    "tp-ref": "urn:example:vsr-lab:nic:00-15-5d-01-03-14"
                   }
                 ],
                 "ietf-simap-topology:linked-termination-point": [
                   {
                     "network-ref": "urn:example:vsr-lab:l3",
-                    "node-ref": "urn:example:vsr-lab:device:7425-8ae3-ee8e",
-                    "tp-ref": "urn:example:vsr-lab:if:GE1-0"
+                    "node-ref": "urn:example:vsr-lab:device:74-25-8a-e3-ee-8e",
+                    "tp-ref": "urn:example:vsr-lab:if:GigabitEthernet1%2F0"
                   },
                   {
                     "network-ref": "urn:example:vsr-lab:l3",
-                    "node-ref": "urn:example:vsr-lab:device:7425-8ae4-1252",
-                    "tp-ref": "urn:example:vsr-lab:if:GE1-0"
+                    "node-ref": "urn:example:vsr-lab:device:74-25-8a-e4-12-52",
+                    "tp-ref": "urn:example:vsr-lab:if:GigabitEthernet1%2F0"
                   }
                 ]
               }
@@ -646,20 +644,20 @@
             "ietf-simap-topology:linked-node": [
               {
                 "network-ref": "urn:example:vsr-lab:l3",
-                "node-ref": "urn:example:vsr-lab:device:7425-8ae3-ee8e"
+                "node-ref": "urn:example:vsr-lab:device:74-25-8a-e3-ee-8e"
               },
               {
                 "network-ref": "urn:example:vsr-lab:l3",
-                "node-ref": "urn:example:vsr-lab:device:7425-8ae4-1252"
+                "node-ref": "urn:example:vsr-lab:device:74-25-8a-e4-12-52"
               }
             ]
           },
           {
-            "node-id": "urn:example:vsr-lab:host:0050-7966-6800",
+            "node-id": "urn:example:vsr-lab:host:00-50-79-66-68-00",
             "supporting-node": [
               {
                 "network-ref": "urn:example:vsr-lab:l2",
-                "node-ref": "urn:example:vsr-lab:host:0050-7966-6800"
+                "node-ref": "urn:example:vsr-lab:host:00-50-79-66-68-00"
               }
             ],
             "ietf-network-topology:termination-point": [
@@ -673,15 +671,15 @@
                 "supporting-termination-point": [
                   {
                     "network-ref": "urn:example:vsr-lab:l2",
-                    "node-ref": "urn:example:vsr-lab:host:0050-7966-6800",
-                    "tp-ref": "urn:example:vsr-lab:nic:0050-7966-6800"
+                    "node-ref": "urn:example:vsr-lab:host:00-50-79-66-68-00",
+                    "tp-ref": "urn:example:vsr-lab:nic:00-50-79-66-68-00"
                   }
                 ],
                 "ietf-simap-topology:linked-termination-point": [
                   {
                     "network-ref": "urn:example:vsr-lab:l3",
-                    "node-ref": "urn:example:vsr-lab:device:7425-8ae4-1252",
-                    "tp-ref": "urn:example:vsr-lab:if:Vlan100"
+                    "node-ref": "urn:example:vsr-lab:device:74-25-8a-e4-12-52",
+                    "tp-ref": "urn:example:vsr-lab:if:Vlan-interface100"
                   }
                 ]
               }
@@ -689,16 +687,16 @@
             "ietf-simap-topology:linked-node": [
               {
                 "network-ref": "urn:example:vsr-lab:l3",
-                "node-ref": "urn:example:vsr-lab:device:7425-8ae4-1252"
+                "node-ref": "urn:example:vsr-lab:device:74-25-8a-e4-12-52"
               }
             ]
           },
           {
-            "node-id": "urn:example:vsr-lab:host:0050-7966-6801",
+            "node-id": "urn:example:vsr-lab:host:00-50-79-66-68-01",
             "supporting-node": [
               {
                 "network-ref": "urn:example:vsr-lab:l2",
-                "node-ref": "urn:example:vsr-lab:host:0050-7966-6801"
+                "node-ref": "urn:example:vsr-lab:host:00-50-79-66-68-01"
               }
             ],
             "ietf-network-topology:termination-point": [
@@ -712,15 +710,15 @@
                 "supporting-termination-point": [
                   {
                     "network-ref": "urn:example:vsr-lab:l2",
-                    "node-ref": "urn:example:vsr-lab:host:0050-7966-6801",
-                    "tp-ref": "urn:example:vsr-lab:nic:0050-7966-6801"
+                    "node-ref": "urn:example:vsr-lab:host:00-50-79-66-68-01",
+                    "tp-ref": "urn:example:vsr-lab:nic:00-50-79-66-68-01"
                   }
                 ],
                 "ietf-simap-topology:linked-termination-point": [
                   {
                     "network-ref": "urn:example:vsr-lab:l3",
-                    "node-ref": "urn:example:vsr-lab:device:7425-8ae3-ee8e",
-                    "tp-ref": "urn:example:vsr-lab:if:Vlan200"
+                    "node-ref": "urn:example:vsr-lab:device:74-25-8a-e3-ee-8e",
+                    "tp-ref": "urn:example:vsr-lab:if:Vlan-interface200"
                   }
                 ]
               }
@@ -728,7 +726,7 @@
             "ietf-simap-topology:linked-node": [
               {
                 "network-ref": "urn:example:vsr-lab:l3",
-                "node-ref": "urn:example:vsr-lab:device:7425-8ae3-ee8e"
+                "node-ref": "urn:example:vsr-lab:device:74-25-8a-e3-ee-8e"
               }
             ]
           }
@@ -741,13 +739,13 @@
             "ietf-simap-topology:tp": [
               {
                 "network-ref": "urn:example:vsr-lab:l3",
-                "node-ref": "urn:example:vsr-lab:device:7425-8ae4-1252",
-                "tp-ref": "urn:example:vsr-lab:if:Vlan100",
+                "node-ref": "urn:example:vsr-lab:device:74-25-8a-e4-12-52",
+                "tp-ref": "urn:example:vsr-lab:if:Vlan-interface100",
                 "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
               },
               {
                 "network-ref": "urn:example:vsr-lab:l3",
-                "node-ref": "urn:example:vsr-lab:host:0050-7966-6800",
+                "node-ref": "urn:example:vsr-lab:host:00-50-79-66-68-00",
                 "tp-ref": "urn:example:vsr-lab:ip:1.1.1.2",
                 "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
               }
@@ -755,32 +753,7 @@
             "supporting-link": [
               {
                 "network-ref": "urn:example:vsr-lab:l2",
-                "link-ref": "urn:example:vsr-lab:l2-link:fdf57640ffd8"
-              }
-            ]
-          },
-          {
-            "link-id": "urn:example:vsr-lab:l3-link:2.2.2.0/24",
-            "ietf-simap-topology:link-direction": "ietf-simap-topology:link-direction-bi",
-            "ietf-simap-topology:link-type": "ietf-simap-topology:link-type-p2p",
-            "ietf-simap-topology:tp": [
-              {
-                "network-ref": "urn:example:vsr-lab:l3",
-                "node-ref": "urn:example:vsr-lab:device:7425-8ae3-ee8e",
-                "tp-ref": "urn:example:vsr-lab:if:GE2-0",
-                "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
-              },
-              {
-                "network-ref": "urn:example:vsr-lab:l3",
-                "node-ref": "urn:example:vsr-lab:device:7425-8ae4-1252",
-                "tp-ref": "urn:example:vsr-lab:if:GE2-0",
-                "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
-              }
-            ],
-            "supporting-link": [
-              {
-                "network-ref": "urn:example:vsr-lab:l2",
-                "link-ref": "urn:example:vsr-lab:l2-link:1d6b5e598acd"
+                "link-ref": "urn:example:vsr-lab:l2-link:17ce155deb7d"
               }
             ]
           },
@@ -791,19 +764,19 @@
             "ietf-simap-topology:tp": [
               {
                 "network-ref": "urn:example:vsr-lab:l3",
-                "node-ref": "urn:example:vsr-lab:device:7425-8ae3-ee8e",
-                "tp-ref": "urn:example:vsr-lab:if:GE1-0",
+                "node-ref": "urn:example:vsr-lab:device:74-25-8a-e3-ee-8e",
+                "tp-ref": "urn:example:vsr-lab:if:GigabitEthernet1%2F0",
                 "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
               },
               {
                 "network-ref": "urn:example:vsr-lab:l3",
-                "node-ref": "urn:example:vsr-lab:device:7425-8ae4-1252",
-                "tp-ref": "urn:example:vsr-lab:if:GE1-0",
+                "node-ref": "urn:example:vsr-lab:device:74-25-8a-e4-12-52",
+                "tp-ref": "urn:example:vsr-lab:if:GigabitEthernet1%2F0",
                 "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
               },
               {
                 "network-ref": "urn:example:vsr-lab:l3",
-                "node-ref": "urn:example:vsr-lab:host:0015-5d01-0314",
+                "node-ref": "urn:example:vsr-lab:host:00-15-5d-01-03-14",
                 "tp-ref": "urn:example:vsr-lab:ip:10.10.1.254",
                 "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
               }
@@ -811,7 +784,7 @@
             "supporting-link": [
               {
                 "network-ref": "urn:example:vsr-lab:l2",
-                "link-ref": "urn:example:vsr-lab:l2-link:1b88d29244b8"
+                "link-ref": "urn:example:vsr-lab:l2-link:820983a72451"
               }
             ]
           },
@@ -822,13 +795,13 @@
             "ietf-simap-topology:tp": [
               {
                 "network-ref": "urn:example:vsr-lab:l3",
-                "node-ref": "urn:example:vsr-lab:device:7425-8ae3-ee8e",
-                "tp-ref": "urn:example:vsr-lab:if:Vlan200",
+                "node-ref": "urn:example:vsr-lab:device:74-25-8a-e3-ee-8e",
+                "tp-ref": "urn:example:vsr-lab:if:Vlan-interface200",
                 "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
               },
               {
                 "network-ref": "urn:example:vsr-lab:l3",
-                "node-ref": "urn:example:vsr-lab:host:0050-7966-6801",
+                "node-ref": "urn:example:vsr-lab:host:00-50-79-66-68-01",
                 "tp-ref": "urn:example:vsr-lab:ip:192.168.1.2",
                 "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
               }
@@ -836,7 +809,32 @@
             "supporting-link": [
               {
                 "network-ref": "urn:example:vsr-lab:l2",
-                "link-ref": "urn:example:vsr-lab:l2-link:1994e7680d47"
+                "link-ref": "urn:example:vsr-lab:l2-link:42eba472cb5c"
+              }
+            ]
+          },
+          {
+            "link-id": "urn:example:vsr-lab:l3-link:2.2.2.0/24",
+            "ietf-simap-topology:link-direction": "ietf-simap-topology:link-direction-bi",
+            "ietf-simap-topology:link-type": "ietf-simap-topology:link-type-p2p",
+            "ietf-simap-topology:tp": [
+              {
+                "network-ref": "urn:example:vsr-lab:l3",
+                "node-ref": "urn:example:vsr-lab:device:74-25-8a-e3-ee-8e",
+                "tp-ref": "urn:example:vsr-lab:if:GigabitEthernet2%2F0",
+                "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+              },
+              {
+                "network-ref": "urn:example:vsr-lab:l3",
+                "node-ref": "urn:example:vsr-lab:device:74-25-8a-e4-12-52",
+                "tp-ref": "urn:example:vsr-lab:if:GigabitEthernet2%2F0",
+                "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+              }
+            ],
+            "supporting-link": [
+              {
+                "network-ref": "urn:example:vsr-lab:l2",
+                "link-ref": "urn:example:vsr-lab:l2-link:ab5fdec88427"
               }
             ]
           }

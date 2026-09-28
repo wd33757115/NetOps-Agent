@@ -73,7 +73,7 @@
     },
     {
       "file": "topology.json",
-      "sha256": "eeb48408cd178081b9f3e6dca84dacbe2c5d6f7f5fe5c334abd486d8b80290d4",
+      "sha256": "77fdb07f992ca881ab3f55f7bc886601a3d2a868ee89edfd115c9e7481765cda",
       "profile": "topology",
       "expected_valid": true,
       "expected_diagnostic": null,
@@ -427,39 +427,35 @@
     }
   ],
   "topology_evidence": {
-    "urn:example:vsr-lab:l2-link:1b88d29244b8": [
-      "vsr-1 arp 10.10.1.2 0c22-57e9-0000 -- GE1/0 11 D",
-      "vsr-1 arp 10.10.1.254 0015-5d01-0314 -- GE1/0 5 D",
-      "vsr-1 lldp GE1/0           7425-8ae4-1252  GigabitEthernet1/0              H3C",
-      "vsr-2 arp 10.10.1.1 0cd2-5bc5-0000 -- GE1/0 11 D",
-      "vsr-2 arp 10.10.1.254 0015-5d01-0314 -- GE1/0 3 D",
-      "vsr-2 lldp GE1/0           7425-8ae3-ee8e  GigabitEthernet1/0              H3C"
+    "urn:example:vsr-lab:l2-link:820983a72451": [
+      "vsr-1 arp 10.10.1.254 00:15:5d:01:03:14 GigabitEthernet1/0",
+      "vsr-1 lldp GigabitEthernet1/0 -> 74:25:8a:e4:12:52 GigabitEthernet1/0",
+      "vsr-2 arp 10.10.1.254 00:15:5d:01:03:14 GigabitEthernet1/0",
+      "vsr-2 lldp GigabitEthernet1/0 -> 74:25:8a:e3:ee:8e GigabitEthernet1/0"
     ],
-    "urn:example:vsr-lab:l2-link:fdf57640ffd8": [
-      "vsr-2 arp 1.1.1.2 0050-7966-6800 100 GE3/0 19 D",
-      "vsr-2 mac 0050-7966-6800 100 Learned GE3/0 Y"
+    "urn:example:vsr-lab:l2-link:17ce155deb7d": [
+      "vsr-2 arp 1.1.1.2 00:50:79:66:68:00 GigabitEthernet3/0",
+      "vsr-2 mac 00:50:79:66:68:00 vlan 100 GigabitEthernet3/0"
     ],
-    "urn:example:vsr-lab:l2-link:1994e7680d47": [
-      "vsr-1 arp 192.168.1.2 0050-7966-6801 200 GE3/0 19 D",
-      "vsr-1 mac 0050-7966-6801 200 Learned GE3/0 Y"
+    "urn:example:vsr-lab:l2-link:42eba472cb5c": [
+      "vsr-1 arp 192.168.1.2 00:50:79:66:68:01 GigabitEthernet3/0",
+      "vsr-1 mac 00:50:79:66:68:01 vlan 200 GigabitEthernet3/0"
     ],
-    "urn:example:vsr-lab:l2-link:1d6b5e598acd": [
-      "vsr-1 arp 2.2.2.1 0c22-57e9-0001 -- GE2/0 17 D",
-      "vsr-1 lldp GE2/0           7425-8ae4-1252  GigabitEthernet2/0              H3C",
-      "vsr-2 arp 2.2.2.2 0cd2-5bc5-0001 -- GE2/0 17 D",
-      "vsr-2 lldp GE2/0           7425-8ae3-ee8e  GigabitEthernet2/0              H3C"
+    "urn:example:vsr-lab:l2-link:ab5fdec88427": [
+      "vsr-1 lldp GigabitEthernet2/0 -> 74:25:8a:e4:12:52 GigabitEthernet2/0",
+      "vsr-2 lldp GigabitEthernet2/0 -> 74:25:8a:e3:ee:8e GigabitEthernet2/0"
     ],
     "urn:example:vsr-lab:l3-link:1.1.1.0/24": [
-      "subnet 1.1.1.0/24"
-    ],
-    "urn:example:vsr-lab:l3-link:2.2.2.0/24": [
-      "subnet 2.2.2.0/24"
+      "subnet default 1.1.1.0/24"
     ],
     "urn:example:vsr-lab:l3-link:10.10.1.0/24": [
-      "subnet 10.10.1.0/24"
+      "subnet default 10.10.1.0/24"
     ],
     "urn:example:vsr-lab:l3-link:192.168.1.0/24": [
-      "subnet 192.168.1.0/24"
+      "subnet default 192.168.1.0/24"
+    ],
+    "urn:example:vsr-lab:l3-link:2.2.2.0/24": [
+      "subnet default 2.2.2.0/24"
     ]
   },
   "gaps": [

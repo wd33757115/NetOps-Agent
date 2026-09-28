@@ -10,6 +10,7 @@ import argparse
 import ipaddress
 import json
 import re
+import sys
 
 from audit_ietf_models import ROOT, digest
 
@@ -247,304 +248,33 @@ def layer2(device, source, ip_interfaces):
 
 
 LAB = "urn:example:vsr-lab:"
-L2_NET = LAB + "l2"
-L3_NET = LAB + "l3"
-ST = "ietf-simap-topology:"
-NT = "ietf-network-topology:"
-# Roadmap 11.0 lab design: what the captured LLDP/ARP/MAC must reproduce.
-EXPECTED_L2 = {
-    frozenset({"vsr-1 GE2/0", "vsr-2 GE2/0"}): "p2p",
-    frozenset({"vsr-1 GE1/0", "vsr-2 GE1/0", "host 0015-5d01-0314"}): "mp2mp",
-    frozenset({"vsr-2 GE3/0", "host 0050-7966-6800"}): "p2p",
-    frozenset({"vsr-1 GE3/0", "host 0050-7966-6801"}): "p2p",
-}
-EXPECTED_L3 = {
-    "10.10.1.0/24": {"vsr-1 GE1/0", "vsr-2 GE1/0", "host 10.10.1.254"},
-    "2.2.2.0/24": {"vsr-1 GE2/0", "vsr-2 GE2/0"},
-    "1.1.1.0/24": {"vsr-2 Vlan100", "host 1.1.1.2"},
-    "192.168.1.0/24": {"vsr-1 Vlan200", "host 192.168.1.2"},
+# Capability -> fixture file; parsed by the App parsers, built by the App builder.
+TOPOLOGY_INPUTS = {
+    "lldp_local": "lldp_local",
+    "lldp": "lldp_verbose",
+    "interfaces": "interfaces",
+    "ip": "ip_interfaces",
+    "arp": "arp",
+    "mac": "mac",
 }
 
 
 def topology(source, devices):
-    """Build SIMAP L2/L3 networks from LLDP, ARP, MAC and interface addresses only.
+    """One implementation: the App's parsers and SIMAP builder, never a second copy."""
+    sys.path.insert(0, str(ROOT))
+    from src.apps.topology.backend.collectors.parse import parse_generic
+    from src.apps.topology.backend.model.builder import build_topology
 
-    SIMAP -03 bidirectional links with an st:tp list replace RFC 8345 pairs of
-    unidirectional links; shared media is one mp2mp link, not an invented node.
-    """
-    dev = {}
-    for d in devices:
-        local = source(d, "lldp_local")
-        ports = [
-            line.split()[0]
-            for line in source(d, "interfaces").splitlines()
-            if re.match(r"GE\d+/\d+\s", line)
-        ]
-        l3 = {}
-        for line in source(d, "ip_interfaces").splitlines():
-            fields = line.split()
-            if (
-                fields
-                and re.fullmatch(r"GE\d+/\d+|Loop\d+|Vlan\d+", fields[0])
-                and fields[3] != "--"
-            ):
-                l3[fields[0]] = ipaddress.ip_interface(fields[3])
-        dev[d] = {
-            "chassis": re.search(r"Chassis ID\s*:\s*(\S+)", local)[1],
-            "name": re.search(r"System name\s*:\s*(\S+)", local)[1],
-            "ports": ports,
-            "l3": l3,
-        }
-    by_chassis = {v["chassis"]: d for d, v in dev.items()}
-    ip_owner = {str(a.ip): (d, n) for d, v in dev.items() for n, a in v["l3"].items()}
-
-    def node_id(member):
-        kind, key = member[0], member[1]
-        return LAB + ("device:" + dev[key]["chassis"] if kind == "dev" else "host:" + key)
-
-    def tp_id(member):
-        return LAB + (
-            "if:" + member[2].replace("/", "-") if member[0] == "dev" else "nic:" + member[1]
-        )
-
-    def label(member):
-        return f"{member[1]} {member[2]}" if member[0] == "dev" else f"host {member[1]}"
-
-    # Each observation joins two L2 endpoints; observations sharing an endpoint merge.
-    observed = []
-    host_ips = {}
-    for d in devices:
-        for line in source(d, "lldp_list").splitlines():
-            fields = line.split()
-            if not fields or not re.fullmatch(r"GE\d+/\d+", fields[0]):
-                continue
-            local, peer_chassis, port_id = fields[:3]
-            peer_port = "GE" + port_id.removeprefix("GigabitEthernet")
-            observed.append(
-                (
-                    ("dev", d, local),
-                    ("dev", by_chassis[peer_chassis], peer_port),
-                    f"{d} lldp {line.strip()}",
-                )
-            )
-        for line in source(d, "arp").splitlines():
-            fields = line.split()
-            if not fields or not re.fullmatch(r"[\d.]+", fields[0]):
-                continue
-            ip, mac, vlan, port = fields[:4]
-            if ip in ip_owner:
-                peer, peer_if = ip_owner[ip]
-                if vlan != "--" or not peer_if.startswith("GE"):
-                    raise ValueError(f"Unreviewed ARP entry for a managed address: {ip}")
-                other = ("dev", peer, peer_if)
-            else:
-                other = ("host", mac)
-                host_ips.setdefault(mac, set()).add(ip)
-            observed.append((("dev", d, port), other, f"{d} arp {' '.join(fields)}"))
-        for line in source(d, "mac").splitlines():
-            fields = line.split()
-            if not fields or not re.fullmatch(r"[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}", fields[0]):
-                continue
-            mac, vid, state, port = fields[:4]
-            if state != "Learned" or mac not in host_ips:
-                raise ValueError(f"Unreviewed MAC entry: {line.strip()}")
-            observed.append((("dev", d, port), ("host", mac), f"{d} mac {' '.join(fields)}"))
-    segments = []
-    for a, b, why in observed:
-        hit = [s for s in segments if a in s[0] or b in s[0]]
-        merged = ({a, b}, [why])
-        for s in hit:
-            segments.remove(s)
-            merged[0].update(s[0])
-            merged[1].extend(s[1])
-        segments.append(merged)
-
-    def link(network, link_id, members, evidence):
-        kind = "p2p" if len(members) == 2 else "mp2mp"
-        return {
-            "link-id": link_id,
-            ST + "link-direction": ST + "link-direction-bi",
-            ST + "link-type": ST + "link-type-" + kind,
-            ST + "tp": [
-                {
-                    "network-ref": network,
-                    "node-ref": m[0],
-                    "tp-ref": m[1],
-                    "tp-direction": ST + "tp-direction-symmetric",
-                }
-                for m in sorted(members)
-            ],
-        }, evidence
-
-    l2_nodes, l2_links, evidence = {}, [], {}
-    for d in devices:
-        l2_nodes[node_id(("dev", d))] = {
-            "node-id": node_id(("dev", d)),
-            "ietf-l2-topology:l2-node-attributes": {"name": dev[d]["name"]},
-            NT + "termination-point": [
-                {
-                    "tp-id": tp_id(("dev", d, p)),
-                    "ietf-l2-topology:l2-termination-point-attributes": {
-                        "interface-name": "GigabitEthernet" + p.removeprefix("GE"),
-                        "encapsulation-type": "ietf-l2-topology:ethernet",
-                    },
-                }
-                for p in dev[d]["ports"]
-            ],
-        }
-    for mac in sorted(host_ips):
-        l2_nodes[node_id(("host", mac))] = {
-            "node-id": node_id(("host", mac)),
-            NT + "termination-point": [
-                {
-                    "tp-id": tp_id(("host", mac)),
-                    "ietf-l2-topology:l2-termination-point-attributes": {
-                        "mac-address": ieee_mac(mac).replace("-", ":").lower(),
-                        "encapsulation-type": "ietf-l2-topology:ethernet",
-                    },
-                }
-            ],
-        }
-    l2_link_of = {}
-    for members, why in sorted(segments, key=lambda s: sorted(map(label, s[0]))):
-        refs = {(node_id(m), tp_id(m)) for m in members}
-        link_id = LAB + "l2-link:" + digest("|".join(sorted(map(label, members))).encode())[:12]
-        body, evidence[link_id] = link(L2_NET, link_id, refs, sorted(set(why)))
-        l2_links.append(body)
-        for m in members:
-            l2_link_of[m] = link_id
-    got = {
-        frozenset(map(label, members)): ("p2p" if len(members) == 2 else "mp2mp")
-        for members, _ in segments
-    }
-    if got != EXPECTED_L2:
-        raise ValueError(f"L2 topology differs from the lab design: {got}")
-
-    l3_nodes, l3_links = {}, []
-    subnets = {}
-    for d in devices:
-        tps, prefixes = [], []
-        for name, address in sorted(dev[d]["l3"].items()):
-            member = ("dev", d, name)
-            # Routed ports carry themselves; VLAN interfaces use the port named by ARP rows.
-            carriers = {("dev", d, name)} if name.startswith("GE") else set()
-            for line in source(d, "arp").splitlines():
-                fields = line.split()
-                if (
-                    fields
-                    and re.fullmatch(r"[\d.]+", fields[0])
-                    and fields[2] != "--"
-                    and ipaddress.ip_address(fields[0]) in address.network
-                ):
-                    carriers.add(("dev", d, fields[3]))
-            tp = {
-                "tp-id": tp_id(member),
-                ST + "name": name,
-                "ietf-l3-unicast-topology:l3-termination-point-attributes": {
-                    "ip-address": [str(address.ip)]
-                },
-            }
-            if carriers:
-                tp["supporting-termination-point"] = [
-                    {"network-ref": L2_NET, "node-ref": node_id(c), "tp-ref": tp_id(c)}
-                    for c in sorted(carriers)
-                ]
-            tps.append(tp)
-            prefixes.append({"prefix": str(address.network)})
-            if address.network.prefixlen < 32:
-                subnets.setdefault(address.network, []).append((member, carriers))
-        l3_nodes[node_id(("dev", d))] = {
-            "node-id": node_id(("dev", d)),
-            "supporting-node": [{"network-ref": L2_NET, "node-ref": node_id(("dev", d))}],
-            "ietf-l3-unicast-topology:l3-node-attributes": {"prefix": prefixes},
-            NT + "termination-point": tps,
-        }
-    for mac, ips in sorted(host_ips.items()):
-        nic = ("host", mac)
-        tps = []
-        for ip in sorted(ips):
-            tps.append(
-                {
-                    "tp-id": LAB + "ip:" + ip,
-                    "ietf-l3-unicast-topology:l3-termination-point-attributes": {
-                        "ip-address": [ip]
-                    },
-                    "supporting-termination-point": [
-                        {"network-ref": L2_NET, "node-ref": node_id(nic), "tp-ref": tp_id(nic)}
-                    ],
-                }
-            )
-            net = next(n for n in subnets if ipaddress.ip_address(ip) in n)
-            subnets[net].append((("host", mac, ip), {nic}))
-        l3_nodes[node_id(nic)] = {
-            "node-id": node_id(nic),
-            "supporting-node": [{"network-ref": L2_NET, "node-ref": node_id(nic)}],
-            NT + "termination-point": tps,
-        }
-    got = {}
-    for net, members in sorted(subnets.items()):
-        names = {f"{m[1]} {m[2]}" if m[0] == "dev" else f"host {m[2]}" for m, _ in members}
-        got[str(net)] = names
-        if len(members) < 2:
-            continue
-        refs = {(node_id(m), tp_id(m) if m[0] == "dev" else LAB + "ip:" + m[2]) for m, _ in members}
-        link_id = LAB + "l3-link:" + str(net)
-        body, evidence[link_id] = link(L3_NET, link_id, refs, [f"subnet {net}"])
-        body["supporting-link"] = [
-            {"network-ref": L2_NET, "link-ref": ref}
-            for ref in sorted({l2_link_of[c] for _, cs in members for c in cs if c in l2_link_of})
-        ]
-        l3_links.append(body)
-    if {k: v for k, v in got.items() if len(v) > 1} != EXPECTED_L3:
-        raise ValueError(f"L3 topology differs from the lab design: {got}")
-
-    # SIMAP navigation (read-only): each TP/node lists what its links reach.
-    for network, nodes, links in ((L2_NET, l2_nodes, l2_links), (L3_NET, l3_nodes, l3_links)):
-        for body in links:
-            ends = [(t["node-ref"], t["tp-ref"]) for t in body[ST + "tp"]]
-            for node_ref, tp_ref in ends:
-                node = nodes[node_ref]
-                tp = next(t for t in node[NT + "termination-point"] if t["tp-id"] == tp_ref)
-                for other_node, other_tp in ends:
-                    if (other_node, other_tp) == (node_ref, tp_ref):
-                        continue
-                    tp.setdefault(ST + "linked-termination-point", []).append(
-                        {"network-ref": network, "node-ref": other_node, "tp-ref": other_tp}
-                    )
-                    linked = node.setdefault(ST + "linked-node", [])
-                    if (
-                        other_node != node_ref
-                        and {"network-ref": network, "node-ref": other_node} not in linked
-                    ):
-                        linked.append({"network-ref": network, "node-ref": other_node})
-
-    def network(net_id, net_type, name, nodes, links, extra=None):
-        return {
-            "network-id": net_id,
-            "network-types": {net_type: {}},
-            ST + "name": name,
-            ST + "network-category": ST + "network-category-live",
-            **(extra or {}),
-            "node": list(nodes.values()),
-            NT + "link": links,
-        }
-
-    tree = {
-        "ietf-network:networks": {
-            "network": [
-                network(L2_NET, "ietf-l2-topology:l2-topology", "lab-l2", l2_nodes, l2_links),
-                network(
-                    L3_NET,
-                    "ietf-l3-unicast-topology:l3-unicast-topology",
-                    "lab-l3",
-                    l3_nodes,
-                    l3_links,
-                    {"supporting-network": [{"network-ref": L2_NET}]},
-                ),
-            ]
-        }
-    }
-    return tree, evidence
+    facts = {}
+    for device in devices:
+        entry = {"platform": "comware"}
+        for capability, name in TOPOLOGY_INPUTS.items():
+            result = parse_generic({"os_family": "comware"}, capability, source(device, name))
+            if result.status != "complete":
+                raise ValueError(f"{device} {capability} did not parse completely")
+            entry[capability] = result.summary if capability == "lldp_local" else result.records
+        facts[device] = entry
+    return build_topology(facts, LAB)
 
 
 def render() -> dict[str, bytes]:

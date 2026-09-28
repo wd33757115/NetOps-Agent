@@ -68,7 +68,7 @@ TE（RFC 8795）、BGP 等不在当前实验场景内，不纳入本轮，避免
 
 | 实例 | 映射范围 | 验证结论 |
 |---|---|---|
-| `topology.json` | RFC 8345 + SIMAP -03 的两层拓扑。L2（RFC 8944）：2 台设备（机箱 MAC 标识）、3 台主机（MAC 标识）；4 条双向链路，其中 GE1/0 共享网段是 1 条 3 端点的 mp2mp 链路，不虚构 Hub 节点。L3（RFC 8346）：4 个网段链路，L3 TP 通过 supporting-termination-point 指向 L2 口（Vlan100/200→GE3/0），L3 链路通过 supporting-link 指向 L2 链路；并填写 SIMAP 导航字段 | 由 LLDP、ARP、MAC 和接口地址生成，生成时自动比对路线图 11.0 的期望链路集合；Yangson 校验通过。每条链路的依据记录在清单 `topology_evidence` 中。L2 链路表示二层邻接，不等于物理线缆 |
+| `topology.json` | RFC 8345 + SIMAP -03 的两层拓扑。L2（RFC 8944）：2 台设备（机箱 MAC 标识）、3 台主机（MAC 标识）；4 条双向链路，其中 GE1/0 共享网段是 1 条 3 端点的 mp2mp 链路，不虚构 Hub 节点。L3（RFC 8346）：4 个网段链路，L3 TP 通过 supporting-termination-point 指向 L2 口（Vlan100/200→GE3/0），L3 链路通过 supporting-link 指向 L2 链路；并填写 SIMAP 导航字段 | 由 App 解析器解析样本后，交给 App 拓扑构建器 `src/apps/topology/backend/model/builder.py` 生成（与在线发现是同一份实现）。与路线图 11.0 期望的比对放在 `tests/unit/test_topology_builder.py`；Yangson 校验通过。每条链路的依据记录在清单 `topology_evidence` 中。L2 链路表示二层邻接，不等于物理线缆 |
 | `inventory.json` | 2 个 ne-virtual、软件版本及名称 | Schema 通过；虚拟属性依据 GNS3 实验部署。同名 H3C 不合并，未虚构硬件组件承载序列号 |
 | `vsr-1-routes.json` / `vsr-2-routes.json` | 18 / 19 条路由：目的前缀、协议类别、优先级、下一跳地址 | 原生 IPv4 unicast RIB 子集通过；保留 0.0.0.0/32 和特殊地址行，不擅改成默认路由或丢弃动作 |
 | `vsr-1-interfaces.partial.json` / `vsr-2-interfaces.partial.json` | 各 6 条 IP 接口行的类型、状态、地址/掩码 | **严格完整性检查失败**：缺 statistics/discontinuity-time；部分解析通过并逐字段保留，不能称完整 operational datastore |

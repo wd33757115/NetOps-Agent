@@ -1043,6 +1043,7 @@ P2-9 根据 Q5 取消，不引入 SNMP。P3 及后续仍在进入阶段时展开
 | IETF-2.2 ARP/VLAN/LLDP 映射 | 已完成本批次映射核验；完整实例未通过 | `build_ietf_lab_instances.py` 新增每台 `-l2.partial.json`（ARP 4 条、GE3/0 access PVID、VLAN 成员、LLDP 本地系统及 3 个端口），原 6 个实例字节不变；新增 `build_ietf_l2_cases.py`、`l2-cases/`（11 文件）、`reports/l2-validation.json`。libyang 15/15 匹配：严格模式缺项正好是 4 个计数器中断时间和 bridge address；operational 模式解析引用后通过；parse-only 往返一致；7 个反例拒绝。Yangson 包验证 26/26。发现并修正 802.1Q pvid 的 when 约束（必须引用非 D-bridge 组件），identity 按 RFC 7951 §6.8 使用同模块简写 | LLDP 远端表的 time-mark 语义未核实，MAC 表缺 database-id 与桥端口号，均不造值（“Update time”超过 TTL，更正了首稿中“只是年龄”的说法）；缺证据清单写入验证包 README，作为之后重排采集的输入 |
 | P2-11 按模型缺口补采（实机） | 已完成实机核查；2 项缺口确认无来源 | 负责人提供实验口令（仅通过环境变量传入，未落盘）后，用 `probe_lab_p2_11.py` 对两台 VSR 执行 2 轮只读探测，间隔约 97 秒。“Update time” 两轮不变且与基准批次一致，而开机时长增长，确认为变化时的开机时长，据此映射 LLDP 远端表。计数器从未清零，中断时间只能取开机时刻，但只有分钟精度；`display stp` 不存在，bridge address、FDB 键无来源。证据 36 个文件入 `evidence/p2-11/`，敏感扫描 0 命中。libyang 16/16、Yangson 26/26 | 计数器中断时间精度不足；bridge address、MAC 表在 VSR 上无来源，留待交换机实验（Q6）再查。负责人决定：不把 `display interface <口>` 加入采集配置 |
 | IETF-2.3 L2/L3 基础拓扑 | 已完成 | 按负责人确认的设计，以 RFC 8345 + SIMAP -03 为基线生成 `topology.json`，替换旧的 `topology-observed.json`（4 条单向链路，且把经 Hub 的 GE1/0 误当点到点）。L2：4 条双向链路，共享网段为 1 条 mp2mp 链路；L3：4 个网段链路，带层间 supporting。生成时与 11.0 期望逐条比对；Yangson 26/26 | 路由、ACL 仍在设备树，不进拓扑；inventory 关联按 Q-IETF-1 不建立 |
+| D-1 拓扑构建器入 App（拓扑发现第 1 步） | 已完成 | 新增 `src/apps/topology/backend/model/builder.py`：输入每台设备的解析记录（lldp_local/lldp/interfaces/ip/arp/mac），输出 SIMAP L2/L3。设备身份用自报机箱 ID，与邻居通告同键，已采集设备和被通告邻居合为一个节点。主机按证据强弱接入：边缘口的 MAC/ARP 优先，只在 LLDP 口出现时才用该口。研究脚本删除自带的 `topology()`，改为调用 App 解析器和构建器，`topology.json` 重新生成（只有标识变化）。新增 8 项单元测试 | 第 2 步：把 collect_node 接进发现任务 |
 | IETF-2.1 VSR 实验实例 | 已完成本批次映射核验；完整实例未通过 | `build_ietf_lab_instances.py` 校验全部既有样本摘要、重建并比较 6 个原生实例与清单。2 节点/4 TP/4 LLDP 邻接、2 个虚拟 NE、18+19 路由通过；各 6 条 IP 接口行因缺 statistics/discontinuity-time 按预期失败。`validate_ietf_model_package.py` 共 24 项结果匹配，负例检查具体诊断；结果已保存 `models/network-twin/reports/`。 | 不虚构计数器时间、默认 VRF、OSPF 版本或物理关系。路由子集未填出口引用，特殊下一跳动作、序列号组件归属、ARP/MAC/VLAN/Hub 与完整路径仍未映射验收。 |
 
 本轮 IETF-1/2 改动文件：`.gitignore` 仅放行 `models/network-twin/` 验证资料；该目录的来源锁、profile、补丁、说明、关联核验、实例及报告；研究脚本 `build_ietf_model_package.py`、`build_ietf_lab_instances.py`、`validate_ietf_model_package.py`；本台账和核验文档。生产代码及 P2-3 未提交修改不包含在本轮。
@@ -1071,7 +1072,9 @@ P2-11 文件与命令：新增 `scripts/topology/probe_lab_p2_11.py`（复用 `c
 
 负责人纠偏（2026-09-28）：不把 `display interface <口>` 加入采集配置；停止为边缘字段追证据，优先用 LLDP、MAC、ARP 构建基础拓扑。下一步以此为准。
 
-IETF-2.3：`build_ietf_lab_instances.py` 新增 `topology()`，由 LLDP/ARP/MAC/接口地址生成 L2、L3 两个 network。执行 `build_ietf_lab_instances.py`（9 文件）和 `validate_ietf_model_package.py`（26/26）。设备内配置/合成状态挂载已单独通过，不把它当全网关联的替代。不能把本轮有限数据投影当“完整 IETF 模型已交付”，P2-3/P2-10 继续暂停。
+IETF-2.3：`build_ietf_lab_instances.py` 新增 `topology()`，由 LLDP/ARP/MAC/接口地址生成 L2、L3 两个 network。执行 `build_ietf_lab_instances.py`（9 文件）和 `validate_ietf_model_package.py`（26/26）。
+
+拓扑发现改造（负责人确认方案，4 步：构建器入 App → 采集接入发现 → 快照/导出/画布 → 实机验收）。D-1 命令：`venv/Scripts/python.exe -m pytest tests/unit -k topology`，400 通过、5 失败、1 跳过；5 个失败均为工作区中暂停的 P2-3 VLAN 模板测试，与本步无关，新增 8 项全部通过。研究 Python 执行 `build_ietf_lab_instances.py`、`--check`（9 文件一致）和 `validate_ietf_model_package.py`（26/26）；Ruff 通过。P2-3 工作区改动未提交。设备内配置/合成状态挂载已单独通过，不把它当全网关联的替代。不能把本轮有限数据投影当“完整 IETF 模型已交付”，P2-3/P2-10 继续暂停。
 
 分项记录与证据详见 [原生模型核验清单](network-digital-twin-model-audit.md)。IETF-0 整体仍进行中；上述“完成”只针对已列出的核验范围。
 
