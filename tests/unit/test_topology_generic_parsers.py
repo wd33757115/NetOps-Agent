@@ -263,6 +263,15 @@ def test_explicit_zero_total_and_contradictory_body():
     assert run("lldp", STYLES[0]["lldp"] + "\nTotal entries: 0").status == "partial"
 
 
+@pytest.mark.parametrize("device", ["vsr-1", "vsr-2"])
+def test_actual_empty_vrf_includes_license_metadata(device):
+    text = lab("vrfs", device)
+    assert run("vrfs", text).status == "complete"
+    assert run("vrfs", text.replace("configured : 0", "configured : 1")).status == "failed"
+    assert run("vrfs", text + "\nUnexpected VPN row").status == "failed"
+    assert run("vrfs", text, complete=False).status == "failed"
+
+
 def test_framing_only_removed_at_known_edges():
     text = "display mac-address\nMAC Address  VLAN ID  State  Port/Nickname  Aging\n<H3C>"
     assert run("mac", text).status == "failed"

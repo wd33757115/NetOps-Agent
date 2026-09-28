@@ -1,0 +1,32 @@
+schema_version: 1
+id: h3c-comware7
+vendor: H3C/HPE
+os_family: comware
+identity_profiles: [h3c-comware7]
+preferred_driver: netmiko
+session:
+  paging_off: [screen-length disable]
+  encoding: utf-8
+  max_output_bytes: 4194304
+budgets: {fast: 120, standard: 300, full: 600}
+capabilities:
+  version: {command: display version, parser: generic_version}
+  lldp_local: {command: display lldp local-information, parser: generic_lldp_local}
+  lldp: {command: display lldp neighbor-information verbose, parser: generic_lldp}
+  interfaces: {command: display interface brief, parser: generic_ifbrief}
+  inventory: {command: display device manuinfo, parser: null}
+  ip: {command: display ip interface brief, parser: generic_ipif}
+  arp: {command: display arp, parser: generic_arp}
+  mac: {command: display mac-address, parser: generic_mac}
+  vlan: {command: display vlan brief, parser: null}
+  lag: {command: display link-aggregation verbose, parser: null}
+  routes: {command: display ip routing-table, timeout: 300, parser: null}
+  vrfs: {command: display ip vpn-instance, parser: null}
+  irf: {command: display irf, parser: null}
+verified:
+  - model: VSR1000
+    version: 7.1.064 Release 1362P12
+    source: tests/fixtures/topology/h3c/vsr1000-7.1.064
+    collected: [version, lldp_local, lldp, interfaces, ip, arp, mac, vlan, lag, routes, vrfs]
+    unsupported: [inventory, irf]
+    parsed: [version, lldp_local, lldp, interfaces, ip, arp, mac, lag, vrfs]

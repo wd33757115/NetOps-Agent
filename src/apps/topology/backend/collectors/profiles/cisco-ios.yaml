@@ -1,0 +1,25 @@
+schema_version: 1
+id: cisco-ios
+vendor: Cisco
+os_family: ios
+identity_profiles: [cisco-ios, cisco-iosxe]
+preferred_driver: paramiko
+session:
+  paging_off: [terminal width 511, terminal length 0]
+  encoding: utf-8
+  max_output_bytes: 4194304
+budgets: {fast: 120, standard: 300, full: 600}
+# IOS-XE is an explicit identity alias, not an assertion of platform-wide verification.
+capabilities:
+  version: {command: show version, parser: generic_version}
+  lldp: {command: show lldp neighbors detail, parser: generic_lldp}
+  interfaces: {command: show interfaces, parser: null}
+  inventory: {command: show inventory, parser: null}
+  ip: {command: show ip interface, parser: null}
+  arp: {command: show ip arp, parser: generic_arp}
+  mac: {command: show mac address-table, parser: generic_mac}
+  vlan: {command: show vlan brief, parser: null}
+  lag: {command: show etherchannel summary, parser: null}
+  routes: {command: show ip route, timeout: 300, parser: null}
+  vrfs: {command: show vrf, parser: null}
+verified: []

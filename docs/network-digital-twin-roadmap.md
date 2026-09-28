@@ -249,6 +249,7 @@ Q7 已确认（2026-09-28）：**团队共同维护**。同一管理域共用设
 - 某能力命令失败或不支持（实测：VSR 上 `display irf` 返回 `% Incomplete command found at '^' position.`，`display device manuinfo` 返回 `The operation is not supported on the specified slot or subslot.`）只让该能力 fact_set 为 `unsupported/failed`，不影响其他能力，也不阻止扩散。
 - 同一对设备之间有多条并行链路时（实测：两台 VSR 的 GE1/0↔GE1/0、GE2/0↔GE2/0），LLDP 会从多个本地端口报告同一邻居机箱，但通告地址可不同（GE1/0 为 10.10.1.x，GE2/0 为 2.2.2.x）：邻居按机箱 ID 去重只入队一次，链路按 (本端 TP, 对端机箱, 对端端口) 分别建立。
 - 能力清单可按任务选择：`fast`（version+lldp_local+lldp+interfaces）、`standard`（+inventory+ip+arp+mac+vlan+lag）、`full`（+routes+vrfs+irf/mlag+vxlan）。默认 `standard`，诊断路径计算需要 `full`。
+  - 这是请求集合；平台未配置的能力必须报告缺口，不能为凑齐集合发送猜测命令。采集成功与解析成功分别记录。P2-2 单节点入口从识别前计总预算 120/300/600 秒；未知平台先 Paramiko，确认后重连时固定首次成功凭据。只有精确型号/版本的驱动实测记录及匹配的主机密钥来源才切换 Netmiko，否则保留原 Paramiko 信任策略。
 
 ### 6.2 身份归并
 
@@ -301,7 +302,7 @@ Q7 已确认（2026-09-28）：**团队共同维护**。同一管理域共用设
 ```yaml
 id: h3c-comware7
 vendor: H3C
-os_family: comware7
+os_family: comware
 detect:
   probe_commands: ["display version"]          # 探测序列，按顺序直到命中
   signatures:
@@ -986,6 +987,7 @@ P2-9 根据 Q5 取消，不引入 SNMP。P3 及后续仍在进入阶段时展开
 | P2-4 | 已完成 | 2026-09-28 | 新增规范化 76 通过；连同实机夹具和原拓扑回归 142 通过；Ruff 通过 | 未接线旧解析器；保留原文、未知名称和分页标志 |
 | P2-7 | 已完成 | 2026-09-28 | 新增识别 29 通过；设备访问/拓扑 878 通过、1 跳过；两台 H3C 一次登录识别并执行对应 LLDP；构建通过 | topology 0.3.2；其他签名仅样本验证；未发布 |
 | P2-8 | 已完成 | 2026-09-28 | 通用解析新增 83 通过、真实样本事实库往返新增 14 通过；设备访问/拓扑全量 975 通过、1 跳过；Ruff 通过 | topology 0.3.3；两台 VSR 原始/规范化样本；五风格合成样本，不等同实机支持 |
+| P2-2 | 已完成 | 2026-09-28 | 档案/调度新增 50、VRF 实测补测 2；全量 1027 通过、1 跳过；双 H3C 三档 6 次采集、隔离构建通过 | topology 0.3.4；动态选择驱动及固定凭据；Cisco 未进行硬件验收 |
 
 ### P0-1 基线记录（2026-09-28）
 
@@ -1196,6 +1198,18 @@ P1-1 实机补验与驱动修复（2026-09-28）：
 - 83 项通用解析测试：两台实测各七能力、五厂商 CLI 风格（明确手写合成）、空表与未知数据、完整键、多行描述、IPv6/VRF、掩码、错误命令、分页/截断、数量、残缺/多邻居、无档案与证据。事实仓储额外 14 项将真实 raw 经生产解析器写入，并由第二账号重放记录与原始证据；不是测试专用解析转换。
 - `venv/Scripts/python.exe -m pytest tests/unit/test_topology_generic_parsers.py tests/unit/test_topology_facts.py -q`：127 通过。全量设备访问/拓扑测试 `--junitxml=.runtime/p2-8-tests.xml`：975 通过、1 条已有可选 YANG 跳过，日志 `.runtime/p2-8-tests.log`；Ruff、注册生成及 `git diff --check` 通过。
 - 未完成项：结构化/模板/LLM 层与现场多能力事实接线按后续卡；旧线上 LLDP 解析保留，未声称其他厂商通过实机测试；原巡检未改、未执行运行库迁移、未发布。下一卡 P2-2 平台档案。
+
+### P2-2 执行记录（2026-09-28）
+
+- 文件：`collectors/profiles.py`、`collect.py`、三份 `profiles/{h3c-comware7,cisco-nxos,cisco-ios}.yaml`、档案 README、`tests/unit/test_topology_profiles.py`；补修 `parse.py` 的 VRF 空表格式并加 2 条实际夹具回归；App 0.3.4、前端注册及本文。
+- 严格检查重复 YAML 键/alias/大小、已识别 profile 引用、标准 L1 命令、初始化命令、能力和解析器匹配、单命令/输出/整节点预算。IOS-XE 显式对应 IOS 档案。`parser: null` 表示待适配；未知引用不会动态导入模块。按 fast/standard/full 请求能力，未配置能力返回 `no_profile_command`，不猜命令。调整示例 os_family 为与识别器一致的 comware。
+- 后端 `collect_node` 复用公共 SSH 批量服务、准确命令授权和实时撤销检查：先 Paramiko 读本机版本，命中停止；复用版本证据；第二连接按识别档案关闭分页后采集，固定刚才成功的凭据，不重新搜索其他账号。默认总预算 120/300/600 秒包含识别和重连，逐命令超时不超过剩余预算。不改现有 LLDP 任务，等待 P3-1 接入新多能力入口。
+- H3C VSR1000 精确软件版本匹配 P1-5 的驱动验证记录时优先 Netmiko；其他型号/版本保持 Paramiko。数据库信任模式切换须由调用方提供同一信任库的 known_hosts_provider，否则保留原验证器并记录原因；禁止静默切到文件信任。实机联调发现构造器参数不匹配后改用实际公共接口，并用 autospec 测试约束签名。
+- 档案 50 项测试涵盖非法配置/命令/初始化/解析引用、模式、驱动资格、证据复用、失败与未知节点、总预算、授权撤销、驱动切换时固定凭据和二次认证失败不轮换。三档真实夹具走实际公共批量服务。空 VRF 真正输出有两条许可证元数据，补齐严格零条判断；任意额外未知行或非零数量仍拒绝为空。
+- 实机脚本 `.runtime/p2-2-lab.py`：两台 H3C 各执行 fast/standard/full，分别 4/10/13 项，全部传输完整；版本用 Paramiko，后续 Netmiko。inventory/irf 正确判 unsupported；已适配七项事实及空 lag 正常。原始报告 `.runtime/p2-2-lab-report.json` 和逐命令证据保留；VRF 空表修正后以本次实际采集原文重放两台，`.runtime/p2-2-vrf-replay.json` 均 complete + 0。未再为纯解析修正重复登录。VLAN/路由已采集但等待 P2-3，未谎报解析完成。
+- 定向测试 135 通过（档案 50 +通用解析 85），Ruff、注册生成和 `git diff --check` 通过；前端隔离构建 `.runtime/p2-2/frontend-dist` 通过。全量设备访问/拓扑 1027 通过、1 条已有可选 YANG 跳过，记录 `.runtime/p2-2-tests.xml` / `.runtime/p2-2-tests.log`。
+- 方案修正：模式清单是请求集，不是能力支持保证；Cisco 本地 LLDP 身份无可信仓库样本时报告缺口，不能用全局 LLDP 状态充当机箱信息。IOS 简表无掩码且并非全物理口，使用详细接口/IP 命令待模板适配；命令参考链接写入档案 README，不能据此声称实机验证。
+- 未完成项：模板层、事实入库与发现队列/界面接线、Cisco/华为实机验收；无巡检变更、无运行数据库迁移、未发布。下一卡 P2-3 模板适配。
 
 ## 参考
 

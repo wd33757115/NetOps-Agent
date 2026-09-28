@@ -32,7 +32,11 @@ EMPTY = {
     "arp": r"No ARP entries(?: found)?\.?",
     "mac": r"No MAC(?: address)? entries(?: found)?\.?",
     "lag": r"No link aggregation group exists\.",
-    "vrfs": r"(?:L3VPN is not configured\.|Total VPN-Instances configured\s*:\s*0)",
+    "vrfs": (
+        r"(?:L3VPN is not configured\.|Total VPN-Instances configured\s*:\s*0"
+        r"(?:\s*\n[ \t]*License limit\s*:\s*[YN]\s*\n[ \t]*"
+        r"Max VPN instances permitted by license\s*:\s*\d+)?)"
+    ),
 }
 MAX_BYTES = 8 * 1024 * 1024
 
