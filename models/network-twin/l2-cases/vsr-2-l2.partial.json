@@ -1,0 +1,145 @@
+{
+  "ietf-interfaces:interfaces": {
+    "interface": [
+      {
+        "name": "GE1/0",
+        "type": "iana-if-type:ethernetCsmacd",
+        "oper-status": "up",
+        "ietf-ip:ipv4": {
+          "address": [
+            {
+              "ip": "10.10.1.2",
+              "prefix-length": 24
+            }
+          ],
+          "neighbor": [
+            {
+              "ip": "10.10.1.1",
+              "link-layer-address": "0c:d2:5b:c5:00:00",
+              "origin": "dynamic"
+            },
+            {
+              "ip": "10.10.1.254",
+              "link-layer-address": "00:15:5d:01:03:14",
+              "origin": "dynamic"
+            }
+          ]
+        }
+      },
+      {
+        "name": "GE2/0",
+        "type": "iana-if-type:ethernetCsmacd",
+        "oper-status": "up",
+        "ietf-ip:ipv4": {
+          "address": [
+            {
+              "ip": "2.2.2.1",
+              "prefix-length": 24
+            }
+          ],
+          "neighbor": [
+            {
+              "ip": "2.2.2.2",
+              "link-layer-address": "0c:d2:5b:c5:00:01",
+              "origin": "dynamic"
+            }
+          ]
+        }
+      },
+      {
+        "name": "GE3/0",
+        "type": "iana-if-type:ethernetCsmacd",
+        "oper-status": "up",
+        "ieee802-dot1q-bridge:bridge-port": {
+          "bridge-name": "captured-bridge",
+          "component-name": "captured-c-vlan-component",
+          "pvid": 100
+        }
+      },
+      {
+        "name": "Vlan100",
+        "type": "iana-if-type:l3ipvlan",
+        "oper-status": "up",
+        "ietf-ip:ipv4": {
+          "address": [
+            {
+              "ip": "1.1.1.1",
+              "prefix-length": 24
+            }
+          ],
+          "neighbor": [
+            {
+              "ip": "1.1.1.2",
+              "link-layer-address": "00:50:79:66:68:00",
+              "origin": "dynamic"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "ieee802-dot1ab-lldp:lldp": {
+    "local-system-data": {
+      "chassis-id-subtype": "mac-address",
+      "chassis-id": "74-25-8A-E4-12-52",
+      "system-name": "H3C",
+      "system-capabilities-supported": "bridge router cvlan-component svlan-component",
+      "system-capabilities-enabled": "bridge router cvlan-component"
+    },
+    "port": [
+      {
+        "name": "GE1/0",
+        "dest-mac-address": "01-80-C2-00-00-0E",
+        "port-id-subtype": "interface-name",
+        "port-id": "GigabitEthernet1/0",
+        "port-desc": "GigabitEthernet1/0 Interface"
+      },
+      {
+        "name": "GE2/0",
+        "dest-mac-address": "01-80-C2-00-00-0E",
+        "port-id-subtype": "interface-name",
+        "port-id": "GigabitEthernet2/0",
+        "port-desc": "GigabitEthernet2/0 Interface"
+      },
+      {
+        "name": "GE3/0",
+        "dest-mac-address": "01-80-C2-00-00-0E",
+        "port-id-subtype": "interface-name",
+        "port-id": "GigabitEthernet3/0",
+        "port-desc": "GigabitEthernet3/0 Interface"
+      }
+    ]
+  },
+  "ieee802-dot1q-bridge:bridges": {
+    "bridge": [
+      {
+        "name": "captured-bridge",
+        "bridge-type": "customer-vlan-bridge",
+        "component": [
+          {
+            "name": "captured-c-vlan-component",
+            "type": "c-vlan-component",
+            "bridge-vlan": {
+              "vlan": [
+                {
+                  "vid": 1,
+                  "name": "VLAN 0001"
+                },
+                {
+                  "vid": 100,
+                  "name": "VLAN 0100",
+                  "egress-ports": [
+                    "GE3/0"
+                  ],
+                  "untagged-ports": [
+                    "GE3/0"
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

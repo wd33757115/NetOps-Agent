@@ -24,6 +24,20 @@
       ]
     },
     {
+      "file": "vsr-1-l2.partial.json",
+      "sha256": "f3bbc304d64a66b1d8f2214ddb088a22dfb0903a0bd8ff922fc93f84d518bb73",
+      "profile": "device",
+      "expected_valid": false,
+      "expected_diagnostic": "missing-data: expected 'statistics'",
+      "sources": [
+        "vsr-1/interfaces.txt",
+        "vsr-1/arp.txt",
+        "vsr-1/vlan.txt",
+        "vsr-1/lldp_local.txt",
+        "vsr-1/mac.txt"
+      ]
+    },
+    {
       "file": "vsr-2-interfaces.partial.json",
       "sha256": "1b6bfc6ad19dad4304d4987b1911ad7932de78aff299debd3cf3441aa40c7137",
       "profile": "device",
@@ -41,6 +55,20 @@
       "expected_diagnostic": null,
       "sources": [
         "vsr-2/routes.txt"
+      ]
+    },
+    {
+      "file": "vsr-2-l2.partial.json",
+      "sha256": "158d667698e02ec21d6b7b3a0ca0d465f00c496294e364af747672289a52df85",
+      "profile": "device",
+      "expected_valid": false,
+      "expected_diagnostic": "missing-data: expected 'statistics'",
+      "sources": [
+        "vsr-2/interfaces.txt",
+        "vsr-2/arp.txt",
+        "vsr-2/vlan.txt",
+        "vsr-2/lldp_local.txt",
+        "vsr-2/mac.txt"
       ]
     },
     {
@@ -73,11 +101,13 @@
   "counts": {
     "vsr-1": {
       "routes": 18,
-      "partial_interfaces": 6
+      "partial_interfaces": 6,
+      "arp_neighbors": 4
     },
     "vsr-2": {
       "routes": 19,
-      "partial_interfaces": 6
+      "partial_interfaces": 6,
+      "arp_neighbors": 4
     }
   },
   "unmapped_route_fields": [
@@ -304,6 +334,90 @@
       "interface": "InLoop0"
     }
   ],
+  "unmapped_l2_fields": [
+    {
+      "device": "vsr-1",
+      "arp": "10.10.1.2",
+      "aging_minutes": 11,
+      "port": "GE1/0",
+      "vlan": "--",
+      "placed_on": "GE1/0"
+    },
+    {
+      "device": "vsr-1",
+      "arp": "10.10.1.254",
+      "aging_minutes": 5,
+      "port": "GE1/0",
+      "vlan": "--",
+      "placed_on": "GE1/0"
+    },
+    {
+      "device": "vsr-1",
+      "arp": "2.2.2.1",
+      "aging_minutes": 17,
+      "port": "GE2/0",
+      "vlan": "--",
+      "placed_on": "GE2/0"
+    },
+    {
+      "device": "vsr-1",
+      "arp": "192.168.1.2",
+      "aging_minutes": 19,
+      "port": "GE3/0",
+      "vlan": "200",
+      "placed_on": "Vlan200"
+    },
+    {
+      "device": "vsr-1",
+      "mac": "00-50-79-66-68-01",
+      "vlan": 200,
+      "state": "Learned",
+      "port": "GE3/0",
+      "aging": "Y",
+      "reason": "filtering-entry needs database-id and bridge port number"
+    },
+    {
+      "device": "vsr-2",
+      "arp": "10.10.1.1",
+      "aging_minutes": 11,
+      "port": "GE1/0",
+      "vlan": "--",
+      "placed_on": "GE1/0"
+    },
+    {
+      "device": "vsr-2",
+      "arp": "10.10.1.254",
+      "aging_minutes": 3,
+      "port": "GE1/0",
+      "vlan": "--",
+      "placed_on": "GE1/0"
+    },
+    {
+      "device": "vsr-2",
+      "arp": "1.1.1.2",
+      "aging_minutes": 19,
+      "port": "GE3/0",
+      "vlan": "100",
+      "placed_on": "Vlan100"
+    },
+    {
+      "device": "vsr-2",
+      "arp": "2.2.2.2",
+      "aging_minutes": 17,
+      "port": "GE2/0",
+      "vlan": "--",
+      "placed_on": "GE2/0"
+    },
+    {
+      "device": "vsr-2",
+      "mac": "00-50-79-66-68-00",
+      "vlan": 100,
+      "state": "Learned",
+      "port": "GE3/0",
+      "aging": "Y",
+      "reason": "filtering-entry needs database-id and bridge port number"
+    }
+  ],
   "gaps": [
     "Interface statistics/discontinuity-time is absent; partial instances intentionally fail full validation.",
     "Six IP-interface rows per device only; bridge and special internal interfaces are not represented.",
@@ -316,6 +430,11 @@
     "Virtual NE type comes from the documented GNS3 VSR lab deployment, not LLDP alone.",
     "No virtual node-to-inventory mapping claimed by reusing identical example keys.",
     "LLDP serial number is retained in capture; no invented physical component for the VM.",
-    "Hub, unmanaged switches, ARP/MAC/VLAN, IPv6, counters and physical wiring remain outside these subsets."
+    "Hub, unmanaged switches, IPv6, counters and physical wiring remain outside these subsets.",
+    "ARP rows on VLAN interfaces are placed on the unique L3 interface whose captured subnet contains the neighbor; the physical port stays in evidence.",
+    "LLDP remote-systems-data is keyed by time-mark (sysUpTime at change); the CLI only shows an age, so remote entries are not synthesized.",
+    "MAC filtering entries need database-id and a bridge port number; the CLI shows an interface name only, so the MAC table is not synthesized.",
+    "Bridge address is mandatory but not captured; bridge/component keys are projection labels; the l2 subsets therefore remain partial.",
+    "Only the nearest-bridge LLDP agent is mapped; multi-line system description and management-address TLVs stay in evidence."
   ]
 }

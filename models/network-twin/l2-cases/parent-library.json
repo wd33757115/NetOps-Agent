@@ -1,0 +1,180 @@
+{
+  "ietf-yang-library:modules-state": {
+    "module-set-id": "l2",
+    "module": [
+      {
+        "name": "iana-if-type",
+        "revision": "2014-05-08",
+        "namespace": "urn:ietf:params:xml:ns:yang:iana-if-type",
+        "conformance-type": "implement"
+      },
+      {
+        "name": "ieee802-dot1ab-lldp",
+        "revision": "2022-03-15",
+        "namespace": "urn:ieee:std:802.1AB:yang:ieee802-dot1ab-lldp",
+        "conformance-type": "implement"
+      },
+      {
+        "name": "ieee802-dot1ab-types",
+        "revision": "2022-03-15",
+        "namespace": "urn:ieee:std:802.1Q:yang:ieee802-dot1ab-types",
+        "conformance-type": "import"
+      },
+      {
+        "name": "ieee802-dot1q-bridge",
+        "revision": "2023-10-26",
+        "namespace": "urn:ieee:std:802.1Q:yang:ieee802-dot1q-bridge",
+        "conformance-type": "implement"
+      },
+      {
+        "name": "ieee802-dot1q-types",
+        "revision": "2023-10-26",
+        "namespace": "urn:ieee:std:802.1Q:yang:ieee802-dot1q-types",
+        "conformance-type": "import"
+      },
+      {
+        "name": "ieee802-types",
+        "revision": "2023-10-22",
+        "namespace": "urn:ieee:std:802.1Q:yang:ieee802-types",
+        "conformance-type": "import"
+      },
+      {
+        "name": "ietf-datastores",
+        "revision": "2018-02-14",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-datastores",
+        "conformance-type": "implement"
+      },
+      {
+        "name": "ietf-inet-types",
+        "revision": "2025-12-22",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-inet-types",
+        "conformance-type": "import"
+      },
+      {
+        "name": "ietf-interfaces",
+        "revision": "2018-02-20",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-interfaces",
+        "conformance-type": "implement"
+      },
+      {
+        "name": "ietf-ip",
+        "revision": "2018-02-22",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-ip",
+        "conformance-type": "implement"
+      },
+      {
+        "name": "ietf-routing",
+        "revision": "2018-03-13",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-routing",
+        "conformance-type": "import"
+      },
+      {
+        "name": "ietf-yang-library",
+        "revision": "2019-01-04",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-yang-library",
+        "conformance-type": "implement"
+      },
+      {
+        "name": "ietf-yang-types",
+        "revision": "2025-12-22",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-yang-types",
+        "conformance-type": "import"
+      }
+    ]
+  },
+  "ietf-yang-library:yang-library": {
+    "content-id": "6b8caca3a716070d6ada9e3baf66972e7b182af8e315f556736517e55e5ddbdf",
+    "module-set": [
+      {
+        "name": "l2",
+        "module": [
+          {
+            "name": "iana-if-type",
+            "revision": "2014-05-08",
+            "namespace": "urn:ietf:params:xml:ns:yang:iana-if-type"
+          },
+          {
+            "name": "ieee802-dot1ab-lldp",
+            "revision": "2022-03-15",
+            "namespace": "urn:ieee:std:802.1AB:yang:ieee802-dot1ab-lldp"
+          },
+          {
+            "name": "ieee802-dot1q-bridge",
+            "revision": "2023-10-26",
+            "namespace": "urn:ieee:std:802.1Q:yang:ieee802-dot1q-bridge"
+          },
+          {
+            "name": "ietf-datastores",
+            "revision": "2018-02-14",
+            "namespace": "urn:ietf:params:xml:ns:yang:ietf-datastores"
+          },
+          {
+            "name": "ietf-interfaces",
+            "revision": "2018-02-20",
+            "namespace": "urn:ietf:params:xml:ns:yang:ietf-interfaces"
+          },
+          {
+            "name": "ietf-ip",
+            "revision": "2018-02-22",
+            "namespace": "urn:ietf:params:xml:ns:yang:ietf-ip"
+          },
+          {
+            "name": "ietf-yang-library",
+            "revision": "2019-01-04",
+            "namespace": "urn:ietf:params:xml:ns:yang:ietf-yang-library"
+          }
+        ],
+        "import-only-module": [
+          {
+            "name": "ieee802-dot1ab-types",
+            "revision": "2022-03-15",
+            "namespace": "urn:ieee:std:802.1Q:yang:ieee802-dot1ab-types"
+          },
+          {
+            "name": "ieee802-dot1q-types",
+            "revision": "2023-10-26",
+            "namespace": "urn:ieee:std:802.1Q:yang:ieee802-dot1q-types"
+          },
+          {
+            "name": "ieee802-types",
+            "revision": "2023-10-22",
+            "namespace": "urn:ieee:std:802.1Q:yang:ieee802-types"
+          },
+          {
+            "name": "ietf-inet-types",
+            "revision": "2025-12-22",
+            "namespace": "urn:ietf:params:xml:ns:yang:ietf-inet-types"
+          },
+          {
+            "name": "ietf-routing",
+            "revision": "2018-03-13",
+            "namespace": "urn:ietf:params:xml:ns:yang:ietf-routing"
+          },
+          {
+            "name": "ietf-yang-types",
+            "revision": "2025-12-22",
+            "namespace": "urn:ietf:params:xml:ns:yang:ietf-yang-types"
+          }
+        ]
+      }
+    ],
+    "schema": [
+      {
+        "name": "l2",
+        "module-set": [
+          "l2"
+        ]
+      }
+    ],
+    "datastore": [
+      {
+        "name": "ietf-datastores:running",
+        "schema": "l2"
+      },
+      {
+        "name": "ietf-datastores:operational",
+        "schema": "l2"
+      }
+    ]
+  }
+}

@@ -25,15 +25,17 @@
 | 拓扑节点/TP/链路 | RFC 8345 + SIMAP -03 + RFC 8944/8346：`N/D/T/L` | 已建模；LLDP 邻接已映射（IETF-2.1） |
 | 设备清单（虚拟 NE、软件版本） | inventory -19 + software -04：`network-element[ne-id]` | 已建模并映射；序列号的组件归属未闭合 |
 | 接口、IP 地址 | RFC 8343/8344：`/if:interfaces/interface`、`ip:ipv4/address` | 已建模；部分映射（缺计数器中断时间） |
-| ARP | RFC 8344：`ip:ipv4/neighbor[ip]/link-layer-address`（operational） | 已建模；未映射 |
-| LLDP 本地/远端 | IEEE 802.1AB：`/lldp/port[name dest-mac-address]/remote-systems-data[time-mark remote-index]` | **本轮加入**；未映射 |
-| access 口 VLAN、MAC 表 | IEEE 802.1Q：接口 `dot1q:bridge-port/pvid`；`/bridges/bridge/component/filtering-database/filtering-entry[database-id vids address]/port-map` | **本轮加入**；未映射 |
+| ARP | RFC 8344：`ip:ipv4/neighbor[ip]/link-layer-address`（operational） | **已映射（IETF-2.2）**：每台 4 条；VLAN 终端按唯一包含其地址的三层接口子网归到 Vlan 接口，物理口留在溯源清单 |
+| LLDP 本地/远端 | IEEE 802.1AB：`/lldp/local-system-data`、`/lldp/port[name dest-mac-address]/remote-systems-data[time-mark remote-index]` | 本地系统与 3 个端口的 nearest-bridge 代理**已映射**；远端表主键 time-mark 是变化时的 sysUpTime，CLI 只给出“更新时间”，**不映射**（邻接仍在拓扑实例中） |
+| access 口 VLAN、MAC 表 | IEEE 802.1Q：接口 `dot1q:bridge-port/{bridge-name,component-name,pvid}`；`component/bridge-vlan/vlan[vid]`；`filtering-database/filtering-entry[database-id vids address]/port-map[port-ref]` | PVID、VLAN 及成员**已映射**（pvid 的 when 要求引用非 D-bridge 组件）；MAC 表需要 database-id 和桥端口号，CLI 只有接口名，**不映射** |
 | RIB、OSPF、静态/黑洞路由 | RFC 8349 + RFC 9129：`ribs/rib/routes/route`、special-next-hop | 已建模；RIB 子集已映射 |
 | VRF/NI 与挂载 | RFC 8529 + RFC 8528 | 已建模；libyang 验证；实验无 VPN 实例 |
 | ACL 与接口挂接 | RFC 8519：`/acls/acl`、`/acls/attachment-points/interface[interface-id]` | **本轮加入 profile**；未映射 |
 | VLAN 接口（SVI）与 VLAN 的绑定 | 固定模块中未找到 Vlan-interface↔VID 的标准节点；iana-if-type 只给出接口类型 | 缺口，不自定义 |
 | Hub、不可管理交换机、PC | 无采集证据；拓扑只能表示可观测对象 | 不建模推断实体（见 6.4 撤回的假设） |
 | 拓扑 node ↔ 清单 ↔ 设备树 | 无当前标准引用 | 缺口，见 [virtual-association](virtual-association/README.md)，负责人授权自定：模型内不建立关联 |
+
+**模型要求而当前采集缺少的证据**（供之后重排采集任务使用）：接口 `statistics/discontinuity-time`；bridge `address`；LLDP 远端的 time-mark（或能精确换算出它的 sysUpTime 基准）；FDB 的 database-id 与桥端口号（接口名到桥端口号的对应）；路由出接口；LLDP 其他代理和管理地址 TLV。SVI↔VID 的绑定属于模型缺口，不是采集缺口。
 
 TE（RFC 8795）、BGP 等不在当前实验场景内，不纳入本轮，避免过度建模；出现对应场景时再按同一方式加入。
 
@@ -62,7 +64,7 @@ TE（RFC 8795）、BGP 等不在当前实验场景内，不纳入本轮，避免
 
 ## 实验实例和验证边界
 
-`instances/` 包含 6 个原生 RFC 7951 实例文件及独立工程溯源清单。清单不送入 YANG 数据树；其中没有认证信息。`build_ietf_lab_instances.py` 只针对已审查的固定批次进行离线映射，先检查所有原始/清理后文件的摘要，再生成实例。它不是通用 CLI 解析器，也不接入生产采集流程。`--check` 比较已提交实例与重建结果，省略时重新生成。
+`instances/` 包含 8 个原生 RFC 7951 实例文件及独立工程溯源清单。清单不送入 YANG 数据树；其中没有认证信息。`build_ietf_lab_instances.py` 只针对已审查的固定批次进行离线映射，先检查所有原始/清理后文件的摘要，再生成实例。它不是通用 CLI 解析器，也不接入生产采集流程。`--check` 比较已提交实例与重建结果，省略时重新生成。
 
 | 实例 | 映射范围 | 验证结论 |
 |---|---|---|
@@ -70,9 +72,17 @@ TE（RFC 8795）、BGP 等不在当前实验场景内，不纳入本轮，避免
 | `inventory.json` | 2 个 ne-virtual、软件版本及名称 | Schema 通过；虚拟属性依据 GNS3 实验部署。同名 H3C 不合并，未虚构硬件组件承载序列号 |
 | `vsr-1-routes.json` / `vsr-2-routes.json` | 18 / 19 条路由：目的前缀、协议类别、优先级、下一跳地址 | 原生 IPv4 unicast RIB 子集通过；保留 0.0.0.0/32 和特殊地址行，不擅改成默认路由或丢弃动作 |
 | `vsr-1-interfaces.partial.json` / `vsr-2-interfaces.partial.json` | 各 6 条 IP 接口行的类型、状态、地址/掩码 | **严格完整性检查失败**：缺 statistics/discontinuity-time；部分解析通过并逐字段保留，不能称完整 operational datastore |
+| `vsr-1-l2.partial.json` / `vsr-2-l2.partial.json` | 同一设备树的另一子集：GE1/0～GE3/0 与 Vlan 接口、4 条 ARP、GE3/0 access PVID、VLAN 1 与业务 VLAN 成员、LLDP 本地系统及 3 个端口 | Yangson 首个诊断为缺 statistics；libyang 15 项检查（`l2-cases/`、`reports/l2-validation.json`）：严格模式的缺项正好是 4 个计数器中断时间和 bridge address（另有工具带出的 yang-library 必填项）；operational 模式解析 LLDP/VLAN 成员接口引用并通过；parse-only 往返一致；7 个反例（未知接口引用 ×2、PVID 越界、VLAN 接口挂 bridge-port、MAC 格式 ×2、自定义字段）按预期拒绝 |
+
+二层子集的 libyang 复现（需验证镜像）：
+
+```powershell
+.runtime/yang-model-tools/Scripts/python.exe scripts/topology/build_ietf_l2_cases.py --check
+.runtime/yang-model-tools/Scripts/python.exe scripts/topology/validate_ietf_mount.py --cases models/network-twin/l2-cases --output models/network-twin/reports/l2-validation.json
+```
 
 接口必填要求见 [RFC 8343 §5](https://www.rfc-editor.org/rfc/rfc8343.html#section-5)。不能用采集时间或估算开机时间代替计数器中断时间，也不因缺值修改 mandatory。路由字段及 address-family 约束依据 [RFC 8349 §7](https://www.rfc-editor.org/rfc/rfc8349.html#section-7)，OSPF 身份依据 [RFC 9129 §3](https://www.rfc-editor.org/rfc/rfc9129.html#section-3)。O_INTRA 只能在当前证据下映射到 ospf 基类；不推定版本、进程或 area-id。成本和出口原值保留在独立溯源清单，未借标准字段塞入自定义含义。
 
 路由实例的 RIB 名是验证投影标识，不是设备原生 YANG 名。为分离路由子集与不完整接口树，未填 outgoing-interface；不能据此进行完整转发路径计算。L2 TP 的 interface-name 是显示名称，不会自动解析到另一个文件中的接口；同名 node-id/ne-id 也不构成标准关联。无 VPN 实例时不人为增加默认 NI。
 
-验证脚本现含 24 个正反例/实例结果。负例必须命中预期诊断；“预期匹配”不等于“所有实例有效”。报告明确保留接口缺失、挂载拒绝及 Schema 未强制的语义要求。关联边界见 `associations.md`。
+验证脚本现含 26 个正反例/实例结果。负例必须命中预期诊断；“预期匹配”不等于“所有实例有效”。报告明确保留接口缺失、挂载拒绝及 Schema 未强制的语义要求。关联边界见 `associations.md`。

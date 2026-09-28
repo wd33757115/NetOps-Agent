@@ -1,0 +1,128 @@
+{
+  "scope": "Offline VSR ARP/VLAN/LLDP partial observations; no live I/O",
+  "model_package_sha256": "0bde5e538572bd9266cfd8a8a64c4a4f506d9d3803a3a4c2aa9cb300cf9ef9c1",
+  "observation_sources": {
+    "models/network-twin/instances/vsr-1-l2.partial.json": "f3bbc304d64a66b1d8f2214ddb088a22dfb0903a0bd8ff922fc93f84d518bb73",
+    "models/network-twin/instances/vsr-2-l2.partial.json": "158d667698e02ec21d6b7b3a0ca0d465f00c496294e364af747672289a52df85"
+  },
+  "parse_only_is_full_validation": false,
+  "files": {
+    "bridge-port-on-vlan-interface.json": "5b3430f72c2a8ce684902954caa40a2ec4a8750ad44573fd39944f6ec5eec5a0",
+    "custom-field.json": "7a592a29c7365901c9303ce526de6fcde29eacdc7a9c73ebc966ccb4763fdef1",
+    "lldp-dest-mac-dotted.json": "17a8912f44ee14973fb66c1c93f2e3805bd401abd65f3baa448b492cb4e1319b",
+    "lldp-port-unknown-interface.json": "7dd371513a1bcfc34040f2a0a979191806cdb78f63e72942d28652adaa4c15ed",
+    "neighbor-invalid-mac.json": "fbe63dbb78b692d8ebb75604284efe6f5f05bf8ee53028c1adc484a376f172b2",
+    "parent-library.json": "f30e7fdaa491e7159543e685402737ee76c4851ac669a59125316cbf8a8a2084",
+    "pvid-out-of-range.json": "2225839ca3e72d761ba55c2d6e86d7402835f88d47f3a2090ee6ca9f5e05532d",
+    "vlan-member-unknown-interface.json": "563ef22dd45678409dd550a7da6c62c15ba931987d98fc73690fc500a84b9279",
+    "vsr-1-l2.partial.json": "f3bbc304d64a66b1d8f2214ddb088a22dfb0903a0bd8ff922fc93f84d518bb73",
+    "vsr-2-l2.partial.json": "158d667698e02ec21d6b7b3a0ca0d465f00c496294e364af747672289a52df85"
+  },
+  "cases": [
+    {
+      "name": "vsr-1-strict-missing-counters",
+      "data": "vsr-1-l2.partial.json",
+      "type": "strict",
+      "expected_valid": false,
+      "diagnostic": "discontinuity-time"
+    },
+    {
+      "name": "vsr-1-strict-missing-bridge-address",
+      "data": "vsr-1-l2.partial.json",
+      "type": "strict",
+      "expected_valid": false,
+      "diagnostic": "Mandatory node \"address\""
+    },
+    {
+      "name": "vsr-1-operational-references",
+      "data": "vsr-1-l2.partial.json",
+      "type": "data",
+      "expected_valid": true,
+      "diagnostic": "Mandatory node \"address\""
+    },
+    {
+      "name": "vsr-1-partial-observation",
+      "data": "vsr-1-l2.partial.json",
+      "type": "get",
+      "expected_valid": true,
+      "diagnostic": null
+    },
+    {
+      "name": "vsr-2-strict-missing-counters",
+      "data": "vsr-2-l2.partial.json",
+      "type": "strict",
+      "expected_valid": false,
+      "diagnostic": "discontinuity-time"
+    },
+    {
+      "name": "vsr-2-strict-missing-bridge-address",
+      "data": "vsr-2-l2.partial.json",
+      "type": "strict",
+      "expected_valid": false,
+      "diagnostic": "Mandatory node \"address\""
+    },
+    {
+      "name": "vsr-2-operational-references",
+      "data": "vsr-2-l2.partial.json",
+      "type": "data",
+      "expected_valid": true,
+      "diagnostic": "Mandatory node \"address\""
+    },
+    {
+      "name": "vsr-2-partial-observation",
+      "data": "vsr-2-l2.partial.json",
+      "type": "get",
+      "expected_valid": true,
+      "diagnostic": null
+    },
+    {
+      "name": "lldp-port-unknown-interface-rejected",
+      "data": "lldp-port-unknown-interface.json",
+      "type": "data",
+      "expected_valid": false,
+      "diagnostic": "GE9/0"
+    },
+    {
+      "name": "vlan-member-unknown-interface-rejected",
+      "data": "vlan-member-unknown-interface.json",
+      "type": "data",
+      "expected_valid": false,
+      "diagnostic": "GE9/0"
+    },
+    {
+      "name": "pvid-out-of-range-rejected",
+      "data": "pvid-out-of-range.json",
+      "type": "get",
+      "expected_valid": false,
+      "diagnostic": "pvid"
+    },
+    {
+      "name": "bridge-port-on-vlan-interface-rejected",
+      "data": "bridge-port-on-vlan-interface.json",
+      "type": "strict",
+      "expected_valid": false,
+      "diagnostic": "ianaif:ethernetCsmacd"
+    },
+    {
+      "name": "neighbor-invalid-mac-rejected",
+      "data": "neighbor-invalid-mac.json",
+      "type": "get",
+      "expected_valid": false,
+      "diagnostic": "link-layer-address"
+    },
+    {
+      "name": "lldp-dest-mac-dotted-rejected",
+      "data": "lldp-dest-mac-dotted.json",
+      "type": "get",
+      "expected_valid": false,
+      "diagnostic": "dest-mac-address"
+    },
+    {
+      "name": "custom-field-rejected",
+      "data": "custom-field.json",
+      "type": "get",
+      "expected_valid": false,
+      "diagnostic": "project-confidence"
+    }
+  ]
+}

@@ -182,6 +182,15 @@
       "diagnostic": null
     },
     {
+      "name": "vsr-1-l2.partial.json",
+      "accepted": false,
+      "expected": false,
+      "matched": true,
+      "expected_diagnostic": "missing-data: expected 'statistics'",
+      "schema_only_gap": false,
+      "diagnostic": "SchemaError: {/ietf-interfaces:interfaces/interface[name=\"GE1/0\"]} missing-data: expected 'statistics'"
+    },
+    {
       "name": "vsr-2-interfaces.partial.json",
       "accepted": false,
       "expected": false,
@@ -198,6 +207,15 @@
       "expected_diagnostic": null,
       "schema_only_gap": false,
       "diagnostic": null
+    },
+    {
+      "name": "vsr-2-l2.partial.json",
+      "accepted": false,
+      "expected": false,
+      "matched": true,
+      "expected_diagnostic": "missing-data: expected 'statistics'",
+      "schema_only_gap": false,
+      "diagnostic": "SchemaError: {/ietf-interfaces:interfaces/interface[name=\"GE1/0\"]} missing-data: expected 'statistics'"
     },
     {
       "name": "topology-observed.json",
@@ -220,7 +238,7 @@
   ],
   "expectations_matched": true,
   "complete_digital_twin": false,
-  "instances_manifest_sha256": "df321ef52f231ef7621ff1216fc7af8c474f93d4c30f70bfca03aa3b8077f60c",
+  "instances_manifest_sha256": "926f7dfc92fb6acdacd9a9aaf3762025b8bab5f703c63d320b9cdb53ecfeefd4",
   "remaining": [
     "schema-mount runtime",
     "virtual topology-to-inventory/device association",

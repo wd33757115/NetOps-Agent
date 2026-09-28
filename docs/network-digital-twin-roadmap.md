@@ -1,6 +1,7 @@
 # 网络数字孪生与 AI 故障诊断落地路线图
 
-- 版本：v1.13（2026-09-28）
+- 版本：v1.14（2026-09-28）
+  - v1.14 完成 IETF-2.2：ARP、access VLAN、LLDP 本地数据映射到原生路径并经 libyang 分项验证；LLDP 远端与 MAC 表因主键缺证据未填，形成采集缺证据清单。
   - v1.13 负责人要求不过度设计、数据建模优先：Q-IETF-1 定为模型层不关联；按实验场景补入 IEEE LLDP/Bridge 及 ACL profile，TE/BGP 等场景外模型暂不纳入。
   - v1.12 由 Claude 接手。追踪 inventory-topology -02～-11 的 node→NE 定义演变：通用映射已被取代，当前仅有物理映射；NE→设备数据树没有标准引用。登记待决 Q-IETF-1，不以自定义关系补缺。
   - v1.11 核实原生路由配置/状态下一跳编码与模型边界：多下一跳不等于已验证 ECMP，Schema 接受不代替选路或路径验收；保持不增加自定义字段。
@@ -1024,6 +1025,7 @@ P2-9 根据 Q5 取消，不引入 SNMP。P3 及后续仍在进入阶段时展开
 | IETF-1.6 原生路由结构语义 | 已完成本轮基础模型核验 | 新增 `validate_ietf_routing_semantics.py`、`routing-semantics.md` 及同名报告，39 个 IPv4/IPv6 单/多/特殊下一跳与边界用例。37 项 Yangson 结果匹配；2 项内部 TypeError 保留，libyang 用 2 个负例和 2 个正对照验证 mandatory choice。 | 不把状态 next-hop 列表套用配置字段；不造权重/metric；多路径列表及同前缀 active 记录不证明转发路径或 ECMP。尚未完成协议/TE 全审查或实机多路径验收。 |
 | IETF-1.7 虚拟 node→NE→设备树新候选 | 已完成本轮候选核验；关联未闭合 | 新增 `audit_ietf_virtual_association.py`、`virtual-association/`（12 份来源锁、核验记录）和 `reports/virtual-association.json`。追踪 -00 附录示例的后继：inventory-topology -02～-05 有不限物理的 node→NE 映射及反向 NE→node；-06 起移除反向引用，-07 加 when，-08 起改为物理 presence。9 个历史/当前模块与当前包组合编译通过；9 项 Yangson 用例匹配（历史 -05 的正例、错对象、目标缺失、非 config、feature 关闭；-11 的 when 拒绝、abstract node、supporting-node 到宿主）。IVY 另 3 份草案不 import ietf-network。inventory -19 将 NE 信息的收集机制划在本文范围外 | 历史版本与 -11 同名，采用即降级，已排除。NE→设备数据树没有标准引用，登记 Q-IETF-1；未新增 augment 或字段 |
 | IETF-1.8 实验场景模型补齐 | 已完成本项（模块层面） | 按 11.0 场景逐项对照原生落点（`models/network-twin/README.md` 覆盖表）。加入 IEEE 802.1AB LLDP、LLDP 类型、802.1Q Bridge、ieee802-types（固定 YangModels 提交），device profile 加入 LLDP/Bridge/RFC 8519 ACL。45 文件编译无诊断，两个 profile 装载成功，重复构建摘要一致；原有 24/8/21/39/9 项验证及 VSR 7 文件重建全部匹配 | ARP/LLDP/VLAN/MAC/ACL 尚未映射实验数据（下一步 IETF-2.2）。SVI↔VID 绑定在固定模块中无标准节点，记为缺口；TE/BGP 不在当前场景，暂不纳入 |
+| IETF-2.2 ARP/VLAN/LLDP 映射 | 已完成本批次映射核验；完整实例未通过 | `build_ietf_lab_instances.py` 新增每台 `-l2.partial.json`（ARP 4 条、GE3/0 access PVID、VLAN 成员、LLDP 本地系统及 3 个端口），原 6 个实例字节不变；新增 `build_ietf_l2_cases.py`、`l2-cases/`（11 文件）、`reports/l2-validation.json`。libyang 15/15 匹配：严格模式缺项正好是 4 个计数器中断时间和 bridge address；operational 模式解析引用后通过；parse-only 往返一致；7 个反例拒绝。Yangson 包验证 26/26。发现并修正 802.1Q pvid 的 when 约束（必须引用非 D-bridge 组件），identity 按 RFC 7951 §6.8 使用同模块简写 | LLDP 远端表缺 time-mark，MAC 表缺 database-id 与桥端口号，均不造值；缺证据清单写入验证包 README，作为之后重排采集的输入 |
 | IETF-2.1 VSR 实验实例 | 已完成本批次映射核验；完整实例未通过 | `build_ietf_lab_instances.py` 校验全部既有样本摘要、重建并比较 6 个原生实例与清单。2 节点/4 TP/4 LLDP 邻接、2 个虚拟 NE、18+19 路由通过；各 6 条 IP 接口行因缺 statistics/discontinuity-time 按预期失败。`validate_ietf_model_package.py` 共 24 项结果匹配，负例检查具体诊断；结果已保存 `models/network-twin/reports/`。 | 不虚构计数器时间、默认 VRF、OSPF 版本或物理关系。路由子集未填出口引用，特殊下一跳动作、序列号组件归属、ARP/MAC/VLAN/Hub 与完整路径仍未映射验收。 |
 
 本轮 IETF-1/2 改动文件：`.gitignore` 仅放行 `models/network-twin/` 验证资料；该目录的来源锁、profile、补丁、说明、关联核验、实例及报告；研究脚本 `build_ietf_model_package.py`、`build_ietf_lab_instances.py`、`validate_ietf_model_package.py`；本台账和核验文档。生产代码及 P2-3 未提交修改不包含在本轮。
@@ -1044,7 +1046,9 @@ IETF-1.7 文件与命令（Claude 接手后首项）：新增 `scripts/topology/
 
 IETF-1.8 文件与命令：更新 `additional-sources.lock.json`（新增 4 个 IEEE 模块）、`profiles.json`、验证包 README 覆盖表；包变更后按依赖重新生成挂载/状态用例清单（仅包摘要一行变化，用例文件字节不变），并刷新 `reports/` 下 manifest、mount-validation、operational-validation、routing-semantics、mount-associations、virtual-association。其中 mount-validation 多出 4 个说明字段：IETF-1.5 扩展验证器后未回写已提交的配置报告，本次补齐，结论仍为 8/8。研究 Python 依次执行 `build_ietf_model_package.py`（两次构建 manifest 同为 `0bde5e53…f9c1`）、`validate_ietf_model_package.py` 24/24、`build_ietf_lab_instances.py --check` 7 文件一致、`build_ietf_mount_cases.py`/`build_ietf_operational_cases.py`、`validate_ietf_mount.py` 8/8 与 21/21、`validate_ietf_routing_semantics.py` 39/39、`audit_ietf_mount_associations.py`（新增 4 模块无挂载点）、`audit_ietf_virtual_association.py` 9/9。旧 41 文件包保留在 `.runtime/ietf-study/model-package-41`。`reports/reproducibility.json` 是改动前的空缓存复现记录，保留为历史。未改脚本、未改 YANG 源码、未访问设备。
 
-下一步：Q-IETF-1 已定，不再在该关联上继续搜索。数据建模按实验场景已补齐到模块层面，下一项 IETF-2.2：把已采样本中的 ARP、LLDP、access VLAN、MAC 表映射到上述原生路径，然后按模型缺口重排采集。设备内配置/合成状态挂载已单独通过，不把它当全网关联的替代。不能把本轮有限数据投影当“完整 IETF 模型已交付”，P2-3/P2-10 继续暂停。
+IETF-2.2 文件与命令：修改 `scripts/topology/build_ietf_lab_instances.py`，新增 `scripts/topology/build_ietf_l2_cases.py`、`models/network-twin/instances/vsr-{1,2}-l2.partial.json`、`models/network-twin/l2-cases/`、`models/network-twin/reports/l2-validation.json`；更新实例清单、`reports/validation.json`、验证包 README 及本台账。研究 Python 执行：`build_ietf_lab_instances.py --check`（9 文件一致）；`build_ietf_l2_cases.py --check`（11 文件一致）；`validate_ietf_mount.py --cases models/network-twin/l2-cases`（15/15，两次报告字节一致）；`validate_ietf_model_package.py`（26/26）。状态用例 16 文件、挂载用例 12 文件的 --check 仍一致。首轮 libyang 暴露两个实例问题：pvid 的 when 条件，以及 identity 写法与 parse-only 往返不一致，均已修正；另把“VLAN 接口挂 bridge-port”反例改用严格模式，因为 operational 下 when 违反只告警（RFC 8342 §5.3）。两个脚本 Ruff 检查/格式检查通过。未访问设备、未改模型源码。
+
+下一步：实验场景的数据建模与样本填充已覆盖到现有样本能支持的范围。按路线进入采集阶段前，先把验证包 README 中的“缺证据清单”落成采集任务的调整（更新第 10/13 节任务卡），再恢复 P2-3/P2-10。设备内配置/合成状态挂载已单独通过，不把它当全网关联的替代。不能把本轮有限数据投影当“完整 IETF 模型已交付”，P2-3/P2-10 继续暂停。
 
 分项记录与证据详见 [原生模型核验清单](network-digital-twin-model-audit.md)。IETF-0 整体仍进行中；上述“完成”只针对已列出的核验范围。
 

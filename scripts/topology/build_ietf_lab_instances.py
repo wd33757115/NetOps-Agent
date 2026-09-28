@@ -7,6 +7,7 @@ The report is provenance for these files, never part of a YANG instance.
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import re
 
@@ -14,6 +15,187 @@ from audit_ietf_models import ROOT, digest
 
 FIXTURES = ROOT / "tests/fixtures/topology/h3c/vsr1000-7.1.064"
 OUTPUT = ROOT / "models/network-twin/instances"
+
+
+# IEEE 802.1AB-2016 Table 7-1 group address of the nearest-bridge agent.
+NEAREST_BRIDGE = "01-80-C2-00-00-0E"
+# IEEE 802.1AB capability names as printed by Comware, mapped to the native bits.
+CAPABILITIES = {
+    "Bridge": "bridge",
+    "Router": "router",
+    "Customer Bridge": "cvlan-component",
+    "Service Bridge": "svlan-component",
+}
+
+
+BRIDGE = "captured-bridge"
+COMPONENT = "captured-c-vlan-component"
+
+
+def ieee_mac(dotted: str) -> str:
+    """Convert Comware xxxx-xxxx-xxxx to the canonical IEEE hyphen form."""
+    digits = dotted.replace("-", "")
+    if not re.fullmatch(r"[0-9a-f]{12}", digits):
+        raise ValueError(f"Unreviewed MAC format: {dotted}")
+    return "-".join(digits[i : i + 2] for i in range(0, 12, 2)).upper()
+
+
+def layer2(device, source, ip_interfaces):
+    """Map ARP, access-port VLAN and LLDP local data; keep unmappable rows as evidence."""
+    unmapped = []
+    by_name = {i["name"]: i for i in ip_interfaces}
+    selected = {}
+
+    def interface(name):
+        if name not in selected:
+            base = by_name[name]
+            selected[name] = {k: base[k] for k in ("name", "type", "oper-status")}
+            if "ietf-ip:ipv4" in base:
+                selected[name]["ietf-ip:ipv4"] = json.loads(json.dumps(base["ietf-ip:ipv4"]))
+        return selected[name]
+
+    subnets = {
+        name: ipaddress.ip_interface(f"{a['ip']}/{a['prefix-length']}").network
+        for name, i in by_name.items()
+        for a in i.get("ietf-ip:ipv4", {}).get("address", [])
+    }
+    for line in source(device, "arp").splitlines():
+        fields = line.split()
+        if not fields or not re.fullmatch(r"[\d.]+", fields[0]):
+            continue
+        ip, mac, vlan, port, aging, kind = fields
+        if kind != "D":
+            raise ValueError("Unreviewed ARP entry type")
+        if vlan == "--":
+            owner = port
+        else:
+            owners = [n for n, net in subnets.items() if ipaddress.ip_address(ip) in net]
+            if len(owners) != 1 or not owners[0].startswith("Vlan"):
+                raise ValueError(f"ARP neighbor {ip} has no unique VLAN interface subnet")
+            owner = owners[0]
+        target = interface(owner)["ietf-ip:ipv4"].setdefault("neighbor", [])
+        target.append(
+            {
+                "ip": ip,
+                "link-layer-address": ieee_mac(mac).replace("-", ":").lower(),
+                "origin": "dynamic",
+            }
+        )
+        unmapped.append(
+            {
+                "device": device,
+                "arp": ip,
+                "aging_minutes": int(aging),
+                "port": port,
+                "vlan": vlan,
+                "placed_on": owner,
+            }
+        )
+
+    access = {}
+    bridge_rows = source(device, "interfaces").split("interfaces in bridge mode:", 1)[1]
+    for line in bridge_rows.splitlines():
+        fields = line.split()
+        if not fields or not re.fullmatch(r"GE\d+/\d+", fields[0]):
+            continue
+        name, link, _speed, _duplex, mode, pvid = fields[:6]
+        if mode != "A" or link not in {"UP", "DOWN"}:
+            raise ValueError("Unreviewed bridge-mode port")
+        access[name] = int(pvid)
+        selected[name] = {
+            "name": name,
+            "type": "iana-if-type:ethernetCsmacd",
+            "oper-status": link.lower(),
+            "ieee802-dot1q-bridge:bridge-port": {
+                # 802.1Q gates pvid on a referenced non-D-bridge component.
+                "bridge-name": BRIDGE,
+                "component-name": COMPONENT,
+                "pvid": int(pvid),
+            },
+        }
+    vlans = []
+    for line in source(device, "vlan").splitlines():
+        match = re.fullmatch(r"(\d+)\s+(VLAN \d{4})\s*(\S*)\s*", line)
+        if not match:
+            continue
+        vid, name, ports = int(match[1]), match[2], match[3].split(",") if match[3] else []
+        if any(access.get(p) != vid for p in ports):
+            raise ValueError("VLAN member is not a reviewed access port of this VLAN")
+        vlan = {"vid": vid, "name": name}
+        if ports:
+            vlan["egress-ports"] = ports
+            vlan["untagged-ports"] = ports
+        vlans.append(vlan)
+    mac_rows = [line.split() for line in source(device, "mac").splitlines() if line[:1].isdigit()]
+    for mac, vid, state, port, aging in mac_rows:
+        unmapped.append(
+            {
+                "device": device,
+                "mac": ieee_mac(mac),
+                "vlan": int(vid),
+                "state": state,
+                "port": port,
+                "aging": aging,
+                "reason": "filtering-entry needs database-id and bridge port number",
+            }
+        )
+
+    local = source(device, "lldp_local")
+    caps = {
+        kind: [
+            CAPABILITIES[c.strip()]
+            for c in re.search(rf"System capabilities {kind}\s*:\s*(.+)", local)[1].split(",")
+        ]
+        for kind in ("supported", "enabled")
+    }
+    ports = []
+    for block in re.split(r"\nLLDP local-information of port ", local)[1:]:
+        match = re.match(r"\d+\[GigabitEthernet(\d+/\d+)\]:", block)
+        port_id = re.search(r"Port ID\s*:\s*(\S+)", block)[1]
+        if re.search(r"Port ID type\s*:\s*(.+)", block)[1].strip() != "Interface name":
+            raise ValueError("Unreviewed LLDP port ID subtype")
+        name = f"GE{match[1]}"
+        if name not in selected:
+            interface(name)
+        ports.append(
+            {
+                "name": name,
+                "dest-mac-address": NEAREST_BRIDGE,
+                "port-id-subtype": "interface-name",
+                "port-id": port_id,
+                "port-desc": re.search(r"Port description\s*:\s*(.+)", block)[1].strip(),
+            }
+        )
+    tree = {
+        "ietf-interfaces:interfaces": {"interface": [selected[n] for n in sorted(selected)]},
+        "ieee802-dot1ab-lldp:lldp": {
+            "local-system-data": {
+                "chassis-id-subtype": "mac-address",
+                "chassis-id": ieee_mac(re.search(r"Chassis ID\s*:\s*(\S+)", local)[1]),
+                "system-name": re.search(r"System name\s*:\s*(\S+)", local)[1],
+                "system-capabilities-supported": " ".join(caps["supported"]),
+                "system-capabilities-enabled": " ".join(caps["enabled"]),
+            },
+            "port": ports,
+        },
+        "ieee802-dot1q-bridge:bridges": {
+            "bridge": [
+                {
+                    "name": BRIDGE,
+                    # RFC 7951 section 6.8: same-module identities use the simple form.
+                    "bridge-type": "customer-vlan-bridge",
+                    "component": [
+                        {
+                            "name": COMPONENT,
+                            "type": "c-vlan-component",
+                            "bridge-vlan": {"vlan": vlans},
+                        }
+                    ],
+                }
+            ]
+        },
+    }
+    return tree, unmapped
 
 
 def render() -> dict[str, bytes]:
@@ -53,6 +235,7 @@ def render() -> dict[str, bytes]:
     elements = []
     chassis = {}
     omissions = []
+    l2_unmapped = []
     counts = {}
     for device in ("vsr-1", "vsr-2"):
         local = source(device, "lldp_local")
@@ -155,7 +338,23 @@ def render() -> dict[str, bytes]:
             "device",
             [f"{device}/routes.txt"],
         )
-        counts[device] = {"routes": len(routes), "partial_interfaces": len(interfaces)}
+        l2, l2_omissions = layer2(device, source, interfaces)
+        save(
+            f"{device}-l2.partial.json",
+            l2,
+            "device",
+            [f"{device}/{c}.txt" for c in ("interfaces", "arp", "vlan", "lldp_local", "mac")],
+            "missing-data: expected 'statistics'",
+        )
+        l2_unmapped.extend(l2_omissions)
+        counts[device] = {
+            "routes": len(routes),
+            "partial_interfaces": len(interfaces),
+            "arp_neighbors": sum(
+                len(i.get("ietf-ip:ipv4", {}).get("neighbor", []))
+                for i in l2["ietf-interfaces:interfaces"]["interface"]
+            ),
+        }
 
     links = []
     for device, peer in (("vsr-1", "vsr-2"), ("vsr-2", "vsr-1")):
@@ -223,6 +422,7 @@ def render() -> dict[str, bytes]:
         "entries": entries,
         "counts": counts,
         "unmapped_route_fields": omissions,
+        "unmapped_l2_fields": l2_unmapped,
         "gaps": [
             "Interface statistics/discontinuity-time is absent; "
             "partial instances intentionally fail full validation.",
@@ -240,8 +440,18 @@ def render() -> dict[str, bytes]:
             "Virtual NE type comes from the documented GNS3 VSR lab deployment, not LLDP alone.",
             "No virtual node-to-inventory mapping claimed by reusing identical example keys.",
             "LLDP serial number is retained in capture; no invented physical component for the VM.",
-            "Hub, unmanaged switches, ARP/MAC/VLAN, IPv6, counters "
-            "and physical wiring remain outside these subsets.",
+            "Hub, unmanaged switches, IPv6, counters and physical wiring "
+            "remain outside these subsets.",
+            "ARP rows on VLAN interfaces are placed on the unique L3 interface whose "
+            "captured subnet contains the neighbor; the physical port stays in evidence.",
+            "LLDP remote-systems-data is keyed by time-mark (sysUpTime at change); the CLI "
+            "only shows an age, so remote entries are not synthesized.",
+            "MAC filtering entries need database-id and a bridge port number; the CLI shows "
+            "an interface name only, so the MAC table is not synthesized.",
+            "Bridge address is mandatory but not captured; bridge/component keys are "
+            "projection labels; the l2 subsets therefore remain partial.",
+            "Only the nearest-bridge LLDP agent is mapped; multi-line system description "
+            "and management-address TLVs stay in evidence.",
         ],
     }
     outputs["manifest.json"] = (json.dumps(report, ensure_ascii=False, indent=2) + "\n").encode()
