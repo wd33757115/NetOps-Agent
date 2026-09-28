@@ -847,7 +847,7 @@ VSR-2 GE3/0(二层 access VLAN 100) ── Switch1(不可管理) ── PC1 1.1.
 | 任务卡 | 状态 | 完成日期 | 测试/验收记录 | 备注 |
 |---|---|---|---|---|
 | P0-1 | 已完成 | 2026-09-28 | 分组提交后工作区干净；三个设备访问/拓扑目录分别跟踪 24/15/14 个文件；`.env`、`.runtime/` 未跟踪且忽略规则生效 | 负责人确认后在 `feat/network-twin` 建立基线，未 push；详见下方记录 |
-| P0-2 | 未开始 | | | |
+| P0-2 | 已完成（基线非全绿） | 2026-09-28 | Python 主集 2396 通过 / 162 失败 / 3 跳过；包内另 24 通过；YANG 补跑 2 通过；前端单测 256 通过、构建通过；BFF、浏览器及视觉失败详见下方 | 只记录基线，不修改业务代码或测试预期；剩余未验证项为可选语义模型及 Linux 专属测试 |
 | P0-3 | 未开始 | | | |
 
 ### P0-1 基线记录（2026-09-28）
@@ -876,6 +876,53 @@ VSR-2 GE3/0(二层 access VLAN 100) ── Switch1(不可管理) ── PC1 1.1.
 - 本卡新增测试：无。已有测试文件随基线保存；全量测试、前端构建尚未执行，留到 P0-2，不据此声称功能验收通过。
 - 未完成项：P0-2 基线测试与 P0-3 文档衔接；采样脚本已随基线纳入版本控制，P0-3 只需核对该项并完成文档衔接。本卡完成后停下汇报，未开始 P1-3。
 - 方案修订：第 0 节明确每卡完成后等待继续指令，与负责人的执行要求一致；未改变数据模型或安全边界。
+
+### P0-2 测试基线（2026-09-28）
+
+**测试对象与范围**：`feat/network-twin` 的 `5b674e1`；Python 3.13.0、pytest 9.0.3、Node.js 24.16.0、npm 11.13.0，Windows 本机 Chrome。该记录表示基线执行完成，**不表示全量测试通过或具备发布验收结论**。
+
+环境与执行方式：
+
+- 新建带 `netops.validation=p0-2` 标签的临时 PostgreSQL 16、Redis 7、MinIO 容器，使用随机本机端口；数据库为 `netops_p02`、`netops_p4_delivery_p02`、`netops_p5_delivery_p02`。三套测试数据库均通过现有 `python -m src.platform.database.bootstrap apply` 初始化，不对业务数据库运行迁移。
+- 主测试使用 `CELERY_BROKER_URL=memory://`，专用部署测试使用临时 Redis 的 DB 2。现有一项 RabbitMQ 重投递测试硬编码访问 `localhost:5672`，使用唯一测试队列并由测试清理；不将该项表述为全部基础设施隔离。
+- 前端使用现有依赖执行；构建写入 `.runtime/p0-2/frontend-dist/`，不覆盖正在使用的 `web/react_frontend/dist/`。Playwright 使用 4173 端口测试服务及既有 API mock。
+- 以下 Python 命令使用仓库 `venv/Scripts/python.exe`；前端命令在 `web/react_frontend/` 执行，Django 命令在 `web/django_backend/` 执行。临时执行器和环境配置位于 `.runtime/p0-2/run_backend.py`、`run_delivery.py`，日志不纳入 Git。
+
+| 测试入口 / 实际命令 | 结果 | 证据（相对仓库根目录） |
+|---|---|---|
+| `python -m pytest tests/ --continue-on-collection-errors --junitxml=.runtime/p0-2/pytest.xml` | 收集 2561 项；2396 通过、162 失败、3 跳过，退出码 1，约 13 分 49 秒；无收集错误 | `.runtime/p0-2/pytest.log`、`pytest.xml`、`pytest-failures.json` |
+| `python -m pytest src/apps/official_documents/tests --junitxml=.runtime/p0-2/app-pytest.xml` | 根测试配置未覆盖的包内测试：24 通过，退出码 0 | `.runtime/p0-2/app-pytest.log`、`app-pytest.xml` |
+| `python manage.py test bff --noinput --verbosity 2` | 79 项：74 通过、1 失败、4 条件跳过，退出码 1；4 项随后全部补跑，见下表 | `.runtime/p0-2/django.log` |
+| `npm run test:unit -- --reporter=default --reporter=json --outputFile=../../.runtime/p0-2/vitest.json` | 60 个测试文件、256 项全部通过，退出码 0 | `.runtime/p0-2/vitest.log`、`vitest.json` |
+| `npm run build -- --outDir ../../.runtime/p0-2/frontend-dist` | 通过，退出码 0，约 12 秒 | `.runtime/p0-2/build.log`、`frontend-dist/` |
+| `npm run test:e2e -- --reporter=line,json` | 桌面/移动端共 102 项：60 通过、40 失败、2 主动跳过，退出码 1 | `.runtime/p0-2/playwright.log`、`playwright.json`、`browser-failures.json` |
+| `npm run test:visual -- --update-snapshots=none --reporter=line,json --output=../../.runtime/p0-2/visual-results` | 四种尺寸共 24 项：7 通过、17 失败，退出码 1；未修改参考截图 | `.runtime/p0-2/visual.log`、`visual.json`、`visual-failures.json`、`visual-results/` |
+| `powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/scripts/test_windows_environment.ps1` | 7 项通过，退出码 0 | `.runtime/p0-2/windows-environment.log` |
+| 同上执行 `tests/scripts/test_process_selection.ps1` / `tests/scripts/test_beat_pid.ps1` | 分别 18 / 8 项通过，退出码均为 0 | `.runtime/p0-2/process-selection.log`、`beat-pid.log` |
+
+浏览器 JSON 报告路径通过 `PLAYWRIGHT_JSON_OUTPUT_NAME` 指定。表中报告简写路径均与同一行首个文件位于 `.runtime/p0-2/`。
+
+条件测试与失败复核：
+
+| 补跑 | 实际执行及结果 |
+|---|---|
+| 文档应用往返测试 | `python manage.py test bff.test_app_package_roundtrip --noinput --verbosity 2`：单独重跑仍失败；HTTP 500，异常为 `RuntimeError: Event loop is closed`；见 `django-roundtrip-alone.log` |
+| 通用包 / 防火墙部署 | 设置 `TEST_PACKAGE_BROKER_URL` 指向临时 Redis，再执行 `python manage.py test bff.test_package_deployment bff.test_firewall_deployment --noinput --verbosity 2`：2 项错误；临时 SQLite 包数据库未满足迁移前置条件，清理时另出现 Windows 文件占用错误；见 `django-deployment.log` |
+| 规则治理部署 | 使用 `netops_p4_delivery_p02`，执行 `python manage.py test bff.test_rule_governance_deployment --noinput --verbosity 2`：1 项错误，导入不存在的 `src.apps.rule_governance.backend.rule_control.generation_jobs`；见 `django-p4.log` |
+| 巡检部署 | 使用 `netops_p5_delivery_p02`，执行 `python manage.py test bff.test_inspection_deployment --noinput --verbosity 2`：1 项失败，断言期待 `viewer`，实际为 `operator`；见 `django-p5.log` |
+| RFC 8345 YANG | 主集因缺少 `yangson` 跳过。按 `tests/topology-requirements.txt` 将 `yangson==1.6.3` 安装到 `.runtime/p0-2/yang-deps/`，设置该目录为 `PYTHONPATH`，执行 `python -m pytest tests/unit/test_topology_yang.py --junitxml=.runtime/p0-2/yang.xml`：2 项通过。默认 HTTP pip 镜像被 pip 拒绝后，使用 `--index-url https://pypi.org/simple` 安装成功；未改项目依赖文件或现有虚拟环境包。见 `yang-install-pypi.log`、`yang.log`、`yang.xml` |
+
+去重后，BFF 的 79 项为 **74 通过、2 失败、3 错误**，最初跳过的 4 项均已尝试。主 Python 集补上 YANG 校验后还剩 2 项未验证：可选 `sentence-transformers` 模型运行时，以及仅适用于 Linux `/proc` 的进程清理测试；未将这两项计作通过。补跑记录不覆盖首轮报告。
+
+失败分布与后续处理边界：
+
+- 主 Python 集的 162 项失败分布在多个模块；数量最多的是 `test_check_item_assessment_runtime`（34）、`test_state_normalizer`（24）、`test_workflow_plugins`（15）、`test_check_item_catalog_governance`（11）、`test_parser_management_api`（6）。可观察错误包括 `StopIteration`、旧语义投影/旧命令契约已退役、工作流或 Skill 未找到、测试 SQLite 缺表及断言不匹配。完整用例与异常见 `pytest-failures.json`；尚未逐项确定是测试过时、测试准备不足还是实现缺陷。
+- 浏览器失败：Parser 工作区 12、权限 8、巡检流程 8、工作台 6、巡检证据 4、Assistant 2。2 项跳过均为测试主动跳过的移动端拖拽用例。拓扑的 8 项浏览器测试全部通过。
+- 视觉失败：设备、Parser、巡检、工作台各 4 项在元素定位阶段失败；移动端状态页 1 项截图不匹配。不能将全部视觉失败归为像素差异。
+- 设备访问 67 项和拓扑 25 项 Python 测试在 YANG 补跑后均通过。这些结果不替代真实网络设备登录、发现或数字孪生场景验收。
+- 本卡新增测试：无；不修改业务代码、不调整断言或截图来消除基线失败。原巡检不修改的约束继续有效。修复这些失败需要另行明确范围，不在 P0-2 内展开。
+- 全部测试结束后，已按容器 ID 和标签核对并清理 3 个临时容器；原服务容器仍在运行。更新本文前 `git status --short` 为空；本卡只提交本路线图的台账更新，不提交日志、测试数据库或构建产物，不 push。
+- 下一张为 P0-3（文档衔接）；本卡完成后停下汇报，未进入 P0-3 或 P1-3。
 
 **待决问题**
 
