@@ -14,7 +14,7 @@
 
 ## 0. 给执行者（GPT）的工作规则
 
-1. **按阶段、按任务卡执行**（第 10、13 节）。每次只做一张任务卡；完成后运行该卡列出的测试，更新本文第 14 节“进度台账”，再开始下一张。
+1. **按阶段、按任务卡执行**（第 10、13 节）。每次只做一张任务卡；完成后运行该卡列出的测试，更新本文第 14 节“进度台账”，**停下汇报，收到负责人继续指令后再开始下一张**。执行顺序为 P0-1 → P0-2 → P0-3，之后优先 P1-3，再按第 13 节任务卡顺序推进。
 2. **不推翻已有代码**。首版的 `src/platform/device_access/`、`src/apps/topology/`、`src/apps/device_access/`、终端组件、DSH 诊断接入都保留，在其上演进。需要删除或重写的点在第 4 节逐条列出，未列出的不要动。
 3. **原巡检链路（`src/core/patrol`、`src/core/ingestion`、Netmiko 实现）不修改**。但**可以只读复用**以下资产：TextFSM 模板库（`src/skills/shared/textfsm-templates/`）、解析运行时（`src/core/parser`、`src/apps/rule_governance`）、设备资产表 `netops_devices`、身份识别器 `DeviceIdentityResolver`。复用方式是调用公开函数或读取模板文件，不改它们的行为。模板只是分层解析中的一层（7.3），主力是通用解析器。
 4. **每个阶段结束必须能在实验环境跑通该阶段的验收场景**；不以“单元测试通过”代替验收。实验环境见第 11 节。
@@ -846,9 +846,36 @@ VSR-2 GE3/0(二层 access VLAN 100) ── Switch1(不可管理) ── PC1 1.1.
 
 | 任务卡 | 状态 | 完成日期 | 测试/验收记录 | 备注 |
 |---|---|---|---|---|
-| P0-1 | 未开始 | | | |
+| P0-1 | 已完成 | 2026-09-28 | 分组提交后工作区干净；三个设备访问/拓扑目录分别跟踪 24/15/14 个文件；`.env`、`.runtime/` 未跟踪且忽略规则生效 | 负责人确认后在 `feat/network-twin` 建立基线，未 push；详见下方记录 |
 | P0-2 | 未开始 | | | |
 | P0-3 | 未开始 | | | |
+
+### P0-1 基线记录（2026-09-28）
+
+- 负责人已确认变更分组，包括保存工作区已有巡检改动及删除项。起点为 `main` 的 `3135698`；本卡不修改业务代码，不运行迁移、不部署。
+- 初始状态：127 个未跟踪文件、153 个修改标记（其中 3 个无实际内容差异）、153 个删除项（109 个已暂存、44 个未暂存）。保留删除项的原有含义，不删除额外本地文件。
+- `.env.example`、`src/gateway/main.py`、`web/react_frontend/src/services/api.ts` 按主题拆分暂存；工作区文件内容不变。
+
+| 提交 | 分组 | 变更文件范围 |
+|---|---|---|
+| `992569f` | 仓库清理 | 原暂存区 109 个历史产物、备份、旧文档等删除项 |
+| `d15249b` | 平台与部署 | `deployment/`、Windows 脚本、平台初始化、BFF、依赖、旧模块/Skill 退役及相关测试 |
+| `fe83d8a` | 已有巡检与规则 | `src/apps/inspection/`、设备管理、规则治理、`src/core/patrol/`、CheckItem/State 及界面、测试；仅保存既有改动 |
+| `cec7c44` | 公共设备访问与终端 | `src/platform/device_access/`、`src/apps/device_access/`、终端组件、网关/BFF 接入及测试 |
+| `45fc743` | 拓扑 App | `src/apps/topology/`、前端注册、拓扑测试、`scripts/topology/collect_lab_samples.py` |
+| `420c53f` | DSH 与聊天体验 | Assistant/DSH 诊断、会话、执行进度、相关前端及测试 |
+| `1d61ff3` | 文档 | 路线图、首版方案、架构与部署运维文档 |
+
+执行与验收记录：
+
+- `git switch -c feat/network-twin`：成功。按明确路径分组 `git add` / `git commit`；共享文件使用索引中的分组内容提交。完整文件清单可用 `git log --name-status 3135698..HEAD` 查看。
+- `git status --porcelain=v1 --untracked-files=all`：7 个主题提交后输出为空；台账提交后再次核对。
+- `git ls-files src/apps/topology src/apps/device_access src/platform/device_access`：分别 24、15、14 个文件，均非空。
+- `git check-ignore -v .env .runtime/test/pids.json`：命中 `.gitignore`；`git ls-files .env '.runtime/*'`：输出为空。
+- 提交前记录的 282 个现存文件 SHA-256 均未改变；索引与文件摘要备份位于被忽略的 `.runtime/p0-1-baseline/`。随后仅修改本路线图的执行规则和台账。
+- 本卡新增测试：无。已有测试文件随基线保存；全量测试、前端构建尚未执行，留到 P0-2，不据此声称功能验收通过。
+- 未完成项：P0-2 基线测试与 P0-3 文档衔接；采样脚本已随基线纳入版本控制，P0-3 只需核对该项并完成文档衔接。本卡完成后停下汇报，未开始 P1-3。
+- 方案修订：第 0 节明确每卡完成后等待继续指令，与负责人的执行要求一致；未改变数据模型或安全边界。
 
 **待决问题**
 
