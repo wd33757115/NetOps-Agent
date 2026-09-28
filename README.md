@@ -22,21 +22,21 @@
 
 ## 本地启动
 
-Python 3.11、Node.js 22、Docker Compose v2。从项目根目录执行；已有 `.env` 时不要覆盖。
+Windows 使用 Python 3.13 x64、Node.js 22 及以上、Docker Desktop（Linux containers）。完整步骤见[Windows 安装部署](docs/windows-deployment.md)。安装会生成缺少的 `.env`，已有配置不覆盖。
 
 ```powershell
-Copy-Item .env.example .env
-.\scripts\test\install.ps1
-.\scripts\test\start.ps1 -EnableApps official-documents,firewall-policy,rule-governance,inspection,materials,assistant
+.\scripts\windows\install.ps1
+.\scripts\windows\bootstrap.ps1 -Action apply
+.\scripts\windows\start.ps1 -SkipLangfuse -EnableApps device-management, official-documents,firewall-policy,rule-governance,inspection,materials,assistant
 ```
 
-后续直接运行 `scripts/test/start.ps1` 保留启用状态与授权。默认构建预览前端，热更新使用 `-DevMode`；只做启动预检使用 `-CheckOnly`。应用源码升级必须先完成停用排空，见[能力包部署](docs/capability-packages-guide.md)。
+后续直接运行 `scripts/windows/start.ps1` 保留启用状态与授权。默认构建预览前端，热更新使用 `-DevMode`；只做启动预检使用 `-CheckOnly`。应用源码升级必须先完成停用排空，见[能力包部署](docs/capability-packages-guide.md)。
 
-React 默认端口 3000，Django BFF 8001，FastAPI 8000。日志在 `.runtime/test/logs/`；停止使用 `scripts/test/stop.ps1`。浏览器经 BFF 访问业务 API，PostgreSQL、Redis、RabbitMQ、MinIO 提供持久化与任务基础设施，Langfuse 为可选观测服务。
+React 默认端口 3000，Django BFF 8001，FastAPI 8000。日志在 `.runtime/test/logs/`；停止使用 `scripts/windows/stop.ps1`。浏览器经 BFF 访问业务 API，PostgreSQL、Redis、RabbitMQ、MinIO 提供持久化与任务基础设施，Langfuse 为可选观测服务。
 
 ## 文档
 
-[文档中心](docs/README.md) · [系统架构](docs/01_系统架构设计.md) · [工作台](docs/workbench-apps-guide-2026-09-05.md) · [开发与构建](docs/06_环境%20&%20编译构建说明.md) · [实施状态与待验收项](docs/netops-architecture-implementation-plan.md)
+[文档中心](docs/README.md) · [系统架构](docs/01_系统架构设计.md) · [工作台](docs/workbench-apps-guide-2026-09-05.md) · [开发与构建](docs/06_环境%20&%20编译构建说明.md) · [仓库内容范围](docs/repository-distribution.md)
 
 代码测试和本地部署通过不等于真实设备、专家问答或生产服务器验收完成。当前验收边界见对应文档。
 
@@ -44,8 +44,8 @@ React 默认端口 3000，Django BFF 8001，FastAPI 8000。日志在 `.runtime/t
 
 [Apache-2.0](LICENSE)
 
-系统管理：管理员从工作台顶部进入 `/system/users`，统一维护用户、业务用户组与应用授权。参见[操作说明](docs/system-management-guide.md)和[实施计划](docs/system-management-plan.md)。
+系统管理：管理员从工作台顶部进入 `/system/users`，统一维护用户、业务用户组与应用授权。参见[操作说明](docs/system-management-guide.md)。
 
-规则包迁移：规则治理内支持检查项、TextFSM、Change 和状态/事件规则的依赖导出、差异预检、草稿导入与记录追溯。参见[使用说明](docs/rule-package-transfer-guide.md)和[实施计划](docs/rule-package-transfer-plan.md)。
+规则包迁移：规则治理内支持检查项、TextFSM、Change 和状态/事件规则的依赖导出、差异预检、草稿导入与记录追溯。参见[使用说明](docs/rule-package-transfer-guide.md)。
 
 规则治理 1.4.0 已删除独立数据契约和旧生成链，当前入口及迁移边界见[规则资产治理](docs/rule-asset-control-plane-guide.md)。

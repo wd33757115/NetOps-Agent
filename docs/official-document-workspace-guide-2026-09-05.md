@@ -60,7 +60,7 @@ Word 导出固定到提交时的版本，按钮在生成期间显示加载状态
 
 ## 部署与回退
 
-后端安装现有 gateway、Django、AI worker 依赖组合；AI worker 的 `requirements-ai-worker.txt` 已包含文档依赖。新增前端依赖为 Tiptap 3.31.3 的 core、react、pm、starter-kit，版本固定。
+后端安装现有 gateway、Django、AI worker 依赖组合；AI worker 的 `deployment/requirements/ai-worker.txt` 已包含文档依赖。新增前端依赖为 Tiptap 3.31.3 的 core、react、pm、starter-kit，版本固定。
 
 ```sh
 python -m alembic upgrade head

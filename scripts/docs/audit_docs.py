@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import subprocess
 import sys
 from datetime import date, datetime
 from pathlib import Path
@@ -171,6 +172,20 @@ def audit(
             )
 
     markdown_files = sorted(docs_root.rglob("*.md"))
+    # Local-only plans and validation reports are not part of the distributed
+    # manuals. Apply the same Git rules locally and in a clean checkout.
+    if registry_path.resolve() == DEFAULT_REGISTRY.resolve():
+        result = subprocess.run(
+            ["git", "check-ignore", "--no-index", "-z", "--stdin"],
+            cwd=ROOT,
+            input="\0".join(str(p) for p in markdown_files).encode("utf-8") + b"\0",
+            stdout=subprocess.PIPE,
+            check=False,
+        )
+        if result.returncode not in (0, 1):
+            raise ValueError("Cannot inspect documentation distribution rules")
+        ignored = {Path(p).resolve() for p in result.stdout.decode("utf-8").split("\0") if p}
+        markdown_files = [p for p in markdown_files if p.resolve() not in ignored]
     registered = {
         row["absolute"].resolve()
         for row in rows.values()

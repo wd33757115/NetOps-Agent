@@ -16,7 +16,7 @@
 
 实现见 [langfuse.py](../src/observability/langfuse.py)及同目录模块。记录的用户、会话、图执行与节点摘要用于关联排障，不能把日志平台当作业务事实或发布审批数据库。
 
-开发可使用 [独立 Compose](../docker/langfuse/docker-compose.yml)；完整部署的 `observability` profile 为另一入口。不要同时启动占用同一端口的两套服务。已有环境使用自己的账号和项目密钥，旧方案中的演示账号不是生产配置。
+开发可使用 [Windows 统一 Compose](../deployment/compose.windows.yml) 的 `observability` profile；完整部署的 `observability` profile 为另一入口。不要同时启动占用同一端口的两套服务。已有环境使用自己的账号和项目密钥，旧方案中的演示账号不是生产配置。
 
 ## 关联排障
 

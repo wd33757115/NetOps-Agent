@@ -57,26 +57,11 @@ docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges -
 结果在 `.runtime/assistant-dsh-probe.json`，工作区/SDK home 在运行结束清理。
 这是接入复现，不等于 P6 题集质量验收。
 
-## P6-B 历史隔离安装
+## SDK 依赖安装
 
-Windows x64、Python 3.13 验证版本为 `deepseek-harness-sdk==0.1.5rc1`、
-`deepseek-harness-runtime-bin==0.1.5rc1`、`mcp==2.2.0`。
-锁文件含 31 个包及实际下载 wheel 的 SHA256；不是跨平台锁文件。
-不向正常项目 venv 安装试验依赖：
-
-```powershell
-.\venv\Scripts\python.exe -m venv --without-pip .runtime\assistant-dsh-venv
-.\venv\Scripts\python.exe -m pip --python .runtime\assistant-dsh-venv\Scripts\python.exe install -r scripts\assistant\requirements-dsh-win-py313.lock
-.\.runtime\assistant-dsh-venv\Scripts\python.exe scripts\assistant\dsh_ecosystem_probe.py
-.\.runtime\assistant-dsh-venv\Scripts\python.exe scripts\assistant\dsh_ecosystem_probe.py --scenario cancel
-.\.runtime\assistant-dsh-venv\Scripts\python.exe scripts\assistant\dsh_ecosystem_probe.py --scenario timeout
-```
-
-默认模型服务为本地替身：真实 SDK/runtime 调用真实 MCP 服务，外部模型调用为 0。
-每次运行独立 home 和空工作目录，只传最小环境；复用 SDK minimal profile 和官方
-`@deepseek-ai/dsh-mcp-client`，禁用 shell、终端、重试插件；工具列表断言只能有 `read_sample`。
-本地服务使用每轮随机 Bearer 凭证，取消/结束即撤销；未认证请求必须返回 401。
-这只是原型进程凭证，不代表已经接通 NetOps 正式用户授权。
+早期隔离试验的 MCP 2.x 锁文件已删除。正式环境统一执行
+`scripts/windows/install.ps1`，由 Assistant App 的 `requirements.lock` 约束 SDK、runtime 和 MCP。
+执行器回归使用上面的 `dsh_runtime_probe.py`，不再向项目环境安装原型依赖。
 
 ## 可选片段验证
 

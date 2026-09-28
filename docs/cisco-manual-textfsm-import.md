@@ -90,5 +90,5 @@ venv/Scripts/python.exe scripts/check_items/cisco_manual_batch.py <样本目录>
 `test_event_builder_handles_initial_abnormal_state`），未计入本批通过数，未据此宣称全量回归通过。
 
 重载时发现 Windows PowerShell 5 会把 Celery 正常 stderr 日志提升为终止错误。
-`scripts/test/celery_beat.ps1` 现在在严格完成 PID 检查后，通过原生进程退出码判断
+`scripts/windows/celery_beat.ps1` 现在在严格完成 PID 检查后，通过原生进程退出码判断
 启动是否成功；已有 PID 恢复与重复进程保护仍保留。

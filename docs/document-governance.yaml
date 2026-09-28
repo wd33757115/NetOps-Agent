@@ -1,6 +1,21 @@
 schema_version: 1
 review_interval_days: 120
 documents:
+- path: device-access-topology-plan.md
+  topic: device-access-topology
+  status: active
+  owner: NetOps Platform
+  last_verified: '2026-09-28'
+- path: windows-deployment.md
+  topic: windows-deployment
+  status: active
+  owner: NetOps Operations
+  last_verified: '2026-09-27'
+- path: app-operations-guide.md
+  topic: app-operations
+  status: active
+  owner: NetOps Operations
+  last_verified: '2026-09-27'
 - path: 01_系统架构设计.md
   topic: system-architecture
   status: active
@@ -56,91 +71,21 @@ documents:
   status: active
   owner: NetOps Operations
   last_verified: 2026-09-06
-- path: adr/001-skill-system-architecture.md
-  topic: adr-skill-system
-  status: active
-  owner: NetOps Architecture
-  last_verified: 2026-09-06
-- path: adr/002-progressive-disclosure.md
-  topic: adr-progressive-disclosure
-  status: active
-  owner: NetOps Architecture
-  last_verified: 2026-09-06
-- path: adr/003-llm-based-routing.md
-  topic: adr-llm-routing
-  status: active
-  owner: NetOps Architecture
-  last_verified: 2026-09-06
-- path: adr/004-production-hardening.md
-  topic: adr-production-hardening
-  status: active
-  owner: NetOps Architecture
-  last_verified: 2026-09-06
-- path: adr/005-django-react-architecture.md
-  topic: adr-django-react
-  status: active
-  owner: NetOps Architecture
-  last_verified: 2026-09-06
-- path: adr/006-docker-compose-orchestration.md
-  topic: adr-compose-orchestration
-  status: active
-  owner: NetOps Architecture
-  last_verified: 2026-09-06
-- path: adr/007-generic-workflow-context.md
-  topic: adr-workflow-context
-  status: active
-  owner: NetOps Architecture
-  last_verified: 2026-09-06
-- path: adr/008-check-item-business-identity.md
-  topic: check-item-business-identity-decision
-  status: active
-  owner: NetOps Architecture
-  last_verified: 2026-09-06
-- path: assistant-foundation-validation.md
-  topic: assistant-foundation-validation
-  owner: NetOps Platform
-  last_verified: '2026-09-22'
-  status: archived
 - path: assistant-guide.md
   topic: assistant-guide
   owner: NetOps Platform
   last_verified: '2026-09-22'
   status: active
-- path: assistant-long-answer-validation.md
-  topic: assistant-long-answer-validation
-  owner: NetOps Platform
-  last_verified: '2026-09-22'
-  status: archived
-- path: assistant-retrieval-validation.md
-  topic: assistant-retrieval-validation
-  owner: NetOps Platform
-  last_verified: '2026-09-22'
-  status: archived
-- path: assistant-runtime-stability.md
-  topic: assistant-runtime-stability
-  owner: NetOps Platform
-  last_verified: '2026-09-22'
-  status: archived
 - path: capability-packages-guide.md
   topic: capability-packages-guide
   owner: NetOps Platform
   last_verified: '2026-09-22'
   status: active
-- path: firewall-policy-generation-refactor-plan.md
-  topic: firewall-policy-generation-refactor-plan
-  owner: NetOps Platform
-  last_verified: '2026-09-22'
-  status: archived
 - path: hardware-value-alignment.md
   topic: hardware-value-alignment
   owner: NetOps Platform
   last_verified: '2026-09-22'
   status: active
-- path: inspection-ui-validation.md
-  topic: inspection-ui-validation
-  owner: NetOps Platform
-  last_verified: '2026-09-22'
-  status: archived
 - path: interface-value-contract-refactor.md
   topic: interface-value-contract-refactor
   owner: NetOps Platform
@@ -156,48 +101,8 @@ documents:
   status: active
   owner: NetOps Platform
   last_verified: '2026-09-22'
-- path: materials-app-validation.md
-  topic: materials-app-validation
-  owner: NetOps Platform
-  last_verified: '2026-09-22'
-  status: archived
 - path: materials-guide.md
   topic: materials-guide
-  owner: NetOps Platform
-  last_verified: '2026-09-22'
-  status: active
-- path: materials-lifecycle-validation.md
-  topic: materials-lifecycle-validation
-  owner: NetOps Platform
-  last_verified: '2026-09-22'
-  status: archived
-- path: netops-architecture-implementation-plan.md
-  topic: netops-architecture-implementation-plan
-  owner: NetOps Platform
-  last_verified: '2026-09-22'
-  status: active
-- path: netops-capability-packages-p2.md
-  topic: netops-capability-packages-p2
-  owner: NetOps Platform
-  last_verified: '2026-09-22'
-  status: archived
-- path: netops-capability-packages-p3.md
-  topic: netops-capability-packages-p3
-  owner: NetOps Platform
-  last_verified: '2026-09-22'
-  status: archived
-- path: netops-capability-packages-p4.md
-  topic: netops-capability-packages-p4
-  owner: NetOps Platform
-  last_verified: '2026-09-22'
-  status: archived
-- path: netops-capability-packages-p5.md
-  topic: netops-capability-packages-p5
-  owner: NetOps Platform
-  last_verified: '2026-09-22'
-  status: archived
-- path: netops-capability-packages-p6.md
-  topic: netops-capability-packages-p6
   owner: NetOps Platform
   last_verified: '2026-09-22'
   status: active
@@ -241,11 +146,6 @@ documents:
   status: active
   owner: NetOps Platform
   last_verified: 2026-09-24
-- path: patrol-report-refactor-plan.md
-  topic: patrol-report-refactor-plan
-  owner: NetOps Platform
-  last_verified: '2026-09-22'
-  status: archived
 - path: patrol-rule-architecture.md
   topic: patrol-platform-architecture
   status: active
@@ -326,3 +226,43 @@ documents:
   status: active
   owner: Rule Governance
   last_verified: '2026-09-24'
+- path: team-capacity-plan.md
+  topic: team-capacity
+  status: active
+  owner: NetOps Platform
+  last_verified: '2026-09-27'
+- path: database-bootstrap.md
+  topic: platform-database-bootstrap
+  status: active
+  owner: NetOps Platform
+  last_verified: '2026-09-27'
+- path: repository-distribution.md
+  topic: repository-distribution
+  status: active
+  owner: NetOps Platform
+  last_verified: '2026-09-27'
+- path: system-management-guide.md
+  topic: system-management-guide
+  status: active
+  owner: NetOps Platform
+  last_verified: '2026-09-27'
+- path: rule-package-transfer-guide.md
+  topic: rule-package-transfer-guide
+  status: active
+  owner: NetOps Platform
+  last_verified: '2026-09-27'
+- path: rule-sample-flow.md
+  topic: rule-sample-flow
+  status: active
+  owner: NetOps Platform
+  last_verified: '2026-09-27'
+- path: platform-module-retirement.md
+  topic: platform-module-retirement
+  status: active
+  owner: NetOps Platform
+  last_verified: '2026-09-27'
+- path: device-version-values.md
+  topic: device-version-values
+  status: active
+  owner: NetOps Platform
+  last_verified: '2026-09-27'
