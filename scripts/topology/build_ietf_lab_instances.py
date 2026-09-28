@@ -444,8 +444,9 @@ def render() -> dict[str, bytes]:
             "remain outside these subsets.",
             "ARP rows on VLAN interfaces are placed on the unique L3 interface whose "
             "captured subnet contains the neighbor; the physical port stays in evidence.",
-            "LLDP remote-systems-data is keyed by time-mark (sysUpTime at change); the CLI "
-            "only shows an age, so remote entries are not synthesized.",
+            "LLDP remote-systems-data is keyed by time-mark (sysUpTime at change). CLI "
+            "'Update time' exceeds the 121 s TTL, so it is not a receive age, but it may be "
+            "uptime-at-change or time-since-change; unverified, so no remote entries.",
             "MAC filtering entries need database-id and a bridge port number; the CLI shows "
             "an interface name only, so the MAC table is not synthesized.",
             "Bridge address is mandatory but not captured; bridge/component keys are "

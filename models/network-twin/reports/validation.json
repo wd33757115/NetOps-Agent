@@ -238,7 +238,7 @@
   ],
   "expectations_matched": true,
   "complete_digital_twin": false,
-  "instances_manifest_sha256": "926f7dfc92fb6acdacd9a9aaf3762025b8bab5f703c63d320b9cdb53ecfeefd4",
+  "instances_manifest_sha256": "8c603dd671078f49ac0a4bd7b6d3dede07d29dddc03b419341eaadd27b47b55a",
   "remaining": [
     "schema-mount runtime",
     "virtual topology-to-inventory/device association",
