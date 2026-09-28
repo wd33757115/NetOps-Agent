@@ -77,6 +77,8 @@ RFC 8349 的下一跳有 choice：简单下一跳、特殊下一跳、多下一�
 
 对于事实来源、历史快照、模拟等要求，先查对应标准/草案是否有准确语义；没有核实到定义时不加字段、不借 `anydata` 填入自定义结构、不宣称已经满足需求。
 
+**2026-09-28 续查补正**：还须区分完整 Schema 约束检查、NMDA operational 语义和部分采集解析。[RFC 8342 §5.3](https://www.rfc-editor.org/rfc/rfc8342.html#section-5.3) 规定 operational 应符合约束，但为返回实际在用值，在特定情况下允许违反 when、must、mandatory、unique、min/max-elements、键唯一性等语义约束；层级、标识符与类型约束不可违反。不能由“缺 mandatory”直接推出全部已知观测不可保留，也不能由“语法解析成功”推出完整状态已验收。事先已知的设备不符合项应通过标准 deviation 表达；当前仅有 CLI 子集缺证据，不能伪造 deviation、统计中断时间或“设备未使用”结论。工具警告和数据完整性另存研究报告，不加进标准数据树。可执行核验见[运行状态验证](../models/network-twin/mount/README.md#运行状态与部分观测ietf-15)。
+
 ## 4. 已采纳的 8345bis 补充与其他草案状态
 
 ### 4.1 采纳依据与版本

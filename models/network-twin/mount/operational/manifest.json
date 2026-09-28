@@ -1,0 +1,197 @@
+{
+  "scope": "Offline native operational mount tests and partial VSR observations; no live I/O",
+  "model_package_sha256": "7742b84b1e7be26e2cf076cec78e959c2895203e80684e75ba08eea2a5c817ab",
+  "observation_sources": {
+    "models/network-twin/instances/vsr-1-interfaces.partial.json": "b91468d38fb18657eaf711c4a3282e21806766ea938f6c718cbcf24b1d3efcaf",
+    "models/network-twin/instances/vsr-2-interfaces.partial.json": "1b6bfc6ad19dad4304d4987b1911ad7932de78aff299debd3cf3441aa40c7137"
+  },
+  "synthetic_timestamp": "2026-01-01T00:00:00Z (test fixture only; not a device fact)",
+  "parse_only_is_full_validation": false,
+  "files": {
+    "complete.json": "9401caf7f26923509a2be5d499f72c38b48c0870811ee3d207efc2a1cce77f97",
+    "cross-vrf.json": "1c78937b4c01307e43d9a03097af71a7d41d2c87378940109fb7ee2f881401cd",
+    "custom-field.json": "c04205f684f84fc2c8d6d534fb16bfd0d77ed5b573d39d78bb40380cd24c13a0",
+    "extension.xml": "de19806e06e609a9fb47fcbbba60d3535ae8ce8a8b0546489fc8f8ecf59cb40d",
+    "invalid-counter.json": "4bfbe5e29788eac2355f3b5325c5da8f46cb8287450175749a5213b0f28e3d29",
+    "invalid-identity.json": "43018fd95c26198353a90b91614ca0df26d664f75c32abf49a1d133fc3a4c347",
+    "invalid-ip.json": "ac6f7dd9d0d3c07556da6bedb577f00b22f884dcf5fdf38cabed367deea454f4",
+    "invalid-prefix.json": "bb162688d3464b1ac381df8a865a1b97f1a49d8202fe9a4d4b5d91895c0afb8d",
+    "invalid-status.json": "6700ac25f2219f79a92b4004ad2a65de38b01581434462f2822bc3ed849f9007",
+    "invalid-time.json": "06bea8099170ffd83e0221132fcdd448413d83e5f43a3c8fe96103ac1bafe612",
+    "parent-library.json": "80ee484df63c01e9f46a6b12ac731f5fb5467648ebd9623875448566a7ad9f3e",
+    "partial.json": "326d645b8d701db88feb4347856b3053f85ccac5627d887dcf3341a4e8811eaf",
+    "vsr-1-interfaces.partial.json": "b91468d38fb18657eaf711c4a3282e21806766ea938f6c718cbcf24b1d3efcaf",
+    "vsr-2-interfaces.partial.json": "1b6bfc6ad19dad4304d4987b1911ad7932de78aff299debd3cf3441aa40c7137",
+    "wrong-hierarchy.json": "56086248e56e0594ef943b1a989b355c213f87232b4f7c25d7f984bd9e8d13de"
+  },
+  "cases": [
+    {
+      "name": "complete-mounted-strict",
+      "data": "complete.json",
+      "extension": "extension.xml",
+      "type": "strict",
+      "expected_valid": true,
+      "diagnostic": null
+    },
+    {
+      "name": "complete-mounted-operational",
+      "data": "complete.json",
+      "extension": "extension.xml",
+      "type": "data",
+      "expected_valid": true,
+      "diagnostic": null
+    },
+    {
+      "name": "state-not-configuration",
+      "data": "complete.json",
+      "extension": "extension.xml",
+      "type": "config",
+      "expected_valid": false,
+      "diagnostic": "oper-status"
+    },
+    {
+      "name": "missing-statistics-strict",
+      "data": "partial.json",
+      "extension": "extension.xml",
+      "type": "strict",
+      "expected_valid": false,
+      "diagnostic": "discontinuity-time"
+    },
+    {
+      "name": "missing-statistics-operational-warning",
+      "data": "partial.json",
+      "extension": "extension.xml",
+      "type": "data",
+      "expected_valid": true,
+      "diagnostic": "Mandatory node \"discontinuity-time\""
+    },
+    {
+      "name": "missing-statistics-parse-only",
+      "data": "partial.json",
+      "extension": "extension.xml",
+      "type": "get",
+      "expected_valid": true,
+      "diagnostic": null
+    },
+    {
+      "name": "state-cross-vrf-strict",
+      "data": "cross-vrf.json",
+      "extension": "extension.xml",
+      "type": "strict",
+      "expected_valid": false,
+      "diagnostic": "outgoing-interface"
+    },
+    {
+      "name": "state-cross-vrf-operational-rejected",
+      "data": "cross-vrf.json",
+      "extension": "extension.xml",
+      "type": "data",
+      "expected_valid": false,
+      "diagnostic": "outgoing-interface"
+    },
+    {
+      "name": "state-cross-vrf-parse-only-unresolved",
+      "data": "cross-vrf.json",
+      "extension": "extension.xml",
+      "type": "get",
+      "expected_valid": true,
+      "diagnostic": null
+    },
+    {
+      "name": "vsr-1-strict-incomplete",
+      "data": "vsr-1-interfaces.partial.json",
+      "extension": "extension.xml",
+      "type": "strict",
+      "expected_valid": false,
+      "diagnostic": "discontinuity-time"
+    },
+    {
+      "name": "vsr-1-partial-observation",
+      "data": "vsr-1-interfaces.partial.json",
+      "extension": "extension.xml",
+      "type": "get",
+      "expected_valid": true,
+      "diagnostic": null
+    },
+    {
+      "name": "vsr-2-strict-incomplete",
+      "data": "vsr-2-interfaces.partial.json",
+      "extension": "extension.xml",
+      "type": "strict",
+      "expected_valid": false,
+      "diagnostic": "discontinuity-time"
+    },
+    {
+      "name": "vsr-2-partial-observation",
+      "data": "vsr-2-interfaces.partial.json",
+      "extension": "extension.xml",
+      "type": "get",
+      "expected_valid": true,
+      "diagnostic": null
+    },
+    {
+      "name": "invalid-status-parse-rejected",
+      "data": "invalid-status.json",
+      "extension": "extension.xml",
+      "type": "get",
+      "expected_valid": false,
+      "diagnostic": "oper-status"
+    },
+    {
+      "name": "custom-field-parse-rejected",
+      "data": "custom-field.json",
+      "extension": "extension.xml",
+      "type": "get",
+      "expected_valid": false,
+      "diagnostic": "project-confidence"
+    },
+    {
+      "name": "invalid-identity-parse-rejected",
+      "data": "invalid-identity.json",
+      "extension": "extension.xml",
+      "type": "get",
+      "expected_valid": false,
+      "diagnostic": "not-defined"
+    },
+    {
+      "name": "invalid-time-parse-rejected",
+      "data": "invalid-time.json",
+      "extension": "extension.xml",
+      "type": "get",
+      "expected_valid": false,
+      "diagnostic": "discontinuity-time"
+    },
+    {
+      "name": "invalid-counter-parse-rejected",
+      "data": "invalid-counter.json",
+      "extension": "extension.xml",
+      "type": "get",
+      "expected_valid": false,
+      "diagnostic": "in-octets"
+    },
+    {
+      "name": "invalid-ip-parse-rejected",
+      "data": "invalid-ip.json",
+      "extension": "extension.xml",
+      "type": "get",
+      "expected_valid": false,
+      "diagnostic": "ip"
+    },
+    {
+      "name": "invalid-prefix-parse-rejected",
+      "data": "invalid-prefix.json",
+      "extension": "extension.xml",
+      "type": "get",
+      "expected_valid": false,
+      "diagnostic": "prefix-length"
+    },
+    {
+      "name": "wrong-hierarchy-rejected",
+      "data": "wrong-hierarchy.json",
+      "extension": "extension.xml",
+      "type": "get",
+      "expected_valid": false,
+      "diagnostic": "discontinuity-time"
+    }
+  ]
+}

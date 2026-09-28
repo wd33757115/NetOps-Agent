@@ -12,7 +12,7 @@
 | 路由 → IPv4 地址族 | RFC 8349 ipv4-unicast identity / augment 的 when | 必须用 ietf-ipv4-unicast-routing:ipv4-unicast；仅用 ipv4 基类不满足前缀/下一跳 augment 条件 |
 | 路由 → 协议 | RFC 8349 source-protocol + RFC 9129 ospf identity | 完整导入 OSPF 模块及依赖；不新建 O_INTRA identity，不把协议 cost 填入 preference |
 
-上述是首轮 Yangson 的边界；续轮已使用具备 schema-mount 能力的 libyang 5.8.6 验证原生 NI 挂载，按 [RFC 8528 §3](https://www.rfc-editor.org/rfc/rfc8528.html#section-3) 分辨 inline 与 shared-schema 并处理 parent-reference。8 个正反例匹配预期，详见 [挂载验证](mount/README.md)。这不是设备接口/路由分树校验，也不能利用 LNE 为两台独立设备制造容器；生产服务和 operational 实例仍待验证。
+上述是首轮 Yangson 的边界；续轮已使用具备 schema-mount 能力的 libyang 5.8.6 验证原生 NI 挂载，按 [RFC 8528 §3](https://www.rfc-editor.org/rfc/rfc8528.html#section-3) 分辨 inline 与 shared-schema 并处理 parent-reference。8 个配置正反例和后续 21 项状态/部分观测检查匹配预期，详见 [挂载验证](mount/README.md)。这不是设备接口/路由分树校验，也不能利用 LNE 为两台独立设备制造容器；生产服务和真实设备完整 operational 实例仍待验证。
 
 虚拟端到端关联继续查找原生标准依据；external-relationship 草案的 node/link/TP 引用作用域和 request-builder 缺口仍存在，见 `docs/network-digital-twin-model-audit.md` §5.2。现阶段不添加自定义映射、不借物理 presence 冒充虚拟关系、不调整原文 require-instance。
 

@@ -150,3 +150,9 @@ IETF-1.1 完成兼容包范围；IETF-1.2 完成当前候选关联与工具边�
 声明扫描确认锁定包内仅 LNE/NI 共 4 个挂载点。历史 inventory-topology -00/-01 的空锚点不等于 RFC 8528 挂载点；Peer-Mount -01 不会自动给 node 添加设备关联，且原文模块有独立语法错误。候选来源和诊断已锁定，结论限于已查范围，不声称全部 IETF 工作都无可用定义。详见 [关联续查](../models/network-twin/associations.md)。
 
 方案将“设备内挂载验证”与“虚拟 node→NE→设备树关联”独立验收。后一项仍未闭合；不能因为前者通过，就将物理 inventory 映射套在 VSR 上，也不能把工程文件名/同名键当作原生引用。
+
+## 9. 运行状态与部分观测边界（IETF-1.5）
+
+新增 21 项离线检查，详见[运行状态验证说明](../models/network-twin/mount/README.md)及[报告](../models/network-twin/reports/operational-validation.json)。完整合成父接口/NI/挂载 RIB/YANG Library 通过严格约束检查，跨 VRF 引用拒绝；合成缺项和两台 VSR 部分接口树的完整性诊断保留。两棵 VSR 树在 parse-only 下往返相等，非法类型、层级及自定义字段被拒绝；parse-only 故意不解析跨 VRF 引用，不能作为完整语义验收。
+
+按 RFC 8342 §5.3 修正“缺必填就不能保留任何观测”的潜在误读。libyang 5.8.6 显式 `-t data` 对部分语义缺失只告警，严格模式与其参数不同；脚本检查诊断和输出，不只看退出码。CLI 缺采集证据不能被认定为设备的合法语义例外。计数器时间仍缺失、未造值，生产挂载服务及全网虚拟关联仍未完成。

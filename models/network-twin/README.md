@@ -33,7 +33,9 @@
 
 续轮已用 libyang 5.8.6 完成设备内配置级挂载的 8 个正反例，见 [挂载验证](mount/README.md)。它不会改变上述 Yangson 的工具边界。
 
-完整模型仍有未闭合项：虚拟 topology node→inventory/device 的标准关联、SIMAP 原文语义缺口、生产挂载服务及 operational 验证、全部 TE/协议扩展。缺口不以项目新字段填补。
+续轮又完成 21 项运行状态/部分观测检查：完整合成状态树挂载通过，VSR 部分接口树可无改写地解析，但严格完整性检查仍失败。详见同一挂载说明及 `reports/operational-validation.json`。运行状态允许的条件性语义例外与 CLI 缺证据必须分开，parse-only 不证明引用已解析。
+
+完整模型仍有未闭合项：虚拟 topology node→inventory/device 的标准关联、SIMAP 原文语义缺口、生产挂载服务及设备全量 operational 验收、全部 TE/协议扩展。缺口不以项目新字段填补。
 
 ## 实验实例和验证边界
 
@@ -44,7 +46,7 @@
 | `topology-observed.json` | 2 节点、4 个节点内 TP、4 条有向 LLDP 邻接；使用原生 L2 属性和 SIMAP live 类别 | Schema 通过；邻接不证明直连物理线缆，不据此制造 Hub/交换机实体 |
 | `inventory.json` | 2 个 ne-virtual、软件版本及名称 | Schema 通过；虚拟属性依据 GNS3 实验部署。同名 H3C 不合并，未虚构硬件组件承载序列号 |
 | `vsr-1-routes.json` / `vsr-2-routes.json` | 18 / 19 条路由：目的前缀、协议类别、优先级、下一跳地址 | 原生 IPv4 unicast RIB 子集通过；保留 0.0.0.0/32 和特殊地址行，不擅改成默认路由或丢弃动作 |
-| `vsr-1-interfaces.partial.json` / `vsr-2-interfaces.partial.json` | 各 6 条 IP 接口行的类型、状态、地址/掩码 | **完整 operational 校验失败**：缺 statistics/discontinuity-time；明确作为缺失证据保存 |
+| `vsr-1-interfaces.partial.json` / `vsr-2-interfaces.partial.json` | 各 6 条 IP 接口行的类型、状态、地址/掩码 | **严格完整性检查失败**：缺 statistics/discontinuity-time；部分解析通过并逐字段保留，不能称完整 operational datastore |
 
 接口必填要求见 [RFC 8343 §5](https://www.rfc-editor.org/rfc/rfc8343.html#section-5)。不能用采集时间或估算开机时间代替计数器中断时间，也不因缺值修改 mandatory。路由字段及 address-family 约束依据 [RFC 8349 §7](https://www.rfc-editor.org/rfc/rfc8349.html#section-7)，OSPF 身份依据 [RFC 9129 §3](https://www.rfc-editor.org/rfc/rfc9129.html#section-3)。O_INTRA 只能在当前证据下映射到 ospf 基类；不推定版本、进程或 area-id。成本和出口原值保留在独立溯源清单，未借标准字段塞入自定义含义。
 

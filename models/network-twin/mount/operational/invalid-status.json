@@ -1,0 +1,68 @@
+{
+  "ietf-interfaces:interfaces": {
+    "interface": [
+      {
+        "name": "GE1/0",
+        "type": "iana-if-type:ethernetCsmacd",
+        "oper-status": "UNKNOWN",
+        "ietf-ip:ipv4": {
+          "address": [
+            {
+              "ip": "10.10.1.1",
+              "prefix-length": 24
+            }
+          ]
+        }
+      },
+      {
+        "name": "GE2/0",
+        "type": "iana-if-type:ethernetCsmacd",
+        "oper-status": "up",
+        "ietf-ip:ipv4": {
+          "address": [
+            {
+              "ip": "2.2.2.2",
+              "prefix-length": 24
+            }
+          ]
+        }
+      },
+      {
+        "name": "GE4/0",
+        "type": "iana-if-type:ethernetCsmacd",
+        "oper-status": "down"
+      },
+      {
+        "name": "GE5/0",
+        "type": "iana-if-type:ethernetCsmacd",
+        "oper-status": "down"
+      },
+      {
+        "name": "Loop0",
+        "type": "iana-if-type:softwareLoopback",
+        "oper-status": "up",
+        "ietf-ip:ipv4": {
+          "address": [
+            {
+              "ip": "4.4.4.4",
+              "prefix-length": 32
+            }
+          ]
+        }
+      },
+      {
+        "name": "Vlan200",
+        "type": "iana-if-type:l3ipvlan",
+        "oper-status": "up",
+        "ietf-ip:ipv4": {
+          "address": [
+            {
+              "ip": "192.168.1.1",
+              "prefix-length": 24
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

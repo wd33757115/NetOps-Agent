@@ -39,6 +39,29 @@ docker build -t netops-ietf-mount-verify:5.8.6 -f models/network-twin/mount/Dock
 
 Debian libyang 3.12.2 对本组共享挂载实例发生 SIGSEGV（返回 -11），没有据此修改标准。`Dockerfile` 保留该版本的复现环境；失败报告另存 `../reports/mount-3.12.2-validation.json`。采用源码构建的 5.8.6 完成验证，并保留准确错误诊断。参考 [上游挂载说明](https://github.com/CESNET/libyang/blob/47351e59e2965e350f9d4098f15ecbe6b3850f6f/src/tree_data.h)。
 
+## 运行状态与部分观测（IETF-1.5）
+
+```powershell
+.runtime/yang-model-tools/Scripts/python.exe scripts/topology/build_ietf_operational_cases.py --check
+.runtime/yang-model-tools/Scripts/python.exe scripts/topology/validate_ietf_mount.py --cases models/network-twin/mount/operational --output models/network-twin/reports/operational-validation.json
+```
+
+`operational/` 的 16 个生成文件与 `../reports/operational-validation.json` 覆盖 21 项检查。完整合成例子包含父接口状态/计数器、父及子 YANG Library、两个 NI 的挂载配置及 RIB 状态。parent-reference 额外提供选中接口的 oper-status/statistics，使子树的可访问接口满足原生约束；没有导出整个接口或改掉 NI 隔离。`2026-01-01T00:00:00Z` 和计数器 42 都是合成测试值，绝不填入 VSR 实例。
+
+验证明确区分三种模式：
+
+| 模式 | 固定工具调用 | 验收含义 |
+|---|---|---|
+| `strict` 完整约束检查 | 5.8.6 不传 `-t`，传 `--merge` | 检查完整树约束；缺 discontinuity-time 拒绝，完整合成例子无诊断通过 |
+| `data` 运行状态模式 | `-t data --merge` | 启用 LYD_VALIDATE_OPERATIONAL，mandatory 缺失可能警告并返回 0；警告必须保留，不能称完整性已证明；跨 VRF leafref 仍拒绝 |
+| `get` 部分数据解析 | `-t get` | LYD_PARSE_ONLY；VSR 两棵部分接口树逐字段往返不变，不插入默认值；不执行完整语义校验，不证明引用解析成功 |
+
+这些开关语义核对了[固定版本 yl_opt.c](https://github.com/CESNET/libyang/blob/47351e59e2965e350f9d4098f15ecbe6b3850f6f/tools/lint/yl_opt.c) 和 [validation.c](https://github.com/CESNET/libyang/blob/47351e59e2965e350f9d4098f15ecbe6b3850f6f/src/validation.c)。该版本帮助中“不传 -t 等同 data”的说法不足以反映 flags 差别，因此不只依赖帮助文字；换工具版本需重新跑全部用例。`--merge` 先解析所有兄弟模块再统一验证，避免直接解析挂载状态树时提前检查 YANG Library 产生 module-set-id 缺失诊断；没有关闭约束或删库。报告保存实际参数。
+
+反例验证 `get` 模式仍拒绝非法 oper-status、identity、日期、计数器、IP、前缀长度、错误层级和自定义字段。另一个反例特意证明跨 VRF 引用在 parse-only 下能保留、在完整校验下失败，所以 parse-only 绝不能充当路由关联验收。未使用会跳过未知字段的 `-n`。正例检查输入保留；get 要求整个 JSON 数据树相等，完整检查只允许增加 Schema 默认节点且不允许原有列表条目丢失。验证输出只作报告，不能拿工具补的默认值覆盖采集证据。
+
+**方案纠偏**：[RFC 8342 §5.3](https://www.rfc-editor.org/rfc/rfc8342.html#section-5.3) 允许 operational 在特定情况下违反所列语义约束，以返回实际在用状态；层级、标识符和类型约束不能违反。CLI 部分采集既不等同完整 operational datastore，也不能据此宣称设备存在合法例外或标准 deviation。VSR 文件仍保持 partial，严格诊断保存，但其中类型合法的观测可保留用于后续关联核验，无需伪造统计时间。
+
 ## 仍未完成
 
-这是配置数据和模型运行时验证，不是 operational 全量状态、NETCONF/RESTCONF 服务、NACM 授权或 VSR 实机验收。VSR 已采样本缺统计必填值，保持 partial 状态。拓扑虚拟节点→NE→设备树的关联也没有因 NI 挂载通过而自动建立；相关审计见 `../associations.md`。
+这完成合成状态挂载及部分观测的离线验证，不是设备完整状态、NETCONF/RESTCONF 服务、NACM 授权或 VSR 实机验收。VSR 已采样本缺统计必填值，保持 partial 状态。拓扑虚拟节点→NE→设备树的关联也没有因 NI 挂载通过而自动建立；相关审计见 `../associations.md`。
