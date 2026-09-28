@@ -1,0 +1,14 @@
+{
+  "ietf-network@2018-02-26.yang": {
+    "source": "https://raw.githubusercontent.com/YangModels/yang/main/standard/ietf/RFC/ietf-network@2018-02-26.yang",
+    "sha256": "312b23187229cde2baec533bdf897a603f1a697e10081cefea3a2f0ef1db2089"
+  },
+  "ietf-network-topology@2018-02-26.yang": {
+    "source": "https://raw.githubusercontent.com/YangModels/yang/main/standard/ietf/RFC/ietf-network-topology@2018-02-26.yang",
+    "sha256": "dacf41a3ed966d3afa76cb540a1c2866f26b4137d27ae4b317fec0b70568e0c3"
+  },
+  "ietf-inet-types@2013-07-15.yang": {
+    "source": "https://raw.githubusercontent.com/YangModels/yang/main/standard/ietf/RFC/ietf-inet-types@2013-07-15.yang",
+    "sha256": "12d98b0143a5ca5095b36420f9ebc1ffa61cfd2eaa850080244cadf01b86ddf9"
+  }
+}

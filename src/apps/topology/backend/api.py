@@ -1,0 +1,85 @@
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import IntegrityError
+
+from src.auth.models import CurrentUser
+from src.platform.authorization.client import require_app
+from src.platform.device_access.contracts import DeviceAccessError
+
+from . import service
+from .schemas import Discovery, Import, Resolve
+
+router = APIRouter(tags=["Topology"])
+actor = require_app("topology")
+
+
+def mutation(user):
+    if not user.can_execute_skills():
+        raise HTTPException(403, "当前账号不能执行设备操作")
+
+
+def call(fn, *args):
+    try:
+        return fn(*args)
+    except DeviceAccessError as exc:
+        raise HTTPException(422, {"code": exc.failure_code, "message": str(exc)}) from None
+    except IntegrityError:
+        raise HTTPException(409, "任务或节点状态已变化，请刷新后重试") from None
+
+
+@router.get("/networks")
+def networks(user: CurrentUser = Depends(actor)):
+    return service.networks(user.user_id)
+
+
+@router.get("/networks/{network_id}/runs")
+def runs(network_id: str, user: CurrentUser = Depends(actor)):
+    return service.runs(user.user_id, network_id)
+
+
+@router.post("/runs", status_code=202)
+def submit(body: Discovery, user: CurrentUser = Depends(actor)):
+    mutation(user)
+    return call(service.submit, user.user_id, body)
+
+
+@router.post("/imports", status_code=201)
+def import_data(body: Import, user: CurrentUser = Depends(actor)):
+    mutation(user)
+    return call(service.import_captures, user.user_id, body)
+
+
+@router.get("/runs/{run_id}")
+def read(run_id: str, user: CurrentUser = Depends(actor)):
+    return service.read(user.user_id, run_id)
+
+
+@router.post("/runs/{run_id}/cancel")
+def cancel(run_id: str, user: CurrentUser = Depends(actor)):
+    mutation(user)
+    return service.cancel(user.user_id, run_id)
+
+
+@router.post("/runs/{run_id}/targets/{target_id}/resolve")
+def resolve(run_id: str, target_id: str, body: Resolve, user: CurrentUser = Depends(actor)):
+    mutation(user)
+    return call(service.resolve, user.user_id, run_id, target_id, body)
+
+
+@router.get("/snapshots/{snapshot_id}")
+def snapshot(snapshot_id: str, user: CurrentUser = Depends(actor)):
+    return service.snapshot(user.user_id, snapshot_id)
+
+
+@router.get("/snapshots/{snapshot_id}/rfc8345")
+def export(snapshot_id: str, user: CurrentUser = Depends(actor)):
+    return service.export(user.user_id, snapshot_id)
+
+
+@router.get("/snapshots/{snapshot_id}/diff/{before_id}")
+def compare(snapshot_id: str, before_id: str, user: CurrentUser = Depends(actor)):
+    return service.compare(user.user_id, before_id, snapshot_id)
+
+
+@router.get("/evidence/{observation_id}")
+def evidence(observation_id: str, user: CurrentUser = Depends(actor)):
+    return call(service.evidence, user.user_id, observation_id)

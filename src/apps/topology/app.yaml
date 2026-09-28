@@ -1,0 +1,28 @@
+manifest_version: 1
+id: topology
+name: 网络拓扑
+version: 0.2.0
+platform_api: '>=1.0,<2.0'
+icon: network
+dependencies: {}
+backend:
+  router: src.apps.topology.backend.api:router
+  task_modules: [src.apps.topology.backend.tasks]
+  task_names: [app.topology.execute, app.topology.reconcile]
+  queue: app.topology
+  schedules:
+    - name: reconcile
+      task: app.topology.reconcile
+      seconds: 30
+frontend:
+  entry: frontend/index.tsx
+agent:
+  tools: src.apps.topology.backend.tools:TOOLS
+database:
+  mode: package
+  migrations: migrations
+  head: topology_0001
+  tables: [app_topology_networks, app_topology_runs, app_topology_targets, app_topology_observations, app_topology_nodes, app_topology_aliases, app_topology_tps, app_topology_links, app_topology_snapshots, app_topology_resolutions]
+lifecycle:
+  drain: src.apps.topology.backend.service:drain
+  pending: src.apps.topology.backend.service:pending

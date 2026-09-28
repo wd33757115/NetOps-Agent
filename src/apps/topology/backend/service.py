@@ -1,0 +1,796 @@
+"""Durable discovery with explicit human retry and fenced target execution."""
+
+import hashlib
+import ipaddress
+import json
+import logging
+import os
+from dataclasses import asdict
+from datetime import datetime, timedelta, timezone
+from uuid import uuid4
+
+from fastapi import HTTPException
+from sqlalchemy import delete, func, select, update
+
+from src.platform.device_access import AccessContext, AccessGrant, BatchRequest, DeviceAccessService
+from src.platform.device_access.contracts import (
+    ConnectionProfile,
+    DeviceAccessError,
+)
+from src.platform.device_access.contracts import (
+    Target as AccessTarget,
+)
+from src.platform.device_access.detection import DiscoveryPlan
+from src.platform.device_access.security import CredentialStore, authorize_address
+
+from . import storage
+from .models import (
+    Alias,
+    Link,
+    Network,
+    Node,
+    Observation,
+    Resolution,
+    Run,
+    Snapshot,
+    Target,
+    TerminationPoint,
+    now,
+)
+from .normalize import build_graph, diff, identifier, parse, rfc8345
+from .repository import owned, sessions
+
+APP_ID = "topology"
+ACTIVE = ("queued", "running", "waiting_for_input")
+logger = logging.getLogger(__name__)
+
+
+def signature(value):
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, ensure_ascii=False).encode()
+    ).hexdigest()
+
+
+def scope(address, networks):
+    return any(ipaddress.ip_address(address) in ipaddress.ip_network(cidr) for cidr in networks)
+
+
+def dispatch(run_id):
+    from .tasks import execute
+
+    try:
+        execute.apply_async(args=[run_id], queue="app.topology")
+    except Exception:
+        logger.warning(
+            "topology queue unavailable; reconciler will dispatch committed run %s", run_id
+        )
+
+
+def release_credentials(run_id):
+    """Revoke after commit. Redis TTL is the fail-safe if revocation is unavailable."""
+    with sessions() as session:
+        run = session.get(Run, run_id)
+        if not run or run.status in ACTIVE:
+            return
+        refs = set(session.scalars(select(Target.credential_ref).where(Target.run_id == run_id)))
+        refs.add(run.settings.get("neighbor_credential_ref"))
+    refs.discard(None)
+    if refs:
+        try:
+            store = CredentialStore()
+            for ref in refs:
+                store.revoke(ref)
+        except Exception:
+            logger.warning("topology credential revocation deferred to TTL for run %s", run_id)
+
+
+def _new_run(session, owner, body, settings, mode):
+    digest = signature({"mode": mode, **settings})
+    existing = session.scalar(
+        select(Run).where(Run.owner_id == owner, Run.request_id == body.request_id)
+    )
+    if existing:
+        if existing.input_hash != digest:
+            raise HTTPException(409, "请求编号已用于不同任务")
+        return existing, False
+    if body.network_id:
+        network = session.scalar(
+            select(Network)
+            .where(Network.id == body.network_id, Network.owner_id == owner)
+            .with_for_update()
+        )
+        if not network:
+            raise HTTPException(404, "网络不存在")
+        if network.domain != body.domain:
+            raise HTTPException(409, "网络管理域不能变更")
+        if network.active_run:
+            raise HTTPException(409, "该网络已有未结束任务")
+    else:
+        network = Network(id=uuid4().hex, owner_id=owner, name=body.name, domain=body.domain)
+        session.add(network)
+        session.flush()
+    run = Run(
+        id=uuid4().hex,
+        network_id=network.id,
+        owner_id=owner,
+        request_id=body.request_id,
+        input_hash=digest,
+        settings={**settings, "mode": mode},
+        status="queued",
+    )
+    session.add(run)
+    session.flush()
+    network.active_run = run.id
+    return run, True
+
+
+def submit(owner, body):
+    settings = body.model_dump(exclude={"credentials", "request_id"})
+    if len(body.seeds) > body.max_targets or any(
+        not scope(ip, body.allowed_cidrs) for ip in body.seeds
+    ):
+        raise HTTPException(422, "种子须在允许网段内，且数量不得超过节点上限")
+    for address in body.seeds:
+        authorize_address(owner, body.domain, address)
+    ref = None
+    try:
+        with sessions() as session:
+            run, created = _new_run(session, owner, body, settings, "ssh")
+            run_id = run.id
+            if created:
+                store = CredentialStore()
+                ref = store.put(
+                    owner,
+                    body.domain,
+                    body.allowed_cidrs if body.credentials_for_neighbors else body.seeds,
+                    body.credentials.username,
+                    body.credentials.password.get_secret_value(),
+                )
+                # The reference, never a secret, is the only credential value persisted/queued.
+                run.settings = {
+                    **run.settings,
+                    "neighbor_credential_ref": ref if body.credentials_for_neighbors else None,
+                }
+                for address in body.seeds:
+                    session.add(
+                        Target(
+                            id=uuid4().hex,
+                            run_id=run.id,
+                            target_key=f"{body.domain}|{address}|{body.port}",
+                            address=address,
+                            depth=0,
+                            status="queued",
+                            credential_ref=ref,
+                        )
+                    )
+    except Exception:
+        if ref:
+            CredentialStore().revoke(ref)
+        raise
+    dispatch(run_id)
+    return read(owner, run_id)
+
+
+def _observations(session, run_id):
+    rows = session.execute(
+        select(Observation, Target.address)
+        .join(Target, Target.id == Observation.target_id)
+        .where(Observation.run_id == run_id)
+        .order_by(Observation.received_at, Observation.id)
+    ).all()
+    # Latest successful parse per target; failures retain raw evidence but cannot overwrite a graph.
+    latest = {}
+    for row, address in rows:
+        if row.data.get("complete"):
+            latest[address] = {
+                "id": row.id,
+                "address": address,
+                "data": row.data,
+                "observed_at": row.observed_at.isoformat(),
+            }
+    return list(latest.values())
+
+
+def _graph(session, run):
+    network = session.get(Network, run.network_id)
+    previous = session.get(Snapshot, network.current_snapshot) if network.current_snapshot else None
+    observations = _observations(session, run.id)
+    graph = build_graph(
+        network.id,
+        network.domain,
+        observations,
+        previous.graph if previous else None,
+    )
+    targets = session.scalars(select(Target).where(Target.run_id == run.id)).all()
+    addresses = {target.address: target for target in targets}
+    unexplored = []
+    for observation in observations:
+        for neighbor in observation["data"]["neighbors"]:
+            if not neighbor["addresses"]:
+                unexplored.append(
+                    {"chassis_id": neighbor["chassis_id"], "reason": "no_management_address"}
+                )
+            for address in neighbor["addresses"]:
+                if address in addresses or run.settings["mode"] != "ssh":
+                    continue
+                reason = "target_budget"
+                if not scope(address, run.settings["allowed_cidrs"]):
+                    reason = "outside_task_scope"
+                elif addresses[observation["address"]].depth >= run.settings["max_depth"]:
+                    reason = "depth_budget"
+                unexplored.append({"address": address, "reason": reason})
+    graph["coverage"] = {
+        "mode": run.settings["mode"],
+        "seed_profile_id": run.settings["profile_id"],
+        "platform_selection": "per_target",
+        "targets": [
+            {"address": t.address, "status": t.status, "reason": t.reason, "depth": t.depth}
+            for t in targets
+        ],
+        "unexplored": unexplored,
+        "adjacency_validation": "single_advertisement",
+        "observed_from": min((o["observed_at"] for o in observations), default=None),
+        "observed_to": max((o["observed_at"] for o in observations), default=None),
+    }
+    return graph
+
+
+def _finish(session, run, status=None):
+    targets = session.scalars(select(Target).where(Target.run_id == run.id)).all()
+    if status is None:
+        if any(t.status in {"queued", "running"} for t in targets):
+            run.status = "running"
+            return
+        if any(t.status == "waiting_for_input" for t in targets):
+            run.status = "waiting_for_input"
+            return
+        status = "partial" if any(t.status != "succeeded" for t in targets) else "completed"
+    graph = _graph(session, run)
+    snap = Snapshot(id=uuid4().hex, network_id=run.network_id, run_id=run.id, graph=graph)
+    session.add(snap)
+    # Projection is rebuildable from immutable snapshots and observations.
+    for model in (Link, TerminationPoint, Alias, Node):
+        session.execute(delete(model).where(model.network_id == run.network_id))
+    for node in graph["nodes"]:
+        session.add(Node(network_id=run.network_id, node_id=node["id"], properties=node))
+    session.flush()
+    for node in graph["nodes"]:
+        for tp in node["tps"]:
+            session.add(
+                TerminationPoint(
+                    network_id=run.network_id, node_id=node["id"], tp_id=tp["id"], properties=tp
+                )
+            )
+        for kind in ("address", "chassis_id"):
+            if node.get(kind):
+                session.add(
+                    Alias(
+                        id=identifier(run.network_id, node["id"], kind, node[kind]),
+                        network_id=run.network_id,
+                        node_id=node["id"],
+                        kind=kind,
+                        value=node[kind],
+                        status=node["identity_status"],
+                    )
+                )
+    session.flush()
+    for link in graph["links"]:
+        session.add(
+            Link(
+                network_id=run.network_id,
+                link_id=link["id"],
+                source_node=link["source"],
+                source_tp=link["source_tp"],
+                dest_node=link["target"],
+                dest_tp=link["target_tp"],
+                properties=link,
+            )
+        )
+    network = session.get(Network, run.network_id)
+    network.current_snapshot, network.active_run = snap.id, None
+    run.status, run.finished_at = status, now()
+
+
+def read(owner, run_id):
+    with sessions() as session:
+        run = owned(session, Run, run_id, owner)
+        targets = session.scalars(
+            select(Target).where(Target.run_id == run_id).order_by(Target.depth, Target.address)
+        ).all()
+        snap = session.scalar(select(Snapshot).where(Snapshot.run_id == run_id))
+        return {
+            "id": run.id,
+            "network_id": run.network_id,
+            "status": run.status,
+            "created_at": run.created_at.isoformat(),
+            "mode": run.settings["mode"],
+            "snapshot_id": snap.id if snap else None,
+            "targets": [
+                {
+                    "id": t.id,
+                    "address": t.address,
+                    "depth": t.depth,
+                    "status": t.status,
+                    "reason": t.reason,
+                    "version": t.version,
+                    "platform": target_platform(session, t),
+                    "evidence_id": session.scalar(
+                        select(Observation.id)
+                        .where(Observation.target_id == t.id)
+                        .order_by(Observation.attempt.desc())
+                        .limit(1)
+                    ),
+                }
+                for t in targets
+            ],
+            "graph": snap.graph if snap else _graph(session, run),
+        }
+
+
+def target_platform(session, target):
+    observation = session.scalar(
+        select(Observation)
+        .where(Observation.target_id == target.id)
+        .order_by(Observation.attempt.desc())
+        .limit(1)
+    )
+    return observation.data.get("platform") if observation else None
+
+
+def networks(owner):
+    with sessions() as session:
+        return [
+            {
+                "id": n.id,
+                "name": n.name,
+                "domain": n.domain,
+                "active_run": n.active_run,
+                "current_snapshot": n.current_snapshot,
+            }
+            for n in session.scalars(
+                select(Network)
+                .where(Network.owner_id == owner)
+                .order_by(Network.created_at.desc())
+                .limit(200)
+            )
+        ]
+
+
+def runs(owner, network_id):
+    with sessions() as session:
+        owned(session, Network, network_id, owner)
+        return [
+            {
+                "id": r.id,
+                "status": r.status,
+                "created_at": r.created_at.isoformat(),
+                "snapshot_id": session.scalar(select(Snapshot.id).where(Snapshot.run_id == r.id)),
+            }
+            for r in session.scalars(
+                select(Run)
+                .where(Run.network_id == network_id)
+                .order_by(Run.created_at.desc())
+                .limit(100)
+            )
+        ]
+
+
+def snapshot(owner, snapshot_id):
+    with sessions() as session:
+        row = session.get(Snapshot, snapshot_id)
+        if not row:
+            raise HTTPException(404, "快照不存在")
+        owned(session, Network, row.network_id, owner)
+        return row.graph
+
+
+def compare(owner, before_id, after_id):
+    before, after = snapshot(owner, before_id), snapshot(owner, after_id)
+    if before["network_id"] != after["network_id"]:
+        raise HTTPException(422, "只能比较同一网络的快照")
+    return diff(before, after)
+
+
+def export(owner, snapshot_id):
+    return rfc8345(snapshot(owner, snapshot_id))
+
+
+def evidence(owner, observation_id):
+    with sessions() as session:
+        row = session.get(Observation, observation_id)
+        if not row:
+            raise HTTPException(404, "证据不存在")
+        owned(session, Run, row.run_id, owner)
+        key = row.evidence_key
+    return storage.get(key)
+
+
+def resolve(owner, run_id, target_id, body):
+    ref = None
+    try:
+        with sessions() as session:
+            run = session.scalar(
+                select(Run).where(Run.id == run_id, Run.owner_id == owner).with_for_update()
+            )
+            if not run:
+                raise HTTPException(404, "任务不存在")
+            target = session.get(Target, target_id)
+            if not target or target.run_id != run.id:
+                raise HTTPException(404, "目标不存在")
+            digest = signature(body.model_dump(exclude={"credentials"}))
+            old = session.get(Resolution, (target_id, body.request_id))
+            if old:
+                if old.input_hash != digest:
+                    raise HTTPException(409, "请求编号已用于不同操作")
+            else:
+                if (
+                    run.status not in ACTIVE
+                    or target.status != "waiting_for_input"
+                    or target.version != body.version
+                ):
+                    raise HTTPException(409, "节点状态已经变化，请刷新")
+                if body.action == "retry":
+                    authorize_address(owner, run.settings["domain"], target.address)
+                    if body.credentials:
+                        ref = CredentialStore().put(
+                            owner,
+                            run.settings["domain"],
+                            [target.address],
+                            body.credentials.username,
+                            body.credentials.password.get_secret_value(),
+                        )
+                        target.credential_ref = ref
+                    if not target.credential_ref:
+                        raise HTTPException(422, "请为该节点提供用户名和密码")
+                    if body.profile_id is not None:
+                        run.settings = {
+                            **run.settings,
+                            "target_profiles": {
+                                **run.settings.get("target_profiles", {}),
+                                target.id: body.profile_id,
+                            },
+                        }
+                    target.status, target.reason = "queued", None
+                else:
+                    target.status, target.reason = "skipped", "human_skipped"
+                target.version += 1
+                session.add(
+                    Resolution(target_id=target_id, request_id=body.request_id, input_hash=digest)
+                )
+                _finish(session, run)
+    except Exception:
+        if ref:
+            CredentialStore().revoke(ref)
+        raise
+    dispatch(run_id)
+    release_credentials(run_id)
+    return read(owner, run_id)
+
+
+def cancel(owner, run_id):
+    with sessions() as session:
+        run = session.scalar(
+            select(Run).where(Run.id == run_id, Run.owner_id == owner).with_for_update()
+        )
+        if not run:
+            raise HTTPException(404, "任务不存在")
+        if run.status in ACTIVE:
+            session.execute(
+                update(Target)
+                .where(Target.run_id == run_id, Target.status.in_(ACTIVE))
+                .values(status="cancelled", lease_token=None, version=Target.version + 1)
+            )
+            _finish(session, run, "cancelled")
+    release_credentials(run_id)
+    return read(owner, run_id)
+
+
+def execute_run(run_id, authority):
+    def authorize_owner(owner):
+        decision = authority(owner, APP_ID)
+        if decision is not None and not decision.can_execute_skills():
+            raise HTTPException(403, "当前账号不能执行设备采集")
+
+    with sessions() as session:
+        run = session.get(Run, run_id)
+        if not run or run.status not in ACTIVE:
+            return
+        owner = run.owner_id
+    try:
+        authorize_owner(owner)
+    except Exception:
+        # Authorization loss suspends the run; never repeatedly attempt a device.
+        with sessions() as session:
+            session.execute(
+                update(Target)
+                .where(Target.run_id == run_id, Target.status == "queued")
+                .values(
+                    status="waiting_for_input",
+                    reason="authorization_unavailable",
+                    version=Target.version + 1,
+                )
+            )
+            run = session.get(Run, run_id)
+            if run and run.status in ACTIVE:
+                _finish(session, run)
+        return
+    with sessions() as session:
+        run = session.scalar(select(Run).where(Run.id == run_id).with_for_update())
+        if run.status not in ACTIVE:
+            return
+        target = session.scalar(
+            select(Target)
+            .where(Target.run_id == run_id, Target.status == "queued")
+            .order_by(Target.depth, Target.id)
+            .with_for_update(skip_locked=True)
+            .limit(1)
+        )
+        if target is None:
+            return
+        token = uuid4().hex
+        target.status, target.lease_token, target.lease_until = (
+            "running",
+            token,
+            now() + timedelta(seconds=180),
+        )
+        run.status = "running"
+        target_id, address, attempt, depth, ref = (
+            target.id,
+            target.address,
+            target.version,
+            target.depth,
+            target.credential_ref,
+        )
+        settings = dict(run.settings)
+
+    def guard():
+        authorize_owner(owner)
+        authorize_address(owner, settings["domain"], address)
+        with sessions() as session:
+            return (
+                session.scalar(
+                    select(Target.id)
+                    .join(Run)
+                    .where(
+                        Target.id == target_id,
+                        Target.lease_token == token,
+                        Target.status == "running",
+                        Target.lease_until > now(),
+                        Run.status.in_(ACTIVE),
+                    )
+                )
+                is not None
+            )
+
+    choice = settings.get("target_profiles", {}).get(
+        target_id, settings.get("profile_id", "auto") if depth == 0 else "auto"
+    )
+    plan = DiscoveryPlan(choice)
+    outputs, data, reason = {}, {"complete": False}, None
+    command_metadata = []
+
+    def capture(item):
+        outputs[item.command_id] = item.output
+        command_metadata.append(
+            {key: value for key, value in asdict(item).items() if key != "output"}
+        )
+
+    try:
+        if not guard():
+            return
+        username, password = CredentialStore().get(ref, owner, settings["domain"], address)
+        commands = plan.commands
+        profile = ConnectionProfile(
+            profile_id=target_id,
+            username=username,
+            password=password,
+            port=settings["port"],
+            known_hosts_file=os.getenv("DEVICE_ACCESS_KNOWN_HOSTS"),
+        )
+        access = DeviceAccessService(
+            target_resolver=lambda _: AccessTarget(
+                target_id, address, management_domain=settings["domain"]
+            ),
+            profile_resolver=lambda _: profile,
+        )
+        result = access.execute_batch(
+            AccessContext(
+                owner,
+                APP_ID,
+                (AccessGrant(target_id, target_id, frozenset(c.text for c in commands)),),
+                run_id,
+            ),
+            BatchRequest(target_id, target_id, commands, budget_seconds=90),
+            on_result=capture,
+            should_continue=guard,
+            command_filter=plan.select,
+        )
+        if result.execution_status != "succeeded":
+            raise DeviceAccessError(
+                result.failure_code or "output_incomplete", "设备采集未完整完成"
+            )
+        data = parse(plan.profile_id, plan.parser_outputs(outputs))
+    except Exception as exc:
+        reason = exc.failure_code if isinstance(exc, DeviceAccessError) else "execution_unavailable"
+    observed_at = now()
+    data = {**data, "platform": plan.metadata()}
+    try:
+        key = storage.put(
+            run_id,
+            target_id,
+            attempt,
+            {
+                "outputs": outputs,
+                "commands": command_metadata,
+                "observed_at": observed_at.isoformat(),
+                "profile_id": plan.profile_id,
+                "platform": plan.metadata(),
+                "complete": data.get("complete", False),
+                "failure_code": reason,
+            },
+        )
+    except Exception:
+        key, reason, data = None, "evidence_unavailable", {"complete": False}
+    with sessions() as session:
+        run = session.scalar(select(Run).where(Run.id == run_id).with_for_update())
+        target = session.get(Target, target_id)
+        if run.status not in ACTIVE or target.lease_token != token or target.status != "running":
+            return
+        expiry = (
+            target.lease_until.replace(tzinfo=timezone.utc)
+            if target.lease_until.tzinfo is None
+            else target.lease_until
+        )
+        if expiry <= now():
+            return
+        target.lease_token, target.lease_until = None, None
+        target.status, target.reason = (
+            ("waiting_for_input", reason) if reason else ("succeeded", None)
+        )
+        if key:
+            session.add(
+                Observation(
+                    id=uuid4().hex,
+                    run_id=run_id,
+                    target_id=target_id,
+                    attempt=attempt,
+                    observed_at=observed_at,
+                    data=data,
+                    evidence_key=key,
+                )
+            )
+        if not reason:
+            count = session.scalar(
+                select(func.count()).select_from(Target).where(Target.run_id == run_id)
+            )
+            for neighbor in data["neighbors"]:
+                for candidate in neighbor["addresses"]:
+                    if (
+                        depth >= settings["max_depth"]
+                        or count >= settings["max_targets"]
+                        or not scope(candidate, settings["allowed_cidrs"])
+                    ):
+                        continue
+                    target_key = f"{settings['domain']}|{candidate}|{settings['port']}"
+                    if session.scalar(
+                        select(Target.id).where(
+                            Target.run_id == run_id, Target.target_key == target_key
+                        )
+                    ):
+                        continue
+                    status, why = "waiting_for_input", "credentials_required"
+                    candidate_ref = settings.get("neighbor_credential_ref")
+                    try:
+                        authorize_address(owner, settings["domain"], candidate)
+                        if candidate_ref:
+                            status, why = "queued", None
+                    except DeviceAccessError:
+                        why = "not_authorized"
+                    session.add(
+                        Target(
+                            id=uuid4().hex,
+                            run_id=run_id,
+                            target_key=target_key,
+                            address=candidate,
+                            depth=depth + 1,
+                            status=status,
+                            reason=why,
+                            credential_ref=candidate_ref,
+                        )
+                    )
+                    session.flush()
+                    count += 1
+        session.flush()
+        _finish(session, run)
+    release_credentials(run_id)
+    dispatch(run_id)
+
+
+def import_captures(owner, body):
+    if (
+        sum(len(value.encode()) for capture in body.captures for value in capture.outputs.values())
+        > 4 * 1024 * 1024
+    ):
+        raise HTTPException(413, "一次离线观测导入不能超过 4 MB")
+    if len({c.address for c in body.captures}) != len(body.captures):
+        raise HTTPException(422, "一次导入不能包含重复设备地址")
+    # Validate the entire bundle before creating its task.
+    parsed = [
+        parse(body.profile_id, capture.outputs, capture.complete) for capture in body.captures
+    ]
+    settings = body.model_dump(exclude={"request_id", "captures"})
+    settings["capture_digest"] = signature([c.model_dump() for c in body.captures])
+    with sessions() as session:
+        run, created = _new_run(session, owner, body, settings, "offline")
+        run_id = run.id
+        if created:
+            for capture, data in zip(body.captures, parsed):
+                target = Target(
+                    id=uuid4().hex,
+                    run_id=run_id,
+                    address=capture.address,
+                    target_key=f"{body.domain}|{capture.address}",
+                    depth=0,
+                    status="succeeded",
+                    version=1,
+                )
+                session.add(target)
+                session.flush()
+                key = storage.put(
+                    run_id,
+                    target.id,
+                    1,
+                    {"outputs": capture.outputs, "complete": True, "source": "user_import"},
+                )
+                session.add(
+                    Observation(
+                        id=uuid4().hex,
+                        run_id=run_id,
+                        target_id=target.id,
+                        attempt=1,
+                        observed_at=datetime.fromisoformat(capture.observed_at),
+                        data={**data, "source": "user_import"},
+                        evidence_key=key,
+                    )
+                )
+            session.flush()
+            _finish(session, run)
+    return read(owner, run_id)
+
+
+def reconcile():
+    with sessions() as session:
+        # A lost executor may have reached the device. Only a human may authorize another attempt.
+        session.execute(
+            update(Target)
+            .where(Target.status == "running", Target.lease_until < now())
+            .values(
+                status="waiting_for_input",
+                reason="worker_interrupted",
+                lease_token=None,
+                version=Target.version + 1,
+            )
+        )
+        ids = []
+        for run in session.scalars(select(Run).where(Run.status.in_(ACTIVE)).with_for_update()):
+            _finish(session, run)
+            if run.status == "running":
+                ids.append(run.id)
+    for run_id in ids:
+        dispatch(run_id)
+    return len(ids)
+
+
+def pending():
+    with sessions() as session:
+        return session.scalar(select(func.count()).select_from(Run).where(Run.status.in_(ACTIVE)))
+
+
+def drain():
+    with sessions() as session:
+        items = [
+            (r.owner_id, r.id) for r in session.scalars(select(Run).where(Run.status.in_(ACTIVE)))
+        ]
+    for owner, run_id in items:
+        cancel(owner, run_id)
+    return pending()
