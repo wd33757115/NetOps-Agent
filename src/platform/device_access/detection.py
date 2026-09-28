@@ -21,7 +21,8 @@ def identify_platform(output):
 class DiscoveryPlan:
     """A fresh plan per target. No hint or choice is inherited by adjacent devices."""
 
-    def __init__(self, profile_id="auto"):
+    def __init__(self, profile_id="auto", *, identifier=None):
+        self._identify = identifier or (lambda output, command_id: identify_platform(output))
         if profile_id != "auto" and profile_id not in DISCOVERY_PROFILES:
             raise DeviceAccessError("platform_unsupported", "此平台尚无已验证的 LLDP 适配")
         self.profile_id = None if profile_id == "auto" else profile_id
@@ -53,7 +54,7 @@ class DiscoveryPlan:
         if self.profile_id is None:
             for result in results:
                 if result.command_id.startswith("detect-"):
-                    found = identify_platform(result.output)
+                    found = self._identify(result.output, result.command_id)
                     if found:
                         self.profile_id, self.evidence_command = found, result.command_id
                         break

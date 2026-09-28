@@ -981,6 +981,7 @@ P2-9 根据 Q5 取消，不引入 SNMP。P3 及后续仍在进入阶段时展开
 | P2-0 | 已完成 | 2026-09-28 | 新增样本回放 44 通过，连同 SSH/拓扑回归 87 通过；56 个数据文件 Git 索引摘要一致，扫描无命中 | 两台 VSR ×14 能力 ×规范化/raw；修正文档 E4/E6/E10/E12 与 raw 证据表述 |
 | P2-1 | 已完成 | 2026-09-28 | 新增事实仓储 30 通过；设备访问/拓扑全量 773 通过、1 跳过；PostgreSQL 并发/迁移 1 通过；前端构建通过 | Q7 团队共享；topology 0.3.0，0002 迁移；尚未发布 |
 | P2-4 | 已完成 | 2026-09-28 | 新增规范化 76 通过；连同实机夹具和原拓扑回归 142 通过；Ruff 通过 | 未接线旧解析器；保留原文、未知名称和分页标志 |
+| P2-7 | 已完成 | 2026-09-28 | 新增识别 29 通过；设备访问/拓扑 878 通过、1 跳过；两台 H3C 一次登录识别并执行对应 LLDP；构建通过 | topology 0.3.2；其他签名仅样本验证；未发布 |
 
 ### P0-1 基线记录（2026-09-28）
 
@@ -1170,6 +1171,17 @@ P1-1 实机补验与驱动修复（2026-09-28）：
 - 速度必须显式 K/M/G/T 单位，年龄必须显式秒/分/时/天；缺失保留 None，不猜单位。当前事实表为整数 Mbps，非整 Mbps 值明确拒绝，不舍入为 0；若后续出现低速链路，应通过独立迁移调整精度后扩展。行尾/ANSI/NUL/分页只清理解析副本，保留 had_paging 标志，不能由清理动作推断采集完整。
 - `python -m pytest tests/unit/test_topology_normalization.py tests/unit/test_topology_lab_fixtures.py tests/unit/test_topology_app.py -q --junitxml=.runtime/p2-4-tests.xml`：142 通过，其中新增 76；Ruff 通过。两台 VSR 实际接口简写与 LLDP 全称规范为同一接口，原 CR CR LF 不产生伪空行；其他平台映射仅样本/合成测试，未新增实机支持声明。
 - 未完成项：后续通用解析器在 P2-8 调用这些纯函数；未改原 normalize.py/巡检，无上线或数据库迁移。下一卡 P2-7 多信号识别。
+
+
+### P2-7 执行记录（2026-09-28）
+
+- 文件：`collectors/identify.py`、`signatures.yaml`、`tests/unit/test_topology_identify.py`；公共 `detection.DiscoveryPlan` 增加识别回调（默认旧行为保留，不反向依赖 App），拓扑 service 注入新适配；App 0.3.2、前端注册、本文。
+- YAML 版本输出签名覆盖 Comware、VRP、IOS/IOS-XE/NX-OS、锐捷、Junos、EOS、Linux；参考已安装 Netmiko 4.7.0 的本地 SSHDetect 签名并收紧为版本行匹配。仅 Comware 在现有两台实验机实测，其余为明确合成/样本测试，不视为设备兼容性声明。
+- 多信号接口保存 LLDP、banner、提示符、分页和版本证据的摘要/片段；只有完整本机版本可确认系统，LLDP/banner 相互吻合也不能代替本机证据；冲突记录告警，本机签名互相冲突则人工处理。IOS-XE 与其内含 IOS 行兼容；Comware 5 不套用 Comware 7 档案。未知厂商但有效版本可仅识别 display/show 风格，不猜型号。
+- 现有发现流程已用新识别器，保持每节点独立计划、同一登录、display→show 按需探测、命中即停，再发对应关闭分页和 LLDP 命令。仍只有已有 Comware/NX-OS LLDP 路径可执行；其他平台/通用风格的后续采集需 P2-8/P2-2，当前保存识别信息并等待适配/人工处理。上一跳提示及完整 banner 的采集接线在 P3 扩散流程升级时传入；本卡不把尚未获得的信号伪装成实测。
+- `python -m pytest <rg 选出的 test_device_access*.py 和 test_topology*.py> -q --junitxml=.runtime/p2-7-tests.xml`：878 通过、1 可选 YANG 跳过；新增 29 项。后续收紧主版本行与手工指定状态后，识别相关 42 项再次通过。Ruff 通过；隔离前端构建 `.runtime/p2-7/frontend-dist` 通过。
+- 实机 `.runtime/p2-7-lab-identify.py`：两台 H3C 经隔离授权/凭据库、已有可信密钥和实际公共并发租约，各一次 Paramiko 连接，顺序为 `display version`、`screen-length disable`、`display lldp neighbor-information verbose`；都识别为 Comware / h3c-comware7，不发送 show 探测。报告 `.runtime/p2-7-lab-identify.json`，密码不进入结果或元数据。
+- 未完成项：平台档案执行范围扩展、通用解析、LLDP 提示的扩散接线按后续卡；原巡检不变，无上线。下一卡 P2-8 通用解析器。
 
 ## 参考
 

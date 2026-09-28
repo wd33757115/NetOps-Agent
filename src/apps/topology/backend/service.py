@@ -21,10 +21,10 @@ from src.platform.device_access.contracts import (
 from src.platform.device_access.contracts import (
     Target as AccessTarget,
 )
-from src.platform.device_access.detection import DiscoveryPlan
 from src.platform.device_access.security import CredentialStore
 
 from . import storage
+from .collectors.identify import TopologyDiscoveryPlan as DiscoveryPlan
 from .models import (
     Alias,
     Link,
