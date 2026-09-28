@@ -1,0 +1,106 @@
+{
+  "sources": [
+    {
+      "file": "draft-ietf-ivy-network-inventory-topology-02.txt",
+      "url": "https://www.ietf.org/archive/id/draft-ietf-ivy-network-inventory-topology-02.txt",
+      "sha256": "872b40726a7904f628634b414a3ef1911fd846ea5c14601008a34b2022c4e558",
+      "format": "rfc-code",
+      "modules": {
+        "ietf-network-inventory-topology@2025-03-03.yang": "1c74c2e5ec3d7df4a29ba4128e2068487ec671323a29a9a18098ec897d378c59"
+      }
+    },
+    {
+      "file": "draft-ietf-ivy-network-inventory-topology-03.txt",
+      "url": "https://www.ietf.org/archive/id/draft-ietf-ivy-network-inventory-topology-03.txt",
+      "sha256": "c8c906d7f0d2600d081b8a251163828840a0fab2d4d035ffe004eda1f081f56e",
+      "format": "rfc-code",
+      "modules": {
+        "ietf-network-inventory-topology@2025-03-03.yang": "7ef9d85aff4521a1ad142972a616855681f1c0bfc5374fc9b6f89e6376bc6869"
+      }
+    },
+    {
+      "file": "draft-ietf-ivy-network-inventory-topology-04.txt",
+      "url": "https://www.ietf.org/archive/id/draft-ietf-ivy-network-inventory-topology-04.txt",
+      "sha256": "aad1dd817a29b9cdb71f080a709ca49cc243d3d99102e98b3b58d145d854326b",
+      "format": "rfc-code",
+      "modules": {
+        "ietf-network-inventory-topology@2025-10-20.yang": "b68028addc945cf926321feb2665155770ae412294568df90c8a91e0617dd6c5"
+      }
+    },
+    {
+      "file": "draft-ietf-ivy-network-inventory-topology-05.txt",
+      "url": "https://www.ietf.org/archive/id/draft-ietf-ivy-network-inventory-topology-05.txt",
+      "sha256": "1690a65ee14c40f37ba5a6ec46f3c546b1338fc6f8178cd06bdfa2fcc494d11a",
+      "format": "rfc-code",
+      "modules": {
+        "ietf-network-inventory-topology@2025-10-20.yang": "b68028addc945cf926321feb2665155770ae412294568df90c8a91e0617dd6c5"
+      }
+    },
+    {
+      "file": "draft-ietf-ivy-network-inventory-topology-06.txt",
+      "url": "https://www.ietf.org/archive/id/draft-ietf-ivy-network-inventory-topology-06.txt",
+      "sha256": "4c5f9cce071e4620d07c0cc528f651b9dbeb7d8349ac472d67b718f9bb909a0d",
+      "format": "rfc-code",
+      "modules": {
+        "ietf-network-inventory-topology@2026-02-28.yang": "259c4ec16d87b8e5b68acb1fbd312c51b53324671dbc9ea126d12b2b5b088e71"
+      }
+    },
+    {
+      "file": "draft-ietf-ivy-network-inventory-topology-07.txt",
+      "url": "https://www.ietf.org/archive/id/draft-ietf-ivy-network-inventory-topology-07.txt",
+      "sha256": "7404ae5de153717fd1f39ad86739dd4fe0826528c93682017670d7277e795574",
+      "format": "rfc-code",
+      "modules": {
+        "ietf-network-inventory-topology@2026-05-19.yang": "ced21b3bf589879004b02b2504d5f1e334dec401548da5111b60c0296463fca8"
+      }
+    },
+    {
+      "file": "draft-ietf-ivy-network-inventory-topology-08.txt",
+      "url": "https://www.ietf.org/archive/id/draft-ietf-ivy-network-inventory-topology-08.txt",
+      "sha256": "095e7dc13bc14e7bf9bd3d5dc765fb6c6a59633256086bcd635f42673178d238",
+      "format": "rfc-code",
+      "modules": {
+        "ietf-network-inventory-topology@2026-06-25.yang": "44b9f84942ab148e685749709f24f1620e79dd0a50842248333a8338e04181cf"
+      }
+    },
+    {
+      "file": "draft-ietf-ivy-network-inventory-topology-09.txt",
+      "url": "https://www.ietf.org/archive/id/draft-ietf-ivy-network-inventory-topology-09.txt",
+      "sha256": "50c3a6599c349e5decc0eab4a17b439f6fef792e703b1157fec4a38bf4bdf9a3",
+      "format": "rfc-code",
+      "modules": {
+        "ietf-network-inventory-topology@2026-08-21.yang": "d9fc805f0736fd53a98801fd40e878a528b4541535f86758f0c122a1773e0560"
+      }
+    },
+    {
+      "file": "draft-ietf-ivy-network-inventory-topology-10.txt",
+      "url": "https://www.ietf.org/archive/id/draft-ietf-ivy-network-inventory-topology-10.txt",
+      "sha256": "f970c13ed1026cd1c0723689439a53e1a8616f67be88f98172d48531e83bf489",
+      "format": "rfc-code",
+      "modules": {
+        "ietf-network-inventory-topology@2026-08-21.yang": "d9fc805f0736fd53a98801fd40e878a528b4541535f86758f0c122a1773e0560"
+      }
+    },
+    {
+      "file": "draft-ietf-ivy-network-inventory-location-06.txt",
+      "url": "https://www.ietf.org/archive/id/draft-ietf-ivy-network-inventory-location-06.txt",
+      "sha256": "f7bd63535600161dcd0f433ff7c5c9725077ad2f58100f5511ef240cb8898fd2",
+      "format": "text",
+      "modules": {}
+    },
+    {
+      "file": "draft-ietf-ivy-passive-network-inventory-01.txt",
+      "url": "https://www.ietf.org/archive/id/draft-ietf-ivy-passive-network-inventory-01.txt",
+      "sha256": "689b05132c1582333466446b9ae6d93f1386762a40455a65eb5bf4ff0837f93c",
+      "format": "text",
+      "modules": {}
+    },
+    {
+      "file": "draft-ietf-ivy-entitlement-inventory-04.txt",
+      "url": "https://www.ietf.org/archive/id/draft-ietf-ivy-entitlement-inventory-04.txt",
+      "sha256": "9a254f9f513bfdc684071163bd830e5131aa575224ae0a3a6388621d56be4934",
+      "format": "text",
+      "modules": {}
+    }
+  ]
+}

@@ -26,3 +26,7 @@
 - [Peer-Mount -01](https://www.ietf.org/archive/id/draft-clemm-netmod-peermount-01.html) 研究远端数据引用，区别于 RFC 8528 的本地模型挂载。它不是自动向 RFC 8345 node 添加关联；其 §7 模块提取后还在 description 处语法失败，保留诊断，不扩展本次仅针对 SIMAP 的补丁授权。
 
 结论限于已查候选：尚未找到可以直接组成虚拟 node→NE→设备树闭环的定义，不能断言全部 IETF 工作都不存在此能力。**方案优化：设备内挂载与全网关联拆成独立验收项**；前者配置级实验已完成，后者继续待解决。Schema Mount 本身既不发现远端 SSH 设备，也不提供凭据管理或跨 datastore 身份映射。当前不恢复 P2-3 模板扩展，不自创 node 挂载 augment，不通过同名 ID 假装引用已解析。
+
+## 新候选核验（IETF-1.7）
+
+追踪了 -00 附录示例的后继：inventory-topology -02～-05 曾有不限物理的 node→NE 映射（config false，受 feature 控制）及反向 NE→node 引用；-06 起移除反向引用，-07 起加 when，-08 起映射改为物理 presence（存在即物理 node，不存在即 abstract node）。历史版本与当前 -11 同名，采用即为降级，因此排除。inventory -19 将 NE 信息的收集机制划在本文范围外，标准层面没有 NE→设备数据树的引用；IVY 其余 3 份草案也不涉及拓扑 node。9 项正反例及结构演变见 [虚拟关联候选核验](virtual-association/README.md) 与 `reports/virtual-association.json`。关联仍未闭合，登记路线图待决 Q-IETF-1。

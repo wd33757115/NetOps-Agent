@@ -160,3 +160,7 @@ IETF-1.1 完成兼容包范围；IETF-1.2 完成当前候选关联与工具边�
 ## 10. 基础路由选择结构（IETF-1.6）
 
 39 项 IPv4/IPv6、配置/状态、单/多/特殊下一跳及 Schema 边界用例结果匹配，见[路由语义核验](../models/network-twin/routing-semantics.md)。Yangson 的两个 mandatory choice 内部异常未当作负例通过，改用 libyang 的两个负例及两个正对照核实；保留原始诊断与实际工具归属。完整模块与 profile 未改，不等于其他路由协议、TE、ECMP 实际转发或全网关联已经验收。
+
+## 11. 虚拟关联新候选（IETF-1.7）
+
+inventory-topology -02～-11 的 node 映射演变、历史 -05 与当前 -11 的 9 项可执行用例见 [虚拟关联候选核验](../models/network-twin/virtual-association/README.md)。通用 node→NE 定义只存在于已被取代的版本；当前 -11 仅适用于最底层物理网络，VSR 在其中只能作为 abstract node。inventory -19 没有 NE→设备数据存储的节点。location、passive、entitlement 三份 IVY 草案均不 import ietf-network。第 5.1 节“虚拟 NE/软件”一行的结论不变；是否由控制器实现层维护数据树之外的对应关系，登记为路线图待决 Q-IETF-1，不以项目 augment 补缺。

@@ -1,0 +1,1627 @@
+{
+  "scope": "Candidate audit for virtual node -> NE -> device tree; historical modules are evidence, not adopted; not all IETF work",
+  "model_package_sha256": "7742b84b1e7be26e2cf076cec78e959c2895203e80684e75ba08eea2a5c817ab",
+  "lock_sha256": "b27628233adc7b894a54e3074359eb1b6ef588111c26a871adcd5c4ddf1b62e9",
+  "candidates": [
+    {
+      "source": "https://www.ietf.org/archive/id/draft-ietf-ivy-network-inventory-topology-02.txt",
+      "sha256": "872b40726a7904f628634b414a3ef1911fd846ea5c14601008a34b2022c4e558",
+      "imports_ietf_network": true,
+      "code_begins": 1,
+      "module": "ietf-network-inventory-topology@2025-03-03.yang",
+      "module_sha256": "1c74c2e5ec3d7df4a29ba4128e2068487ec671323a29a9a18098ec897d378c59",
+      "compile_with_current_package": {
+        "files": 41,
+        "passed": true,
+        "diagnostics": [],
+        "structure": {
+          "namespace": "urn:ietf:params:xml:ns:yang:ietf-network-inventory-topology",
+          "features": [
+            "inventory-to-topology-navigate",
+            "topology-to-inventory-navigate"
+          ],
+          "augments": [
+            {
+              "target": "/nw:networks/nw:network/nw:node",
+              "when": null,
+              "if_feature": [],
+              "nodes": [
+                {
+                  "path": "/inventory-mapping-attributes",
+                  "keyword": "container",
+                  "config": true,
+                  "presence": null,
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": [
+                    "topology-to-inventory-navigate"
+                  ]
+                },
+                {
+                  "path": "/inventory-mapping-attributes/ne-ref",
+                  "keyword": "leaf",
+                  "config": false,
+                  "presence": null,
+                  "type": "nwi:ne-ref",
+                  "require_instance": null,
+                  "if_feature": []
+                }
+              ]
+            },
+            {
+              "target": "/nw:networks/nw:network/nt:link",
+              "when": null,
+              "if_feature": [],
+              "nodes": [
+                {
+                  "path": "/inventory-mapping-attributes",
+                  "keyword": "container",
+                  "config": true,
+                  "presence": null,
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": [
+                    "topology-to-inventory-navigate"
+                  ]
+                },
+                {
+                  "path": "/inventory-mapping-attributes/cable-name",
+                  "keyword": "leaf",
+                  "config": false,
+                  "presence": null,
+                  "type": "string",
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/inventory-mapping-attributes/link-type",
+                  "keyword": "leaf",
+                  "config": false,
+                  "presence": null,
+                  "type": "string",
+                  "require_instance": null,
+                  "if_feature": []
+                }
+              ]
+            },
+            {
+              "target": "/nw:networks/nw:network/nw:node/nt:termination-point",
+              "when": null,
+              "if_feature": [],
+              "nodes": [
+                {
+                  "path": "/inventory-mapping-attributes",
+                  "keyword": "container",
+                  "config": true,
+                  "presence": null,
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": [
+                    "topology-to-inventory-navigate"
+                  ]
+                },
+                {
+                  "path": "/inventory-mapping-attributes/ne-ref",
+                  "keyword": "leaf",
+                  "config": true,
+                  "presence": null,
+                  "type": "nwi:ne-ref",
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/inventory-mapping-attributes/port-ref",
+                  "keyword": "leaf",
+                  "config": true,
+                  "presence": null,
+                  "type": "leafref",
+                  "require_instance": "false",
+                  "if_feature": []
+                },
+                {
+                  "path": "/inventory-mapping-attributes/physical-interface-name",
+                  "keyword": "leaf",
+                  "config": false,
+                  "presence": null,
+                  "type": "string",
+                  "require_instance": null,
+                  "if_feature": []
+                }
+              ]
+            },
+            {
+              "target": "/nwi:network-inventory/nwi:network-elements/nwi:network-element",
+              "when": null,
+              "if_feature": [
+                "inventory-to-topology-navigate"
+              ],
+              "nodes": [
+                {
+                  "path": "/node-ref",
+                  "keyword": "leaf",
+                  "config": false,
+                  "presence": null,
+                  "type": "leafref",
+                  "require_instance": "false",
+                  "if_feature": []
+                },
+                {
+                  "path": "/network-ref",
+                  "keyword": "leaf",
+                  "config": false,
+                  "presence": null,
+                  "type": "leafref",
+                  "require_instance": "false",
+                  "if_feature": []
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "source": "https://www.ietf.org/archive/id/draft-ietf-ivy-network-inventory-topology-03.txt",
+      "sha256": "c8c906d7f0d2600d081b8a251163828840a0fab2d4d035ffe004eda1f081f56e",
+      "imports_ietf_network": true,
+      "code_begins": 1,
+      "module": "ietf-network-inventory-topology@2025-03-03.yang",
+      "module_sha256": "7ef9d85aff4521a1ad142972a616855681f1c0bfc5374fc9b6f89e6376bc6869",
+      "compile_with_current_package": {
+        "files": 41,
+        "passed": true,
+        "diagnostics": [],
+        "structure": {
+          "namespace": "urn:ietf:params:xml:ns:yang:ietf-network-inventory-topology",
+          "features": [
+            "inventory-to-topology-navigate",
+            "topology-to-inventory-navigate"
+          ],
+          "augments": [
+            {
+              "target": "/nw:networks/nw:network/nw:node",
+              "when": null,
+              "if_feature": [],
+              "nodes": [
+                {
+                  "path": "/inventory-mapping-attributes",
+                  "keyword": "container",
+                  "config": true,
+                  "presence": null,
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": [
+                    "topology-to-inventory-navigate"
+                  ]
+                },
+                {
+                  "path": "/inventory-mapping-attributes/ne-ref",
+                  "keyword": "leaf",
+                  "config": false,
+                  "presence": null,
+                  "type": "nwi:ne-ref",
+                  "require_instance": null,
+                  "if_feature": []
+                }
+              ]
+            },
+            {
+              "target": "/nw:networks/nw:network/nt:link",
+              "when": null,
+              "if_feature": [],
+              "nodes": [
+                {
+                  "path": "/inventory-mapping-attributes",
+                  "keyword": "container",
+                  "config": true,
+                  "presence": null,
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": [
+                    "topology-to-inventory-navigate"
+                  ]
+                },
+                {
+                  "path": "/inventory-mapping-attributes/cable-name",
+                  "keyword": "leaf",
+                  "config": false,
+                  "presence": null,
+                  "type": "string",
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/inventory-mapping-attributes/link-type",
+                  "keyword": "leaf",
+                  "config": false,
+                  "presence": null,
+                  "type": "string",
+                  "require_instance": null,
+                  "if_feature": []
+                }
+              ]
+            },
+            {
+              "target": "/nw:networks/nw:network/nw:node/nt:termination-point",
+              "when": null,
+              "if_feature": [],
+              "nodes": [
+                {
+                  "path": "/inventory-mapping-attributes",
+                  "keyword": "container",
+                  "config": true,
+                  "presence": null,
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": [
+                    "topology-to-inventory-navigate"
+                  ]
+                },
+                {
+                  "path": "/inventory-mapping-attributes/ne-ref",
+                  "keyword": "leaf",
+                  "config": true,
+                  "presence": null,
+                  "type": "nwi:ne-ref",
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/inventory-mapping-attributes/port-ref",
+                  "keyword": "leaf",
+                  "config": true,
+                  "presence": null,
+                  "type": "leafref",
+                  "require_instance": "false",
+                  "if_feature": []
+                },
+                {
+                  "path": "/inventory-mapping-attributes/physical-interface-name",
+                  "keyword": "leaf",
+                  "config": false,
+                  "presence": null,
+                  "type": "string",
+                  "require_instance": null,
+                  "if_feature": []
+                }
+              ]
+            },
+            {
+              "target": "/nwi:network-inventory/nwi:network-elements/nwi:network-element",
+              "when": null,
+              "if_feature": [
+                "inventory-to-topology-navigate"
+              ],
+              "nodes": [
+                {
+                  "path": "/node-ref",
+                  "keyword": "leaf",
+                  "config": false,
+                  "presence": null,
+                  "type": "leafref",
+                  "require_instance": "false",
+                  "if_feature": []
+                },
+                {
+                  "path": "/network-ref",
+                  "keyword": "leaf",
+                  "config": false,
+                  "presence": null,
+                  "type": "leafref",
+                  "require_instance": "false",
+                  "if_feature": []
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "source": "https://www.ietf.org/archive/id/draft-ietf-ivy-network-inventory-topology-04.txt",
+      "sha256": "aad1dd817a29b9cdb71f080a709ca49cc243d3d99102e98b3b58d145d854326b",
+      "imports_ietf_network": true,
+      "code_begins": 1,
+      "module": "ietf-network-inventory-topology@2025-10-20.yang",
+      "module_sha256": "b68028addc945cf926321feb2665155770ae412294568df90c8a91e0617dd6c5",
+      "compile_with_current_package": {
+        "files": 41,
+        "passed": true,
+        "diagnostics": [],
+        "structure": {
+          "namespace": "urn:ietf:params:xml:ns:yang:ietf-network-inventory-topology",
+          "features": [
+            "inventory-to-topology-navigate",
+            "topology-to-inventory-navigate"
+          ],
+          "augments": [
+            {
+              "target": "/nw:networks/nw:network/nw:node",
+              "when": null,
+              "if_feature": [],
+              "nodes": [
+                {
+                  "path": "/inventory-mapping-attributes",
+                  "keyword": "container",
+                  "config": false,
+                  "presence": null,
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": [
+                    "topology-to-inventory-navigate"
+                  ]
+                },
+                {
+                  "path": "/inventory-mapping-attributes/ne-ref",
+                  "keyword": "leaf",
+                  "config": false,
+                  "presence": null,
+                  "type": "nwi:ne-ref",
+                  "require_instance": null,
+                  "if_feature": []
+                }
+              ]
+            },
+            {
+              "target": "/nw:networks/nw:network/nt:link",
+              "when": null,
+              "if_feature": [],
+              "nodes": [
+                {
+                  "path": "/inventory-mapping-attributes",
+                  "keyword": "container",
+                  "config": false,
+                  "presence": null,
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": [
+                    "topology-to-inventory-navigate"
+                  ]
+                },
+                {
+                  "path": "/inventory-mapping-attributes/cable-name",
+                  "keyword": "leaf",
+                  "config": false,
+                  "presence": null,
+                  "type": "string",
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/inventory-mapping-attributes/link-type",
+                  "keyword": "leaf",
+                  "config": false,
+                  "presence": null,
+                  "type": "string",
+                  "require_instance": null,
+                  "if_feature": []
+                }
+              ]
+            },
+            {
+              "target": "/nw:networks/nw:network/nw:node/nt:termination-point",
+              "when": null,
+              "if_feature": [],
+              "nodes": [
+                {
+                  "path": "/inventory-mapping-attributes",
+                  "keyword": "container",
+                  "config": false,
+                  "presence": null,
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": [
+                    "topology-to-inventory-navigate"
+                  ]
+                },
+                {
+                  "path": "/inventory-mapping-attributes/ne-ref",
+                  "keyword": "leaf",
+                  "config": false,
+                  "presence": null,
+                  "type": "nwi:ne-ref",
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/inventory-mapping-attributes/port-ref",
+                  "keyword": "leaf",
+                  "config": false,
+                  "presence": null,
+                  "type": "leafref",
+                  "require_instance": "false",
+                  "if_feature": []
+                },
+                {
+                  "path": "/inventory-mapping-attributes/port-breakout",
+                  "keyword": "container",
+                  "config": false,
+                  "presence": "When present, it indicates that port breakout is\nsupported.",
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/inventory-mapping-attributes/port-breakout/breakout-channel",
+                  "keyword": "list",
+                  "config": false,
+                  "presence": null,
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/inventory-mapping-attributes/port-breakout/breakout-channel/channel-id",
+                  "keyword": "leaf",
+                  "config": false,
+                  "presence": null,
+                  "type": "uint16",
+                  "require_instance": null,
+                  "if_feature": []
+                }
+              ]
+            },
+            {
+              "target": "/nwi:network-inventory/nwi:network-elements/nwi:network-element",
+              "when": null,
+              "if_feature": [
+                "inventory-to-topology-navigate"
+              ],
+              "nodes": [
+                {
+                  "path": "/node-ref",
+                  "keyword": "leaf",
+                  "config": false,
+                  "presence": null,
+                  "type": "leafref",
+                  "require_instance": "false",
+                  "if_feature": []
+                },
+                {
+                  "path": "/network-ref",
+                  "keyword": "leaf",
+                  "config": false,
+                  "presence": null,
+                  "type": "leafref",
+                  "require_instance": "false",
+                  "if_feature": []
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "source": "https://www.ietf.org/archive/id/draft-ietf-ivy-network-inventory-topology-05.txt",
+      "sha256": "1690a65ee14c40f37ba5a6ec46f3c546b1338fc6f8178cd06bdfa2fcc494d11a",
+      "imports_ietf_network": true,
+      "code_begins": 1,
+      "module": "ietf-network-inventory-topology@2025-10-20.yang",
+      "module_sha256": "b68028addc945cf926321feb2665155770ae412294568df90c8a91e0617dd6c5",
+      "compile_with_current_package": {
+        "files": 41,
+        "passed": true,
+        "diagnostics": [],
+        "structure": {
+          "namespace": "urn:ietf:params:xml:ns:yang:ietf-network-inventory-topology",
+          "features": [
+            "inventory-to-topology-navigate",
+            "topology-to-inventory-navigate"
+          ],
+          "augments": [
+            {
+              "target": "/nw:networks/nw:network/nw:node",
+              "when": null,
+              "if_feature": [],
+              "nodes": [
+                {
+                  "path": "/inventory-mapping-attributes",
+                  "keyword": "container",
+                  "config": false,
+                  "presence": null,
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": [
+                    "topology-to-inventory-navigate"
+                  ]
+                },
+                {
+                  "path": "/inventory-mapping-attributes/ne-ref",
+                  "keyword": "leaf",
+                  "config": false,
+                  "presence": null,
+                  "type": "nwi:ne-ref",
+                  "require_instance": null,
+                  "if_feature": []
+                }
+              ]
+            },
+            {
+              "target": "/nw:networks/nw:network/nt:link",
+              "when": null,
+              "if_feature": [],
+              "nodes": [
+                {
+                  "path": "/inventory-mapping-attributes",
+                  "keyword": "container",
+                  "config": false,
+                  "presence": null,
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": [
+                    "topology-to-inventory-navigate"
+                  ]
+                },
+                {
+                  "path": "/inventory-mapping-attributes/cable-name",
+                  "keyword": "leaf",
+                  "config": false,
+                  "presence": null,
+                  "type": "string",
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/inventory-mapping-attributes/link-type",
+                  "keyword": "leaf",
+                  "config": false,
+                  "presence": null,
+                  "type": "string",
+                  "require_instance": null,
+                  "if_feature": []
+                }
+              ]
+            },
+            {
+              "target": "/nw:networks/nw:network/nw:node/nt:termination-point",
+              "when": null,
+              "if_feature": [],
+              "nodes": [
+                {
+                  "path": "/inventory-mapping-attributes",
+                  "keyword": "container",
+                  "config": false,
+                  "presence": null,
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": [
+                    "topology-to-inventory-navigate"
+                  ]
+                },
+                {
+                  "path": "/inventory-mapping-attributes/ne-ref",
+                  "keyword": "leaf",
+                  "config": false,
+                  "presence": null,
+                  "type": "nwi:ne-ref",
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/inventory-mapping-attributes/port-ref",
+                  "keyword": "leaf",
+                  "config": false,
+                  "presence": null,
+                  "type": "leafref",
+                  "require_instance": "false",
+                  "if_feature": []
+                },
+                {
+                  "path": "/inventory-mapping-attributes/port-breakout",
+                  "keyword": "container",
+                  "config": false,
+                  "presence": "When present, it indicates that port breakout is\nsupported.",
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/inventory-mapping-attributes/port-breakout/breakout-channel",
+                  "keyword": "list",
+                  "config": false,
+                  "presence": null,
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/inventory-mapping-attributes/port-breakout/breakout-channel/channel-id",
+                  "keyword": "leaf",
+                  "config": false,
+                  "presence": null,
+                  "type": "uint16",
+                  "require_instance": null,
+                  "if_feature": []
+                }
+              ]
+            },
+            {
+              "target": "/nwi:network-inventory/nwi:network-elements/nwi:network-element",
+              "when": null,
+              "if_feature": [
+                "inventory-to-topology-navigate"
+              ],
+              "nodes": [
+                {
+                  "path": "/node-ref",
+                  "keyword": "leaf",
+                  "config": false,
+                  "presence": null,
+                  "type": "leafref",
+                  "require_instance": "false",
+                  "if_feature": []
+                },
+                {
+                  "path": "/network-ref",
+                  "keyword": "leaf",
+                  "config": false,
+                  "presence": null,
+                  "type": "leafref",
+                  "require_instance": "false",
+                  "if_feature": []
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "source": "https://www.ietf.org/archive/id/draft-ietf-ivy-network-inventory-topology-06.txt",
+      "sha256": "4c5f9cce071e4620d07c0cc528f651b9dbeb7d8349ac472d67b718f9bb909a0d",
+      "imports_ietf_network": true,
+      "code_begins": 1,
+      "module": "ietf-network-inventory-topology@2026-02-28.yang",
+      "module_sha256": "259c4ec16d87b8e5b68acb1fbd312c51b53324671dbc9ea126d12b2b5b088e71",
+      "compile_with_current_package": {
+        "files": 41,
+        "passed": true,
+        "diagnostics": [],
+        "structure": {
+          "namespace": "urn:ietf:params:xml:ns:yang:ietf-network-inventory-topology",
+          "features": [],
+          "augments": [
+            {
+              "target": "/nw:networks/nw:network/nw:node",
+              "when": null,
+              "if_feature": [],
+              "nodes": [
+                {
+                  "path": "/inventory-mapping-attributes",
+                  "keyword": "container",
+                  "config": true,
+                  "presence": null,
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/inventory-mapping-attributes/ne-ref",
+                  "keyword": "leaf",
+                  "config": true,
+                  "presence": null,
+                  "type": "nwi:ne-ref",
+                  "require_instance": null,
+                  "if_feature": []
+                }
+              ]
+            },
+            {
+              "target": "/nw:networks/nw:network/nt:link",
+              "when": null,
+              "if_feature": [],
+              "nodes": [
+                {
+                  "path": "/inventory-mapping-attributes",
+                  "keyword": "container",
+                  "config": true,
+                  "presence": null,
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/inventory-mapping-attributes/link-type",
+                  "keyword": "leaf",
+                  "config": true,
+                  "presence": null,
+                  "type": "string",
+                  "require_instance": null,
+                  "if_feature": []
+                }
+              ]
+            },
+            {
+              "target": "/nw:networks/nw:network/nw:node/nt:termination-point",
+              "when": null,
+              "if_feature": [],
+              "nodes": [
+                {
+                  "path": "/inventory-mapping-attributes",
+                  "keyword": "container",
+                  "config": true,
+                  "presence": null,
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/inventory-mapping-attributes/ne-ref",
+                  "keyword": "leaf",
+                  "config": true,
+                  "presence": null,
+                  "type": "nwi:ne-ref",
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/inventory-mapping-attributes/port-ref",
+                  "keyword": "leaf",
+                  "config": true,
+                  "presence": null,
+                  "type": "leafref",
+                  "require_instance": "false",
+                  "if_feature": []
+                },
+                {
+                  "path": "/inventory-mapping-attributes/port-breakout",
+                  "keyword": "container",
+                  "config": false,
+                  "presence": "Indicates the port supports channel breakout.",
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/inventory-mapping-attributes/port-breakout/breakout-channel",
+                  "keyword": "list",
+                  "config": false,
+                  "presence": null,
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/inventory-mapping-attributes/port-breakout/breakout-channel/channel-id",
+                  "keyword": "leaf",
+                  "config": false,
+                  "presence": null,
+                  "type": "uint16",
+                  "require_instance": null,
+                  "if_feature": []
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "source": "https://www.ietf.org/archive/id/draft-ietf-ivy-network-inventory-topology-07.txt",
+      "sha256": "7404ae5de153717fd1f39ad86739dd4fe0826528c93682017670d7277e795574",
+      "imports_ietf_network": true,
+      "code_begins": 1,
+      "module": "ietf-network-inventory-topology@2026-05-19.yang",
+      "module_sha256": "ced21b3bf589879004b02b2504d5f1e334dec401548da5111b60c0296463fca8",
+      "compile_with_current_package": {
+        "files": 41,
+        "passed": true,
+        "diagnostics": [],
+        "structure": {
+          "namespace": "urn:ietf:params:xml:ns:yang:ietf-network-inventory-topology",
+          "features": [],
+          "augments": [
+            {
+              "target": "/nw:networks/nw:network/nw:network-types",
+              "when": null,
+              "if_feature": [],
+              "nodes": [
+                {
+                  "path": "/inventory-topology",
+                  "keyword": "container",
+                  "config": true,
+                  "presence": "Indicates this is a bottom-most physical topology instance,\ncontaining physical-layer attributes including inventory\nmapping, port breakout capabilities, and link media types.",
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": []
+                }
+              ]
+            },
+            {
+              "target": "/nw:networks/nw:network/nw:node",
+              "when": "../nw:network-types/nwit:inventory-topology",
+              "if_feature": [],
+              "nodes": [
+                {
+                  "path": "/inventory-mapping-attributes",
+                  "keyword": "container",
+                  "config": true,
+                  "presence": null,
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/inventory-mapping-attributes/ne-ref",
+                  "keyword": "leaf",
+                  "config": true,
+                  "presence": null,
+                  "type": "nwi:ne-ref",
+                  "require_instance": null,
+                  "if_feature": []
+                }
+              ]
+            },
+            {
+              "target": "/nw:networks/nw:network/nt:link",
+              "when": "../nw:network-types/nwit:inventory-topology",
+              "if_feature": [],
+              "nodes": [
+                {
+                  "path": "/inventory-mapping-attributes",
+                  "keyword": "container",
+                  "config": true,
+                  "presence": null,
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/inventory-mapping-attributes/link-type",
+                  "keyword": "leaf",
+                  "config": true,
+                  "presence": null,
+                  "type": "identityref",
+                  "require_instance": null,
+                  "if_feature": []
+                }
+              ]
+            },
+            {
+              "target": "/nw:networks/nw:network/nw:node/nt:termination-point",
+              "when": "../../nw:network-types/nwit:inventory-topology",
+              "if_feature": [],
+              "nodes": [
+                {
+                  "path": "/inventory-mapping-attributes",
+                  "keyword": "container",
+                  "config": true,
+                  "presence": null,
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/inventory-mapping-attributes/ne-ref",
+                  "keyword": "leaf",
+                  "config": true,
+                  "presence": null,
+                  "type": "nwi:ne-ref",
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/inventory-mapping-attributes/port-ref",
+                  "keyword": "leaf",
+                  "config": true,
+                  "presence": null,
+                  "type": "leafref",
+                  "require_instance": "false",
+                  "if_feature": []
+                },
+                {
+                  "path": "/port-breakout",
+                  "keyword": "container",
+                  "config": false,
+                  "presence": "Indicates the port supports channel breakout.",
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/port-breakout/breakout-channel",
+                  "keyword": "list",
+                  "config": false,
+                  "presence": null,
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/port-breakout/breakout-channel/channel-id",
+                  "keyword": "leaf",
+                  "config": false,
+                  "presence": null,
+                  "type": "uint16",
+                  "require_instance": null,
+                  "if_feature": []
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "source": "https://www.ietf.org/archive/id/draft-ietf-ivy-network-inventory-topology-08.txt",
+      "sha256": "095e7dc13bc14e7bf9bd3d5dc765fb6c6a59633256086bcd635f42673178d238",
+      "imports_ietf_network": true,
+      "code_begins": 1,
+      "module": "ietf-network-inventory-topology@2026-06-25.yang",
+      "module_sha256": "44b9f84942ab148e685749709f24f1620e79dd0a50842248333a8338e04181cf",
+      "compile_with_current_package": {
+        "files": 41,
+        "passed": true,
+        "diagnostics": [],
+        "structure": {
+          "namespace": "urn:ietf:params:xml:ns:yang:ietf-network-inventory-topology",
+          "features": [],
+          "augments": [
+            {
+              "target": "/nw:networks/nw:network/nw:network-types",
+              "when": null,
+              "if_feature": [],
+              "nodes": [
+                {
+                  "path": "/inventory-topology",
+                  "keyword": "container",
+                  "config": true,
+                  "presence": "Indicates a physical network topology, containing\nphysical-layer attributes including inventory mapping, port\nbreakout capabilities, and link media types.",
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": []
+                }
+              ]
+            },
+            {
+              "target": "/nw:networks/nw:network/nw:node",
+              "when": "../nw:network-types/nwit:inventory-topology",
+              "if_feature": [],
+              "nodes": [
+                {
+                  "path": "/inventory-mapping-attributes",
+                  "keyword": "container",
+                  "config": true,
+                  "presence": "If present, it indicates this is a physical node, which\nmaps to a network element. If not present, it indicates it\nis an abstract node.",
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/inventory-mapping-attributes/ne-ref",
+                  "keyword": "leaf",
+                  "config": true,
+                  "presence": null,
+                  "type": "nwi:ne-ref",
+                  "require_instance": null,
+                  "if_feature": []
+                }
+              ]
+            },
+            {
+              "target": "/nw:networks/nw:network/nt:link",
+              "when": "../nw:network-types/nwit:inventory-topology",
+              "if_feature": [],
+              "nodes": [
+                {
+                  "path": "/inventory-mapping-attributes",
+                  "keyword": "container",
+                  "config": true,
+                  "presence": "Indicates a physical link, at the lowest underlay\nabstraction level.",
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/inventory-mapping-attributes/link-type",
+                  "keyword": "leaf",
+                  "config": true,
+                  "presence": null,
+                  "type": "identityref",
+                  "require_instance": null,
+                  "if_feature": []
+                }
+              ]
+            },
+            {
+              "target": "/nw:networks/nw:network/nw:node/nt:termination-point",
+              "when": "../../nw:network-types/nwit:inventory-topology",
+              "if_feature": [],
+              "nodes": [
+                {
+                  "path": "/inventory-mapping-attributes",
+                  "keyword": "container",
+                  "config": true,
+                  "presence": "If present, it indicates this is a physical termination\npoint (TP), which maps to a port component. If not present,\nit indicates it is a logical TP.",
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/inventory-mapping-attributes/ne-ref",
+                  "keyword": "leaf",
+                  "config": true,
+                  "presence": null,
+                  "type": "nwi:ne-ref",
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/inventory-mapping-attributes/port-ref",
+                  "keyword": "leaf",
+                  "config": true,
+                  "presence": null,
+                  "type": "leafref",
+                  "require_instance": "false",
+                  "if_feature": []
+                },
+                {
+                  "path": "/port-breakout",
+                  "keyword": "container",
+                  "config": false,
+                  "presence": "Indicates the port supports channel breakout.",
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/port-breakout/breakout-channel",
+                  "keyword": "list",
+                  "config": false,
+                  "presence": null,
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/port-breakout/breakout-channel/channel-id",
+                  "keyword": "leaf",
+                  "config": false,
+                  "presence": null,
+                  "type": "uint16",
+                  "require_instance": null,
+                  "if_feature": []
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "source": "https://www.ietf.org/archive/id/draft-ietf-ivy-network-inventory-topology-09.txt",
+      "sha256": "50c3a6599c349e5decc0eab4a17b439f6fef792e703b1157fec4a38bf4bdf9a3",
+      "imports_ietf_network": true,
+      "code_begins": 1,
+      "module": "ietf-network-inventory-topology@2026-08-21.yang",
+      "module_sha256": "d9fc805f0736fd53a98801fd40e878a528b4541535f86758f0c122a1773e0560",
+      "compile_with_current_package": {
+        "files": 41,
+        "passed": true,
+        "diagnostics": [],
+        "structure": {
+          "namespace": "urn:ietf:params:xml:ns:yang:ietf-network-inventory-topology",
+          "features": [],
+          "augments": [
+            {
+              "target": "/nw:networks/nw:network/nw:network-types",
+              "when": null,
+              "if_feature": [],
+              "nodes": [
+                {
+                  "path": "/inventory-topology",
+                  "keyword": "container",
+                  "config": true,
+                  "presence": "Indicates a physical network topology, containing\nphysical-layer attributes including inventory mapping, port\nbreakout capabilities, and link media types.",
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": []
+                }
+              ]
+            },
+            {
+              "target": "/nw:networks/nw:network/nw:node",
+              "when": "../nw:network-types/nwit:inventory-topology",
+              "if_feature": [],
+              "nodes": [
+                {
+                  "path": "/inventory-mapping-attributes",
+                  "keyword": "container",
+                  "config": true,
+                  "presence": "If present, it indicates this is a physical node, which\nmaps to a network element. If not present, it indicates it\nis an abstract node.",
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/inventory-mapping-attributes/ne-ref",
+                  "keyword": "leaf",
+                  "config": true,
+                  "presence": null,
+                  "type": "nwi:ne-ref",
+                  "require_instance": null,
+                  "if_feature": []
+                }
+              ]
+            },
+            {
+              "target": "/nw:networks/nw:network/nt:link",
+              "when": "../nw:network-types/nwit:inventory-topology",
+              "if_feature": [],
+              "nodes": [
+                {
+                  "path": "/inventory-mapping-attributes",
+                  "keyword": "container",
+                  "config": true,
+                  "presence": "Indicates a physical link, at the lowest underlay\nabstraction level.",
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/inventory-mapping-attributes/link-type",
+                  "keyword": "leaf",
+                  "config": true,
+                  "presence": null,
+                  "type": "identityref",
+                  "require_instance": null,
+                  "if_feature": []
+                }
+              ]
+            },
+            {
+              "target": "/nw:networks/nw:network/nw:node/nt:termination-point",
+              "when": "../../nw:network-types/nwit:inventory-topology",
+              "if_feature": [],
+              "nodes": [
+                {
+                  "path": "/inventory-mapping-attributes",
+                  "keyword": "container",
+                  "config": true,
+                  "presence": "If present, it indicates this is a physical termination\npoint (TP), which maps to a port component. If not present,\nit indicates it is a logical TP.",
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/inventory-mapping-attributes/ne-ref",
+                  "keyword": "leaf",
+                  "config": true,
+                  "presence": null,
+                  "type": "nwi:ne-ref",
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/inventory-mapping-attributes/port-ref",
+                  "keyword": "leaf",
+                  "config": true,
+                  "presence": null,
+                  "type": "leafref",
+                  "require_instance": "false",
+                  "if_feature": []
+                },
+                {
+                  "path": "/port-breakout",
+                  "keyword": "container",
+                  "config": false,
+                  "presence": "Indicates the port supports channel breakout.",
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/port-breakout/breakout-channel",
+                  "keyword": "list",
+                  "config": false,
+                  "presence": null,
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/port-breakout/breakout-channel/channel-id",
+                  "keyword": "leaf",
+                  "config": false,
+                  "presence": null,
+                  "type": "uint16",
+                  "require_instance": null,
+                  "if_feature": []
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "source": "https://www.ietf.org/archive/id/draft-ietf-ivy-network-inventory-topology-10.txt",
+      "sha256": "f970c13ed1026cd1c0723689439a53e1a8616f67be88f98172d48531e83bf489",
+      "imports_ietf_network": true,
+      "code_begins": 1,
+      "module": "ietf-network-inventory-topology@2026-08-21.yang",
+      "module_sha256": "d9fc805f0736fd53a98801fd40e878a528b4541535f86758f0c122a1773e0560",
+      "compile_with_current_package": {
+        "files": 41,
+        "passed": true,
+        "diagnostics": [],
+        "structure": {
+          "namespace": "urn:ietf:params:xml:ns:yang:ietf-network-inventory-topology",
+          "features": [],
+          "augments": [
+            {
+              "target": "/nw:networks/nw:network/nw:network-types",
+              "when": null,
+              "if_feature": [],
+              "nodes": [
+                {
+                  "path": "/inventory-topology",
+                  "keyword": "container",
+                  "config": true,
+                  "presence": "Indicates a physical network topology, containing\nphysical-layer attributes including inventory mapping, port\nbreakout capabilities, and link media types.",
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": []
+                }
+              ]
+            },
+            {
+              "target": "/nw:networks/nw:network/nw:node",
+              "when": "../nw:network-types/nwit:inventory-topology",
+              "if_feature": [],
+              "nodes": [
+                {
+                  "path": "/inventory-mapping-attributes",
+                  "keyword": "container",
+                  "config": true,
+                  "presence": "If present, it indicates this is a physical node, which\nmaps to a network element. If not present, it indicates it\nis an abstract node.",
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/inventory-mapping-attributes/ne-ref",
+                  "keyword": "leaf",
+                  "config": true,
+                  "presence": null,
+                  "type": "nwi:ne-ref",
+                  "require_instance": null,
+                  "if_feature": []
+                }
+              ]
+            },
+            {
+              "target": "/nw:networks/nw:network/nt:link",
+              "when": "../nw:network-types/nwit:inventory-topology",
+              "if_feature": [],
+              "nodes": [
+                {
+                  "path": "/inventory-mapping-attributes",
+                  "keyword": "container",
+                  "config": true,
+                  "presence": "Indicates a physical link, at the lowest underlay\nabstraction level.",
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/inventory-mapping-attributes/link-type",
+                  "keyword": "leaf",
+                  "config": true,
+                  "presence": null,
+                  "type": "identityref",
+                  "require_instance": null,
+                  "if_feature": []
+                }
+              ]
+            },
+            {
+              "target": "/nw:networks/nw:network/nw:node/nt:termination-point",
+              "when": "../../nw:network-types/nwit:inventory-topology",
+              "if_feature": [],
+              "nodes": [
+                {
+                  "path": "/inventory-mapping-attributes",
+                  "keyword": "container",
+                  "config": true,
+                  "presence": "If present, it indicates this is a physical termination\npoint (TP), which maps to a port component. If not present,\nit indicates it is a logical TP.",
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/inventory-mapping-attributes/ne-ref",
+                  "keyword": "leaf",
+                  "config": true,
+                  "presence": null,
+                  "type": "nwi:ne-ref",
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/inventory-mapping-attributes/port-ref",
+                  "keyword": "leaf",
+                  "config": true,
+                  "presence": null,
+                  "type": "leafref",
+                  "require_instance": "false",
+                  "if_feature": []
+                },
+                {
+                  "path": "/port-breakout",
+                  "keyword": "container",
+                  "config": false,
+                  "presence": "Indicates the port supports channel breakout.",
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/port-breakout/breakout-channel",
+                  "keyword": "list",
+                  "config": false,
+                  "presence": null,
+                  "type": null,
+                  "require_instance": null,
+                  "if_feature": []
+                },
+                {
+                  "path": "/port-breakout/breakout-channel/channel-id",
+                  "keyword": "leaf",
+                  "config": false,
+                  "presence": null,
+                  "type": "uint16",
+                  "require_instance": null,
+                  "if_feature": []
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "source": "https://www.ietf.org/archive/id/draft-ietf-ivy-network-inventory-location-06.txt",
+      "sha256": "f7bd63535600161dcd0f433ff7c5c9725077ad2f58100f5511ef240cb8898fd2",
+      "imports_ietf_network": false,
+      "code_begins": 1
+    },
+    {
+      "source": "https://www.ietf.org/archive/id/draft-ietf-ivy-passive-network-inventory-01.txt",
+      "sha256": "689b05132c1582333466446b9ae6d93f1386762a40455a65eb5bf4ff0837f93c",
+      "imports_ietf_network": false,
+      "code_begins": 1
+    },
+    {
+      "source": "https://www.ietf.org/archive/id/draft-ietf-ivy-entitlement-inventory-04.txt",
+      "sha256": "9a254f9f513bfdc684071163bd830e5131aa575224ae0a3a6388621d56be4934",
+      "imports_ietf_network": false,
+      "code_begins": 0
+    }
+  ],
+  "current_inventory_topology_11": {
+    "files": 41,
+    "passed": true,
+    "diagnostics": [],
+    "structure": {
+      "namespace": "urn:ietf:params:xml:ns:yang:ietf-network-inventory-topology",
+      "features": [],
+      "augments": [
+        {
+          "target": "/nw:networks/nw:network/nw:network-types",
+          "when": null,
+          "if_feature": [],
+          "nodes": [
+            {
+              "path": "/inventory-topology",
+              "keyword": "container",
+              "config": true,
+              "presence": "Indicates a physical network topology, containing\nphysical-layer attributes including inventory mapping, port\nbreakout capabilities, and link media types.",
+              "type": null,
+              "require_instance": null,
+              "if_feature": []
+            }
+          ]
+        },
+        {
+          "target": "/nw:networks/nw:network/nw:node",
+          "when": "../nw:network-types/nwit:inventory-topology",
+          "if_feature": [],
+          "nodes": [
+            {
+              "path": "/inventory-mapping-attributes",
+              "keyword": "container",
+              "config": true,
+              "presence": "If present, it indicates this is a physical node, which\nmaps to a network element. If not present, it indicates it\nis an abstract node.",
+              "type": null,
+              "require_instance": null,
+              "if_feature": []
+            },
+            {
+              "path": "/inventory-mapping-attributes/ne-ref",
+              "keyword": "leaf",
+              "config": true,
+              "presence": null,
+              "type": "nwi:ne-ref",
+              "require_instance": null,
+              "if_feature": []
+            }
+          ]
+        },
+        {
+          "target": "/nw:networks/nw:network/nt:link",
+          "when": "../nw:network-types/nwit:inventory-topology",
+          "if_feature": [],
+          "nodes": [
+            {
+              "path": "/inventory-mapping-attributes",
+              "keyword": "container",
+              "config": true,
+              "presence": "Indicates a physical link, at the lowest underlay\nabstraction level.",
+              "type": null,
+              "require_instance": null,
+              "if_feature": []
+            },
+            {
+              "path": "/inventory-mapping-attributes/link-type",
+              "keyword": "leaf",
+              "config": true,
+              "presence": null,
+              "type": "identityref",
+              "require_instance": null,
+              "if_feature": []
+            }
+          ]
+        },
+        {
+          "target": "/nw:networks/nw:network/nw:node/nt:termination-point",
+          "when": "../../nw:network-types/nwit:inventory-topology",
+          "if_feature": [],
+          "nodes": [
+            {
+              "path": "/inventory-mapping-attributes",
+              "keyword": "container",
+              "config": true,
+              "presence": "If present, it indicates this is a physical TP, which\nmaps to a port component. If not present, it indicates it\nis a logical TP.",
+              "type": null,
+              "require_instance": null,
+              "if_feature": []
+            },
+            {
+              "path": "/inventory-mapping-attributes/ne-ref",
+              "keyword": "leaf",
+              "config": true,
+              "presence": null,
+              "type": "nwi:ne-ref",
+              "require_instance": null,
+              "if_feature": []
+            },
+            {
+              "path": "/inventory-mapping-attributes/port-ref",
+              "keyword": "leaf",
+              "config": true,
+              "presence": null,
+              "type": "leafref",
+              "require_instance": "false",
+              "if_feature": []
+            },
+            {
+              "path": "/port-breakout",
+              "keyword": "container",
+              "config": false,
+              "presence": "Indicates the port supports channel breakout.",
+              "type": null,
+              "require_instance": null,
+              "if_feature": []
+            },
+            {
+              "path": "/port-breakout/breakout-channel",
+              "keyword": "list",
+              "config": false,
+              "presence": null,
+              "type": null,
+              "require_instance": null,
+              "if_feature": []
+            },
+            {
+              "path": "/port-breakout/breakout-channel/channel-id",
+              "keyword": "leaf",
+              "config": false,
+              "presence": null,
+              "type": "uint16",
+              "require_instance": null,
+              "if_feature": []
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "checks": [
+    {
+      "name": "h05-virtual-node-ne-ref",
+      "accepted": true,
+      "expected": true,
+      "matched": true,
+      "expected_diagnostic": null,
+      "semantic_gap": "Superseded -05 and mixed with current inventory -19; cannot be co-loaded with -11",
+      "diagnostic": null
+    },
+    {
+      "name": "h05-target-missing-still-accepted",
+      "accepted": true,
+      "expected": true,
+      "matched": true,
+      "expected_diagnostic": null,
+      "semantic_gap": "nwi:ne-ref is require-instance false; acceptance is not resolution",
+      "diagnostic": null
+    },
+    {
+      "name": "h05-wrong-object-physical-host-accepted",
+      "accepted": true,
+      "expected": true,
+      "matched": true,
+      "expected_diagnostic": null,
+      "semantic_gap": "Schema cannot tell the VM router NE from its hosting server NE",
+      "diagnostic": null
+    },
+    {
+      "name": "h05-mapping-is-not-config",
+      "accepted": false,
+      "expected": false,
+      "matched": true,
+      "expected_diagnostic": "member-not-allowed: ietf-network-inventory-topology:inventory-mapping-attributes",
+      "semantic_gap": null,
+      "diagnostic": "SchemaError: {/ietf-network:networks/network[network-id=\"urn:example:l3\"]/node[node-id=\"urn:example:vsr-1\"]} config member-not-allowed: ietf-network-inventory-topology:inventory-mapping-attributes"
+    },
+    {
+      "name": "h05-feature-disabled-rejects-mapping",
+      "accepted": false,
+      "expected": false,
+      "matched": true,
+      "expected_diagnostic": "inventory-mapping-attributes",
+      "semantic_gap": null,
+      "diagnostic": "RawMemberError: /ietf-network:networks/network=urn:example:l3/node=urn:example:vsr-1/ietf-network-inventory-topology:inventory-mapping-attributes"
+    },
+    {
+      "name": "h05-reverse-node-ref-target-missing-accepted",
+      "accepted": true,
+      "expected": true,
+      "matched": true,
+      "expected_diagnostic": null,
+      "semantic_gap": "RFC 8345 node-ref grouping is require-instance false; removed from -06 onward",
+      "diagnostic": null
+    },
+    {
+      "name": "c11-mapping-outside-inventory-topology-rejected",
+      "accepted": false,
+      "expected": false,
+      "matched": true,
+      "expected_diagnostic": "inventory-mapping-attributes",
+      "semantic_gap": null,
+      "diagnostic": "SchemaError: {/ietf-network:networks/network[network-id=\"urn:example:l3\"]/node[node-id=\"urn:example:vsr-1\"]} member-not-allowed: ietf-network-inventory-topology:inventory-mapping-attributes"
+    },
+    {
+      "name": "c11-node-without-mapping-is-abstract",
+      "accepted": true,
+      "expected": true,
+      "matched": true,
+      "expected_diagnostic": null,
+      "semantic_gap": "Valid only as an abstract node; no link to the ne-virtual entry exists",
+      "diagnostic": null
+    },
+    {
+      "name": "c11-supporting-node-to-physical-host",
+      "accepted": true,
+      "expected": true,
+      "matched": true,
+      "expected_diagnostic": null,
+      "semantic_gap": "Needs hosting-server evidence not collected; still leaves ne-virtual unlinked",
+      "diagnostic": null
+    }
+  ],
+  "expectations_matched": true,
+  "virtual_end_to_end_mapping_closed": false,
+  "ne_to_device_datastore_standard_reference": null
+}
