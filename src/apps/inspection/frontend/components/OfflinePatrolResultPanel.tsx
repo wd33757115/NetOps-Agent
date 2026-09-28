@@ -1,7 +1,9 @@
+import StatusNotice from '@netops/components/common/StatusNotice'
 import InspectionDetailPage from '../InspectionDetailPage'
+import './OfflinePatrolResultPanel.css'
 import React from 'react'
 import {
-  Alert, Button, Collapse, Descriptions, Space, Spin, Table, Tag, Typography,
+   Button, Collapse, Descriptions, Space, Spin, Table, Tag, Typography,
 } from 'antd'
 import {
   DownloadOutlined,
@@ -283,7 +285,7 @@ const OfflinePatrolResultPanel: React.FC<OfflinePatrolResultPanelProps> = ({
 
   if (loading && loadingTimedOut) {
     return (
-      <Alert
+      <StatusNotice
         type="warning"
         showIcon
         message="验证与回放生成时间较长"
@@ -295,7 +297,7 @@ const OfflinePatrolResultPanel: React.FC<OfflinePatrolResultPanelProps> = ({
 
   if (loading) {
     return (
-      <Alert
+      <StatusNotice
         type="info"
         showIcon
         message="正在生成验证与回放结果"
@@ -311,7 +313,7 @@ const OfflinePatrolResultPanel: React.FC<OfflinePatrolResultPanelProps> = ({
   }
   if (error || !report) {
     return (
-      <Alert
+      <StatusNotice
         type="error"
         showIcon
         message="巡检分析摘要加载失败"
@@ -360,33 +362,52 @@ const OfflinePatrolResultPanel: React.FC<OfflinePatrolResultPanelProps> = ({
   )
 
   return (
-    <Space direction="vertical" size={16} style={{ width: '100%' }}>
-      <Alert
-        type={presentation.tone}
-        showIcon
-        message={report.assessment.status}
-        description={`${report.assessment.basis.replaceAll('当前风险', '分析期风险')}；结论可信度：${report.assessment.trust}`}
-      />
-
+    <Space className="patrol-result" direction="vertical" size={24} style={{ width: '100%' }}>
+      <section className="patrol-result-summary" aria-label="巡检结论" data-tone={presentation.tone}>
+        <div className="patrol-result-heading">
+          <div><span className="patrol-result-eyebrow">{presentation.validation ? '验证结论' : '巡检结论'}</span>
+            <h3>{report.assessment.status}</h3></div>
+          <span className="patrol-result-trust">结论可信度 <strong>{report.assessment.trust}</strong></span>
+        </div>
+        <p className="patrol-result-basis">{report.assessment.basis.replaceAll('当前风险', '分析期风险')}</p>
+        {!presentation.validation && <>
+          <dl className="patrol-result-metrics" aria-label="巡检关键指标">
+            <div><dt>当前异常</dt><dd>{metric(report, 'current_state_finding_count')}</dd></div>
+            <div><dt>趋势提醒</dt><dd>{report.numeric_trends?.notice_count || 0}</dd></div>
+            <div><dt>有效变化</dt><dd>{metric(report, 'effective_change_count')}</dd></div>
+          </dl>
+          <dl className="patrol-result-secondary" aria-label="事件与风险统计">
+            <div><dt>{presentation.riskLabel}</dt><dd>{report.risk_summary.total}</dd></div>
+            <div><dt>关闭已跟踪故障</dt><dd>{report.event_summary.resolved_prior_fault_count || 0}</dd></div>
+            <div><dt>状态改善</dt><dd>{report.event_summary.state_improvement_count || 0}</dd></div>
+            <div><dt>事件事实</dt><dd>{report.event_summary.fact_count}</dd></div>
+          </dl>
+        </>}
       <Space wrap className="patrol-result-actions">
         <Button type="primary" icon={<DownloadOutlined />} loading={reportDownloading} onClick={onDownloadReport}>{presentation.reportLabel}</Button>
         <Button icon={<DownloadOutlined />} loading={workbookDownloading} onClick={onDownloadWorkbook}>{presentation.workbookLabel}</Button>
         {canManageRules && <Button icon={<SafetyCertificateOutlined />} onClick={onOpenRuleAssets}>{presentation.validation ? "继续制作规则" : "补齐检查能力"}</Button>}
       </Space>
-      {(templateMissing > 0 || String(report.data_quality.status || '') !== 'ready') && (
-        <Alert
-          type="warning"
-          showIcon
-          message="数据质量未达到完全覆盖"
-          description={`Parser Ready ${parserReady}/${parserEligible}，缺失模板 ${templateMissing}；未覆盖领域不能据此判定健康。`}
-        />
+      </section>
+      {(templateMissing > 0 || report.data_quality.status !== 'ready' || metric(report, 'change_policy_missing_count') > 0 || parserFailureEvidenceCount > 0) && (
+        <section className="patrol-result-limits" aria-label="覆盖与结论边界">
+          <h4>覆盖与结论边界</h4>
+          <ul>
+            {(templateMissing > 0 || report.data_quality.status !== 'ready') && <li>
+              <strong>解析覆盖不足</strong><div><span>已就绪 {parserReady} / {parserEligible} · 缺失模板 {templateMissing}</span>
+                <p>数据质量未达到完全覆盖；未覆盖领域不能据此判定健康。</p></div>
+            </li>}
+            {metric(report, 'change_policy_missing_count') > 0 && <li>
+              <strong>变化策略缺失</strong><div><span>{metric(report, 'change_policy_missing_count')} 项观测未执行普通变化比较</span>
+                <p>这些项目不能据此判定为没有变化；当前健康判断和数值趋势仍独立执行。</p></div>
+            </li>}
+            {parserFailureEvidenceCount > 0 && <li>
+              <strong>仅有文本证据</strong><div><span>{parserFailureEvidenceCount} 项输出未完成 Parser 解析，已按原文文本比对</span>
+                <p>该类差异保留为 Parser 阻断项，不会作为结构化 Event 结论。</p></div>
+            </li>}
+          </ul>
+        </section>
       )}
-      {!presentation.validation && <Descriptions bordered size="small" column={isMobile ? 1 : 3}>
-        <Descriptions.Item label={presentation.riskLabel}>{report.risk_summary.total}</Descriptions.Item>
-        <Descriptions.Item label="关闭已跟踪故障">{report.event_summary.resolved_prior_fault_count || 0}</Descriptions.Item>
-        <Descriptions.Item label="状态改善">{report.event_summary.state_improvement_count || 0}</Descriptions.Item>
-        <Descriptions.Item label="事件事实">{report.event_summary.fact_count}</Descriptions.Item>
-      </Descriptions>}
       <Collapse ghost items={[{ key: "diagnostics", label: "解析覆盖与技术诊断", children: <Descriptions bordered size="small" column={isMobile ? 1 : 3}>
         <Descriptions.Item label="Parser Ready">{parserReady}/{parserEligible} · {formatPercent(metric(report, 'parser_ready_rate'))}</Descriptions.Item>
         <Descriptions.Item label="缺失模板">{templateMissing}</Descriptions.Item>
@@ -415,7 +436,7 @@ const OfflinePatrolResultPanel: React.FC<OfflinePatrolResultPanelProps> = ({
       {!presentation.validation && trend?.available && (
         <section>
           <Typography.Title level={5}>跨周期趋势</Typography.Title>
-          <Alert
+          <StatusNotice
             type="info"
             showIcon
             message={`${trend.period_count} 个连续周期 · 新增 ${trend.new_evidence_count || 0} · 持续 ${trend.persistent_evidence_count || 0} · 已恢复 ${trend.resolved_evidence_count || 0}`}
@@ -448,13 +469,13 @@ const OfflinePatrolResultPanel: React.FC<OfflinePatrolResultPanelProps> = ({
             expandable={{ expandedRowRender: (row) => <RiskEvidence row={row} isMobile={isMobile} jobId={jobId} /> }}
             scroll={{ x: 940 }}
           />
-        ) : <Alert type={presentation.tone} showIcon message={presentation.emptyText} />}
+        ) : <StatusNotice type={presentation.tone} showIcon message={presentation.emptyText} />}
       </section>}
 
       {!presentation.validation && correlated.length > 0 && (
         <section>
           <Typography.Title level={5}>关联信号</Typography.Title>
-          <Alert
+          <StatusNotice
             type="warning"
             showIcon
             message={`${report.risk_summary.correlated_evidence_count || correlated.length} 项信号与主故障相关，未重复计为独立风险`}
@@ -474,15 +495,6 @@ const OfflinePatrolResultPanel: React.FC<OfflinePatrolResultPanelProps> = ({
       )}
 
 
-
-      {parserFailureEvidenceCount > 0 && (
-        <Alert
-          type="warning"
-          showIcon
-          message={String(parserFailureEvidenceCount) + ' 项输出未完成 Parser 解析，已按原文文本比对'}
-          description="该类差异保留为 Parser 阻断项，不会作为结构化 Event 结论。"
-        />
-      )}
 
       {structuredEvidence.length > 0 && (
         <section>
@@ -614,7 +626,7 @@ const OfflinePatrolResultPanel: React.FC<OfflinePatrolResultPanelProps> = ({
           <Typography.Text type="secondary">正在读取完整 CLI 原文...</Typography.Text>
         )}
         {comparisonEvidenceError && (
-          <Alert
+          <StatusNotice
             type="error"
             showIcon
             message="完整 CLI 证据加载失败"
@@ -624,7 +636,7 @@ const OfflinePatrolResultPanel: React.FC<OfflinePatrolResultPanelProps> = ({
         {comparisonEvidence && (
           <Space direction="vertical" size={16} style={{ width: '100%' }}>
             {comparisonEvidence.parser_failure_text_comparison && (
-              <Alert
+              <StatusNotice
                 type="warning"
                 showIcon
                 message="Parser 未成功，本项仅提供文本差异证据"

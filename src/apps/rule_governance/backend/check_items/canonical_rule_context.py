@@ -140,6 +140,7 @@ def build_canonical_rule_context(
         ).strip()
         dimensions = list(row.get("dimensions") or definition.dimensions)
         semantics = {
+            "change_tracking": row.get("change_tracking", True),
             "event_on_change": row.get("event_on_change", False),
             "observation_type": observation_type,
             "semantic_type": str(
@@ -363,7 +364,8 @@ def generate_canonical_rule_candidates(
                 }
             )
             continue
-        policies.append(candidate)
+        if target.get('change_tracking', True) and observation_type in change_targets:
+            policies.append(candidate)
         if observation_type not in current_targets | event_targets:
             continue
         compiled = compile_event_rule_intents(

@@ -31,12 +31,13 @@ export interface InspectionDetailPageProps {
   title?: React.ReactNode
   extra?: React.ReactNode
   subtitle?: React.ReactNode
+  eyebrow?: string
   backLabel?: string
   onClose?: () => void
   children?: React.ReactNode
 }
 
-export default function InspectionDetailPage({ open, title, extra, subtitle, backLabel = '返回上一页', onClose, children }: InspectionDetailPageProps) {
+export default function InspectionDetailPage({ open, title, extra, subtitle, eyebrow = '网络巡检 / 任务与证据', backLabel = '返回上一页', onClose, children }: InspectionDetailPageProps) {
   const context = useContext(Pages)
   const view = context?.view
   const previousView = useRef(view)
@@ -75,7 +76,7 @@ export default function InspectionDetailPage({ open, title, extra, subtitle, bac
     <header className="inspection-detail-heading">
       <Button className="inspection-detail-back" type="text" icon={<ArrowLeftOutlined aria-hidden="true" />} onClick={onClose}>{backLabel}</Button>
       <div className="inspection-detail-title-row">
-        <div><span className="inspection-eyebrow">网络巡检 / 任务与证据</span><h1 id={id} ref={heading} tabIndex={-1}>{title}</h1>
+        <div><span className="inspection-eyebrow">{eyebrow}</span><h1 id={id} ref={heading} tabIndex={-1}>{title}</h1>
           {subtitle && <Typography.Text className="inspection-detail-subtitle" type="secondary">{subtitle}</Typography.Text>}
         </div>
         {extra && <div className="inspection-detail-actions">{extra}</div>}

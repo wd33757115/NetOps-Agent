@@ -4,8 +4,35 @@ import re
 from copy import deepcopy
 
 
+def _without_change_events(constraints):
+    """Remove only ordinary change intents, retaining health/recovery constraints."""
+    result = deepcopy(constraints or {})
+    removed = {key for key, value in result.get('required_event_classes', {}).items() if value == 'change'}
+    change_type = result.get('role_event_types', {}).pop('change', None)
+    if change_type:
+        removed.add(change_type)
+    for key in ('required_event_types',):
+        if key in result:
+            result[key] = [value for value in result[key] if value not in removed]
+    for key in ('required_event_classes', 'required_severities', 'required_condition_kinds'):
+        if key in result:
+            result[key] = {name: value for name, value in result[key].items() if name not in removed}
+    return {key: value for key, value in result.items() if value not in ({}, [])}
+
+
 def normalize_value_contract(contract):
     result = deepcopy(contract)
+    for row in result.get('observations', []):
+        tracking = row.get('change_tracking', True)
+        if not isinstance(tracking, bool):
+            raise ValueError(f"{row.get('canonical_field')}: change_tracking must be boolean")
+        if not tracking:
+            row['event_on_change'] = False
+            row['assessment_roles'] = [role for role in row.get('assessment_roles', []) if role != 'change'] or ['evidence']
+            if 'event_constraints' in row:
+                row['event_constraints'] = _without_change_events(row['event_constraints'])
+                if not row['event_constraints']:
+                    row.pop('event_constraints')
     if "change_events" not in result:
         if not any('semantic_definition' in row for row in result.get('observations', [])):
             return result  # Other active checks retain their explicitly configured assessment rules.
@@ -20,7 +47,7 @@ def normalize_value_contract(contract):
         if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", field) or field in seen:
             raise ValueError(f"invalid or duplicate standard Value: {field}")
         seen.add(field)
-        if 'semantic_definition' in row and not result['change_events'] and 'current_state' in row.get('assessment_roles', []):
+        if 'semantic_definition' in row and not result['change_events'] and 'current_state' in row.get('assessment_roles', []) and 'change' not in row.get('assessment_roles', []):
             row['event_on_change'] = False
             continue
         local_change = 'semantic_definition' in row and 'change' in row.get('assessment_roles', [])
@@ -31,16 +58,18 @@ def normalize_value_contract(contract):
             roles.discard('evidence')
             roles.add("change")
             event_type = str(row["observation_type"]) + ".changed"
-            row["event_constraints"] = {
-                "required_event_types": [event_type],
-                "role_event_types": {"change": event_type},
-                "required_event_classes": {event_type: "change"},
-                "required_severities": {event_type: "info"},
-                "required_recovery_pairs": [],
-            }
+            constraints = _without_change_events(row.get('event_constraints'))
+            constraints['required_event_types'] = list(dict.fromkeys([*constraints.get('required_event_types', []), event_type]))
+            for key, value in (('role_event_types', {'change': event_type}), ('required_event_classes', {event_type: 'change'}), ('required_severities', {event_type: 'info'})):
+                constraints[key] = {**constraints.get(key, {}), **value}
+            constraints.setdefault('required_recovery_pairs', [])
+            row['event_constraints'] = constraints
         else:
-            row.pop("event_constraints", None)
-        row["assessment_roles"] = sorted(roles)
+            if 'event_constraints' in row:
+                row['event_constraints'] = _without_change_events(row['event_constraints'])
+                if not row['event_constraints']:
+                    row.pop('event_constraints')
+        row["assessment_roles"] = sorted(roles) or ['evidence']
     return result
 
 

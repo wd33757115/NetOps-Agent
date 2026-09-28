@@ -1,7 +1,7 @@
 manifest_version: 1
 id: device-management
 name: 设备管理
-version: 1.0.1
+version: 1.0.3
 platform_api: '>=1.0,<2.0'
 icon: server
 dependencies: {}

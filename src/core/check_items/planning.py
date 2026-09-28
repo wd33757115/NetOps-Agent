@@ -951,6 +951,10 @@ class CheckItemEffectivePlanService:
         public_decisions: list[dict[str, Any]] = []
         for row in decisions:
             public = {key: value for key, value in row.items() if key != "_action_keys"}
+            public['change_tracking'] = {
+                observation['observation_type']: observation.get('change_tracking', True)
+                for observation in item_by_id[row['check_item_id']].canonical_contract.get('observations', [])
+            }
             public["collection_action_ids"] = sorted(
                 action_id_by_key[key] for key in row["_action_keys"]
             )

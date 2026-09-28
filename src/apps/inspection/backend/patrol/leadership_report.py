@@ -1622,6 +1622,9 @@ def build_leadership_report(
             "observation_count": int(quality.get("observation_count") or 0),
             "evaluated_current_state_count": int(coverage.get("evaluated_observation_count") or 0),
             "change_count": int(summary.get("change_count") or 0),
+            "effective_change_count": sum(bool(change.get('change_policy_version_id')) for change in summary.get('changes') or []),
+            "trend_notice_count": numeric_trends['notice_count'],
+            "change_policy_missing_count": int(summary.get('change_policy_missing_count') or 0),
             "event_count": int(summary.get("event_count") or 0),
             "fault_event_count": fault_event_count,
             "recovery_event_count": recovery_event_count,
@@ -1812,7 +1815,12 @@ def render_leadership_markdown(report: dict[str, Any]) -> str:
                 )
     else:
         lines.append("本批次未形成可用于报告的设备版本、CPU、内存、电源、风扇或温度标准观测数据。")
-    lines.extend(["", "#### 3.1.2 主要风险与趋势", ""])
+    lines.extend(["", "#### 3.1.2 主要风险与趋势", "",
+                  f"当前异常 {metrics.get('current_state_finding_count', 0)} 项；"
+                  f"趋势提醒 {metrics.get('trend_notice_count', 0)} 项；"
+                  f"有效变化 {metrics.get('effective_change_count', 0)} 项。"])
+    if metrics.get('change_policy_missing_count'):
+        lines.append(f"{metrics['change_policy_missing_count']} 项观测缺少变化策略，未执行普通变化比较；不能据此判定为没有变化。")
     if report["risk_groups"]:
         for index, risk in enumerate(report["risk_groups"], start=1):
             lines.append(
@@ -2242,6 +2250,13 @@ def render_leadership_docx(report: dict[str, Any]) -> bytes:
     scope_label = (report.get("scope") or {}).get("target_label") or "本批次目标设备"
     device_inventory_rows = list(report.get("device_inventory_rows") or [])
     basic_observation_tables = list(report.get("basic_observation_tables") or [])
+
+    add_styled_paragraph(doc,
+        f"当前异常 {metrics.get('current_state_finding_count', 0)} 项；"
+        f"趋势提醒 {metrics.get('trend_notice_count', 0)} 项；"
+        f"有效变化 {metrics.get('effective_change_count', 0)} 项。")
+    if metrics.get('change_policy_missing_count'):
+        add_styled_paragraph(doc, f"{metrics['change_policy_missing_count']} 项观测缺少变化策略，未执行普通变化比较；不能据此判定为没有变化。")
 
     _add_section(doc, "第一章 概述", level=1)
     _add_section(doc, "1.1 巡检概述", level=2)

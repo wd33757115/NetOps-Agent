@@ -3,7 +3,7 @@
 
 import React, { Suspense } from 'react'
 import { Spin } from 'antd'
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import AppLayout from './components/Layout/AppLayout'
 import ProtectedRoute from './components/ProtectedRoute'
 import AdminRoute from './components/AdminRoute'
@@ -33,6 +33,11 @@ const pageFallback = (
   </div>
 )
 
+function LegacyParserRedirect() {
+  const { pathname, search, hash } = useLocation()
+  return <Navigate to={pathname.replace('/skills/parser', '/apps/rule-governance') + search + hash} replace />
+}
+
 const App: React.FC = () => {
   return (
     <AuthProvider>
@@ -58,8 +63,7 @@ const App: React.FC = () => {
             <Route path="apps/patrol" element={<BusinessRoute><PackageRoute appId="inspection"><PatrolAppPage /></PackageRoute></BusinessRoute>} />
             <Route path="apps/patrol-rules" element={<BusinessRoute><PackageRoute appId="rule-governance"><PatrolRulesAppPage /></PackageRoute></BusinessRoute>} />
             <Route path="apps/patrol-rules/source-jobs/:jobId" element={<BusinessRoute><PackageRoute appId="rule-governance"><RuleAssetSourceJobDetailPage /></PackageRoute></BusinessRoute>} />
-            <Route path="skills/parser" element={<BusinessRoute><PackageRoute appId="rule-governance"><SkillsPage /></PackageRoute></BusinessRoute>} />
-            <Route path="skills/parser/source-jobs/:jobId" element={<BusinessRoute><PackageRoute appId="rule-governance"><RuleAssetSourceJobDetailPage /></PackageRoute></BusinessRoute>} />
+            <Route path="skills/parser/*" element={<LegacyParserRedirect />} />
             <Route path="skills/:section" element={<SkillsPage />} />
             <Route path="devices" element={<DevicesPage />} />
             <Route path="admin/netops/devices" element={<DevicesPage />} />

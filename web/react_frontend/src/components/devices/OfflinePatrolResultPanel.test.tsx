@@ -1,5 +1,5 @@
 import React from 'react'
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { vi } from 'vitest'
 import type { OfflinePatrolAnalysisSummary } from '../../services/api'
@@ -182,6 +182,33 @@ describe('OfflinePatrolResultPanel', () => {
     expect(screen.queryByText('本次已覆盖范围内未发现风险')).not.toBeInTheDocument()
   })
 
+  it('keeps incomplete conclusions and comparison gaps visible together without repeating warning banners', () => {
+    render(<OfflinePatrolResultPanel report={{ ...report, risks: [],
+      assessment: { ...report.assessment, status: '本次未发现已确认异常，但结论不完整', conclusion_allowed: false },
+      metrics: { ...report.metrics, change_policy_missing_count: 203 },
+    }} loading={false} isMobile onRetry={vi.fn()} onDownloadReport={vi.fn()} onDownloadWorkbook={vi.fn()}
+      onOpenRuleAssets={vi.fn()} onLoadComparisonEvidence={vi.fn()} />)
+    const conclusion = screen.getByRole('region', { name: '巡检结论' })
+    expect(conclusion).toHaveAttribute('data-tone', 'warning')
+    expect(within(conclusion).getByRole('heading', { name: '本次未发现已确认异常，但结论不完整' })).toBeVisible()
+    const limits = screen.getByRole('region', { name: '覆盖与结论边界' })
+    expect(within(limits).getByText('解析覆盖不足')).toBeVisible()
+    expect(within(limits).getByText('203 项观测未执行普通变化比较')).toBeVisible()
+    expect(within(limits).getByText(/当前健康判断和数值趋势仍独立执行/)).toBeVisible()
+    expect(within(limits).queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('keeps a failed result actionable as an error alert', async () => {
+    const retry = vi.fn()
+    render(<OfflinePatrolResultPanel loading={false} error={new Error('offline')} isMobile={false}
+      onRetry={retry} onDownloadReport={vi.fn()} onDownloadWorkbook={vi.fn()}
+      onOpenRuleAssets={vi.fn()} onLoadComparisonEvidence={vi.fn()} />)
+    const alert = screen.getByRole('alert')
+    expect(within(alert).getByText('巡检分析摘要加载失败')).toBeVisible()
+    await userEvent.click(within(alert).getByRole('button', { name: /重\s*试/ }))
+    expect(retry).toHaveBeenCalledOnce()
+  })
+
   it('formats composite entity keys without exposing JSON punctuation', () => {
     expect(formatOfflineEntityKey('["WGE1/0/15"]')).toBe('WGE1/0/15')
     expect(formatOfflineEntityKey('plain-interface')).toBe('plain-interface')
@@ -197,7 +224,7 @@ describe('OfflinePatrolResultPanel', () => {
     } }} loading={false} isMobile={false} onRetry={vi.fn()} onDownloadReport={vi.fn()}
       onDownloadWorkbook={vi.fn()} onOpenRuleAssets={vi.fn()} onLoadComparisonEvidence={vi.fn()} />)
     expect(screen.getByText('数值趋势与恢复')).toBeVisible()
-    expect(screen.getByText('趋势提醒')).toBeVisible()
+    expect(screen.getAllByText('趋势提醒')).toHaveLength(2)
     expect(screen.getByText('趋势提醒不计入当前故障数。')).toBeVisible()
   })
 })

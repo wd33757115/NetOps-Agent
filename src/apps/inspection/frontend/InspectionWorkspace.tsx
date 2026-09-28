@@ -1,18 +1,18 @@
+import StatusNotice from '@netops/components/common/StatusNotice'
 import InspectionDetailPage from './InspectionDetailPage'
 import type { PatrolBatchSummary } from '@netops/services/api';
 import { inspectionDeviceApi as deviceApi, inspectionBatchApi as workflowApi } from './api';
-import { canConfigureNetOps } from '@netops/apps/permissions';
 import { useAuth } from '@netops/context/AuthContext';
 import { usePatrolDraft } from '@netops/hooks/usePatrolDraft';
 import PatrolDeviceSelector from '@netops/components/devices/PatrolDeviceSelector';
 import { businessHref } from '@netops/apps/appRoutes';
-import { appRoutes } from '@netops/apps/appRoutes';
 import React, { useMemo, useState } from 'react';
-import { Alert, Button, Collapse, Descriptions, Dropdown, Form, Input, Modal, Progress, Row, Col, Select, Space, Switch, Table, Tabs, Tag, Tooltip, Typography, message } from 'antd';
-import { EyeOutlined, MoreOutlined, PlayCircleOutlined, ReloadOutlined, SearchOutlined, StopOutlined } from '@ant-design/icons';
+import { Button, Collapse, Descriptions, Dropdown, Form, Input, Modal, Progress, Row, Col, Select, Space, Switch, Table, Tabs, Tag, Tooltip, Typography, message } from 'antd';
+import { CheckCircleOutlined, ExclamationCircleOutlined, CodeOutlined, EyeOutlined, MoreOutlined, PlayCircleOutlined, ReloadOutlined, SearchOutlined, StopOutlined } from '@ant-design/icons';
 import { useMutation, useQuery } from 'react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import InspectionLayout from './InspectionLayout';
+import PatrolPlanPreview from './components/PatrolPlanPreview';
 import WorkflowRunMonitor from '@netops/components/skills/WorkflowRunMonitor';
 import { type DeviceAssetFilters } from '@netops/components/devices/DeviceAssetInventoryPanel';
 import PatrolOperationsPanel from '@netops/components/devices/PatrolOperationsPanel';
@@ -115,7 +115,7 @@ const recordText = (record: Record<string, unknown>, keys: string[], fallback = 
   }
   return fallback;
 };
-const moduleStatusColor = (status?: string) => {
+const readinessStatusColor = (status?: string) => {
   const normalized = String(status || '').toLowerCase();
   if (['active', 'healthy', 'ready'].includes(normalized)) return 'green';
   if (['maintenance', 'degraded', 'warning'].includes(normalized)) return 'orange';
@@ -131,15 +131,12 @@ const coverageStatusColor = (status?: string) => {
 };
 const previewIssueCounts = (preview?: DevicePatrolPreview | null) => {
   if (!preview) return {
-    module: 0,
     coverage: 0,
     connection: 0
   };
-  const errorModuleCount = (preview.errors || []).reduce((total, item) => total + recordList(item.module_violations).length, 0);
   const coverageCount = (preview.errors || []).reduce((total, item) => total + recordList(item.coverage_violations).length, 0) + (preview.rows || []).reduce((total, item) => total + recordList(item.coverage_violations).length, 0);
   const connectionCount = (preview.errors || []).reduce((total, item) => total + recordList(item.connection_issues).length, 0) + (preview.rows || []).reduce((total, item) => total + recordList(item.connection_issues).length, 0);
   return {
-    module: recordList(preview.module_violations).length + errorModuleCount,
     coverage: coverageCount,
     connection: connectionCount
   };
@@ -164,7 +161,6 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = () =
   const {
     user
   } = useAuth();
-  const canConfigure = Boolean(user?.app_ids?.includes('device-management'));
   const {
     draft: patrolDraft,
     saveDraft,
@@ -246,7 +242,10 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = () =
   const {
     data
   } = useQuery(['devices', queryParams], () => deviceApi.list(queryParams), {
-    keepPreviousData: true
+    enabled: patrolOpen,
+    keepPreviousData: true,
+    staleTime: 30000,
+    refetchOnWindowFocus: false
   });
   const {
     data: patrolPlatformReadiness,
@@ -303,7 +302,8 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = () =
     status: batchHistoryStatus
   }), {
     keepPreviousData: true,
-    enabled: "patrol" === 'patrol',
+    enabled: searchParams.get('patrol_view') === 'online' || Boolean(activePatrolBatchId),
+    staleTime: 10000,
     refetchInterval: page => batchHistoryPage === 1 && hasActivePatrolBatches((page as PatrolBatchPage | undefined)?.items || []) ? 10000 : false,
     refetchOnWindowFocus: false,
     retry: false
@@ -312,6 +312,8 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = () =
   const {
     data: dynamicGroups = []
   } = useQuery(['device-dynamic-groups'], () => deviceApi.dynamicGroups(), {
+    enabled: patrolOpen,
+    staleTime: 60000,
     refetchOnWindowFocus: false
   });
   const {
@@ -332,6 +334,8 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = () =
   const {
     data: deviceGroups = []
   } = useQuery(['device-groups'], () => deviceApi.groups(), {
+    enabled: patrolOpen,
+    staleTime: 60000,
     refetchOnWindowFocus: false
   });
   const {
@@ -389,11 +393,24 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = () =
     launch_mode: 'direct',
     workflow_name: 'patrol-change-event'
   });
+  const previewEpoch = React.useRef(0);
+  const previewPayload = React.useRef('');
+  const invalidatePatrolPreview = () => {
+    previewEpoch.current += 1;
+    previewPayload.current = '';
+    setPatrolPreview(null);
+  };
   const previewPatrol = useMutation(async () => {
+    invalidatePatrolPreview();
+    const epoch = previewEpoch.current;
     const values = await patrolForm.validateFields();
-    return deviceApi.previewPatrol(buildPatrolPayload(values));
+    const payload = buildPatrolPayload(values);
+    const result = await deviceApi.previewPatrol(payload);
+    return { result, epoch, payload: JSON.stringify(payload) };
   }, {
-    onSuccess: result => {
+    onSuccess: ({ result, epoch, payload }) => {
+      if (epoch !== previewEpoch.current) return;
+      previewPayload.current = payload;
       setPatrolPreview(result);
       setPatrolLaunch(null);
     },
@@ -406,7 +423,7 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = () =
   const launchPatrol = useMutation(async () => {
     const values = await patrolForm.validateFields();
     const payload = buildPatrolPayload(values);
-    if (!patrolPreview) {
+    if (!patrolPreview || previewPayload.current !== JSON.stringify(payload)) {
       throw new Error('请先完成巡检预检');
     }
     if (!patrolPreview.platform_readiness?.can_launch) {
@@ -648,51 +665,6 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = () =
     setEvidenceTab('result');
     setEvidenceOpen(true);
   };
-  const patrolColumns = [{
-    title: '设备',
-    dataIndex: 'device_name',
-    width: 220
-  }, {
-    title: 'IP',
-    dataIndex: 'ip',
-    width: 130
-  }, {
-    title: '检查项 / 命令',
-    width: 140,
-    render: (_: unknown, row: DevicePatrolPreview['rows'][number]) => {
-      const checkItemCount = row.plan.check_item_ids?.length || 0;
-      return checkItemCount ? `${checkItemCount} 项 / ${row.command_count} 条` : `兼容模式 / ${row.command_count} 条`;
-    }
-  }, {
-    title: '预检状态',
-    width: 180,
-    render: (_: unknown, row: DevicePatrolPreview['rows'][number]) => {
-      const coverageCount = recordList(row.coverage_violations).length;
-      const connectionCount = recordList(row.connection_issues).length;
-      const runtimeStatus = row.runtime_asset_health?.status || 'not_required';
-      const blocked = connectionCount > 0;
-      return <Space wrap size={4}>
-            <Tag color={blocked ? 'red' : 'green'}>{blocked ? '阻断' : '就绪'}</Tag>
-            {coverageCount > 0 && <Tag color="orange">Parser 告警 {coverageCount}</Tag>}
-            {runtimeStatus === 'degraded' && <Tag color="orange">规则资产降级</Tag>}
-            {connectionCount > 0 && <Tag color="orange">连接 {connectionCount}</Tag>}
-          </Space>;
-    }
-  }, {
-    title: '策略来源',
-    dataIndex: ['plan', 'policy_source'],
-    width: 140,
-    render: (value: string) => value || '-'
-  }, {
-    title: '巡检命令集',
-    dataIndex: ['plan', 'profile_name'],
-    width: 180,
-    render: (value: string) => value || '-'
-  }, {
-    title: '检查项',
-    dataIndex: ['plan', 'check_item_ids'],
-    render: (value: string[], row: DevicePatrolPreview['rows'][number]) => value?.length ? <Space wrap size={[4, 4]}>{value.map(item => <Tag key={item}>{item}</Tag>)}</Space> : <Typography.Text type="secondary">{(row.commands || []).join(' | ')}</Typography.Text>
-  }];
   const patrolTaskColumns = [{
     title: '设备',
     dataIndex: 'device_name',
@@ -868,15 +840,14 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = () =
   const effectivePatrolReadiness = patrolPreview?.platform_readiness || patrolPlatformReadiness;
   const renderPatrolPlatformReadiness = () => {
     if (patrolReadinessLoading && !effectivePatrolReadiness) {
-      return <Alert type="info" showIcon message="正在检查巡检运行环境" />;
+      return <StatusNotice type="info" showIcon message="正在检查巡检运行环境" />;
     }
     if (patrolReadinessIsError && !effectivePatrolReadiness) {
-      return <Alert type="error" showIcon message="无法完成巡检运行环境检查" description={extractErrorMessage(patrolReadinessError, '请检查 API 服务后重试')} action={<Tooltip title="重新检查">
+      return <StatusNotice type="error" showIcon message="无法完成巡检运行环境检查" description={extractErrorMessage(patrolReadinessError, '请检查 API 服务后重试')} action={<Tooltip title="重新检查">
               <Button size="small" icon={<ReloadOutlined />} aria-label="重新检查巡检运行环境" onClick={() => refetchPatrolReadiness()} />
             </Tooltip>} />;
     }
     if (!effectivePatrolReadiness) return null;
-    const alertType = effectivePatrolReadiness.status === 'blocked' ? 'error' : effectivePatrolReadiness.status === 'degraded' ? 'warning' : 'success';
     const title = effectivePatrolReadiness.status === 'blocked' ? `运行环境存在 ${effectivePatrolReadiness.blocking_count} 个阻断项` : effectivePatrolReadiness.status === 'degraded' ? `运行环境可用，存在 ${effectivePatrolReadiness.warning_count} 个告警` : '巡检运行环境已就绪';
     const checks = effectivePatrolReadiness.checks || [];
     const checkDetails = isMobile ? <Space direction="vertical" size={8} style={{
@@ -888,7 +859,7 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = () =
       }}>
             <Space wrap size={6}>
               <Typography.Text strong>{check.name}</Typography.Text>
-              <Tag color={moduleStatusColor(check.status)}>{statusLabel(check.status)}</Tag>
+              <Tag color={readinessStatusColor(check.status)}>{statusLabel(check.status)}</Tag>
             </Space>
             <div><Typography.Text type="secondary">{check.message}</Typography.Text></div>
             {check.blocking && <div><Typography.Text type="danger">{check.remediation}</Typography.Text></div>}
@@ -901,7 +872,7 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = () =
       title: '状态',
       dataIndex: 'status',
       width: 90,
-      render: (value: string) => <Tag color={moduleStatusColor(value)}>{statusLabel(value)}</Tag>
+      render: (value: string) => <Tag color={readinessStatusColor(value)}>{statusLabel(value)}</Tag>
     }, {
       title: '检查结果',
       dataIndex: 'message'
@@ -912,57 +883,24 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = () =
     }]} scroll={{
       x: 840
     }} />;
-    return <Alert type={alertType} showIcon message={title} description={<Space direction="vertical" size={8} style={{
-      width: '100%'
-    }}>
-            <Typography.Text type="secondary">
-              最近检查：{formatDateTime(effectivePatrolReadiness.checked_at)}
-            </Typography.Text>
-            <Collapse ghost defaultActiveKey={effectivePatrolReadiness.can_launch ? [] : ['environment']} items={[{
-        key: 'environment',
-        label: '运行环境详情',
-        children: checkDetails
+    return <section className="patrol-launch-readiness" data-status={effectivePatrolReadiness.status} aria-label="运行环境">
+      <div className="patrol-launch-readiness-line">
+        {effectivePatrolReadiness.can_launch ? <CheckCircleOutlined /> : <ExclamationCircleOutlined />}
+        <strong>{title}</strong>
+        <span>检查于 {formatDateTime(effectivePatrolReadiness.checked_at)}</span>
+        <Button type="text" size="small" icon={<ReloadOutlined />} loading={patrolReadinessLoading} aria-label="重新检查巡检运行环境" onClick={() => refetchPatrolReadiness()} />
+      </div>
+      <Collapse key={effectivePatrolReadiness.can_launch ? 'ready' : 'blocked'} ghost defaultActiveKey={effectivePatrolReadiness.can_launch ? [] : ['environment']} items={[{
+        key: 'environment', label: '运行环境详情', children: checkDetails
       }]} />
-          </Space>} action={<Tooltip title="重新检查">
-            <Button size="small" icon={<ReloadOutlined />} loading={patrolReadinessLoading} aria-label="重新检查巡检运行环境" onClick={() => refetchPatrolReadiness()} />
-          </Tooltip>} />;
+    </section>;
   };
   const renderPatrolPreviewIssueDetails = (item: PatrolPreviewIssue) => {
-    const moduleViolations = recordList(item.module_violations);
     const coverageViolations = recordList(item.coverage_violations);
     const connectionIssues = recordList(item.connection_issues);
     return <Space direction="vertical" size={12} style={{
       width: '100%'
     }}>
-        {moduleViolations.length > 0 && <Table rowKey={(row, index) => `${recordText(row, ['module_id'], 'module')}-${index}`} size="small" pagination={false} dataSource={moduleViolations} columns={[{
-        title: '模块',
-        width: 180,
-        render: (_: unknown, row: Record<string, unknown>) => recordText(row, ['module_id', 'name'])
-      }, {
-        title: '状态',
-        width: 120,
-        render: (_: unknown, row: Record<string, unknown>) => {
-          const status = recordText(row, ['status'], 'unknown');
-          return <Tag color={moduleStatusColor(status)}>{statusLabel(status)}</Tag>;
-        }
-      }, {
-        title: '维护原因',
-        width: 220,
-        render: (_: unknown, row: Record<string, unknown>) => recordText(row, ['maintenance_reason', 'reason'])
-      }, {
-        title: '维护窗口',
-        width: 220,
-        render: (_: unknown, row: Record<string, unknown>) => {
-          const startsAt = recordText(row, ['maintenance_starts_at'], '');
-          const endsAt = recordText(row, ['maintenance_ends_at'], '');
-          return startsAt || endsAt ? `${startsAt || '-'} ~ ${endsAt || '-'}` : '-';
-        }
-      }, {
-        title: '说明',
-        render: (_: unknown, row: Record<string, unknown>) => recordText(row, ['message', 'error', 'detail'])
-      }]} scroll={{
-        x: 900
-      }} />}
         {coverageViolations.length > 0 && <Table rowKey={(row, index) => `${recordText(row, ['canonical_command', 'command', 'raw_command'], 'command')}-${index}`} size="small" pagination={false} dataSource={coverageViolations} columns={[{
         title: '命令',
         width: 240,
@@ -1018,7 +956,6 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = () =
   };
   const renderPatrolPreviewErrors = () => {
     const counts = previewIssueCounts(patrolPreview);
-    const moduleViolations = recordList(patrolPreview?.module_violations);
     const issues = patrolPreview?.errors || [];
     return <Space direction="vertical" size={12} style={{
       width: '100%'
@@ -1028,32 +965,10 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = () =
           <Descriptions.Item label="就绪设备">{patrolPreview?.ready_count || 0}</Descriptions.Item>
           <Descriptions.Item label="阻断设备">{patrolPreview?.error_count || 0}</Descriptions.Item>
           <Descriptions.Item label="启动方式">{patrolPreview?.launch_mode || '-'}</Descriptions.Item>
-          <Descriptions.Item label="模块治理阻断">{counts.module}</Descriptions.Item>
           <Descriptions.Item label="Parser 覆盖告警">{counts.coverage}</Descriptions.Item>
           <Descriptions.Item label="采集器预检问题">{counts.connection}</Descriptions.Item>
           <Descriptions.Item label="规则资产告警">{patrolPreview?.quality_readiness?.runtime_asset_warning_count || 0}</Descriptions.Item>
         </Descriptions>
-        {moduleViolations.length > 0 && <Table rowKey={(row, index) => `${recordText(row, ['module_id'], 'module')}-${index}`} size="small" pagination={false} dataSource={moduleViolations} columns={[{
-        title: '模块',
-        width: 180,
-        render: (_: unknown, row: Record<string, unknown>) => recordText(row, ['module_id', 'name'])
-      }, {
-        title: '状态',
-        width: 120,
-        render: (_: unknown, row: Record<string, unknown>) => {
-          const status = recordText(row, ['status'], 'unknown');
-          return <Tag color={moduleStatusColor(status)}>{statusLabel(status)}</Tag>;
-        }
-      }, {
-        title: '维护原因',
-        width: 220,
-        render: (_: unknown, row: Record<string, unknown>) => recordText(row, ['maintenance_reason', 'reason'])
-      }, {
-        title: '说明',
-        render: (_: unknown, row: Record<string, unknown>) => recordText(row, ['message', 'error', 'detail'])
-      }]} scroll={{
-        x: 760
-      }} />}
         {issues.length > 0 && <Table rowKey={row => `${row.device_id || row.device_name || row.error}-${row.failure_code || 'preflight'}`} size="small" pagination={{
         pageSize: 6
       }} dataSource={issues} columns={[{
@@ -1065,13 +980,6 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = () =
         dataIndex: 'failure_code',
         width: 190,
         render: (value: string) => value || '-'
-      }, {
-        title: '模块',
-        width: 90,
-        render: (_: unknown, row: PatrolPreviewIssue) => {
-          const count = recordList(row.module_violations).length;
-          return count ? <Tag color="red">{count}</Tag> : '-';
-        }
       }, {
         title: 'Parser',
         width: 90,
@@ -1091,13 +999,13 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = () =
         render: (_: unknown, row: PatrolPreviewIssue) => row.error ? <Typography.Text type="danger">{row.error}</Typography.Text> : '-'
       }]} expandable={{
         expandedRowRender: renderPatrolPreviewIssueDetails,
-        rowExpandable: row => recordList(row.module_violations).length + recordList(row.coverage_violations).length + recordList(row.connection_issues).length > 0
+        rowExpandable: row => recordList(row.coverage_violations).length + recordList(row.connection_issues).length > 0
       }} scroll={{
         x: 980
       }} />}
       </Space>;
   };
-  return <InspectionLayout onNewPatrol={() => setSourcePickerOpen(true)} canConfigure={canConfigure}>
+  return <InspectionLayout onNewPatrol={() => setSourcePickerOpen(true)}>
       <Tabs activeKey={"patrol"} renderTabBar={() => <></>} items={[{
       key: 'patrol',
       label: '巡检运行',
@@ -1191,7 +1099,7 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = () =
           setSourcePickerOpen(false);
           patrolForm.resetFields();
           patrolForm.setFieldsValue(patrolDraft.values);
-          setPatrolPreview(null);
+          invalidatePatrolPreview();
           setPatrolLaunch(null);
           setPatrolOpen(true);
         }}>在线采集 · 从设备读取数据</Button>
@@ -1211,31 +1119,25 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = () =
 
 
 
-      <Modal title="发起正式巡检" open={patrolOpen} onCancel={() => {
-      setPatrolOpen(false);
-      updateBatchHistoryQuery({
-        launch: undefined
-      });
-    }} footer={[<Button key="close" onClick={() => {
-      setPatrolOpen(false);
-      updateBatchHistoryQuery({
-        launch: undefined
-      });
-    }}>关闭</Button>, <Button key="preview" icon={<SearchOutlined />} loading={previewPatrol.isLoading} disabled={Boolean(patrolLaunch) || patrolReadinessLoading || !effectivePatrolReadiness?.can_launch} onClick={() => previewPatrol.mutate()}>
-            检查目标
-          </Button>, <Button key="launch" type="primary" icon={<PlayCircleOutlined />} loading={launchPatrol.isLoading} disabled={previewPatrol.isLoading || Boolean(patrolLaunch) || !patrolPreview || !effectivePatrolReadiness?.can_launch || Boolean(patrolPreview && patrolPreview.ready_count === 0)} onClick={() => launchPatrol.mutate()}>
-            {patrolLaunch ? '已发起' : '发起正式巡检'}
-          </Button>]} width={1080} destroyOnClose>
-        <Space direction="vertical" size={12} style={{
-        width: '100%'
+      <InspectionDetailPage title="新建在线巡检" eyebrow="网络巡检 / 在线巡检" subtitle="选择设备，核对采集命令后发起。" open={patrolOpen} backLabel="返回巡检任务" onClose={() => {
+        setPatrolOpen(false);
+        invalidatePatrolPreview();
+        updateBatchHistoryQuery({ launch: undefined });
       }}>
-          <Space wrap><Typography.Text strong>采集命令：沿用设备已绑定的命令集</Typography.Text>{canConfigure && <Button onClick={() => navigate(appRoutes.devices)}>配置命令集</Button>}</Space>
-          <Typography.Paragraph type="secondary">预检后核对每台设备的检查项与命令。方案由拥有配置权限的人员维护。</Typography.Paragraph>
+        <div className="patrol-launch-workspace">
+          <ol className="patrol-launch-steps" aria-label="发起巡检步骤">
+            {['选择设备', '核对命令', '发起巡检'].map((label, index) => <li key={label} aria-current={index === (patrolLaunch ? 2 : patrolPreview ? 1 : 0) ? 'step' : undefined}>
+              <span>{String(index + 1).padStart(2, '0')}</span>{label}
+            </li>)}
+          </ol>
           {renderPatrolPlatformReadiness()}
-          <Alert type="info" showIcon message={selectedRowKeys.length ? '将为已勾选的 ' + selectedRowKeys.length + ' 台设备生成巡检计划。' : '未勾选设备时，将按当前筛选条件生成巡检计划。'} description="正式巡检固定使用已审批生效的采集与规则资产；覆盖不足时仍保留原始证据，但报告结论会明确降级。" />
-          {Object.values(filters).some(Boolean) && <Alert type="info" message={`已沿用设备筛选：${Object.values(filters).filter(Boolean).join(" · ")}`} />}
-          {<Form.Item label="指定设备（留空时按分组选择）">
-            <PatrolDeviceSelector devices={devices} selected={selectedRowKeys.map(String)} onChange={values => {
+          <div className="patrol-launch-setup">
+            <section className="patrol-launch-form" aria-labelledby="patrol-scope-heading">
+              <h2 id="patrol-scope-heading">选择巡检范围</h2>
+              <p className="patrol-launch-description">指定设备，或使用设备分组与现有筛选范围。</p>
+              {Object.values(filters).some(Boolean) && <Typography.Paragraph type="secondary">当前筛选：{Object.values(filters).filter(Boolean).join(' · ')}</Typography.Paragraph>}
+          {<Form.Item className="patrol-launch-device-picker" label="指定设备" help="留空时按下方分组选择；均未指定时使用当前筛选范围。">
+            <PatrolDeviceSelector disabled={launchPatrol.isLoading || Boolean(patrolLaunch)} devices={devices} selected={selectedRowKeys.map(String)} onChange={values => {
             setSelectedRowKeys(values);
             patrolForm.setFieldsValue({
               group: undefined,
@@ -1245,11 +1147,11 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = () =
               deviceIds: values,
               values: patrolForm.getFieldsValue()
             });
-            setPatrolPreview(null);
+            invalidatePatrolPreview();
             setPatrolLaunch(null);
           }} />
           </Form.Item>}
-          <Form<PatrolFormValues> form={patrolForm} initialValues={{
+          <Form<PatrolFormValues> disabled={launchPatrol.isLoading || Boolean(patrolLaunch)} form={patrolForm} initialValues={{
           ...patrolDraft.values,
           group: searchParams.get('group') || patrolDraft.values.group
         }} layout="vertical" requiredMark={false} onValuesChange={(_, values) => {
@@ -1257,11 +1159,11 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = () =
             deviceIds: selectedRowKeys.map(String),
             values
           });
-          setPatrolPreview(null);
+          invalidatePatrolPreview();
           setPatrolLaunch(null);
         }}>
-            <Row gutter={12}>
-              <Col xs={24} md={8}>
+            <Row gutter={20}>
+              <Col xs={24} md={12}>
                 <Form.Item name="group" label="设备分组">
                   <Select allowClear showSearch optionFilterProp="label" placeholder="使用当前筛选" disabled={Boolean(selectedRowKeys.length)} onChange={value => {
                   if (value) patrolForm.setFieldValue('dynamic_group_id', undefined);
@@ -1271,7 +1173,7 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = () =
                 }))} />
                 </Form.Item>
               </Col>
-              <Col xs={24} md={8}>
+              <Col xs={24} md={12}>
                 <Form.Item name="dynamic_group_id" label="动态分组">
                   <Select allowClear placeholder="使用当前筛选" disabled={Boolean(selectedRowKeys.length)} onChange={value => {
                   if (value) patrolForm.setFieldValue('group', undefined);
@@ -1281,18 +1183,35 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = () =
                 }))} />
                 </Form.Item>
               </Col>
-              <Col xs={24} md={8}>
+              <Col xs={24}><h3 className="patrol-launch-options-heading">执行选项</h3></Col>
+              <Col xs={24} md={12}>
                 <Form.Item name="ticket_id" label="工单号">
                   <Input placeholder="可选" />
                 </Form.Item>
               </Col>
-              <Col xs={24}>
+              <Col xs={24} md={12}>
                 <Form.Item name="save_baseline" label="保存为后续对比基线" valuePropName="checked" initialValue={false}>
                   <Switch />
                 </Form.Item>
               </Col>
             </Row>
           </Form>
+            </section>
+            <aside className="patrol-launch-summary" aria-label="本次采集摘要">
+              <h2>本次采集</h2>
+              <dl>
+                <dt>设备范围</dt><dd>{patrolPreview ? `${patrolPreview.target_count} 台设备已预检` : selectedRowKeys.length ? `已指定 ${selectedRowKeys.length} 台设备` : '按分组或筛选范围'}</dd>
+                <dt>采集命令</dt><dd>{patrolPreview ? `${patrolPreview.rows.reduce((total, row) => total + row.command_count, 0)} 条设备命令` : '预检后展示完整命令'}</dd>
+                <dt>命令来源</dt><dd>设备已绑定的命令集</dd>
+                <dt>任务状态</dt><dd>{patrolLaunch ? '已创建巡检批次' : patrolPreview ? `${patrolPreview.ready_count} 台就绪 · ${patrolPreview.error_count} 台待处理` : '尚未发起'}</dd>
+              </dl>
+              <p>使用已生效的采集与规则资产。解析覆盖不足时保留原始证据，并在报告中标明缺口。</p>
+            </aside>
+          </div>
+          {!patrolPreview && <section className="patrol-launch-preview-placeholder" aria-label="待核对命令">
+            <CodeOutlined aria-hidden="true" />
+            <div><h2>核对设备与命令</h2><p>{previewPatrol.isLoading ? '正在生成预检计划，请稍候…' : '预览后，在此逐台查看管理地址、命令顺序与预检状态。'}</p></div>
+          </section>}
           {patrolPreview && <Space direction="vertical" size={8} style={{
           width: '100%'
         }}>
@@ -1303,20 +1222,15 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = () =
                 <Tag color={patrolPreview.quality_readiness?.status === 'degraded' ? 'orange' : 'green'}>
                   报告质量 {statusLabel(patrolPreview.quality_readiness?.status)}
                 </Tag>
-                {(patrolPreview.module_violations?.length || 0) > 0 && <Tag color="red">模块阻断 {patrolPreview.module_violations?.length}</Tag>}
               </Space>
-              <Alert type={patrolPreview.error_count > 0 ? 'error' : patrolPreview.quality_readiness?.status === 'degraded' ? 'warning' : 'success'} showIcon message={patrolPreview.error_count > 0 ? '部分设备未通过巡检预检' : patrolPreview.quality_readiness?.status === 'degraded' ? '设备可以巡检，但最终报告质量将降级' : '设备与规则资产预检通过'} description={renderPatrolPreviewErrors()} />
-              <Table rowKey="device_id" size="small" pagination={{
-            pageSize: 8
-          }} dataSource={patrolPreview.rows} columns={patrolColumns} scroll={{
-            x: 1120
-          }} />
+              <StatusNotice type={patrolPreview.error_count > 0 ? 'error' : patrolPreview.quality_readiness?.status === 'degraded' ? 'warning' : 'success'} showIcon message={patrolPreview.error_count > 0 ? '部分设备未通过巡检预检' : patrolPreview.quality_readiness?.status === 'degraded' ? '设备可以巡检，但最终报告质量将降级' : '设备与规则资产预检通过'} description={renderPatrolPreviewErrors()} />
+              <PatrolPlanPreview rows={patrolPreview.rows} />
             </Space>}
           {patrolLaunch && <Space direction="vertical" size={8} style={{
           width: '100%'
         }}>
-              <Alert type={patrolLaunch.dispatch_status === 'pending' ? 'warning' : 'info'} showIcon message={`批次已创建，${patrolLaunch.queued_count} 台设备${patrolLaunch.dispatch_status === 'pending' ? '等待调度恢复' : '等待后台分发'}${patrolLaunch.skipped_count || 0 ? `，跳过 ${patrolLaunch.skipped_count} 台未就绪设备` : ''}`} />
-              {(patrolLaunch.skipped_count || 0) > 0 && <Alert type="warning" showIcon message="部分设备未发起" description={renderPatrolPreviewErrors()} />}
+              <StatusNotice type={patrolLaunch.dispatch_status === 'pending' ? 'warning' : 'info'} showIcon message={`批次已创建，${patrolLaunch.queued_count} 台设备${patrolLaunch.dispatch_status === 'pending' ? '等待调度恢复' : '等待后台分发'}${patrolLaunch.skipped_count || 0 ? `，跳过 ${patrolLaunch.skipped_count} 台未就绪设备` : ''}`} />
+              {(patrolLaunch.skipped_count || 0) > 0 && <StatusNotice type="warning" showIcon message="部分设备未发起" description={renderPatrolPreviewErrors()} />}
               {patrolLaunch.launch_mode === 'workflow' ? <>
                   <Table rowKey="workflow_run_id" size="small" pagination={{
               pageSize: 8
@@ -1330,8 +1244,16 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = () =
             x: 820
           }} />}
             </Space>}
-        </Space>
-      </Modal>
+          <footer className="patrol-launch-footer">
+            <span>{patrolLaunch ? '批次已创建，可返回任务页跟进执行进度。' : patrolPreview ? '请核对设备与命令，确认后发起巡检。' : '先预览设备与命令，再发起巡检。'}</span>
+            <Space wrap><Button key="preview" type={patrolPreview ? 'default' : 'primary'} icon={<SearchOutlined />} loading={previewPatrol.isLoading} disabled={Boolean(patrolLaunch) || patrolReadinessLoading || !effectivePatrolReadiness?.can_launch} onClick={() => previewPatrol.mutate()}>
+            预览设备与命令
+          </Button><Button key="launch" type={patrolPreview ? 'primary' : 'default'} icon={<PlayCircleOutlined />} loading={launchPatrol.isLoading} disabled={previewPatrol.isLoading || Boolean(patrolLaunch) || !patrolPreview || !effectivePatrolReadiness?.can_launch || Boolean(patrolPreview && patrolPreview.ready_count === 0)} onClick={() => launchPatrol.mutate()}>
+            {patrolLaunch ? '已发起' : '发起正式巡检'}
+          </Button></Space>
+          </footer>
+        </div>
+      </InspectionDetailPage>
     </InspectionLayout>;
 };
 export default DeviceOperationsWorkspace;

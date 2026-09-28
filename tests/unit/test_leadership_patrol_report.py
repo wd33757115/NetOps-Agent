@@ -1142,3 +1142,22 @@ def test_three_period_trend_uses_frozen_analysis_and_classifies_evidence():
         "attempt_id": "analysis-q1-q2",
         "revision": "acceptance:q1-q2",
     }
+
+
+def test_report_separates_effective_changes_and_missing_policy():
+    summary = _summary()
+    summary['changes'] = [
+        {'change_policy_version_id': 'approved-policy', 'field': 'status', 'new': 'down'},
+        {'field': 'legacy_counter', 'new': 200},
+    ]
+    summary['change_count'] = 2
+    summary['change_policy_missing_count'] = 3
+    report = build_leadership_report("change-tracking", summary)
+    assert report['metrics']['effective_change_count'] == 1
+    markdown = render_leadership_markdown(report)
+    assert '有效变化 1 项' in markdown
+    assert '3 项观测缺少变化策略' in markdown
+    document = Document(io.BytesIO(render_leadership_docx(report)))
+    text = '\n'.join(paragraph.text for paragraph in document.paragraphs)
+    assert '有效变化 1 项' in text
+    assert '3 项观测缺少变化策略' in text

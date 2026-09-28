@@ -62,6 +62,8 @@ describe('CheckItemEditorDrawer', () => {
         rule_semantics_snapshot: { digest: 'frozen', observations: [definition] } } }}
       canonicalCatalog={{ items: [{ ...definition, description: '全局目录说明' }] } as any} />)
     await user.click(screen.getByText('编辑语义与规则用途'))
+    expect(screen.getByRole('checkbox', { name: '参与普通变化比较' })).toBeChecked()
+    await user.click(screen.getByRole('checkbox', { name: '参与普通变化比较' }))
     expect(screen.getByLabelText('含义说明')).toHaveValue('检查项自己的说明')
     await user.clear(screen.getByLabelText('含义说明'))
     await user.type(screen.getByLabelText('含义说明'), '现场风扇状态')
@@ -73,6 +75,7 @@ describe('CheckItemEditorDrawer', () => {
       observation_type: 'custom.fan.state', semantic_definition: {
         description: '现场风扇状态', state_groups: { unhealthy: ['broken'] },
       },
+      change_tracking: false,
     })
     expect(definition.description).toBe('检查项自己的说明')
   })

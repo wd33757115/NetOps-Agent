@@ -1,12 +1,11 @@
 import { commandApi } from '../commandApi'
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Button, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Typography, message } from 'antd'
+import { Alert, Button, Form, Input, InputNumber, Modal, Select, Space, Table, Typography, message } from 'antd'
 import { useQuery } from 'react-query'
 import { type DeviceDynamicGroup, type ParserCommandProfile, type ParserCommandProfileImpactPreview } from '@netops/services/api'
 
 interface Props {
   open: boolean
-  onClose: () => void
   onSaved: () => void
   selectedDeviceIds: string[]
   currentSelector: Record<string, unknown>
@@ -37,7 +36,7 @@ async function loadCommandProfiles() {
   }
 }
 
-export default function PatrolCommandBindingDrawer({ open, onClose, onSaved, selectedDeviceIds, currentSelector, groups, dynamicGroups }: Props) {
+export default function PatrolCommandConfiguration({ open, onSaved, selectedDeviceIds, currentSelector, groups, dynamicGroups }: Props) {
   const [form] = Form.useForm<BindingValues>()
   const [editor] = Form.useForm<{ name: string; commands: string }>()
   const [editorOpen, setEditorOpen] = useState(false)
@@ -102,7 +101,7 @@ export default function PatrolCommandBindingDrawer({ open, onClose, onSaved, sel
     const binding = await commandApi.upsertCommandProfileBinding({ profile_version_id: values.profile_version_id, selector: selectorFor(values), priority: values.priority, status: 'disabled' })
     await commandApi.enableCommandProfileBinding(binding.binding_id, values.reason)
     message.success('巡检命令集已绑定')
-    await refetch(); onSaved(); onClose()
+    await refetch(); onSaved(); setPreview(null)
   })
   const create = () => perform('create', async () => {
     const values = await editor.validateFields()
@@ -116,8 +115,7 @@ export default function PatrolCommandBindingDrawer({ open, onClose, onSaved, sel
     message.success('命令集已创建，请预览后绑定')
   })
   return <>
-    <Drawer title="绑定巡检命令集" open={open} onClose={() => { if (!busy) onClose() }} closable={!busy} maskClosable={!busy} keyboard={!busy} width={900} destroyOnClose
-      footer={<Space><Button onClick={inspect} disabled={!!busy || !commands.length} loading={busy === 'preview'}>预览设备与命令</Button><Button type="primary" onClick={bind} loading={busy === 'bind'} disabled={!!busy || !preview?.evidence_saved || !preview.matched_device_count}>{selected?.version_status === 'active' ? '确认绑定' : '启用并绑定'}</Button></Space>}>
+    <section aria-label="命令集配置">
       <Space direction="vertical" size={20} style={{ width: '100%' }}>
         <Typography.Text type="secondary">设备按命令集逐条采集。检查项及解析规则只处理采集结果，不增加或替换命令。</Typography.Text>
         {error && <Alert type="error" showIcon message={error} />}
@@ -159,7 +157,10 @@ export default function PatrolCommandBindingDrawer({ open, onClose, onSaved, sel
           {preview.matched_device_count > preview.rows.length && <Typography.Text type="secondary">已检查全部匹配设备，列表展示前 {preview.rows.length} 台。</Typography.Text>}
         </>}
       </Space>
-    </Drawer>
+      <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid #e5eaf1' }}>
+        <Space><Button onClick={inspect} disabled={!!busy || !commands.length} loading={busy === 'preview'}>预览设备与命令</Button><Button type="primary" onClick={bind} loading={busy === 'bind'} disabled={!!busy || !preview?.evidence_saved || !preview.matched_device_count}>{selected?.version_status === 'active' ? '确认绑定' : '启用并绑定'}</Button></Space>
+      </div>
+    </section>
     <Modal title="新建巡检命令集" open={editorOpen} onCancel={() => { if (!busy) setEditorOpen(false) }} closable={!busy} maskClosable={!busy} keyboard={!busy} onOk={create} okText="保存命令集" confirmLoading={busy === 'create'} destroyOnClose>
       {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 16 }} />}
       <Form form={editor} layout="vertical" disabled={!!busy}>

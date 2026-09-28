@@ -1,4 +1,4 @@
-catalog_version: 12
+catalog_version: 13
 defaults:
   check_item:
     freshness_policy:
@@ -117,7 +117,7 @@ check_items:
     require_rule_evaluation: false
   status: active
 - id: system.cpu_usage
-  version: 12
+  version: 14
   name: CPU 使用率
   category: system
   description: Evaluate system, slot or processor CPU utilization.
@@ -148,6 +148,8 @@ check_items:
       dimensions: []
       fixed_dimensions:
         window: 5s
+      change_tracking: false
+      event_on_change: false
     - canonical_field: cpu_1m_percent
       observation_type: system.cpu_usage.cpu_1m_percent
       semantic_type: gauge
@@ -160,6 +162,8 @@ check_items:
       dimensions: []
       fixed_dimensions:
         window: 1m
+      change_tracking: false
+      event_on_change: false
     - observation_type: device.cpu.utilization
       semantic_type: gauge
       unit: percent
@@ -226,6 +230,10 @@ check_items:
       fixed_dimensions:
         window: 5m
       description: 设备明确输出的五分钟平均使用率或对应阈值；不能填入瞬时值或容量推算值
+      change_tracking: false
+      event_on_change: false
+      assessment_roles:
+      - evidence
     - observation_type: device.cpu.high_warning
       semantic_type: threshold
       unit: percent
@@ -238,6 +246,8 @@ check_items:
       fixed_dimensions:
         window: 5m
       description: 设备明确输出的五分钟平均使用率或对应阈值；不能填入瞬时值或容量推算值
+      change_tracking: false
+      event_on_change: false
     - observation_type: device.cpu.high_alarm
       semantic_type: threshold
       unit: percent
@@ -250,10 +260,86 @@ check_items:
       fixed_dimensions:
         window: 5m
       description: 设备明确输出的五分钟平均使用率或对应阈值；不能填入瞬时值或容量推算值
+      change_tracking: false
+      event_on_change: false
+    - canonical_field: cpu_interrupt_5s_percent
+      semantic_type: gauge
+      value_type: number
+      description: 五秒 CPU 使用率中的中断部分，不应再次加到总 CPU 使用率上。
+      required: false
+      assessment_roles:
+      - evidence
+      ntc_values:
+      - CPU_INTERRUPTION_5_SEC
+      source_kind: ntc
+      unit: percent
+      observation_type: system.cpu_usage.cpu_interrupt_5s_percent
+      event_on_change: false
+      change_tracking: false
+    - canonical_field: cpu_user_percent
+      semantic_type: gauge
+      value_type: number
+      description: NX-OS 当前 user 状态百分比，与五分钟平均值不同。
+      required: false
+      assessment_roles:
+      - evidence
+      ntc_values: []
+      source_kind: sample_cli
+      unit: percent
+      observation_type: system.cpu_usage.cpu_user_percent
+      event_on_change: false
+      change_tracking: false
+    - canonical_field: cpu_kernel_percent
+      semantic_type: gauge
+      value_type: number
+      description: NX-OS 当前 kernel 状态百分比。
+      required: false
+      assessment_roles:
+      - evidence
+      ntc_values: []
+      source_kind: sample_cli
+      unit: percent
+      observation_type: system.cpu_usage.cpu_kernel_percent
+      event_on_change: false
+      change_tracking: false
+    - canonical_field: cpu_idle_percent
+      semantic_type: gauge
+      value_type: number
+      description: NX-OS 当前 idle 百分比，不能直接写入五分钟 cpu_usage_percent。
+      required: false
+      assessment_roles:
+      - evidence
+      ntc_values: []
+      source_kind: sample_cli
+      unit: percent
+      observation_type: system.cpu_usage.cpu_idle_percent
+      event_on_change: false
+      change_tracking: false
+    reference_revision: cisco-samples-2026-09-23
+    record_semantics:
+      reference_notes: 保留已有5s/1m/5m 字段及设备阈值策略。NX-OS show system resources 未给五分钟使用率时，不用瞬时值冒充。
+      missing_values: 缺失与不支持不得补零；仅必填缺失导致不完整；可选字段无数据保留缺失。
+    value_references:
+    - template: cisco_ios_show_processes_cpu.textfsm
+      sha256: 580ba59ca0c2b0d09091fb0ccaca5cf2b618404e6b45f336f3bcafdb5bc3abe9
+      values:
+      - CPU_USAGE_5_SEC
+      - CPU_INTERRUPTION_5_SEC
+      - CPU_USAGE_1_MIN
+      - CPU_USAGE_5_MIN
+      - PROCESS_PID
+      - PROCESS_RUNTIME
+      - PROCESS_INVOKED
+      - PROCESS_CPU_TIME_FOR_INVOCATION
+      - PROCESS_CPU_USAGE_5_SEC
+      - PROCESS_CPU_USAGE_1_MIN
+      - PROCESS_CPU_USAGE_5_MIN
+      - PROCESS_TTY
+      - PROCESS_NAME
     rule_semantics_snapshot:
       catalog_id: netops.canonical-observations
-      version: 5
-      digest: c4d3613d81b45085b28f6d4189c7f7cdd2e634c57494786c9f791c0e7f4c2738
+      version: 7
+      digest: b85f32f086657bc790293cef0f07eee63a011c55c975f4e1fd749122d9e91355
       observations:
       - id: device.cpu.utilization
         description: CPU utilization for one canonical CPU scope and time window.
@@ -331,6 +417,55 @@ check_items:
         state_groups: {}
         assessment_roles:
         - evidence
+      - id: system.cpu_usage.cpu_interrupt_5s_percent
+        description: 五秒 CPU 使用率中的中断部分，不应再次加到总 CPU 使用率上。
+        semantic_type: gauge
+        value_types:
+        - number
+        canonical_unit: percent
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+      - id: system.cpu_usage.cpu_user_percent
+        description: NX-OS 当前 user 状态百分比，与五分钟平均值不同。
+        semantic_type: gauge
+        value_types:
+        - number
+        canonical_unit: percent
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+      - id: system.cpu_usage.cpu_kernel_percent
+        description: NX-OS 当前 kernel 状态百分比。
+        semantic_type: gauge
+        value_types:
+        - number
+        canonical_unit: percent
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+      - id: system.cpu_usage.cpu_idle_percent
+        description: NX-OS 当前 idle 百分比，不能直接写入五分钟 cpu_usage_percent。
+        semantic_type: gauge
+        value_types:
+        - number
+        canonical_unit: percent
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+    change_tracking_revision: ordinary-change-tracking-v1
   report_projection: auto@1
   applicability: {}
   freshness_policy:
@@ -345,7 +480,7 @@ check_items:
     first_observation: unable_to_determine
   status: active
 - id: system.memory_usage
-  version: 11
+  version: 13
   name: 内存使用率
   category: system
   description: Evaluate system or slot memory capacity and utilization.
@@ -371,6 +506,8 @@ check_items:
       assessment_roles:
       - evidence
       dimensions: []
+      change_tracking: false
+      event_on_change: false
     - canonical_field: memory_used_kb
       observation_type: system.memory_usage.memory_used_kb
       semantic_type: gauge
@@ -381,6 +518,8 @@ check_items:
       assessment_roles:
       - evidence
       dimensions: []
+      change_tracking: false
+      event_on_change: false
     - canonical_field: memory_free_kb
       observation_type: system.memory_usage.memory_free_kb
       semantic_type: gauge
@@ -391,6 +530,8 @@ check_items:
       assessment_roles:
       - evidence
       dimensions: []
+      change_tracking: false
+      event_on_change: false
     - canonical_field: memory_shared_kb
       observation_type: system.memory_usage.memory_shared_kb
       semantic_type: gauge
@@ -401,6 +542,8 @@ check_items:
       assessment_roles:
       - evidence
       dimensions: []
+      change_tracking: false
+      event_on_change: false
     - canonical_field: memory_buffers_kb
       observation_type: system.memory_usage.memory_buffers_kb
       semantic_type: gauge
@@ -411,6 +554,8 @@ check_items:
       assessment_roles:
       - evidence
       dimensions: []
+      change_tracking: false
+      event_on_change: false
     - canonical_field: memory_cached_kb
       observation_type: system.memory_usage.memory_cached_kb
       semantic_type: gauge
@@ -421,6 +566,8 @@ check_items:
       assessment_roles:
       - evidence
       dimensions: []
+      change_tracking: false
+      event_on_change: false
     - canonical_field: memory_free_percent
       observation_type: system.memory_usage.memory_free_percent
       semantic_type: gauge
@@ -431,6 +578,8 @@ check_items:
       assessment_roles:
       - evidence
       dimensions: []
+      change_tracking: false
+      event_on_change: false
     - observation_type: device.memory.utilization
       semantic_type: gauge
       unit: percent
@@ -493,6 +642,10 @@ check_items:
       fixed_dimensions:
         window: 5m
       description: 设备明确输出的五分钟平均使用率或对应阈值；不能填入瞬时值或容量推算值
+      change_tracking: false
+      event_on_change: false
+      assessment_roles:
+      - evidence
     - observation_type: device.memory.high_warning
       semantic_type: threshold
       unit: percent
@@ -503,6 +656,8 @@ check_items:
       value_type: number
       dimensions: []
       description: 设备明确输出的五分钟平均使用率或对应阈值；不能填入瞬时值或容量推算值
+      change_tracking: false
+      event_on_change: false
     - observation_type: device.memory.high_alarm
       semantic_type: threshold
       unit: percent
@@ -513,10 +668,94 @@ check_items:
       value_type: number
       dimensions: []
       description: 设备明确输出的五分钟平均使用率或对应阈值；不能填入瞬时值或容量推算值
+      change_tracking: false
+      event_on_change: false
+    - canonical_field: pool
+      semantic_type: text
+      value_type: text
+      description: 内存池名称，例如 Processor/lsmpi_io；多池数据不能相互覆盖。
+      required: false
+      assessment_roles:
+      - evidence
+      ntc_values: []
+      source_kind: sample_cli
+      observation_type: system.memory_usage.pool
+      event_on_change: false
+      change_tracking: false
+    - canonical_field: memory_total_bytes
+      semantic_type: gauge
+      value_type: number
+      description: IOS Processor Pool 原文总字节数；不能直接放入 memory_total_kb。
+      required: false
+      assessment_roles:
+      - evidence
+      ntc_values:
+      - MEMORY_TOTAL
+      source_kind: ntc
+      unit: bytes
+      observation_type: system.memory_usage.memory_total_bytes
+      event_on_change: false
+      change_tracking: false
+    - canonical_field: memory_used_bytes
+      semantic_type: gauge
+      value_type: number
+      description: IOS Processor Pool 已使用字节数。
+      required: false
+      assessment_roles:
+      - evidence
+      ntc_values:
+      - MEMORY_USED
+      source_kind: ntc
+      unit: bytes
+      observation_type: system.memory_usage.memory_used_bytes
+      event_on_change: false
+      change_tracking: false
+    - canonical_field: memory_free_bytes
+      semantic_type: gauge
+      value_type: number
+      description: IOS Processor Pool 空闲字节数。
+      required: false
+      assessment_roles:
+      - evidence
+      ntc_values:
+      - MEMORY_FREE
+      source_kind: ntc
+      unit: bytes
+      observation_type: system.memory_usage.memory_free_bytes
+      event_on_change: false
+      change_tracking: false
+    - canonical_field: memory_status
+      semantic_type: text
+      value_type: text
+      description: NX-OS Current memory status 原文。
+      required: false
+      assessment_roles:
+      - evidence
+      ntc_values: []
+      source_kind: sample_cli
+      observation_type: system.memory_usage.memory_status
+      event_on_change: false
+      change_tracking: false
+    reference_revision: cisco-samples-2026-09-23
+    record_semantics:
+      reference_notes: 保留既有 KB 和百分比值。容量计算得到的比例是派生指标，不能伪造设备明确输出的五分钟平均值；同一 slot 多池应在适配器验收时分开实体。
+      missing_values: 缺失与不支持不得补零；仅必填缺失导致不完整；可选字段无数据保留缺失。
+    value_references:
+    - template: cisco_ios_show_processes_memory_sorted.textfsm
+      sha256: 0066110987a52e13378a6bbb01ea1d90041347e93c4389d08a3edfa86490a57e
+      values:
+      - MEMORY_TOTAL
+      - MEMORY_USED
+      - MEMORY_FREE
+      - PROCESS_ID
+      - PROCESS_ALLOCATED
+      - PROCESS_FREED
+      - PROCESS_HOLDING
+      - PROCESS
     rule_semantics_snapshot:
       catalog_id: netops.canonical-observations
-      version: 5
-      digest: c4d3613d81b45085b28f6d4189c7f7cdd2e634c57494786c9f791c0e7f4c2738
+      version: 7
+      digest: b85f32f086657bc790293cef0f07eee63a011c55c975f4e1fd749122d9e91355
       observations:
       - id: device.memory.utilization
         description: Used memory as a percentage of total memory for one memory scope.
@@ -640,6 +879,67 @@ check_items:
         state_groups: {}
         assessment_roles:
         - evidence
+      - id: system.memory_usage.pool
+        description: 内存池名称，例如 Processor/lsmpi_io；多池数据不能相互覆盖。
+        semantic_type: text
+        value_types:
+        - text
+        canonical_unit: null
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+      - id: system.memory_usage.memory_total_bytes
+        description: IOS Processor Pool 原文总字节数；不能直接放入 memory_total_kb。
+        semantic_type: gauge
+        value_types:
+        - number
+        canonical_unit: bytes
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+      - id: system.memory_usage.memory_used_bytes
+        description: IOS Processor Pool 已使用字节数。
+        semantic_type: gauge
+        value_types:
+        - number
+        canonical_unit: bytes
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+      - id: system.memory_usage.memory_free_bytes
+        description: IOS Processor Pool 空闲字节数。
+        semantic_type: gauge
+        value_types:
+        - number
+        canonical_unit: bytes
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+      - id: system.memory_usage.memory_status
+        description: NX-OS Current memory status 原文。
+        semantic_type: text
+        value_types:
+        - text
+        canonical_unit: null
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+    change_tracking_revision: ordinary-change-tracking-v1
   report_projection: auto@1
   applicability: {}
   freshness_policy:
@@ -654,11 +954,10 @@ check_items:
     first_observation: unable_to_determine
   status: active
 - id: interface.optical_power
-  version: 11
+  version: 16
   name: Interface optical power
   category: interface
-  description: Evaluate transceiver presence and measured receive/transmit optical
-    power.
+  description: Evaluate transceiver presence and measured receive/transmit optical power.
   result_mode: structured
   assessment_mode: health
   canonical_contract:
@@ -673,8 +972,8 @@ check_items:
       dimensions:
       - channel
       required: true
-      mapping_guidance: Map explicit presence/absence evidence; an empty source status
-        may mean present only when samples prove that convention.
+      mapping_guidance: Map explicit presence/absence evidence; an empty source status may mean present only when samples
+        prove that convention.
       policy_constraints:
         allowed_compare_modes:
         - state_transition
@@ -707,8 +1006,7 @@ check_items:
       required_when:
         field: transceiver_present
         equals: present
-      mapping_guidance: Map only the current receive optical-power measurement, not
-        alarm or warning thresholds.
+      mapping_guidance: Map only the current receive optical-power measurement, not alarm or warning thresholds.
       context_fields:
       - part_number
       - serial_number
@@ -721,12 +1019,6 @@ check_items:
           field_name: rx_low_warning_dbm
         critical_low:
           field_name: rx_low_alarm_dbm
-      baseline_comparison:
-        kind: linear_power_loss_ratio
-        max_loss_ratio: 0.1
-        identity_fields:
-        - part_number
-        - serial_number
       policy_constraints:
         allowed_compare_modes:
         - threshold_and_deadband
@@ -750,13 +1042,11 @@ check_items:
           critical_high: OpticalRxPowerHighCritical
           low_recovery: OpticalRxPowerRecovered
           high_recovery: OpticalRxPowerRecoveredFromHigh
-          baseline_degradation: OpticalRxPowerDegraded
         required_event_types:
         - OpticalRxPowerLow
         - OpticalRxPowerCritical
         - OpticalRxPowerHigh
         - OpticalRxPowerHighCritical
-        - OpticalRxPowerDegraded
         - OpticalRxPowerRecovered
         - OpticalRxPowerRecoveredFromHigh
         required_event_classes:
@@ -764,7 +1054,6 @@ check_items:
           OpticalRxPowerCritical: fault
           OpticalRxPowerHigh: fault
           OpticalRxPowerHighCritical: fault
-          OpticalRxPowerDegraded: fault
           OpticalRxPowerRecovered: recovery
           OpticalRxPowerRecoveredFromHigh: recovery
         required_severities:
@@ -772,7 +1061,6 @@ check_items:
           OpticalRxPowerCritical: critical
           OpticalRxPowerHigh: warning
           OpticalRxPowerHighCritical: critical
-          OpticalRxPowerDegraded: warning
           OpticalRxPowerRecovered: info
           OpticalRxPowerRecoveredFromHigh: info
         required_exclusive_event_types:
@@ -790,6 +1078,27 @@ check_items:
         - fault: OpticalRxPowerHighCritical
           recovery: OpticalRxPowerRecoveredFromHigh
         max_rule_count: 7
+      health_policy:
+        revision: device-limits-with-directional-trends-v2
+        baseline_mode: trend_only
+        trend:
+          kind: linear_power_drop
+          threshold_ratio: 0.1
+          identity_fields:
+          - part_number
+          - serial_number
+          require_identity: false
+        device_thresholds:
+          high:
+          - rx_high_warning_dbm
+          - rx_high_alarm_dbm
+          low:
+          - rx_low_warning_dbm
+          - rx_low_alarm_dbm
+      change_tracking: false
+      event_on_change: false
+      assessment_roles:
+      - evidence
     - observation_type: interface.optical.tx_power
       semantic_type: gauge
       unit: dbm
@@ -801,8 +1110,7 @@ check_items:
       required_when:
         field: transceiver_present
         equals: present
-      mapping_guidance: Map only the current transmit optical-power measurement, not
-        alarm or warning thresholds.
+      mapping_guidance: Map only the current transmit optical-power measurement, not alarm or warning thresholds.
       context_fields:
       - part_number
       - serial_number
@@ -815,12 +1123,6 @@ check_items:
           field_name: tx_low_warning_dbm
         critical_low:
           field_name: tx_low_alarm_dbm
-      baseline_comparison:
-        kind: linear_power_loss_ratio
-        max_loss_ratio: 0.1
-        identity_fields:
-        - part_number
-        - serial_number
       policy_constraints:
         allowed_compare_modes:
         - threshold_and_deadband
@@ -844,13 +1146,11 @@ check_items:
           critical_high: OpticalTxPowerHighCritical
           low_recovery: OpticalTxPowerRecovered
           high_recovery: OpticalTxPowerRecoveredFromHigh
-          baseline_degradation: OpticalTxPowerDegraded
         required_event_types:
         - OpticalTxPowerLow
         - OpticalTxPowerCritical
         - OpticalTxPowerHigh
         - OpticalTxPowerHighCritical
-        - OpticalTxPowerDegraded
         - OpticalTxPowerRecovered
         - OpticalTxPowerRecoveredFromHigh
         required_event_classes:
@@ -858,7 +1158,6 @@ check_items:
           OpticalTxPowerCritical: fault
           OpticalTxPowerHigh: fault
           OpticalTxPowerHighCritical: fault
-          OpticalTxPowerDegraded: fault
           OpticalTxPowerRecovered: recovery
           OpticalTxPowerRecoveredFromHigh: recovery
         required_severities:
@@ -866,7 +1165,6 @@ check_items:
           OpticalTxPowerCritical: critical
           OpticalTxPowerHigh: warning
           OpticalTxPowerHighCritical: critical
-          OpticalTxPowerDegraded: warning
           OpticalTxPowerRecovered: info
           OpticalTxPowerRecoveredFromHigh: info
         required_exclusive_event_types:
@@ -884,6 +1182,27 @@ check_items:
         - fault: OpticalTxPowerHighCritical
           recovery: OpticalTxPowerRecoveredFromHigh
         max_rule_count: 7
+      health_policy:
+        revision: device-limits-with-directional-trends-v2
+        baseline_mode: trend_only
+        trend:
+          kind: linear_power_drop
+          threshold_ratio: 0.1
+          identity_fields:
+          - part_number
+          - serial_number
+          require_identity: false
+        device_thresholds:
+          high:
+          - tx_high_warning_dbm
+          - tx_high_alarm_dbm
+          low:
+          - tx_low_warning_dbm
+          - tx_low_alarm_dbm
+      change_tracking: false
+      event_on_change: false
+      assessment_roles:
+      - evidence
     - observation_type: interface.optical.rx_high_alarm
       semantic_type: threshold
       unit: dbm
@@ -893,6 +1212,8 @@ check_items:
       required: false
       assessment_roles:
       - reference
+      change_tracking: false
+      event_on_change: false
     - observation_type: interface.optical.rx_high_warning
       semantic_type: threshold
       unit: dbm
@@ -902,6 +1223,8 @@ check_items:
       required: false
       assessment_roles:
       - reference
+      change_tracking: false
+      event_on_change: false
     - observation_type: interface.optical.rx_low_warning
       semantic_type: threshold
       unit: dbm
@@ -911,6 +1234,8 @@ check_items:
       required: false
       assessment_roles:
       - reference
+      change_tracking: false
+      event_on_change: false
     - observation_type: interface.optical.rx_low_alarm
       semantic_type: threshold
       unit: dbm
@@ -920,6 +1245,8 @@ check_items:
       required: false
       assessment_roles:
       - reference
+      change_tracking: false
+      event_on_change: false
     - observation_type: interface.optical.tx_high_alarm
       semantic_type: threshold
       unit: dbm
@@ -929,6 +1256,8 @@ check_items:
       required: false
       assessment_roles:
       - reference
+      change_tracking: false
+      event_on_change: false
     - observation_type: interface.optical.tx_high_warning
       semantic_type: threshold
       unit: dbm
@@ -938,6 +1267,8 @@ check_items:
       required: false
       assessment_roles:
       - reference
+      change_tracking: false
+      event_on_change: false
     - observation_type: interface.optical.tx_low_warning
       semantic_type: threshold
       unit: dbm
@@ -947,6 +1278,8 @@ check_items:
       required: false
       assessment_roles:
       - reference
+      change_tracking: false
+      event_on_change: false
     - observation_type: interface.optical.tx_low_alarm
       semantic_type: threshold
       unit: dbm
@@ -956,6 +1289,8 @@ check_items:
       required: false
       assessment_roles:
       - reference
+      change_tracking: false
+      event_on_change: false
     - observation_type: interface.optical.part_number
       semantic_type: state
       canonical_field: part_number
@@ -972,109 +1307,770 @@ check_items:
       required: false
       assessment_roles:
       - evidence
-    parser_field_vocabulary:
+    - canonical_field: temperature_celsius
+      semantic_type: gauge
+      value_type: number
+      description: 光模块温度，不是机箱环境温度。
+      required: false
+      assessment_roles:
+      - evidence
+      ntc_values:
+      - TEMPERATURE_VALUE
+      - TEMPERATURE
+      source_kind: ntc
+      unit: celsius
+      observation_type: interface.optical_power.temperature_celsius
+      event_on_change: false
+      change_tracking: false
+    - canonical_field: voltage_volts
+      semantic_type: gauge
+      value_type: number
+      description: 光模块供电电压。
+      required: false
+      assessment_roles:
+      - evidence
+      ntc_values:
+      - VOLTAGE_VALUE
+      - VOLTAGE
+      source_kind: ntc
+      unit: v
+      observation_type: interface.optical_power.voltage_volts
+      event_on_change: false
+      change_tracking: false
+    - canonical_field: bias_current_ma
+      semantic_type: gauge
+      value_type: number
+      description: 激光器偏置电流；mA 与 A 不可混用。
+      required: false
+      assessment_roles:
+      - evidence
+      ntc_values:
+      - AMPS_VALUE
+      - CURRENT
+      source_kind: ntc
+      unit: ma
+      observation_type: interface.optical_power.bias_current_ma
+      event_on_change: false
+      change_tracking: false
+    - canonical_field: transceiver_type
+      semantic_type: text
+      value_type: text
+      description: 模块类型原文，例如 QSFP-100G。
+      required: false
+      assessment_roles:
+      - evidence
+      ntc_values: []
+      source_kind: sample_cli
+      observation_type: interface.optical_power.transceiver_type
+      event_on_change: false
+      change_tracking: false
+    - canonical_field: vendor_name
+      semantic_type: text
+      value_type: text
+      description: 模块 name/vendor 原文，不由设备厂商推断。
+      required: false
+      assessment_roles:
+      - evidence
+      ntc_values: []
+      source_kind: sample_cli
+      observation_type: interface.optical_power.vendor_name
+      event_on_change: false
+      change_tracking: false
+    - canonical_field: revision
+      semantic_type: text
+      value_type: text
+      description: 光模块硬件修订号。
+      required: false
+      assessment_roles:
+      - evidence
+      ntc_values: []
+      source_kind: sample_cli
+      observation_type: interface.optical_power.revision
+      event_on_change: false
+      change_tracking: false
+    - canonical_field: wavelength_nm
+      semantic_type: gauge
+      value_type: number
+      description: 模块波长；只有源输出明确 nm 时使用。
+      required: false
+      assessment_roles:
+      - evidence
+      ntc_values: []
+      source_kind: sample_cli
+      unit: nm
+      observation_type: interface.optical_power.wavelength_nm
+      event_on_change: false
+      change_tracking: false
+    - canonical_field: dom_supported
+      semantic_type: text
+      value_type: text
+      description: DOM 是否支持及不支持原因原文；不提供 DOM 不表示零光功率。
+      required: false
+      assessment_roles:
+      - evidence
+      ntc_values: []
+      source_kind: sample_cli
+      observation_type: interface.optical_power.dom_supported
+      event_on_change: false
+      change_tracking: false
+    - canonical_field: temperature_high_alarm_celsius
+      semantic_type: threshold
+      value_type: number
+      unit: celsius
+      required: false
+      assessment_roles:
+      - reference
+      description: 模块明确输出的温度 high_alarm 阈值；保留缺失，不套用通用阈值。
+      ntc_values:
+      - TEMPERATURE_ALARM_HIGH
+      source_kind: ntc
+      observation_type: interface.optical_power.temperature_high_alarm_celsius
+      event_on_change: false
+      change_tracking: false
+    - canonical_field: temperature_low_alarm_celsius
+      semantic_type: threshold
+      value_type: number
+      unit: celsius
+      required: false
+      assessment_roles:
+      - reference
+      description: 模块明确输出的温度 low_alarm 阈值；保留缺失，不套用通用阈值。
+      ntc_values:
+      - TEMPERATURE_ALARM_LOW
+      source_kind: ntc
+      observation_type: interface.optical_power.temperature_low_alarm_celsius
+      event_on_change: false
+      change_tracking: false
+    - canonical_field: temperature_high_warning_celsius
+      semantic_type: threshold
+      value_type: number
+      unit: celsius
+      required: false
+      assessment_roles:
+      - reference
+      description: 模块明确输出的温度 high_warning 阈值；保留缺失，不套用通用阈值。
+      ntc_values:
+      - TEMPERATURE_WARN_HIGH
+      source_kind: ntc
+      observation_type: interface.optical_power.temperature_high_warning_celsius
+      event_on_change: false
+      change_tracking: false
+    - canonical_field: temperature_low_warning_celsius
+      semantic_type: threshold
+      value_type: number
+      unit: celsius
+      required: false
+      assessment_roles:
+      - reference
+      description: 模块明确输出的温度 low_warning 阈值；保留缺失，不套用通用阈值。
+      ntc_values:
+      - TEMPERATURE_WARN_LOW
+      source_kind: ntc
+      observation_type: interface.optical_power.temperature_low_warning_celsius
+      event_on_change: false
+      change_tracking: false
+    - canonical_field: voltage_high_alarm_volts
+      semantic_type: threshold
+      value_type: number
+      unit: v
+      required: false
+      assessment_roles:
+      - reference
+      description: 模块明确输出的电压 high_alarm 阈值；保留缺失，不套用通用阈值。
+      ntc_values:
+      - VOLTAGE_ALARM_HIGH
+      source_kind: ntc
+      observation_type: interface.optical_power.voltage_high_alarm_volts
+      event_on_change: false
+      change_tracking: false
+    - canonical_field: voltage_low_alarm_volts
+      semantic_type: threshold
+      value_type: number
+      unit: v
+      required: false
+      assessment_roles:
+      - reference
+      description: 模块明确输出的电压 low_alarm 阈值；保留缺失，不套用通用阈值。
+      ntc_values:
+      - VOLTAGE_ALARM_LOW
+      source_kind: ntc
+      observation_type: interface.optical_power.voltage_low_alarm_volts
+      event_on_change: false
+      change_tracking: false
+    - canonical_field: voltage_high_warning_volts
+      semantic_type: threshold
+      value_type: number
+      unit: v
+      required: false
+      assessment_roles:
+      - reference
+      description: 模块明确输出的电压 high_warning 阈值；保留缺失，不套用通用阈值。
+      ntc_values:
+      - VOLTAGE_WARN_HIGH
+      source_kind: ntc
+      observation_type: interface.optical_power.voltage_high_warning_volts
+      event_on_change: false
+      change_tracking: false
+    - canonical_field: voltage_low_warning_volts
+      semantic_type: threshold
+      value_type: number
+      unit: v
+      required: false
+      assessment_roles:
+      - reference
+      description: 模块明确输出的电压 low_warning 阈值；保留缺失，不套用通用阈值。
+      ntc_values:
+      - VOLTAGE_WARN_LOW
+      source_kind: ntc
+      observation_type: interface.optical_power.voltage_low_warning_volts
+      event_on_change: false
+      change_tracking: false
+    - canonical_field: bias_current_high_alarm_ma
+      semantic_type: threshold
+      value_type: number
+      unit: ma
+      required: false
+      assessment_roles:
+      - reference
+      description: 模块明确输出的偏置电流 high_alarm 阈值；保留缺失，不套用通用阈值。
+      ntc_values:
+      - AMPS_ALARM_HIGH
+      source_kind: ntc
+      observation_type: interface.optical_power.bias_current_high_alarm_ma
+      event_on_change: false
+      change_tracking: false
+    - canonical_field: bias_current_low_alarm_ma
+      semantic_type: threshold
+      value_type: number
+      unit: ma
+      required: false
+      assessment_roles:
+      - reference
+      description: 模块明确输出的偏置电流 low_alarm 阈值；保留缺失，不套用通用阈值。
+      ntc_values:
+      - AMPS_ALARM_LOW
+      source_kind: ntc
+      observation_type: interface.optical_power.bias_current_low_alarm_ma
+      event_on_change: false
+      change_tracking: false
+    - canonical_field: bias_current_high_warning_ma
+      semantic_type: threshold
+      value_type: number
+      unit: ma
+      required: false
+      assessment_roles:
+      - reference
+      description: 模块明确输出的偏置电流 high_warning 阈值；保留缺失，不套用通用阈值。
+      ntc_values:
+      - AMPS_WARN_HIGH
+      source_kind: ntc
+      observation_type: interface.optical_power.bias_current_high_warning_ma
+      event_on_change: false
+      change_tracking: false
+    - canonical_field: bias_current_low_warning_ma
+      semantic_type: threshold
+      value_type: number
+      unit: ma
+      required: false
+      assessment_roles:
+      - reference
+      description: 模块明确输出的偏置电流 low_warning 阈值；保留缺失，不套用通用阈值。
+      ntc_values:
+      - AMPS_WARN_LOW
+      source_kind: ntc
+      observation_type: interface.optical_power.bias_current_low_warning_ma
+      event_on_change: false
+      change_tracking: false
+    reference_revision: cisco-samples-2026-09-23
+    value_contract: same-name/v1
+    record_semantics:
+      reference_notes: LANE 对应 channel。保留现有 RX/TX 高低阈值和严格要求：在位但缺少光功率仍为数据不完整；不更改已有健康策略。
+      missing_values: 缺失与不支持不得补零；仅必填缺失导致不完整；可选字段无数据保留缺失。
+    value_references:
+    - template: cisco_nxos_show_interface_transceiver_details.textfsm
+      sha256: 8ff6510db0c2e13957229c3c127c7206ef3f4be728cc39f944861161669095b3
+      values:
+      - INTERFACE
+      - LANE
+      - TEMPERATURE_VALUE
+      - TEMPERATURE_ALARM_HIGH
+      - TEMPERATURE_ALARM_LOW
+      - TEMPERATURE_WARN_HIGH
+      - TEMPERATURE_WARN_LOW
+      - VOLTAGE_VALUE
+      - VOLTAGE_ALARM_HIGH
+      - VOLTAGE_ALARM_LOW
+      - VOLTAGE_WARN_HIGH
+      - VOLTAGE_WARN_LOW
+      - AMPS_VALUE
+      - AMPS_ALARM_HIGH
+      - AMPS_ALARM_LOW
+      - AMPS_WARN_HIGH
+      - AMPS_WARN_LOW
+      - RX_VALUE
+      - RX_ALARM_HIGH
+      - RX_ALARM_LOW
+      - RX_WARN_HIGH
+      - RX_WARN_LOW
+      - TX_VALUE
+      - TX_ALARM_HIGH
+      - TX_ALARM_LOW
+      - TX_WARN_HIGH
+      - TX_WARN_LOW
+    - template: cisco_ios_show_interface_transceiver.textfsm
+      sha256: dc880058b56f67351b757ea10aea1e5ea1ccbec46d685b422bf30661cc9f6766
+      values:
+      - INTERFACE
+      - TEMPERATURE
+      - VOLTAGE
+      - CURRENT
+      - TX_PWR
+      - RX_PWR
+    identity_dimension_rules:
       interface:
-        aliases:
-        - port
-        - interface_id
-        - interface_name
-        role: identity
-        value_type: interface_name
+        kind: identifier
+        value_type: text
+        description: 来自原文的稳定实体标识；不使用行号或虚构值补齐。
       channel:
-        aliases:
-        - lane
-        role: identity
-      transceiver_present:
-        aliases:
+        kind: identifier
+        value_type: text
+        description: 来自原文的稳定实体标识；不使用行号或虚构值补齐。
+    rule_semantics_snapshot:
+      catalog_id: netops.canonical-observations
+      version: 7
+      digest: b85f32f086657bc790293cef0f07eee63a011c55c975f4e1fd749122d9e91355
+      observations:
+      - id: interface.optical.presence
+        description: Whether an optical transceiver is physically present and diagnosable on the interface channel.
+        semantic_type: state
+        value_types:
+        - boolean
+        - text
+        canonical_unit: null
+        dimensions:
+        - channel
+        allowed_dimension_values: {}
+        allowed_values:
         - present
-        - presence
-        - transceiver_status
-        observation_type: interface.optical.presence
-        role: state
-      rx_power_dbm:
-        aliases:
-        - rx_power
-        - receive_power
-        - receive_power_dbm
-        observation_type: interface.optical.rx_power
-        role: metric
-      rx_high_alarm_dbm:
-        aliases:
-        - rx_power_high_alarm
-        - rx_high_alarm
-        role: threshold
-      rx_high_warning_dbm:
-        aliases:
-        - rx_power_high_warning
-        - rx_high_warning
-        role: threshold
-      rx_low_warning_dbm:
-        aliases:
-        - rx_power_low_warning
-        - rx_low_warning
-        role: threshold
-      rx_low_alarm_dbm:
-        aliases:
-        - rx_power_low_alarm
-        - rx_low_alarm
-        role: threshold
-      tx_power_dbm:
-        aliases:
-        - tx_power
-        - transmit_power
-        - transmit_power_dbm
-        observation_type: interface.optical.tx_power
-        role: metric
-      tx_high_alarm_dbm:
-        aliases:
-        - tx_power_high_alarm
-        - tx_high_alarm
-        role: threshold
-      tx_high_warning_dbm:
-        aliases:
-        - tx_power_high_warning
-        - tx_high_warning
-        role: threshold
-      tx_low_warning_dbm:
-        aliases:
-        - tx_power_low_warning
-        - tx_low_warning
-        role: threshold
-      tx_low_alarm_dbm:
-        aliases:
-        - tx_power_low_alarm
-        - tx_low_alarm
-        role: threshold
-      temperature_celsius:
-        aliases:
-        - temperature
-        - temperature_c
-        role: metric
-      voltage_v:
-        aliases:
-        - voltage
-        role: metric
-      bias_ma:
-        aliases:
-        - bias
-        - current_ma
-        role: metric
-      part_number:
-        aliases:
-        - vendor_part_number
-        - transceiver_part_number
-        observation_type: interface.optical.part_number
-        role: context
-      serial_number:
-        aliases:
-        - vendor_serial_number
-        - transceiver_serial_number
-        observation_type: interface.optical.serial_number
-        role: context
+        - absent
+        - unknown
+        state_groups:
+          healthy:
+          - present
+          unhealthy:
+          - absent
+          unknown:
+          - unknown
+        assessment_roles:
+        - current_state
+        - change
+      - id: interface.optical.rx_power
+        description: Current received optical power measurement for one interface channel.
+        semantic_type: gauge
+        value_types:
+        - number
+        canonical_unit: dbm
+        dimensions:
+        - channel
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - current_state
+        - change
+      - id: interface.optical.tx_power
+        description: Current transmitted optical power measurement for one interface channel.
+        semantic_type: gauge
+        value_types:
+        - number
+        canonical_unit: dbm
+        dimensions:
+        - channel
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - current_state
+        - change
+      - id: interface.optical.rx_low_warning
+        description: Device-reported low receive-power warning threshold for one interface channel.
+        semantic_type: threshold
+        value_types:
+        - number
+        canonical_unit: dbm
+        dimensions:
+        - channel
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - reference
+      - id: interface.optical.rx_low_alarm
+        description: Device-reported low receive-power alarm threshold for one interface channel.
+        semantic_type: threshold
+        value_types:
+        - number
+        canonical_unit: dbm
+        dimensions:
+        - channel
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - reference
+      - id: interface.optical.rx_high_warning
+        description: Device-reported high receive-power warning threshold for one interface channel.
+        semantic_type: threshold
+        value_types:
+        - number
+        canonical_unit: dbm
+        dimensions:
+        - channel
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - reference
+      - id: interface.optical.rx_high_alarm
+        description: Device-reported high receive-power alarm threshold for one interface channel.
+        semantic_type: threshold
+        value_types:
+        - number
+        canonical_unit: dbm
+        dimensions:
+        - channel
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - reference
+      - id: interface.optical.tx_low_warning
+        description: Device-reported low transmit-power warning threshold for one interface channel.
+        semantic_type: threshold
+        value_types:
+        - number
+        canonical_unit: dbm
+        dimensions:
+        - channel
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - reference
+      - id: interface.optical.tx_low_alarm
+        description: Device-reported low transmit-power alarm threshold for one interface channel.
+        semantic_type: threshold
+        value_types:
+        - number
+        canonical_unit: dbm
+        dimensions:
+        - channel
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - reference
+      - id: interface.optical.tx_high_warning
+        description: Device-reported high transmit-power warning threshold for one interface channel.
+        semantic_type: threshold
+        value_types:
+        - number
+        canonical_unit: dbm
+        dimensions:
+        - channel
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - reference
+      - id: interface.optical.tx_high_alarm
+        description: Device-reported high transmit-power alarm threshold for one interface channel.
+        semantic_type: threshold
+        value_types:
+        - number
+        canonical_unit: dbm
+        dimensions:
+        - channel
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - reference
+      - id: interface.optical.part_number
+        description: Optical transceiver manufacturer part number used to bind baselines.
+        semantic_type: state
+        value_types:
+        - text
+        canonical_unit: null
+        dimensions:
+        - channel
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+      - id: interface.optical.serial_number
+        description: Optical transceiver serial number used to bind baselines.
+        semantic_type: state
+        value_types:
+        - text
+        canonical_unit: null
+        dimensions:
+        - channel
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+      - id: interface.optical_power.temperature_celsius
+        description: 光模块温度，不是机箱环境温度。
+        semantic_type: gauge
+        value_types:
+        - number
+        canonical_unit: celsius
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+      - id: interface.optical_power.voltage_volts
+        description: 光模块供电电压。
+        semantic_type: gauge
+        value_types:
+        - number
+        canonical_unit: v
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+      - id: interface.optical_power.bias_current_ma
+        description: 激光器偏置电流；mA 与 A 不可混用。
+        semantic_type: gauge
+        value_types:
+        - number
+        canonical_unit: ma
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+      - id: interface.optical_power.transceiver_type
+        description: 模块类型原文，例如 QSFP-100G。
+        semantic_type: text
+        value_types:
+        - text
+        canonical_unit: null
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+      - id: interface.optical_power.vendor_name
+        description: 模块 name/vendor 原文，不由设备厂商推断。
+        semantic_type: text
+        value_types:
+        - text
+        canonical_unit: null
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+      - id: interface.optical_power.revision
+        description: 光模块硬件修订号。
+        semantic_type: text
+        value_types:
+        - text
+        canonical_unit: null
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+      - id: interface.optical_power.wavelength_nm
+        description: 模块波长；只有源输出明确 nm 时使用。
+        semantic_type: gauge
+        value_types:
+        - number
+        canonical_unit: nm
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+      - id: interface.optical_power.dom_supported
+        description: DOM 是否支持及不支持原因原文；不提供 DOM 不表示零光功率。
+        semantic_type: text
+        value_types:
+        - text
+        canonical_unit: null
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+      - id: interface.optical_power.temperature_high_alarm_celsius
+        description: 模块明确输出的温度 high_alarm 阈值；保留缺失，不套用通用阈值。
+        semantic_type: threshold
+        value_types:
+        - number
+        canonical_unit: celsius
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - reference
+      - id: interface.optical_power.temperature_low_alarm_celsius
+        description: 模块明确输出的温度 low_alarm 阈值；保留缺失，不套用通用阈值。
+        semantic_type: threshold
+        value_types:
+        - number
+        canonical_unit: celsius
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - reference
+      - id: interface.optical_power.temperature_high_warning_celsius
+        description: 模块明确输出的温度 high_warning 阈值；保留缺失，不套用通用阈值。
+        semantic_type: threshold
+        value_types:
+        - number
+        canonical_unit: celsius
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - reference
+      - id: interface.optical_power.temperature_low_warning_celsius
+        description: 模块明确输出的温度 low_warning 阈值；保留缺失，不套用通用阈值。
+        semantic_type: threshold
+        value_types:
+        - number
+        canonical_unit: celsius
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - reference
+      - id: interface.optical_power.voltage_high_alarm_volts
+        description: 模块明确输出的电压 high_alarm 阈值；保留缺失，不套用通用阈值。
+        semantic_type: threshold
+        value_types:
+        - number
+        canonical_unit: v
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - reference
+      - id: interface.optical_power.voltage_low_alarm_volts
+        description: 模块明确输出的电压 low_alarm 阈值；保留缺失，不套用通用阈值。
+        semantic_type: threshold
+        value_types:
+        - number
+        canonical_unit: v
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - reference
+      - id: interface.optical_power.voltage_high_warning_volts
+        description: 模块明确输出的电压 high_warning 阈值；保留缺失，不套用通用阈值。
+        semantic_type: threshold
+        value_types:
+        - number
+        canonical_unit: v
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - reference
+      - id: interface.optical_power.voltage_low_warning_volts
+        description: 模块明确输出的电压 low_warning 阈值；保留缺失，不套用通用阈值。
+        semantic_type: threshold
+        value_types:
+        - number
+        canonical_unit: v
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - reference
+      - id: interface.optical_power.bias_current_high_alarm_ma
+        description: 模块明确输出的偏置电流 high_alarm 阈值；保留缺失，不套用通用阈值。
+        semantic_type: threshold
+        value_types:
+        - number
+        canonical_unit: ma
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - reference
+      - id: interface.optical_power.bias_current_low_alarm_ma
+        description: 模块明确输出的偏置电流 low_alarm 阈值；保留缺失，不套用通用阈值。
+        semantic_type: threshold
+        value_types:
+        - number
+        canonical_unit: ma
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - reference
+      - id: interface.optical_power.bias_current_high_warning_ma
+        description: 模块明确输出的偏置电流 high_warning 阈值；保留缺失，不套用通用阈值。
+        semantic_type: threshold
+        value_types:
+        - number
+        canonical_unit: ma
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - reference
+      - id: interface.optical_power.bias_current_low_warning_ma
+        description: 模块明确输出的偏置电流 low_warning 阈值；保留缺失，不套用通用阈值。
+        semantic_type: threshold
+        value_types:
+        - number
+        canonical_unit: ma
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - reference
+    change_tracking_revision: ordinary-change-tracking-v1
   report_projection: optical_power
   applicability:
     capability: optical_diagnostics
     unknown_is: unable_to_determine
+  freshness_policy:
+    max_observation_age: 24h
+    max_collection_span: 8h
+    clock_skew_tolerance: 10m
   empty_result_policy:
     classification: not_applicable
   coverage_policy:
@@ -1201,7 +2197,7 @@ check_items:
     first_observation: unable_to_determine
   status: active
 - id: environment.power
-  version: 4
+  version: 6
   name: 电源状态
   category: environment
   description: Evaluate power-supply presence and operating state.
@@ -1246,6 +2242,8 @@ check_items:
       assessment_roles:
       - evidence
       dimensions: []
+      change_tracking: false
+      event_on_change: false
     - canonical_field: voltage_volts
       observation_type: environment.power.voltage_volts
       semantic_type: gauge
@@ -1256,6 +2254,8 @@ check_items:
       assessment_roles:
       - evidence
       dimensions: []
+      change_tracking: false
+      event_on_change: false
     - canonical_field: output_watts
       observation_type: environment.power.output_watts
       semantic_type: gauge
@@ -1266,6 +2266,8 @@ check_items:
       assessment_roles:
       - evidence
       dimensions: []
+      change_tracking: false
+      event_on_change: false
     - canonical_field: fan_direction
       observation_type: environment.power.fan_direction
       semantic_type: text
@@ -1286,10 +2288,99 @@ check_items:
       assessment_roles:
       - evidence
       dimensions: []
+      change_tracking: false
+      event_on_change: false
+    - canonical_field: model
+      semantic_type: text
+      value_type: text
+      description: 电源模块型号。
+      required: false
+      assessment_roles:
+      - evidence
+      ntc_values:
+      - POWER_SUPPLY_MODEL
+      source_kind: ntc
+      observation_type: environment.power.model
+      event_on_change: false
+      change_tracking: false
+    - canonical_field: input_watts
+      semantic_type: gauge
+      value_type: number
+      description: 单个电源实际输入功率。
+      required: false
+      assessment_roles:
+      - evidence
+      ntc_values:
+      - POWER_SUPPLY_INPUT
+      source_kind: ntc
+      unit: w
+      observation_type: environment.power.input_watts
+      event_on_change: false
+      change_tracking: false
+    - canonical_field: capacity_watts
+      semantic_type: gauge
+      value_type: number
+      description: 单个电源额定容量，不是当前输出功率。
+      required: false
+      assessment_roles:
+      - evidence
+      ntc_values:
+      - POWER_SUPPLY_CAPACITY
+      source_kind: ntc
+      unit: w
+      observation_type: environment.power.capacity_watts
+      event_on_change: false
+      change_tracking: false
+    - canonical_field: input_state
+      semantic_type: text
+      value_type: text
+      description: 输入供电状态原文。
+      required: false
+      assessment_roles:
+      - evidence
+      ntc_values: []
+      source_kind: sample_cli
+      observation_type: environment.power.input_state
+      event_on_change: false
+      change_tracking: false
+    - canonical_field: output_state
+      semantic_type: text
+      value_type: text
+      description: 输出供电状态原文。
+      required: false
+      assessment_roles:
+      - evidence
+      ntc_values: []
+      source_kind: sample_cli
+      observation_type: environment.power.output_state
+      event_on_change: false
+      change_tracking: false
+    reference_revision: cisco-samples-2026-09-23
+    record_semantics:
+      reference_notes: 每个电源一行。POWER_SUPPLY_OUTPUT 对应 output_watts；禁止把设备 Total Power 汇总值复制到每个电源。
+      missing_values: 缺失与不支持不得补零；仅必填缺失导致不完整；可选字段无数据保留缺失。
+    value_references:
+    - template: cisco_nxos_show_environment.textfsm
+      sha256: ada88fb6ab46f3f2043237c96d5d8ee899e81aa09b4ff31aa74dd274078c3b6d
+      values:
+      - POWER_SUPPLY
+      - POWER_SUPPLY_MODEL
+      - POWER_SUPPLY_OUTPUT
+      - POWER_SUPPLY_INPUT
+      - POWER_SUPPLY_CAPACITY
+      - POWER_SUPPLY_STATUS
+      - FAN
+      - FAN_STATUS
+      - TEMPERATURE_MODULE
+      - TEMPERATURE_SENSOR
+      - TEMPERATURE_MAJOR_THRESH
+      - TEMPERATURE_MINOR_THRESH
+      - TEMPERATURE_CURRENT
+      - TEMPERATURE_STATUS
     rule_semantics_snapshot:
       catalog_id: netops.canonical-observations
-      version: 5
-      digest: c4d3613d81b45085b28f6d4189c7f7cdd2e634c57494786c9f791c0e7f4c2738
+      version: 7
+      digest: b85f32f086657bc790293cef0f07eee63a011c55c975f4e1fd749122d9e91355
       observations:
       - id: environment.power.state
         description: Current presence and operating health state of one power supply.
@@ -1393,6 +2484,67 @@ check_items:
         state_groups: {}
         assessment_roles:
         - evidence
+      - id: environment.power.model
+        description: 电源模块型号。
+        semantic_type: text
+        value_types:
+        - text
+        canonical_unit: null
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+      - id: environment.power.input_watts
+        description: 单个电源实际输入功率。
+        semantic_type: gauge
+        value_types:
+        - number
+        canonical_unit: w
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+      - id: environment.power.capacity_watts
+        description: 单个电源额定容量，不是当前输出功率。
+        semantic_type: gauge
+        value_types:
+        - number
+        canonical_unit: w
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+      - id: environment.power.input_state
+        description: 输入供电状态原文。
+        semantic_type: text
+        value_types:
+        - text
+        canonical_unit: null
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+      - id: environment.power.output_state
+        description: 输出供电状态原文。
+        semantic_type: text
+        value_types:
+        - text
+        canonical_unit: null
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+    change_tracking_revision: ordinary-change-tracking-v1
   report_projection: auto@1
   applicability: {}
   freshness_policy:
@@ -1507,7 +2659,7 @@ check_items:
     require_rule_evaluation: false
   status: active
 - id: environment.temperature
-  version: 2
+  version: 5
   name: Temperature sensor health
   category: environment
   description: Evaluate current sensor temperature against device-reported thresholds.
@@ -1523,61 +2675,226 @@ check_items:
       semantic_type: gauge
       unit: celsius
       canonical_field: temperature_celsius
+      mapping_guidance: Map the measured sensor value and evaluate it only against the warning/alarm thresholds reported for
+        the same slot and sensor.
+      threshold_references:
+        high:
+          field_name: temperature_high_warning_celsius
+        critical_high:
+          field_name: temperature_high_alarm_celsius
+      policy_constraints:
+        allowed_compare_modes:
+        - threshold_and_deadband
+        require_structured_threshold_references: true
+        required_threshold_reference_any:
+        - high
+        - critical_high
+        minimum_hysteresis: 2
+      event_constraints:
+        allow_critical: true
+        role_event_types:
+          high: TemperatureHigh
+          critical_high: TemperatureCritical
+          high_recovery: TemperatureRecovered
+        required_event_types:
+        - TemperatureHigh
+        - TemperatureCritical
+        - TemperatureRecovered
+        required_event_classes:
+          TemperatureHigh: fault
+          TemperatureCritical: fault
+          TemperatureRecovered: recovery
+        required_severities:
+          TemperatureHigh: warning
+          TemperatureCritical: critical
+          TemperatureRecovered: info
+        required_recovery_pairs:
+        - fault: TemperatureHigh
+          recovery: TemperatureRecovered
+        - fault: TemperatureCritical
+          recovery: TemperatureRecovered
+        max_rule_count: 3
     - observation_type: environment.temperature.warning
       semantic_type: threshold
       unit: celsius
       canonical_field: temperature_high_warning_celsius
       required: false
+      change_tracking: false
+      event_on_change: false
+      assessment_roles:
+      - evidence
     - observation_type: environment.temperature.alarm
       semantic_type: threshold
       unit: celsius
       canonical_field: temperature_high_alarm_celsius
       required: false
-    parser_field_vocabulary:
+      change_tracking: false
+      event_on_change: false
+      assessment_roles:
+      - evidence
+    - canonical_field: sensor_status
+      semantic_type: text
+      value_type: text
+      description: 设备报告的温度传感器状态；保留 Ok/Normal 等原文。
+      required: false
+      assessment_roles:
+      - evidence
+      ntc_values:
+      - STATUS
+      source_kind: ntc
+      observation_type: environment.temperature.sensor_status
+      event_on_change: false
+      change_tracking: false
+    - canonical_field: temperature_low_warning_celsius
+      semantic_type: threshold
+      value_type: number
+      description: 设备明确报告的低温告警阈值；未输出时缺失。
+      required: false
+      assessment_roles:
+      - evidence
+      ntc_values: []
+      source_kind: sample_cli
+      unit: celsius
+      observation_type: environment.temperature.temperature_low_warning_celsius
+      event_on_change: false
+      change_tracking: false
+    - canonical_field: temperature_low_alarm_celsius
+      semantic_type: threshold
+      value_type: number
+      description: 设备明确报告的低温严重告警阈值。
+      required: false
+      assessment_roles:
+      - evidence
+      ntc_values: []
+      source_kind: sample_cli
+      unit: celsius
+      observation_type: environment.temperature.temperature_low_alarm_celsius
+      event_on_change: false
+      change_tracking: false
+    reference_revision: cisco-samples-2026-09-23
+    value_contract: same-name/v1
+    record_semantics:
+      reference_notes: MODULE/SENSOR 对应 slot/sensor；CURRENT_VALUE、MINOR_THRESHOLD、MAJOR_THRESHOLD 对应现有温度、warning 和 alarm。未知单位不自动当摄氏度。
+      missing_values: 缺失与不支持不得补零；仅必填缺失导致不完整；可选字段无数据保留缺失。
+    value_references:
+    - template: cisco_nxos_show_environment_temperature.textfsm
+      sha256: 0d1921cf16e914dbc936709734119576245413ef0d20bb635189acc0c5c8f3d4
+      values:
+      - CURRENT_VALUE
+      - MAJOR_THRESHOLD
+      - MINOR_THRESHOLD
+      - STATUS
+      - MODULE
+      - SENSOR
+    - template: cisco_ios_show_environment_temperature.textfsm
+      sha256: 79f9929cd7afb1b8623deaeea6a9e2da6f2619de31da462a2c2eba67fc48253f
+      values:
+      - SWITCH
+      - SWITCH_TEMPERATURE
+      - INLET_TEMPERATURE_VALUE
+      - INLET_TEMPERATURE_STATE
+      - INLET_YELLOW_THRESHOLD
+      - INLET_RED_THRESHOLD
+      - HOTSPOT_TEMPERATURE_VALUE
+      - HOTSPOT_TEMPERATURE_STATE
+      - HOTSPOT_YELLOW_THRESHOLD
+      - HOTSPOT_RED_THRESHOLD
+    identity_dimension_rules:
       slot:
-        aliases:
-        - module
-        role: identity
+        kind: identifier
+        value_type: text
+        description: 来自原文的稳定实体标识；不使用行号或虚构值补齐。
       sensor:
-        aliases:
-        - sensor_name
-        role: identity
-      temperature_celsius:
-        aliases:
-        - temperature
-        - current_temperature
-        - cur_temp
-        observation_type: environment.temperature.current
-        role: metric
-      temperature_status:
-        aliases:
-        - status
-        - state
-        role: state
-      temperature_high_warning_celsius:
-        aliases:
-        - high_warning
-        - high_warn
-        - minor_thresh
-        observation_type: environment.temperature.warning
-        role: threshold
-      temperature_high_alarm_celsius:
-        aliases:
-        - high_alarm
-        - major_thresh
-        observation_type: environment.temperature.alarm
-        role: threshold
-      temperature_low_warning_celsius:
-        aliases:
-        - low_warning
-        - low_warn
-        role: threshold
-      temperature_low_alarm_celsius:
-        aliases:
-        - low_alarm
-        role: threshold
+        kind: identifier
+        value_type: text
+        description: 来自原文的稳定实体标识；不使用行号或虚构值补齐。
+    rule_semantics_snapshot:
+      catalog_id: netops.canonical-observations
+      version: 7
+      digest: b85f32f086657bc790293cef0f07eee63a011c55c975f4e1fd749122d9e91355
+      observations:
+      - id: environment.temperature.current
+        description: Current temperature reported by one device sensor.
+        semantic_type: gauge
+        value_types:
+        - number
+        canonical_unit: celsius
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - current_state
+        - change
+      - id: environment.temperature.warning
+        description: Device-reported warning threshold for one temperature sensor.
+        semantic_type: threshold
+        value_types:
+        - number
+        canonical_unit: celsius
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - reference
+      - id: environment.temperature.alarm
+        description: Device-reported alarm threshold for one temperature sensor.
+        semantic_type: threshold
+        value_types:
+        - number
+        canonical_unit: celsius
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - reference
+      - id: environment.temperature.sensor_status
+        description: 设备报告的温度传感器状态；保留 Ok/Normal 等原文。
+        semantic_type: text
+        value_types:
+        - text
+        canonical_unit: null
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+      - id: environment.temperature.temperature_low_warning_celsius
+        description: 设备明确报告的低温告警阈值；未输出时缺失。
+        semantic_type: threshold
+        value_types:
+        - number
+        canonical_unit: celsius
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+      - id: environment.temperature.temperature_low_alarm_celsius
+        description: 设备明确报告的低温严重告警阈值。
+        semantic_type: threshold
+        value_types:
+        - number
+        canonical_unit: celsius
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - evidence
+    change_tracking_revision: ordinary-change-tracking-v1
   report_projection: temperature
   applicability: {}
+  freshness_policy:
+    max_observation_age: 24h
+    max_collection_span: 8h
+    clock_skew_tolerance: 10m
+  empty_result_policy:
+    classification: invalid
   coverage_policy:
     model: derived_entity_set
     source: previous_qualified_observation
@@ -1968,7 +3285,7 @@ check_items:
     require_rule_evaluation: false
   status: active
 - id: interface.runtime_statistics
-  version: 1
+  version: 4
   name: 接口状态运行信息和统计信息
   category: interface
   description: 接口状态、基本配置及收发统计；每个可用 Value 的变化均产生信息事件，变化不等于故障。
@@ -2208,19 +3525,10 @@ check_items:
       unit: count
       description: 接口累计接收报文数
       required: false
-      event_on_change: true
-      event_constraints:
-        required_event_types:
-        - interface.runtime_statistics.input_packets.changed
-        role_event_types:
-          change: interface.runtime_statistics.input_packets.changed
-        required_event_classes:
-          interface.runtime_statistics.input_packets.changed: change
-        required_severities:
-          interface.runtime_statistics.input_packets.changed: info
-        required_recovery_pairs: []
+      event_on_change: false
       assessment_roles:
-      - change
+      - evidence
+      change_tracking: false
     - canonical_field: output_packets
       observation_type: interface.runtime_statistics.output_packets
       semantic_type: counter
@@ -2228,19 +3536,10 @@ check_items:
       unit: count
       description: 接口累计发送报文数
       required: false
-      event_on_change: true
-      event_constraints:
-        required_event_types:
-        - interface.runtime_statistics.output_packets.changed
-        role_event_types:
-          change: interface.runtime_statistics.output_packets.changed
-        required_event_classes:
-          interface.runtime_statistics.output_packets.changed: change
-        required_severities:
-          interface.runtime_statistics.output_packets.changed: info
-        required_recovery_pairs: []
+      event_on_change: false
       assessment_roles:
-      - change
+      - evidence
+      change_tracking: false
     - canonical_field: input_bytes
       observation_type: interface.runtime_statistics.input_bytes
       semantic_type: counter
@@ -2248,19 +3547,10 @@ check_items:
       unit: bytes
       description: 接口累计接收字节数
       required: false
-      event_on_change: true
-      event_constraints:
-        required_event_types:
-        - interface.runtime_statistics.input_bytes.changed
-        role_event_types:
-          change: interface.runtime_statistics.input_bytes.changed
-        required_event_classes:
-          interface.runtime_statistics.input_bytes.changed: change
-        required_severities:
-          interface.runtime_statistics.input_bytes.changed: info
-        required_recovery_pairs: []
+      event_on_change: false
       assessment_roles:
-      - change
+      - evidence
+      change_tracking: false
     - canonical_field: output_bytes
       observation_type: interface.runtime_statistics.output_bytes
       semantic_type: counter
@@ -2268,19 +3558,10 @@ check_items:
       unit: bytes
       description: 接口累计发送字节数
       required: false
-      event_on_change: true
-      event_constraints:
-        required_event_types:
-        - interface.runtime_statistics.output_bytes.changed
-        role_event_types:
-          change: interface.runtime_statistics.output_bytes.changed
-        required_event_classes:
-          interface.runtime_statistics.output_bytes.changed: change
-        required_severities:
-          interface.runtime_statistics.output_bytes.changed: info
-        required_recovery_pairs: []
+      event_on_change: false
       assessment_roles:
-      - change
+      - evidence
+      change_tracking: false
     - canonical_field: input_errors
       observation_type: interface.runtime_statistics.input_errors
       semantic_type: counter
@@ -2441,6 +3722,288 @@ check_items:
         required_recovery_pairs: []
       assessment_roles:
       - change
+    rule_semantics_snapshot:
+      catalog_id: netops.canonical-observations
+      version: 7
+      digest: b85f32f086657bc790293cef0f07eee63a011c55c975f4e1fd749122d9e91355
+      observations:
+      - id: interface.runtime_statistics.line_status
+        description: 接口物理状态，保留管理关闭及故障原因等完整原文
+        semantic_type: state
+        value_types:
+        - text
+        canonical_unit: null
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - change
+      - id: interface.runtime_statistics.protocol_status
+        description: 接口链路协议状态，保留括号中的状态说明
+        semantic_type: state
+        value_types:
+        - text
+        canonical_unit: null
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - change
+      - id: interface.runtime_statistics.description
+        description: 接口描述，空字符串也是有效描述
+        semantic_type: text
+        value_types:
+        - text
+        canonical_unit: null
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - change
+      - id: interface.runtime_statistics.hw_address
+        description: 接口硬件 MAC 地址
+        semantic_type: text
+        value_types:
+        - text
+        canonical_unit: null
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - change
+      - id: interface.runtime_statistics.bandwidth_kbps
+        description: 接口原文 Bandwidth 配置带宽，单位 kbps，不等于当前吞吐量
+        semantic_type: gauge
+        value_types:
+        - integer
+        canonical_unit: kbps
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - change
+      - id: interface.runtime_statistics.speed
+        description: 接口当前速度原文，保留原文单位或厂商显示格式
+        semantic_type: text
+        value_types:
+        - text
+        canonical_unit: null
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - change
+      - id: interface.runtime_statistics.duplex
+        description: 接口双工模式原文
+        semantic_type: state
+        value_types:
+        - text
+        canonical_unit: null
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - change
+      - id: interface.runtime_statistics.port_link_type
+        description: 接口链路类型，保留 configured/negotiated 等原文
+        semantic_type: state
+        value_types:
+        - text
+        canonical_unit: null
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - change
+      - id: interface.runtime_statistics.vlan_native
+        description: 接口缺省 VLAN/PVID 编号
+        semantic_type: gauge
+        value_types:
+        - integer
+        canonical_unit: null
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - change
+      - id: interface.runtime_statistics.mtu
+        description: 接口三层最大传输单元，不与二层最大帧长混用
+        semantic_type: gauge
+        value_types:
+        - integer
+        canonical_unit: bytes
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - change
+      - id: interface.runtime_statistics.l2mtu
+        description: 接口二层最大帧长度，不与三层 MTU 混用
+        semantic_type: gauge
+        value_types:
+        - integer
+        canonical_unit: bytes
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - change
+      - id: interface.runtime_statistics.input_packets
+        description: 接口累计接收报文数
+        semantic_type: counter
+        value_types:
+        - integer
+        canonical_unit: count
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - change
+      - id: interface.runtime_statistics.output_packets
+        description: 接口累计发送报文数
+        semantic_type: counter
+        value_types:
+        - integer
+        canonical_unit: count
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - change
+      - id: interface.runtime_statistics.input_bytes
+        description: 接口累计接收字节数
+        semantic_type: counter
+        value_types:
+        - integer
+        canonical_unit: bytes
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - change
+      - id: interface.runtime_statistics.output_bytes
+        description: 接口累计发送字节数
+        semantic_type: counter
+        value_types:
+        - integer
+        canonical_unit: bytes
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - change
+      - id: interface.runtime_statistics.input_errors
+        description: 接口接收错误总数；Huawei Input 下的 Total Error；没有输出则缺失
+        semantic_type: counter
+        value_types:
+        - integer
+        canonical_unit: count
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - change
+      - id: interface.runtime_statistics.output_errors
+        description: 接口发送错误总数；只取输出方向明确的错误总数
+        semantic_type: counter
+        value_types:
+        - integer
+        canonical_unit: count
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - change
+      - id: interface.runtime_statistics.input_crc_errors
+        description: 接收方向 CRC/FCS 错误计数，保留厂商计数口径
+        semantic_type: counter
+        value_types:
+        - integer
+        canonical_unit: count
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - change
+      - id: interface.runtime_statistics.last_physical_up_time
+        description: 最近物理 Up 时间，原文 - 表示未记录
+        semantic_type: text
+        value_types:
+        - text
+        canonical_unit: null
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - change
+      - id: interface.runtime_statistics.last_physical_down_time
+        description: 最近物理 Down 时间，原文 - 表示未记录
+        semantic_type: text
+        value_types:
+        - text
+        canonical_unit: null
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - change
+      - id: interface.runtime_statistics.negotiation
+        description: 接口自协商状态原文
+        semantic_type: state
+        value_types:
+        - text
+        canonical_unit: null
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - change
+      - id: interface.runtime_statistics.port_mode
+        description: 接口介质工作模式原文
+        semantic_type: state
+        value_types:
+        - text
+        canonical_unit: null
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - change
+      - id: interface.runtime_statistics.loopback
+        description: 接口环回模式原文
+        semantic_type: state
+        value_types:
+        - text
+        canonical_unit: null
+        dimensions: []
+        allowed_dimension_values: {}
+        allowed_values: []
+        state_groups: {}
+        assessment_roles:
+        - change
+    change_tracking_revision: ordinary-change-tracking-v1
   report_projection: auto@1
   applicability: {}
   freshness_policy:
@@ -2453,8 +4016,6 @@ check_items:
     model: non_exhaustive
     require_rule_evaluation: true
   status: active
-  digest: 7af7c1aabc721a64574cd6d41d4144b993bd78c4fc0f7ca14f40e2d7a8b8397f
-  version_id: 5ae03063-2121-550b-8ccf-873197de9012
 implementations:
 - id: h3c-device-version
   version: 2
@@ -2652,7 +4213,7 @@ implementations:
   selection_priority: 100
   status: active
 - id: huawei-interface-values
-  version: 3
+  version: 4
   name: Huawei display interface 同名字段
   description: ''
   check_item_ids:
@@ -2676,7 +4237,7 @@ implementations:
     - check_item_id: interface.runtime_statistics
       source_record_set: default
       empty_status: unavailable
-      check_item_version_id: 5ae03063-2121-550b-8ccf-873197de9012
+      check_item_version_id: 525dc1a1-b596-57b2-bde9-5313146bfb90
       projection:
         fields:
           bandwidth_kbps:

@@ -1,16 +1,13 @@
 import type { DeviceBulkRequest } from '@netops/services/api';
 import { businessHref } from '@netops/apps/appRoutes';
-import { appRoutes, workbenchEnabled } from '@netops/apps/appRoutes';
 import React, { useMemo, useState } from 'react';
 import { Alert, AutoComplete, Button, Descriptions, Drawer, Dropdown, Form, Input, Modal, Row, Col, Select, Space, Table, Tabs, Tag, Typography, Upload, message } from 'antd';
-import { DeleteOutlined, DownloadOutlined, EditOutlined, EyeOutlined, ImportOutlined, LinkOutlined, MoreOutlined, PlayCircleOutlined, PlusOutlined, ReloadOutlined, SafetyCertificateOutlined, SearchOutlined } from '@ant-design/icons';
+import { DeleteOutlined, DownloadOutlined, EditOutlined, EyeOutlined, ImportOutlined, LinkOutlined, MoreOutlined, PlusOutlined, ReloadOutlined, SafetyCertificateOutlined, SearchOutlined } from '@ant-design/icons';
 import { useMutation, useQuery } from 'react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import DeviceWorkspaceLayout from './DeviceWorkspaceLayout';
-import { useAuth } from '@netops/context/AuthContext';
 import WorkflowRunMonitor from '@netops/components/skills/WorkflowRunMonitor';
-import AgentModuleControlTab from './components/AgentModuleControlTab';
-import PatrolCommandBindingDrawer from './components/PatrolCommandBindingDrawer';
+import PatrolCommandConfiguration from './components/PatrolCommandConfiguration';
 import DeviceAssetInventoryPanel, { type DeviceAssetFilters } from './components/DeviceAssetInventoryPanel';
 import EvidenceTimeline from '@netops/components/devices/EvidenceTimeline';
 import { deviceApi, type DeviceBulkPreview, type DeviceBulkDeletePreview, type DeviceBulkUpdate, type DeviceConnectionHealthRecord, type DeviceCredentialInspection, type DeviceDynamicGroup, type DeviceDynamicGroupPreview, type DeviceEffectivePlanPreview, type DeviceIdentityDiscoveryResult, type DeviceImportPayload, type DeviceConnectivityTestResult, type DeviceImportPreview, type DeviceImportTemplate, type DeviceUpsertPayload, type ManagedDevice } from '@netops/services/api';
@@ -191,11 +188,10 @@ export interface DeviceOperationsWorkspaceProps {
 }
 const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = () => {
   const isMobile = useIsMobile();
-  const { user } = useAuth();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedTab = searchParams.get('tab') || 'overview';
-  const activeTab = ['overview', 'patrol', 'modules'].includes(requestedTab) ? requestedTab : 'overview';
+  const activeTab = ['overview', 'commands'].includes(requestedTab) ? requestedTab : 'overview';
   const [form] = Form.useForm<DeviceFormValues>();
   const [bulkForm] = Form.useForm<BulkFormValues>();
   const [dynamicGroupForm] = Form.useForm<DynamicGroupFormValues>();
@@ -238,7 +234,6 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = () =
   const [editingDynamicGroup, setEditingDynamicGroup] = useState<DeviceDynamicGroup | null>(null);
   const [dynamicGroupPreview, setDynamicGroupPreview] = useState<DeviceDynamicGroupPreview | null>(null);
   const [dynamicGroupRules, setDynamicGroupRules] = useState<DynamicGroupRule[]>([]);
-  const [profileBindingOpen, setProfileBindingOpen] = useState(false);
   const [credentialInspection, setCredentialInspection] = useState<DeviceCredentialInspection | null>(null);
   const [devicePage, setDevicePage] = useState(1);
   const [devicePageSize, setDevicePageSize] = useState(20);
@@ -496,7 +491,11 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = () =
     });
     return selector;
   };
-  const openProfileBinding = () => setProfileBindingOpen(true);
+  const openProfileBinding = () => {
+    const next = new URLSearchParams(searchParams);
+    next.set('tab', 'commands');
+    setSearchParams(next);
+  };
   const buildBulkPayload = (values: BulkFormValues): DeviceBulkRequest => {
     const update: DeviceBulkUpdate = {
       command_profile: values.command_profile || undefined,
@@ -1053,9 +1052,6 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = () =
   return <DeviceWorkspaceLayout activeKey={activeTab} onImport={() => setImportOpen(true)} onGroups={openDynamicGroupCreate} title={"设备管理"} subtitle={"维护设备资产、连接、分组与巡检配置"} toolbar={<Space wrap>
           {<Button icon={<PlusOutlined />} type="primary" onClick={openCreate}>新增设备</Button>}
           {<Button icon={<LinkOutlined />} onClick={openProfileBinding}>绑定巡检命令集</Button>}
-          {user?.app_ids?.includes('inspection') && <Button icon={<PlayCircleOutlined />} type={'default'} onClick={() => navigate(appRoutes.patrol)}>
-            新建巡检
-          </Button>}
           {<Dropdown trigger={['click']} menu={{
       items: [{
         key: 'import',
@@ -1099,10 +1095,6 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = () =
         </Space>}>
       <Tabs activeKey={activeTab} onChange={key => {
       const next = new URLSearchParams(searchParams);
-      if (key === 'patrol' && true && workbenchEnabled) {
-        navigate(appRoutes.patrol);
-        return;
-      }
       if (key === 'overview') {
         next.delete('tab');
       } else {
@@ -1129,9 +1121,10 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = () =
         }} onSelectedRowKeysChange={setSelectedRowKeys} />
               </Space>
     }, {
-      key: 'modules',
-      label: '平台模块',
-      children: <AgentModuleControlTab />
+      key: 'commands',
+      label: '配置命令集',
+      children: <PatrolCommandConfiguration open={activeTab === 'commands'} onSaved={() => { refetch(); }} selectedDeviceIds={selectedRowKeys.map(String)} currentSelector={currentFilterSelector()} groups={deviceGroups} dynamicGroups={dynamicGroups} />
+
     }]} />
 
       <Drawer title={selected?.device_name || '设备详情'} open={Boolean(selected)} onClose={() => {
@@ -1558,9 +1551,6 @@ const DeviceOperationsWorkspace: React.FC<DeviceOperationsWorkspaceProps> = () =
         </Space>
       </Drawer>
 
-      <PatrolCommandBindingDrawer open={profileBindingOpen} onClose={() => setProfileBindingOpen(false)} onSaved={() => {
-      refetch();
-    }} selectedDeviceIds={selectedRowKeys.map(String)} currentSelector={currentFilterSelector()} groups={deviceGroups} dynamicGroups={dynamicGroups} />
       <Modal title={editing ? '编辑设备' : '新增设备'} open={modalOpen} onCancel={() => {
       setModalOpen(false);
       setEditing(null);

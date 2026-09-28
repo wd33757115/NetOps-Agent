@@ -151,15 +151,23 @@ def test_generates_change_and_event_candidates_without_collection_inputs():
         "parser_template_count": 0,
     }
     assert result["change_policies"][0]["source"] == ("check_item_all_value_changes")
-    assert len(result["event_rules"]) == 23
+    assert len(result["event_rules"]) == 19
     assert {rule["event_class"] for rule in result["event_rules"]} == {"change"}
     assert {rule["event_type"] for rule in result["event_rules"]} == {
         row["observation_type"] + ".changed" for row in item.canonical_contract["observations"]
+        if row.get("change_tracking", True)
     }
 
 
 def test_health_target_without_state_groups_or_thresholds_is_blocked():
     item = _catalog_item("environment.temperature")
+    from copy import deepcopy
+    from dataclasses import replace
+    contract = deepcopy(item.canonical_contract)
+    for row in contract['observations']:
+        for key in ('health_policy', 'threshold_references', 'event_constraints', 'policy_constraints'):
+            row.pop(key, None)
+    item = replace(item, canonical_contract=contract)
     context = build_canonical_rule_context(
         check_item_id=item.id,
         check_item_version_id=item.version_id,
@@ -213,17 +221,13 @@ def test_cpu_and_memory_candidates_use_dynamic_thresholds_only(
     )
 
     result = generate_canonical_rule_candidates(context)
-    policy = next(
-        row for row in result["change_policies"] if row["observation_type"] == observation_type
-    )
-
     assert result["success"] is True
-    assert policy["thresholds"] == {}
-    assert policy["allow_static_threshold_fallback"] is False
-    assert policy["threshold_references"] == {
-        "high": {"field_name": warning_field},
-        "critical_high": {"field_name": alarm_field},
-    }
+    assert not result["change_policies"]
+    health_rules = [row for row in result["event_rules"] if row["observation_type"] == observation_type]
+    assert {row["condition"]["reference_field"] for row in health_rules} == {warning_field, alarm_field}
+    assert all("threshold" not in row["condition"] for row in health_rules)
+    target = next(row for row in item.canonical_contract['observations'] if row['observation_type'] == observation_type)
+    assert target['health_policy']['baseline_mode'] == 'trend_only'
 
 
 def test_optical_candidate_declares_linear_baseline_and_module_identity():
@@ -237,18 +241,11 @@ def test_optical_candidate_declares_linear_baseline_and_module_identity():
     )
 
     result = generate_canonical_rule_candidates(context)
-    rx = next(
-        row
-        for row in result["change_policies"]
-        if row["observation_type"] == "interface.optical.rx_power"
-    )
-
-    assert rx["baseline_comparison"] == {
-        "kind": "linear_power_loss_ratio",
-        "max_loss_ratio": 0.1,
-        "identity_fields": ["part_number", "serial_number"],
+    assert result['success'] is True
+    assert not any(row['observation_type'] == 'interface.optical.rx_power' for row in result['change_policies'])
+    assert not any(row['event_type'] == 'OpticalRxPowerDegraded' for row in result['event_rules'])
+    rx = next(row for row in item.canonical_contract['observations'] if row['observation_type'] == 'interface.optical.rx_power')
+    assert rx['health_policy']['trend'] == {
+        'kind': 'linear_power_drop', 'threshold_ratio': 0.1,
+        'identity_fields': ['part_number', 'serial_number'], 'require_identity': False,
     }
-    baseline_rule = next(
-        row for row in result["event_rules"] if row["event_type"] == "OpticalRxPowerDegraded"
-    )
-    assert baseline_rule["condition"]["kind"] == "linear_power_baseline_loss"

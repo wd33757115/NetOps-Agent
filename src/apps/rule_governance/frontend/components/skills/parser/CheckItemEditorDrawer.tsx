@@ -54,6 +54,7 @@ interface CheckItemFormValues {
     value_type: string
     unit?: string
     required: boolean
+    change_tracking: boolean
     semantic_definition?: any
     compare_mode?: string
     threshold_fields?: Record<string, string>
@@ -110,6 +111,7 @@ const initialValues = (checkItem?: ParserCheckItem, catalog?: CanonicalObservati
         value_type: String(item.value_type || semantic?.value_types?.[0] || 'text'),
         unit: String(item.unit || semantic?.canonical_unit || ''),
         required: item.required !== false,
+        change_tracking: item.change_tracking !== false,
         semantic_definition: semantic,
         compare_mode: (item.policy_constraints as any)?.allowed_compare_modes?.length === 1
           ? (item.policy_constraints as any).allowed_compare_modes[0]
@@ -228,6 +230,7 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
         unit: field.unit?.trim() || null,
         dimensions: existing?.dimensions || definition?.dimensions || [],
         required: field.required,
+        change_tracking: field.change_tracking !== false,
       }
     })
     const vocabulary = {

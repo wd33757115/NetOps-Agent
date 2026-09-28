@@ -6,14 +6,17 @@ export default function PatrolDeviceSelector({
   devices,
   selected,
   onChange,
+  disabled = false,
 }: {
   devices: ManagedDevice[]
   selected: string[]
   onChange: (ids: string[]) => void
+  disabled?: boolean
 }) {
   return (
     <Select
       mode="multiple"
+      disabled={disabled}
       allowClear
       showSearch
       optionFilterProp="label"

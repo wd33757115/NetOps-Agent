@@ -192,27 +192,27 @@ class PatrolBatchService:
                 domain_cache[key] = report_domain(*key)
             return domain_cache[key]
 
+        def group_by_domain(items, *, command_field="command", command_only=False):
+            grouped = {}
+            for item in items:
+                domain = domain_for(None if command_only else item.get("entity_type"), item.get(command_field))
+                grouped.setdefault(domain, []).append(item)
+            return grouped
+
+        observations_by_domain = group_by_domain(observations)
+        commands_by_domain = group_by_domain(command_details, command_only=True)
+        changes_by_domain = group_by_domain(changes)
+        events_by_domain = group_by_domain(events, command_field="event_type")
+        findings_by_domain = {}
+        for item in current_findings or []:
+            findings_by_domain.setdefault(str(item.get("domain") or ""), []).append(item)
+        coverage_by_domain = dict((rule_coverage or {}).get("by_domain") or {})
+
         for domain, label in REPORT_DOMAINS:
-            domain_observations = [
-                item
-                for item in observations
-                if domain_for(item.get("entity_type"), item.get("command")) == domain
-            ]
-            domain_commands = [
-                item
-                for item in command_details
-                if domain_for(None, item.get("command")) == domain
-            ]
-            domain_changes = [
-                item
-                for item in changes
-                if domain_for(item.get("entity_type"), item.get("command")) == domain
-            ]
-            domain_events = [
-                item
-                for item in events
-                if domain_for(item.get("entity_type"), item.get("event_type")) == domain
-            ]
+            domain_observations = observations_by_domain.get(domain, [])
+            domain_commands = commands_by_domain.get(domain, [])
+            domain_changes = changes_by_domain.get(domain, [])
+            domain_events = events_by_domain.get(domain, [])
             unresolved_fault_events = [
                 item
                 for item in domain_events
@@ -225,13 +225,10 @@ class PatrolBatchService:
                 for item in domain_events
                 if str(item.get("event_class") or "fault") == "recovery"
             ]
-            domain_findings = [
-                item for item in (current_findings or []) if str(item.get("domain") or "") == domain
-            ]
+            domain_findings = findings_by_domain.get(domain, [])
             if not any((domain_commands, domain_observations, domain_changes, domain_events)):
                 continue
             parse_statuses = {str(item.get("parse_status") or "") for item in domain_commands}
-            coverage_by_domain = dict((rule_coverage or {}).get("by_domain") or {})
             domain_rule_coverage = dict(coverage_by_domain.get(domain) or {})
             evaluated_current = int(domain_rule_coverage.get("evaluated_observation_count") or 0)
             threshold_unknown_current = int(

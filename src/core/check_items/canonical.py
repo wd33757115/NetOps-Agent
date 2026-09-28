@@ -72,6 +72,8 @@ def freeze_rule_semantics(contract: dict[str, Any]) -> dict[str, Any]:
             row['semantic_definition'] = definition
             row['semantic_type'] = definition['semantic_type']
             row['assessment_roles'] = definition['assessment_roles']
+            if row.get('change_tracking', True) is False:
+                row['assessment_roles'] = [role for role in row['assessment_roles'] if role != 'change'] or ['evidence']
             row['description'] = definition['description']
             if row.get('value_type') not in definition['value_types']:
                 raise ValueError(f'{identifier}: 值类型与语义定义不一致')

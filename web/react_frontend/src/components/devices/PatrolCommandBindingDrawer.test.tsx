@@ -4,12 +4,12 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from 'react-query'
-import PatrolCommandBindingDrawer from './PatrolCommandBindingDrawer'
+import PatrolCommandBindingDrawer from '../../../../../src/apps/device_management/frontend/components/PatrolCommandConfiguration'
 import { type ParserCommandProfile, type ParserCommandProfileImpactPreview } from '../../services/api'
 
 const profile: ParserCommandProfile = { profile_id: 'p1', profile_version_id: 'v1', profile_name: '核心交换机', status: 'active', version_status: 'active', current_version: 1, version: 1, items: [{ action: 'patrol', command: 'display version' }, { action: 'patrol', command: 'display cpu-usage' }] }
 const impact: ParserCommandProfileImpactPreview = { success: true, mode: 'production', profile_name: profile.profile_name, profile_version_id: 'v1', selector: { device_id: ['d1'] }, command_count: 2, matched_device_count: 1, returned_device_count: 1, blocked_device_count: 1, ready_device_count: 0, eligible_command_count: 2, ready_command_count: 1, blocked_command_count: 1, coverage_rate: 0.5, evidence_saved: true, rows: [] }
-const baseProps = { open: true, onClose: vi.fn(), onSaved: vi.fn(), selectedDeviceIds: ['d1'], currentSelector: {}, groups: ['core'], dynamicGroups: [] }
+const baseProps = { open: true, onSaved: vi.fn(), selectedDeviceIds: ['d1'], currentSelector: {}, groups: ['core'], dynamicGroups: [] }
 function mount(props = baseProps) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, cacheTime: 0 } } })
   return render(<QueryClientProvider client={client}><PatrolCommandBindingDrawer {...props} /></QueryClientProvider>)

@@ -20,11 +20,6 @@ from src.infrastructure.db.postgres import get_db_session
 
 
 @pytest.fixture(autouse=True)
-def _disable_agent_module_guard(monkeypatch):
-    monkeypatch.setattr(devices_api, "_agent_module_control_violations", lambda module_ids: [])
-
-
-@pytest.fixture(autouse=True)
 def _patrol_platform_is_ready(monkeypatch):
     monkeypatch.setattr(
         devices_api,
@@ -125,142 +120,6 @@ def test_device_import_template_exposes_columns_and_csv():
     assert "device_name,management_ip" in result["csv"]
     assert any(column["name"] == "credential_ref" for column in result["columns"])
     assert any(column["name"] == "output_path" for column in result["columns"])
-
-
-def test_agent_module_health_endpoint_uses_runtime_builder(monkeypatch):
-    @contextmanager
-    def fake_session():
-        yield object()
-
-    monkeypatch.setattr(devices_api, "get_db_session", fake_session)
-    monkeypatch.setattr(
-        devices_api,
-        "_build_agent_module_health",
-        lambda db: [
-            {
-                "module_id": "parser-control",
-                "design_status": "active",
-                "runtime_status": "healthy",
-                "metrics": [{"label": "已激活模板", "value": 2, "status": "ok"}],
-                "checks": [{"name": "模板资产", "status": "ok", "message": "存在已激活模板"}],
-            }
-        ],
-    )
-
-    result = devices_api.get_agent_module_health()
-
-    assert result["items"][0]["module_id"] == "parser-control"
-    assert result["items"][0]["runtime_status"] == "healthy"
-    assert result["items"][0]["metrics"][0]["value"] == 2
-    assert "generated_at" in result
-
-
-def test_agent_module_includes_runtime_evidence():
-    result = devices_api._agent_module(
-        module_id="change-detector",
-        design_status="active",
-        checks=[devices_api._module_check(name="变化生成", status="ok", message="已有变化")],
-        metrics=[devices_api._metric("变化数", 1)],
-        evidence=[
-            devices_api._evidence(
-                kind="network_change",
-                status="ok",
-                title="最近网络变化",
-                object_id="change-1",
-                summary="PE01 bgp_state",
-                target_url="/devices?tab=overview",
-            )
-        ],
-    )
-
-    assert result["runtime_status"] == "healthy"
-    assert result["evidence"][0]["kind"] == "network_change"
-    assert result["evidence"][0]["object_id"] == "change-1"
-    assert result["evidence"][0]["target_url"] == "/devices?tab=overview"
-
-
-def test_agent_module_control_requires_reason_when_disabled():
-    try:
-        devices_api._set_agent_module_control(
-            None,
-            "parser-control",
-            devices_api.AgentModuleControlRequest(status="disabled"),
-            updated_by="admin",
-        )
-    except devices_api.HTTPException as exc:
-        assert exc.status_code == 400
-        assert "maintenance_reason" in exc.detail
-    else:
-        raise AssertionError("expected HTTPException")
-
-
-def test_agent_module_control_creates_record():
-    class FakeQuery:
-        def filter(self, *_args, **_kwargs):
-            return self
-
-        def first(self):
-            return None
-
-    class FakeDb:
-        def __init__(self):
-            self.added = None
-            self.committed = False
-
-        def query(self, _model):
-            return FakeQuery()
-
-        def add(self, row):
-            self.added = row
-
-        def commit(self):
-            self.committed = True
-
-        def refresh(self, _row):
-            return None
-
-    db = FakeDb()
-
-    result = devices_api._set_agent_module_control(
-        db,
-        "parser-control",
-        devices_api.AgentModuleControlRequest(
-            status="maintenance",
-            maintenance_reason="版本升级窗口",
-            maintenance_starts_at=datetime(2026, 6, 23, 22, 0, tzinfo=timezone.utc),
-            maintenance_ends_at=datetime(2026, 6, 23, 23, 0, tzinfo=timezone.utc),
-        ),
-        updated_by="admin",
-    )
-
-    assert result["module_id"] == "parser-control"
-    assert result["status"] == "maintenance"
-    assert result["maintenance_reason"] == "版本升级窗口"
-    assert result["maintenance_starts_at"].startswith("2026-06-23T22:00:00")
-    assert result["maintenance_ends_at"].startswith("2026-06-23T23:00:00")
-    assert result["updated_by"] == "admin"
-    assert db.added is not None
-    assert db.committed is True
-
-
-def test_agent_module_control_rejects_invalid_maintenance_window():
-    try:
-        devices_api._set_agent_module_control(
-            None,
-            "parser-control",
-            devices_api.AgentModuleControlRequest(
-                status="maintenance",
-                maintenance_reason="版本升级窗口",
-                maintenance_starts_at=datetime(2026, 6, 23, 23, 0, tzinfo=timezone.utc),
-                maintenance_ends_at=datetime(2026, 6, 23, 22, 0, tzinfo=timezone.utc),
-            ),
-            updated_by="admin",
-        )
-    except devices_api.HTTPException as exc:
-        assert exc.status_code == 400
-        assert "maintenance_ends_at" in exc.detail
-    else:
-        raise AssertionError("expected HTTPException")
 
 
 def test_preview_device_import_reports_header_errors():
@@ -1560,46 +1419,6 @@ def test_launch_device_patrol_does_not_create_batch_when_platform_is_blocked(mon
 
     assert exc_info.value.status_code == 503
     assert exc_info.value.detail["failure_code"] == "patrol_platform_not_ready"
-
-
-def test_preview_device_patrol_launch_blocks_disabled_agent_module(monkeypatch):
-    class FakeRepository:
-        def get_devices_by_filter(self, **kwargs):
-            return [
-                {
-                    "device_id": "device-1",
-                    "device_name": "SW1",
-                    "ip": "10.0.0.1",
-                    "vendor": "Cisco",
-                    "password": "secret",
-                }
-            ]
-
-    monkeypatch.setattr(devices_api, "DeviceRepository", FakeRepository)
-    monkeypatch.setattr(
-        devices_api,
-        "_agent_module_control_violations",
-        lambda module_ids: [
-            {
-                "failure_code": "agent_module_not_enabled",
-                "module_id": "change-detector",
-                "status": "maintenance",
-                "maintenance_reason": "规则升级窗口",
-                "message": "Agent 模块 change-detector 当前为 maintenance：规则升级窗口",
-            }
-        ],
-    )
-
-    result = devices_api.preview_device_patrol_launch(
-        devices_api.DevicePatrolLaunchRequest(device_ids=["device-1"])
-    )
-
-    assert result["success"] is False
-    assert result["ready_count"] == 0
-    assert result["error_count"] == 1
-    assert result["module_violations"][0]["module_id"] == "change-detector"
-    assert result["errors"][0]["failure_code"] == "agent_module_not_ready"
-    assert result["errors"][0]["module_violations"][0]["status"] == "maintenance"
 
 
 def test_preview_device_patrol_launch_blocks_production_without_active_profile(monkeypatch):

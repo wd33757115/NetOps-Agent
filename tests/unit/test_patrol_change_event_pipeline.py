@@ -786,6 +786,18 @@ def test_check_item_change_does_not_bypass_empty_runtime_policy_bundle(
     assert result["suppressed_comparison_observations"] == 1
 
 
+def _explicit_interface_rule():
+    # Interface health is catalog-governed now, not a built-in fallback.
+    # This event-builder test supplies its own published-rule snapshot.
+    from src.core.patrol.event_rules import event_rules_from_snapshot
+    return event_rules_from_snapshot([{
+        "rule_name": "interface-down", "version": 1, "event_type": "InterfaceDown",
+        "condition": {"kind": "transition", "entity_types": ["interface_l3"],
+                      "fields": ["protocol"], "from_values": ["up"],
+                      "to_values": ["down"], "allow_initial_target": True},
+    }])
+
+
 def test_event_builder_distinguishes_change_from_event():
     small_cpu_change = [
         {
@@ -815,7 +827,7 @@ def test_event_builder_distinguishes_change_from_event():
 
     assert build_events_from_changes(small_cpu_change) == []
     high_cpu_event = build_events_from_changes(high_cpu_change)[0]
-    interface_event = build_events_from_changes(interface_down)[0]
+    interface_event = build_events_from_changes(interface_down, rules=_explicit_interface_rule())[0]
 
     assert high_cpu_event.event_type == "CPUHigh"
     assert high_cpu_event.payload["rule"]["rule_id"] == "cpu-high"
@@ -1070,7 +1082,7 @@ def test_event_builder_handles_initial_abnormal_state():
 
     assert build_events_from_changes(initial_cpu_normal) == []
     assert build_events_from_changes(initial_cpu_high)[0].event_type == "CPUHigh"
-    assert build_events_from_changes(initial_interface_down)[0].event_type == "InterfaceDown"
+    assert build_events_from_changes(initial_interface_down, rules=_explicit_interface_rule())[0].event_type == "InterfaceDown"
 
 
 def test_event_builder_suppresses_initial_admin_disabled_interface_state():

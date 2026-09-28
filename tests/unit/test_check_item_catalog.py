@@ -109,7 +109,7 @@ def _catalog_with_family_scoped_shared_command():
 def test_production_catalog_is_check_item_centered_and_complete():
     catalog = load_catalog()
 
-    assert catalog.catalog_version == 12
+    assert catalog.catalog_version == 13
     assert {item.id for item in catalog.check_items} == {
         "device.version",
         "device.inventory",
@@ -219,7 +219,7 @@ def test_parser_field_naming_guidance_comes_from_resolved_check_item_contract():
         for item in optical["preferred_observation_fields"]
     }
     assert optical_fields["interface.optical.rx_power"]["preferred_pattern"] == (
-        "rx_power_dbm_{channel}"
+        "rx_power_dbm"
     )
 
 
@@ -240,8 +240,9 @@ def test_top_catalog_uses_only_approved_canonical_observations():
     assert cpu_check is not None
     cpu_target = next(r for r in cpu_check.canonical_contract["observations"]
                       if r["canonical_field"] == "cpu_usage_percent")
-    assert cpu_check.version == 12
+    assert cpu_check.version == 14
     assert cpu_target["canonical_field"] == "cpu_usage_percent"
+    assert cpu_target["change_tracking"] is False
     assert cpu_target["fixed_dimensions"] == {"window": "5m"}
     assert "projection_recipes" not in cpu_target
     assert cpu_check.canonical_contract["value_contract"] == "same-name/v1"
@@ -257,7 +258,7 @@ def test_top_catalog_uses_only_approved_canonical_observations():
     }
     memory_check = catalog.check_item("system.memory_usage")
     assert memory_check is not None
-    assert memory_check.version == 11
+    assert memory_check.version == 13
     memory_utilization = next(
         item
         for item in memory_check.canonical_contract["observations"]
@@ -302,14 +303,13 @@ def test_top_catalog_uses_only_approved_canonical_observations():
     assert set(rx_target["threshold_references"]) == {
         "low", "critical_low", "high", "critical_high"
     }
-    assert rx_target["baseline_comparison"] == {
-        "kind": "linear_power_loss_ratio",
-        "max_loss_ratio": 0.1,
-        "identity_fields": ["part_number", "serial_number"],
+    assert rx_target["change_tracking"] is False
+    assert rx_target["health_policy"]["baseline_mode"] == "trend_only"
+    assert rx_target["health_policy"]["trend"] == {
+        "kind": "linear_power_drop", "threshold_ratio": 0.1,
+        "identity_fields": ["part_number", "serial_number"], "require_identity": False,
     }
-    assert rx_target["event_constraints"]["role_event_types"][
-        "baseline_degradation"
-    ] == "OpticalRxPowerDegraded"
+    assert "baseline_degradation" not in rx_target["event_constraints"]["role_event_types"]
     assert rx_target["event_constraints"]["required_exclusive_event_types"] == [
         "OpticalRxPowerCritical"
     ]

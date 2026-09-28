@@ -1386,15 +1386,6 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
                             <Typography.Text type="danger">
                               当前现状证明必须绑定 Inventory
                             </Typography.Text>
-                            <Button
-                              size="small"
-                              onClick={() => {
-                                closeDetail()
-                                navigate('/devices?tab=overview')
-                              }}
-                            >
-                              前往设备资产
-                            </Button>
                           </>
                         )}
                       </Space>
@@ -1573,10 +1564,6 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
                   <OfflineCurrentAuthorityPanel
                     job={detail}
                     onOpenSources={() => changeDetailTab('sources')}
-                    onOpenInventory={() => {
-                      closeDetail()
-                      navigate('/devices?tab=overview')
-                    }}
                     onOpenRuntimeAssets={() => navigate(
                       buildOfflineRuleBundleUrl(detail),
                     )}

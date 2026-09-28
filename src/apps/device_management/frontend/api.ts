@@ -1,6 +1,6 @@
 import { api } from '@netops/config/api'
 import { inspectionDeviceApi } from '../../inspection/frontend/api'
-import type { DeviceAgentModuleControl, DeviceAgentModuleHealthResponse, DeviceBulkApplyResult, DeviceBulkDeletePreview, DeviceBulkDeleteResult, DeviceBulkPreview, DeviceBulkRequest, DeviceConnectionHealthResponse, DeviceConnectivityTestResult, DeviceCredentialInspection, DeviceCredentialReference, DeviceDynamicGroup, DeviceDynamicGroupPreview, DeviceEffectivePlanPreview, DeviceEvidenceTimelineResponse, DeviceExecutionPlanResponse, DeviceIdentityDiscoveryResult, DeviceImportApplyResult, DeviceImportPayload, DeviceImportPreview, DeviceImportTemplate, DeviceListResponse, DeviceMutationResponse, DeviceUpsertPayload, ManagedDevice } from '@netops/services/api'
+import type { DeviceBulkApplyResult, DeviceBulkDeletePreview, DeviceBulkDeleteResult, DeviceBulkPreview, DeviceBulkRequest, DeviceConnectionHealthResponse, DeviceConnectivityTestResult, DeviceCredentialInspection, DeviceCredentialReference, DeviceDynamicGroup, DeviceDynamicGroupPreview, DeviceEffectivePlanPreview, DeviceEvidenceTimelineResponse, DeviceExecutionPlanResponse, DeviceIdentityDiscoveryResult, DeviceImportApplyResult, DeviceImportPayload, DeviceImportPreview, DeviceImportTemplate, DeviceListResponse, DeviceMutationResponse, DeviceUpsertPayload, ManagedDevice } from '@netops/services/api'
 
 export const deviceApi = {
   list: async (params: Record<string, string | number | undefined> = {}) => {
@@ -160,25 +160,6 @@ export const deviceApi = {
   },
   inspectCredential: async (credential_ref?: string) => {
     const response = await api.post<DeviceCredentialInspection>('/apps/device-management/devices/credentials/inspect/', { credential_ref })
-    return response.data
-  },
-  agentModuleHealth: async () => {
-    const response = await api.get<DeviceAgentModuleHealthResponse>('/apps/device-management/devices/agent-modules/health/')
-    return response.data
-  },
-  updateAgentModuleControl: async (
-    moduleId: string,
-    payload: {
-      status: string
-      maintenance_reason?: string | null
-      maintenance_starts_at?: string | null
-      maintenance_ends_at?: string | null
-    },
-  ) => {
-    const response = await api.patch<{ success: boolean; control: DeviceAgentModuleControl }>(
-      `/apps/device-management/devices/agent-modules/${moduleId}/control/`,
-      payload,
-    )
     return response.data
   },
 }

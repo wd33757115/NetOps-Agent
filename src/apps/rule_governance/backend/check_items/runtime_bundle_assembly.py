@@ -231,6 +231,10 @@ def derive_asset_requirement_profile(
         return {
             observation_type
             for observation_type in values
+            if role != 'change' or all(
+                row.get('change_tracking', True) is not False
+                for row in rows if row['observation_type'] == observation_type
+            )
             if (
                 role in declared_roles[observation_type]
                 if observation_type in declared_roles

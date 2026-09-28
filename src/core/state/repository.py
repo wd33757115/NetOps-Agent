@@ -105,7 +105,7 @@ class StateRepository:
                 StateObservationRecord.entity_key,
                 StateObservationRecord.field_name,
                 StateObservationRecord.observed_at,
-            ).all()
+            ).yield_per(1000)
             return [row.to_dict() for row in rows]
 
     def list_observations_for_runs(
@@ -146,7 +146,7 @@ class StateRepository:
                 StateObservationRecord.entity_key,
                 StateObservationRecord.field_name,
                 StateObservationRecord.observed_at,
-            ).all()
+            ).yield_per(1000)
             return [row.to_dict() for row in rows]
 
     def find_previous_observation(self, observation: dict[str, Any]) -> dict[str, Any] | None:
@@ -187,6 +187,13 @@ class StateRepository:
             current_run = db.get(PatrolRun, run_id)
             if current_run is None:
                 return []
+            # A run cannot compare state on unrelated devices. Use a SQL subquery
+            # rather than loading the complete estate's history into each worker.
+            current_devices = db.query(StateObservationRecord.device_id).filter(
+                StateObservationRecord.run_id == run_id
+            ).union(db.query(PatrolCollectionResult.device_id).filter(
+                PatrolCollectionResult.run_id == run_id
+            ))
             rows = (
                 db.query(StateObservationRecord)
                 .join(PatrolRun, PatrolRun.id == StateObservationRecord.run_id)
@@ -200,6 +207,7 @@ class StateRepository:
                     ),
                 )
                 .filter(StateObservationRecord.run_id != run_id)
+                .filter(StateObservationRecord.device_id.in_(current_devices))
                 .filter(StateObservationRecord.mode == current_run.mode)
                 .filter(PatrolRun.baseline_eligible.is_(True))
                 .filter(PatrolRun.analysis_status == "completed")
@@ -209,7 +217,7 @@ class StateRepository:
                     PatrolRun.started_at.desc(),
                     StateObservationRecord.observed_at.desc(),
                 )
-                .all()
+                .yield_per(1000)
             )
             return [row.to_dict() for row in rows]
 
@@ -242,12 +250,13 @@ class StateRepository:
             chunk = observations[offset : offset + max(1, int(chunk_size))]
             values = [self._observation_values(item) for item in chunk]
             stmt = (
-                pg_insert(StateObservationRecord)
-                .values(values)
+                pg_insert(StateObservationRecord.__table__)
                 .on_conflict_do_nothing(index_elements=["idempotency_key"])
                 .returning(StateObservationRecord.id)
             )
-            inserted_ids = {str(row[0]) for row in db.execute(stmt).all()}
+            # Separate parameters let SQLAlchemy batch RETURNING inserts without
+            # constructing/compiling one expression node per field per row.
+            inserted_ids = {str(row[0]) for row in db.execute(stmt, values).all()}
             created += len(inserted_ids)
             if update_current_state and inserted_ids:
                 inserted = [item for item in chunk if item.observation_id in inserted_ids]
@@ -375,9 +384,8 @@ class StateRepository:
             ):
                 latest_by_state_key[item.state_key] = item
         observations = list(latest_by_state_key.values())
-        stmt = pg_insert(CurrentStateRecord).values(
-            [self._current_state_values(item) for item in observations]
-        )
+        values = [self._current_state_values(item) for item in observations]
+        stmt = pg_insert(CurrentStateRecord.__table__)
         excluded = stmt.excluded
         update_values = {
             "device_id": excluded.device_id,
@@ -428,7 +436,7 @@ class StateRepository:
             )
             .returning(CurrentStateRecord.id)
         )
-        result = db.execute(stmt)
+        result = db.execute(stmt, values)
         if hasattr(result, "all"):
             return len(result.all())
         return int(result.scalar_one_or_none() is not None)

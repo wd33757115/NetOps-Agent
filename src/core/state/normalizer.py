@@ -841,6 +841,7 @@ def _build_snapshot_normalization(
     snapshot_id: str,
     *,
     update_current_state: bool | None,
+    include_observations: bool = True,
 ) -> tuple[dict[str, Any], list[StateObservation], bool]:
     context = repository.get_snapshot_context(snapshot_id)
     if context is None:
@@ -921,7 +922,7 @@ def _build_snapshot_normalization(
                 "created_count": 0,
                 "current_state_updates": 0,
                 "updated_current_state": False,
-                "observations": [item.to_dict() for item in observations],
+                "observations": [item.to_dict() for item in observations] if include_observations else [],
             },
             observations,
             False,
@@ -1085,7 +1086,7 @@ def _build_snapshot_normalization(
             "created_count": 0,
             "current_state_updates": 0,
             "updated_current_state": should_update_current,
-            "observations": [item.to_dict() for item in observations],
+            "observations": [item.to_dict() for item in observations] if include_observations else [],
             "observation_batches": batch_rows,
             "partial": bool(
                 batches
@@ -1274,6 +1275,7 @@ def _normalize_run_impl(
             repository,
             snapshot_id,
             update_current_state=update_current_state,
+            include_observations=include_observations,
         )
         if not include_observations:
             snapshot_result.pop("observations", None)

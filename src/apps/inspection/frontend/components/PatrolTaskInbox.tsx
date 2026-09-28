@@ -22,8 +22,10 @@ export default function PatrolTaskInbox({ onNewPatrol, embedded = false }: { onN
   const [searchInput, setSearchInput] = useState('')
   const [source, setSource] = useState<'online' | 'offline'>()
   const [selectedKey, setSelectedKey] = useState<string>()
-  const online = useQuery(['patrol-inbox-online', search], () => workflowApi.listPatrolBatches({ limit: 20, search }), { refetchInterval: 10000 })
-  const offline = useQuery(['patrol-inbox-offline', search], () => offlinePatrolApi.list({ page_size: 20, search }), { refetchInterval: 10000 })
+  const online = useQuery(['patrol-inbox-online', search], () => workflowApi.listPatrolBatches({ limit: 20, search }), { staleTime: 10000, keepPreviousData: true, refetchOnWindowFocus: false,
+    refetchInterval: page => page?.items.some(row => activeStates.has(row.aggregate_status || 'pending')) ? 10000 : 60000 })
+  const offline = useQuery(['patrol-inbox-offline', search], () => offlinePatrolApi.list({ page_size: 20, search }), { staleTime: 10000, keepPreviousData: true, refetchOnWindowFocus: false,
+    refetchInterval: page => page?.items.some(row => activeStates.has(row.status)) ? 10000 : 60000 })
   const rows: Task[] = [
     ...(online.data?.items || []).map(row => ({ id: row.patrol_batch_id, name: row.target_label || row.ticket_id || '在线巡检', source: 'online' as const,
       time: row.created_at || '', status: row.aggregate_status || 'pending', scope: `${row.target_count ?? row.total ?? 0} 台设备`,

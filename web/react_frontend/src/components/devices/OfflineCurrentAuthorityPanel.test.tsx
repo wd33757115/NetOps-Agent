@@ -68,7 +68,6 @@ const renderPanel = (
   job = currentJob,
   actions: {
     onOpenSources?: () => void
-    onOpenInventory?: () => void
     onOpenRuntimeAssets?: () => void
     onStartReplacement?: () => void
   } = {},
@@ -131,7 +130,6 @@ describe('OfflineCurrentAuthorityPanel', () => {
       production_batch: { workflow_status_counts: {} },
     })
     const onOpenSources = vi.fn()
-    const onOpenInventory = vi.fn()
     const user = userEvent.setup()
     renderPanel({
       ...currentJob,
@@ -147,16 +145,15 @@ describe('OfflineCurrentAuthorityPanel', () => {
         confidence: 0,
       }],
       preview_totals: { file_count: 1, device_count: 1, command_count: 1 },
-    } as never, { onOpenSources, onOpenInventory })
+    } as never, { onOpenSources })
 
     expect(await screen.findByText('1 台设备 · 检查项待核验 · 1 个文件'))
       .toBeInTheDocument()
     expect(screen.getByText('1 台设备尚未绑定 Inventory')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '打开文件与设备' }))
-    await user.click(screen.getByRole('button', { name: '前往设备资产' }))
+    expect(screen.queryByRole('button', { name: '前往设备资产' })).not.toBeInTheDocument()
 
     expect(onOpenSources).toHaveBeenCalledTimes(1)
-    expect(onOpenInventory).toHaveBeenCalledTimes(1)
   })
 
   it('renders the service-owned remediation action for a blocked request', async () => {

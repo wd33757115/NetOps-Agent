@@ -1,5 +1,5 @@
 import React from 'react'
-import { Collapse, Form, Input, Select, Typography } from 'antd'
+import { Checkbox, Collapse, Form, Input, Select, Typography } from 'antd'
 
 export const semanticKinds = [
   { value: 'state', label: '状态' }, { value: 'text', label: '文本' },
@@ -38,6 +38,11 @@ export default function FieldSemanticEditor({ name, field, fields }: {
             { value: 'change', label: '变化检测', disabled: roles.includes('evidence') },
             { value: 'reference', label: '阈值参考', disabled: roles.includes('evidence') },
           ]} />
+        </Form.Item>
+        <Form.Item name={[name, 'change_tracking']} valuePropName="checked" initialValue={true}
+          className="check-item-catalog-form-wide"
+          extra="关闭后仍采集、保存并展示该 Value；不参与普通变化统计，健康判断、设备阈值和基线趋势不受影响。">
+          <Checkbox>参与普通变化比较</Checkbox>
         </Form.Item>
         {state && <>
           <Form.Item label="允许的状态值" name={path('allowed_values')} className="check-item-catalog-form-wide">

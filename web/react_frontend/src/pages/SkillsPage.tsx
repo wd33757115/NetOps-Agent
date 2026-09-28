@@ -1,9 +1,8 @@
 // SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
 // SPDX-License-Identifier: Apache-2.0
 
-import { useCanConfigureNetOps } from '../context/AuthContext'
-import React, { Suspense, useCallback, useMemo, useState } from 'react'
-import { Spin, Tabs } from 'antd'
+import React, { useCallback, useMemo, useState } from 'react'
+import { Tabs } from 'antd'
 import { useNavigate, useParams } from 'react-router-dom'
 import GrokShellLayout from '../components/layout/GrokShellLayout'
 import { useIsMobile } from '../hooks/useBreakpoint'
@@ -14,20 +13,11 @@ import DevGuideTab from '../components/skills/DevGuideTab'
 import WorkflowWizard, { WorkflowWizardInitial } from '../components/skills/WorkflowWizard'
 import WorkflowWizardShell from '../components/skills/WorkflowWizardShell'
 
-const ParserControlTab = React.lazy(() => import('../components/skills/ParserControlTab'))
-
-const workspaceFallback = (
-  <div className="grok-page-loading is-compact" role="status" aria-label="工作区加载中">
-    <Spin />
-  </div>
-)
-
 const SkillsPage: React.FC = () => {
   const isMobile = useIsMobile()
-  const canConfigure = useCanConfigureNetOps()
   const navigate = useNavigate()
   const { section } = useParams<{ section?: string }>()
-  const activeTab = ['skills', 'workflows', 'market', 'parser', 'guide'].includes(section || '')
+  const activeTab = ['skills', 'workflows', 'market', 'guide'].includes(section || '')
     ? section!
     : 'skills'
   const [wizardOpen, setWizardOpen] = useState(false)
@@ -84,15 +74,6 @@ const SkillsPage: React.FC = () => {
       children: <TemplateMarketTab />,
     },
     {
-      key: 'parser',
-      label: 'Parser 控制面',
-      children: (
-        <Suspense fallback={workspaceFallback}>
-          <ParserControlTab />
-        </Suspense>
-      ),
-    },
-    {
       key: 'guide',
       label: '开发指南',
       children: <DevGuideTab />,
@@ -101,24 +82,16 @@ const SkillsPage: React.FC = () => {
 
   return (
     <GrokShellLayout
-      title={activeTab === 'parser' ? '巡检规则资产' : 'Skills 和连接器'}
-      subtitle={activeTab === 'parser'
-        ? '以检查项标准语义统一命令适配、变化策略与事件规则'
-        : '管理 Skill、编排 Workflow 插件、模板市场与聊天触发'}
+      title="Skills 和连接器"
+      subtitle="管理 Skill、编排 Workflow 插件、模板市场与聊天触发"
     >
-      {activeTab === 'parser' ? (
-        <Suspense fallback={workspaceFallback}>
-          <ParserControlTab />
-        </Suspense>
-      ) : (
-        <Tabs
-          activeKey={activeTab}
-          onChange={(key) => navigate(key === 'skills' ? '/skills' : `/skills/${key}`)}
-          items={tabItems.filter(tab => tab.key !== 'parser' || canConfigure)}
-          size={isMobile ? 'small' : 'middle'}
-          className="grok-skills-tabs"
-        />
-      )}
+      <Tabs
+        activeKey={activeTab}
+        onChange={(key) => navigate(key === 'skills' ? '/skills' : `/skills/${key}`)}
+        items={tabItems}
+        size={isMobile ? 'small' : 'middle'}
+        className="grok-skills-tabs"
+      />
     </GrokShellLayout>
   )
 }

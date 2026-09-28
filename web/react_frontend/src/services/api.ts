@@ -2780,14 +2780,12 @@ export interface DevicePatrolPreview {
   workflow_name: string
   platform_readiness: PatrolProductionReadiness
   quality_readiness: PatrolTargetQualityReadiness
-  module_violations?: Array<Record<string, unknown>>
   rows: DevicePatrolPreviewRow[]
   errors: Array<{
     device_id?: string
     device_name?: string
     error: string
     failure_code?: string
-    module_violations?: Array<Record<string, unknown>>
     coverage_violations?: Array<Record<string, unknown>>
     connection_issues?: Array<Record<string, unknown>>
     platform_violations?: Array<Record<string, unknown>>
@@ -2835,57 +2833,6 @@ export interface DeviceListResponse {
   total: number
   limit: number
   offset: number
-}
-
-export interface DeviceAgentModuleHealthCheck {
-  name: string
-  status: 'ok' | 'warning' | 'blocked' | string
-  message: string
-  value?: string | number | null
-  target?: string | null
-}
-
-export interface DeviceAgentModuleMetric {
-  label: string
-  value: string | number
-  status?: 'ok' | 'warning' | 'blocked' | string
-}
-
-export interface DeviceAgentModuleEvidence {
-  kind: string
-  status: 'ok' | 'warning' | 'blocked' | 'failed' | string
-  title: string
-  object_id?: string | null
-  occurred_at?: string | null
-  summary?: string | null
-  detail?: Record<string, unknown>
-  target_url?: string | null
-}
-
-export interface DeviceAgentModuleControl {
-  module_id: string
-  status: 'enabled' | 'disabled' | 'maintenance' | string
-  maintenance_reason?: string | null
-  maintenance_starts_at?: string | null
-  maintenance_ends_at?: string | null
-  updated_by?: string | null
-  updated_at?: string | null
-}
-
-export interface DeviceAgentModuleHealth {
-  module_id: string
-  design_status: string
-  runtime_status: 'healthy' | 'degraded' | 'blocked' | string
-  effective_status?: 'healthy' | 'degraded' | 'blocked' | 'disabled' | 'maintenance' | string
-  control?: DeviceAgentModuleControl
-  metrics: DeviceAgentModuleMetric[]
-  checks: DeviceAgentModuleHealthCheck[]
-  evidence?: DeviceAgentModuleEvidence[]
-}
-
-export interface DeviceAgentModuleHealthResponse {
-  items: DeviceAgentModuleHealth[]
-  generated_at: string
 }
 
 export interface DeviceDynamicGroup {

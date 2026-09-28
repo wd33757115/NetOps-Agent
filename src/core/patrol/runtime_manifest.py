@@ -328,6 +328,7 @@ def comparison_scopes_for_device(
                 "comparison_context_id": context_id,
                 "comparison_context_digest": context_digest,
                 "comparison_status": status,
+                **({'change_tracking': dict(decision['change_tracking'])} if 'change_tracking' in decision else {}),
                 "selection_reason": str(
                     context.get("selection_reason") or status
                 ),

@@ -1,7 +1,7 @@
 import { InspectionPageHost } from './InspectionDetailPage'
 import React, { useEffect, useRef } from 'react'
 import { Button } from 'antd'
-import { ArrowLeftOutlined, ArrowRightOutlined, CheckCircleOutlined, CloudServerOutlined, FileTextOutlined, InboxOutlined, MessageOutlined, PlusOutlined, RadarChartOutlined, SettingOutlined, WarningOutlined } from '@ant-design/icons'
+import { ArrowLeftOutlined, ArrowRightOutlined, CheckCircleOutlined, CloudServerOutlined, FileTextOutlined, InboxOutlined, MessageOutlined, PlusOutlined, RadarChartOutlined, WarningOutlined } from '@ant-design/icons'
 import { Link, useSearchParams } from 'react-router-dom'
 import { appRoutes, workbenchEnabled } from '@netops/apps/appRoutes'
 import { inspectionView, inspectionViews } from './inspectionNavigation'
@@ -9,8 +9,8 @@ import './InspectionWorkspace.css'
 
 const icons = [InboxOutlined, CloudServerOutlined, FileTextOutlined, WarningOutlined, MessageOutlined]
 
-export default function InspectionLayout({ children, onNewPatrol, canConfigure }: {
-  children: React.ReactNode; onNewPatrol: () => void; canConfigure: boolean
+export default function InspectionLayout({ children, onNewPatrol }: {
+  children: React.ReactNode; onNewPatrol: () => void
 }) {
   const [params, setParams] = useSearchParams()
   const view = inspectionView(params)
@@ -45,7 +45,6 @@ export default function InspectionLayout({ children, onNewPatrol, canConfigure }
             setParams(next)
           }}><Icon aria-hidden="true" /><span>{item.label}</span></button>
         })}</nav>
-        {canConfigure && <Link className="inspection-settings" to={appRoutes.devices}><SettingOutlined aria-hidden="true" /> 设备管理 <ArrowRightOutlined aria-hidden="true" /></Link>}
         <div className="inspection-sidebar-note"><CheckCircleOutlined aria-hidden="true" /> 从采集到结论<p>核对检查范围，查看原始证据，<br />跟进风险与整改。</p></div>
       </aside>
       <main className="inspection-main" ref={mainRef}>

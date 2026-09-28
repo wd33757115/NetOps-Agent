@@ -288,9 +288,9 @@ class ChangePolicyResolver:
         self._repo = ChangePolicyRepository()
         self._frozen = policies is not None
         self._cache: dict[str, dict[str, Any] | None] = {
-            str(policy.get("observation_type") or ""): policy
+            str(policy.get("observation_type") or (policy.get('policy') or {}).get('observation_type') or ""): policy
             for policy in policies or []
-            if policy.get("observation_type")
+            if policy.get("observation_type") or (policy.get('policy') or {}).get('observation_type')
         }
 
     def resolve(self, observation_type: str) -> dict[str, Any] | None:
@@ -1117,6 +1117,33 @@ def detect_changes_from_params(params: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _tracking_key(observation):
+    metadata = observation.get('metadata_json') or {}
+    return f"{metadata.get('check_item_id', '')}:{_observation_type(observation)}"
+
+
+def _frozen_change_tracking(observations):
+    """Offline runs also use immutable CheckItem versions, never today's active catalog."""
+    from src.infrastructure.db.models import CheckItemVersionRecord
+    from src.infrastructure.db.postgres import get_db_session
+
+    versions = {str((item.get('metadata_json') or {}).get('check_item_version_id'))
+                for item in observations if (item.get('metadata_json') or {}).get('check_item_version_id')}
+    if not versions:
+        return {}
+    result = {}
+    with get_db_session() as db:
+        rows = db.query(CheckItemVersionRecord).filter(CheckItemVersionRecord.id.in_(versions)).all()
+        for item in rows:
+            for row in (item.canonical_contract_json or {}).get('observations', []):
+                key = f"{item.check_item_id}:{row['observation_type']}"
+                value = row.get('change_tracking', True)
+                if key in result and result[key] != value:
+                    raise ValueError('Conflicting CheckItem comparison declarations in one run')
+                result[key] = value
+    return result
+
+
 def detect_observation_changes_against_history(
     *,
     current_run_id: str,
@@ -1150,6 +1177,7 @@ def detect_observation_changes_against_history(
         )
     else:
         input_observations = state_repository.list_run_observations(current_run_id)
+    tracking = _frozen_change_tracking(input_observations) if not normalized_scopes else {}
     if normalized_scopes:
         baseline_run_ids = sorted(
             {
@@ -1228,6 +1256,7 @@ def detect_observation_changes_against_history(
             suppress_initial_collection_item_ids=(
                 suppress_initial_collection_item_ids
             ),
+            change_tracking=tracking,
         )
     frozen_policies = (
         ChangePolicyRepository().list_active_policies()
@@ -1263,6 +1292,7 @@ def detect_observation_changes_against_history(
             set(suppress_initial_collection_item_ids or [])
         ),
         "comparison_scopes": normalized_scopes,
+        "change_tracking": tracking,
     }
     attempt = patrol_repository.begin_analysis_attempt(
         run_id=current_run_id,
@@ -1338,6 +1368,7 @@ def detect_observation_changes_against_history(
                 persist=persist,
                 missing_confirmations=missing_confirmations,
                 policy_bundle=list(attempt["rule_bundle"].get("change_policies") or []),
+                change_tracking=tracking,
                 current_observations=input_observations,
                 prior_observations=prior_observations,
                 heartbeat=heartbeat,
@@ -1444,10 +1475,15 @@ def _detect_observation_changes_against_history_impl(
     suppress_initial_collection_item_ids: list[str] | None = None,
     collection_results: list[dict[str, Any]] | None = None,
     include_internal: bool = False,
+    change_tracking: dict[str, bool] | None = None,
+    require_change_policy: bool = False,
+    run_context: dict[str, Any] | None = None,
+    aggregated_collection_results: dict | None = None,
 ) -> dict[str, Any]:
     repository = StateRepository()
     patrol_repository = PatrolRepository()
-    run_context = patrol_repository.get_run(current_run_id)
+    if run_context is None:
+        run_context = patrol_repository.get_run(current_run_id)
     if run_context and run_context.get("run_purpose") == "baseline":
         return {
             "success": True,
@@ -1498,7 +1534,10 @@ def _detect_observation_changes_against_history_impl(
         collection_results = patrol_repository.list_collection_results(
             current_run_id
         )
-    current_collection_results = _aggregate_collection_results(collection_results)
+    current_collection_results = (
+        aggregated_collection_results if aggregated_collection_results is not None
+        else _aggregate_collection_results(collection_results)
+    )
     authoritative_collections = {
         key
         for key, item in current_collection_results.items()
@@ -1506,6 +1545,26 @@ def _detect_observation_changes_against_history_impl(
     }
     prior_by_key: dict[str, dict[str, Any]] = {}
     policy_resolver = ChangePolicyResolver(policy_bundle)
+    # Current frozen declarations govern BOTH periods, including fields absent today.
+    tracking = {
+        _tracking_key(item): (item.get('metadata_json') or {}).get('semantics', {}).get('change_tracking', True)
+        for item in current_observations
+    }
+    tracking.update(change_tracking or {})
+
+    def exclusion(observation):
+        observation_type = _observation_type(observation)
+        metadata = observation.get('metadata_json') or {}
+        enabled = tracking.get(observation_type, tracking.get(_tracking_key(observation), metadata.get('semantics', {}).get('change_tracking', True)))
+        if enabled is False:
+            return 'change_tracking_disabled'
+        if require_change_policy or metadata.get('check_item_version_id'):
+            active = policy_resolver.resolve(observation_type)
+            if not active or not isinstance(active.get('policy'), dict):
+                return 'change_policy_missing'
+            if observation.get('field_name') in active['policy'].get('ignore_fields', []):
+                return 'change_policy_suppressed'
+        return None
     if prior_observations is not None:
         pass
     elif previous_run_id:
@@ -1523,6 +1582,11 @@ def _detect_observation_changes_against_history_impl(
         if heartbeat is not None:
             heartbeat()
         previous = prior_by_key.get(_state_key(current))
+        reason = exclusion(current)
+        if reason:
+            decisions.append(_change_decision(run_id=current_run_id, previous=previous, current=current,
+                                             decision='suppressed', reason=reason))
+            continue
         if previous:
             previous_at = _observed_datetime(previous.get("observed_at"))
             current_at = _observed_datetime(current.get("observed_at"))
@@ -1701,6 +1765,11 @@ def _detect_observation_changes_against_history_impl(
             missing_confirmations=max(1, int(missing_confirmations)),
         )
         derived_observations.append(tombstone)
+        reason = exclusion(previous)
+        if reason:
+            decisions.append(_change_decision(run_id=current_run_id, previous=previous, current=tombstone.to_dict(),
+                                             decision='suppressed', reason=reason))
+            continue
         change_type = (
             "deleted" if missing_count >= max(1, int(missing_confirmations)) else "missing"
         )
@@ -1731,6 +1800,15 @@ def _detect_observation_changes_against_history_impl(
                 ),
             )
         )
+
+    for index, change in enumerate(changes):
+        if change.change_policy_version_id:
+            continue
+        active = policy_resolver.resolve(change.observation_type or '')
+        if active:
+            changes[index] = replace(change, change_policy_id=active.get('policy_id'),
+                                     change_policy_version_id=active.get('version_id'),
+                                     policy_snapshot=active.get('policy'))
 
     changes = [
         replace(
@@ -1847,6 +1925,8 @@ def _detect_observation_changes_against_history_impl(
         "change_count": len(changes),
         "persisted_change_count": persisted_change_count,
         "change_decision_count": len(decisions),
+        "change_policy_missing_count": sum(d["reason"] == "change_policy_missing" for d in decisions),
+        "change_tracking_disabled_count": sum(d["reason"] == "change_tracking_disabled" for d in decisions),
         "storage": "postgresql",
         "source": "state_observation",
         "changes": [change.to_dict() for change in changes],
@@ -1908,6 +1988,8 @@ def _detect_scoped_observation_changes_impl(
     baseline_observations = 0
     suppressed_comparison_observations = 0
     scope_status_counts: dict[str, int] = {}
+    run_context = None
+    aggregated_collection_results = None
 
     for scope in comparison_scopes:
         if heartbeat is not None:
@@ -1930,6 +2012,8 @@ def _detect_scoped_observation_changes_impl(
             observation
             for action_id in sorted(action_ids)
             for observation in current_by_action.get(action_id, [])
+            if not (observation.get('metadata_json') or {}).get('check_item_version_id')
+            or str(observation['metadata_json']['check_item_version_id']) == check_item_version_id
         ]
         lineage = {
             "check_item_id": str(scope.get("check_item_id") or "") or None,
@@ -1968,7 +2052,7 @@ def _detect_scoped_observation_changes_impl(
                 [],
             )
         )
-        if not scoped_policies:
+        if not scoped_policies and not scope.get('change_tracking'):
             suppressed_comparison_observations += len(scoped_current)
             for current in scoped_current:
                 decision = _change_decision(
@@ -2001,12 +2085,17 @@ def _detect_scoped_observation_changes_impl(
             for snapshot_id in sorted(baseline_snapshot_ids)
             for observation in prior_by_snapshot.get(snapshot_id, [])
             if str(observation.get("run_id") or "") == baseline_run_id
+            and (not scope.get('check_item_id') or not (observation.get('metadata_json') or {}).get('check_item_id')
+                 or observation['metadata_json']['check_item_id'] == scope['check_item_id'])
         ]
         if not scoped_prior:
             raise ExplicitBaselineNotReadyError(
                 "frozen baseline produced no StateObservation records: "
                 f"context={context_id}, run={baseline_run_id}"
             )
+        if run_context is None:
+            run_context = patrol_repository.get_run(current_run_id) or {}
+            aggregated_collection_results = _aggregate_collection_results(collection_results)
         result = _detect_observation_changes_against_history_impl(
             current_run_id=current_run_id,
             previous_run_id=baseline_run_id,
@@ -2021,6 +2110,10 @@ def _detect_scoped_observation_changes_impl(
             rule_bundle_digest=rule_bundle_digest,
             collection_results=collection_results,
             include_internal=True,
+            change_tracking=scope.get('change_tracking'),
+            require_change_policy=True,
+            run_context=run_context,
+            aggregated_collection_results=aggregated_collection_results,
         )
         compared_observations += int(result.get("compared_observations") or 0)
         compared_text_outputs.update(
@@ -2125,6 +2218,8 @@ def _detect_scoped_observation_changes_impl(
         "change_count": len(changes),
         "persisted_change_count": persisted_change_count,
         "change_decision_count": len(decisions),
+        "change_policy_missing_count": sum(d["reason"] == "change_policy_missing" for d in decisions),
+        "change_tracking_disabled_count": sum(d["reason"] == "change_tracking_disabled" for d in decisions),
         "storage": "postgresql",
         "source": "state_observation",
         "changes": [change.to_dict() for change in changes],

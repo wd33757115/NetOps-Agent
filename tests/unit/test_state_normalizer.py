@@ -548,7 +548,7 @@ class _CurrentStateDb:
         self.scalar = scalar
         self.statements = []
 
-    def execute(self, statement):
+    def execute(self, statement, parameters=None):
         self.statements.append(statement)
 
         class Result:
@@ -1736,9 +1736,10 @@ def test_normalize_run_can_limit_to_selected_devices(monkeypatch):
             calls["saved"] = (observations, update_current_state)
             return len(observations), 0
 
-    def fake_build(repository, snapshot_id, *, update_current_state=None):
+    def fake_build(repository, snapshot_id, *, update_current_state=None, include_observations=True):
         assert snapshot_id == "snapshot-1"
         assert update_current_state is False
+        assert include_observations is True
         observations = [
             _state_observation("2026-06-20T10:00:00+00:00", value="up"),
             _state_observation("2026-06-20T10:01:00+00:00", value="down"),

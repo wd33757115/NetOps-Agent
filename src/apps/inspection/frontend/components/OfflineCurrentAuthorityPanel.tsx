@@ -1,6 +1,7 @@
+import StatusNotice from '@netops/components/common/StatusNotice'
 import React, { useRef, useEffect, useMemo, useState } from 'react'
 import {
-  Alert,
+  
   Button,
   Descriptions,
   Divider,
@@ -78,13 +79,11 @@ const authorityStep = (authority?: PatrolCurrentAuthority) => {
 const OfflineCurrentAuthorityPanel: React.FC<{
   job: OfflinePatrolJob
   onOpenSources?: () => void
-  onOpenInventory?: () => void
   onOpenRuntimeAssets?: () => void
   onStartReplacement?: () => void
 }> = ({
   job,
   onOpenSources,
-  onOpenInventory,
   onOpenRuntimeAssets,
   onStartReplacement,
 }) => {
@@ -246,7 +245,7 @@ const OfflineCurrentAuthorityPanel: React.FC<{
 
   if (job.report_intent !== 'current_attestation') {
     return (
-      <Alert
+      <StatusNotice
         type="info"
         showIcon
         message="该任务仅用于历史分析"
@@ -257,7 +256,7 @@ const OfflineCurrentAuthorityPanel: React.FC<{
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
-      <Alert
+      <StatusNotice
         type="warning"
         showIcon
         message="当前现状证明不是把历史任务改名为生产巡检"
@@ -277,9 +276,9 @@ const OfflineCurrentAuthorityPanel: React.FC<{
       />
 
       {query.isLoading ? (
-        <Alert type="info" showIcon message="正在读取现状证明状态" />
+        <StatusNotice type="info" showIcon message="正在读取现状证明状态" />
       ) : query.isError ? (
-        <Alert
+        <StatusNotice
           type="error"
           showIcon
           message="无法读取现状证明状态"
@@ -320,7 +319,7 @@ const OfflineCurrentAuthorityPanel: React.FC<{
       )}
 
       {showIdentityPreflight && (
-        <Alert
+        <StatusNotice
           type="warning"
           showIcon
           message={`${unconfirmedBindingCount} 台设备尚未绑定 Inventory`}
@@ -328,14 +327,13 @@ const OfflineCurrentAuthorityPanel: React.FC<{
           action={(
             <Space direction="vertical" size={4}>
               {onOpenSources && <Button size="small" onClick={onOpenSources}>打开文件与设备</Button>}
-              {onOpenInventory && <Button size="small" onClick={onOpenInventory}>前往设备资产</Button>}
             </Space>
           )}
         />
       )}
 
       {(authority?.blockers || []).map((item) => (
-        <Alert
+        <StatusNotice
           key={item.code}
           type="error"
           showIcon
@@ -345,7 +343,7 @@ const OfflineCurrentAuthorityPanel: React.FC<{
         />
       ))}
       {authority?.production_batch?.dispatch_error && (
-        <Alert
+        <StatusNotice
           type="error"
           showIcon
           message={runtimeAssetBlocked ? '当前范围没有可执行的生产规则资产' : '生产计划或调度失败'}
@@ -399,13 +397,13 @@ const OfflineCurrentAuthorityPanel: React.FC<{
         <>
           <Divider orientation="left">生产运行环境</Divider>
           {readinessQuery.isLoading ? (
-            <Alert
+            <StatusNotice
               type="info"
               showIcon
               message="正在检查生产巡检运行环境"
             />
           ) : readinessQuery.isError ? (
-            <Alert
+            <StatusNotice
               type="error"
               showIcon
               message="无法确认生产巡检运行环境"
@@ -421,7 +419,7 @@ const OfflineCurrentAuthorityPanel: React.FC<{
               )}
             />
           ) : platformReadiness && !platformReady ? (
-            <Alert
+            <StatusNotice
               type="error"
               showIcon
               message="生产巡检运行环境未就绪"
@@ -445,7 +443,7 @@ const OfflineCurrentAuthorityPanel: React.FC<{
               )}
             />
           ) : platformReadiness ? (
-            <Alert
+            <StatusNotice
               type="success"
               showIcon
               message="生产巡检运行环境已就绪"
@@ -459,7 +457,7 @@ const OfflineCurrentAuthorityPanel: React.FC<{
         <>
           <Divider orientation="left">独立核验</Divider>
           {sameActor ? (
-            <Alert
+            <StatusNotice
               type="info"
               showIcon
               message="等待另一位独立核验人复核"
@@ -483,7 +481,7 @@ const OfflineCurrentAuthorityPanel: React.FC<{
               </Button>
             </Space>
           ) : (
-            <Alert type="info" showIcon message="等待独立核验" />
+            <StatusNotice type="info" showIcon message="等待独立核验" />
           )}
         </>
       )}

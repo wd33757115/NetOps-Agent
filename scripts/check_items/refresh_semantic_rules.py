@@ -104,11 +104,13 @@ def verify_candidates(context: dict, candidates: dict) -> dict:
             'assertions': sum(r.get('assertions', 1) for r in cases), 'cases': cases}
 
 
-def build_plan() -> dict:
+def build_plan(check_ids: set[str] | None = None) -> dict:
     catalog = CheckItemCatalogRepository().load_active()
     service = CanonicalRuleContextService()
     checks = []
     for check in catalog.check_items:
+        if check_ids is not None and check.id not in check_ids:
+            continue
         context = service.get(check.version_id)
         candidates = service.generate_candidates(check.version_id)
         checks.append({'id': check.id, 'name': check.name, 'version_id': check.version_id,
