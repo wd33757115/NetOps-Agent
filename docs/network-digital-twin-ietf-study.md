@@ -116,6 +116,8 @@ IETF 模块的标准依赖也必须保留来源边界。例如 RFC 8944 引用�
 
 ## 6. 进入建模前尚须完成的核验
 
+逐项结果见 [原生模型核验清单](network-digital-twin-model-audit.md)。2026-09-28 已核对 RFC 8345 基础结构与 SIMAP 的全部 36 项需求；发现 -03 的方案、树图、代码不一致，原文 §9 编译失败。采纳决定保持，不能据此声称完整可执行模型已就绪。
+
 1. 闭合整个目标所需的标准模块、子模块、import 和 revision 清单，核对勘误与替代关系；当前已闭合十八个基础入口的三十个模块，不等于目标所有协议与草案的依赖包。
 2. 逐项核对 topology、device、inventory、service 之间的标准关联方式，包括虚拟设备与多实例；找不到已定义关联时记录缺口。
 3. 完整审查 TE 与目标涉及的协议扩展，不从当前 H3C 样本反推或删减模型。
@@ -130,4 +132,4 @@ IETF 模块的标准依赖也必须保留来源边界。例如 RFC 8944 引用�
 - 使用隔离的研究环境 `pyang==2.7.1` 编译上述文件：退出码 0，`.runtime/ietf-study/pyang.log` 无诊断；生成 `.runtime/ietf-study/topology-tree.txt` 用于核对扩展位置。TE 和草案组合不在这次编译范围。
 - 用 `yangson==1.6.3` 对首版冻结的 RFC 8345 原生模块运行 5 个语义正反例：允许不同网络相同 node-id；允许标准明示的未解析 leafref；拒绝同网络重复 node-id；拒绝自定义 confidence；拒绝基础 link 上不存在的 direction 字段。结果 `.runtime/ietf-study/base-semantics.json`，5 项通过。
 - 这些结果验证具体标准约束，不能证明全部协议理解或完整模型交付。涉及草案的正式示例还需单独编译、回放和语义核对。
-- RFC 8345 基础 link 拒绝 direction 的反例仅验证基础 Schema，不适用于判断 SIMAP 命名空间下的方向扩展。SIMAP 组合尚未编译或通过实例验证；本次采纳决定不改变这一验证状态。
+- RFC 8345 基础 link 拒绝 direction 的反例仅验证基础 Schema，不适用于判断 SIMAP 命名空间下的方向扩展。后续已对 SIMAP -03 原文执行编译并确认失败，因此扩展实例尚未验证。其他组合、18 项实例结果和语义缺口详见 [核验清单第 6 节](network-digital-twin-model-audit.md#6-验证证据)。
