@@ -4,6 +4,8 @@
 
 负责人最新约束：先理解 IETF 相关定义，再按照其完整模型实施；不做按实验裁剪的最小模型，不增加项目自定义实体、字段、关系、identity、augment 或命名空间。当前采集/模板扩展暂停。
 
+2026-09-28 采纳决定：**RFC 8345bis 相关补充工作纳入建模依据，不因其处于草案状态而排除。** 当前固定采用其后继 `draft-havel-nmop-simap-yang-03`；RFC 8345 保留为基础，SIMAP 原生扩展纳入模型范围。来源状态与项目是否采纳分别记录；“禁止自定义”不等于“禁止采用草案已有定义”。详见第 4 节。
+
 ## 1. 应先分清的模型层次
 
 IETF 的网络拓扑、设备管理、网络资源清单、服务接入和数字孪生架构不是同一份 Schema。不能把若干数据库事实表称为完整 IETF 模型，也不能把所有树直接塞到 `ietf-network/node` 下。[RFC 8309](https://www.rfc-editor.org/rfc/rfc8309.html) 讨论服务模型和设备模型的区别；各具体模块的作用范围必须分别遵守。
@@ -14,6 +16,7 @@ flowchart TD
     NT --> L2["RFC 8944 · L2 拓扑扩展"]
     NT --> L3["RFC 8346 · L3 单播拓扑扩展"]
     NT --> TE["RFC 8795 · TE 拓扑扩展"]
+    NT --> SIMAP["8345bis 后继 · SIMAP YANG -03（已采纳草案）"]
     NW --> SAP["RFC 9408 · 服务接入点扩展"]
     IF["RFC 8343 · 设备接口"] --> IP["RFC 8344 · 接口 IP / 邻居"]
     RT["RFC 8349 · 设备路由"] --> AF["IPv4 / IPv6 地址族扩展"]
@@ -54,6 +57,8 @@ RFC 8345 的 node-id 在包含它的 network 中唯一；TP 在 node 中标识�
 
 因此，原方案的“一台设备等于所有层的同一个 node”“TP 就是物理端口”“所有引用必须在当前 JSON 内存在”均不能成为替代标准的统一规则。标识符的具体取值可按标准允许的实施选择决定，不等于允许新增标识字段。
 
+上述方向和端点数量描述限定于 RFC 8345 基础模型。纳入 SIMAP 后，须按其扩展定义核对双向、多点等表达；不能把基础模型的限制直接用来拒绝草案合法定义的扩展实例，也不能在基础命名空间自行加字段。
+
 ### 3.2 L2、L3 与设备数据不可混同
 
 RFC 8944 的 TP `interface-name` 是字符串，文中专门说明不能直接使用只面向单设备数据存储的 `interface-ref` 来唯一引用全网接口；其 rate 使用 Kbps，不能直接填本项目的 Mbps 值。L3 拓扑的前缀属性也不等于路由表。依据：[RFC 8944 §5](https://www.rfc-editor.org/rfc/rfc8944.html#section-5)、[RFC 8346](https://www.rfc-editor.org/rfc/rfc8346.html)。
@@ -72,13 +77,23 @@ RFC 8349 的下一跳有 choice：简单下一跳、特殊下一跳、多下一�
 
 对于事实来源、历史快照、模拟等要求，先查对应标准/草案是否有准确语义；没有核实到定义时不加字段、不借 `anydata` 填入自定义结构、不宣称已经满足需求。
 
-## 4. 草案状态与不能冒充的内容
+## 4. 已采纳的 8345bis 补充与其他草案状态
+
+### 4.1 采纳依据与版本
+
+此前“仅检索到修订计划/讨论”的记录不完整，现更正：Datatracker 明确记录 `draft-havel-nmop-simap-yang` 接续 `draft-davis-nmop-some-refinements-to-rfc8345`、其 OPSAWG 前身以及 digital-map 草案，并关联作者的 `RFC8345Bis` 仓库。这是本项目所称“8345bis 补充工作”的可追溯文档沿革，不是另一个已发布 RFC 编号。[官方沿革](https://datatracker.ietf.org/doc/draft-havel-nmop-simap-yang/history/)
+
+**采纳基线为 RFC 8345 + `draft-havel-nmop-simap-yang-03`，概念和需求配套核对 `draft-ietf-nmop-simap-concept-13`。** 后继文档替代关系不代表已废止 RFC 8345；本项目采用补充模型的决定已经明确，不再以等待转为 RFC 作为进入建模的条件。模型文件的 namespace、revision、feature 和约束按原文保留；草案编号与模块 revision 分开记录。后续换版须记录差异并重做受影响的实例验证，不随移动链接或仓库 HEAD 自动替换。
+
+SIMAP 的核心拓扑、导航、生命周期及外部关联均列入后续逐项核验范围。核验时对照第 7 节方案、第 8 节树图和第 9 节模块代码，记录哪些定义已落入原生 YANG、哪些仍是提议或 TODO；采纳不等于声称所有能力已经实现。未完成定义继续跟随原草案，不由本项目补写。[固定版本原文](https://datatracker.ietf.org/doc/html/draft-havel-nmop-simap-yang-03)
+
+### 4.2 来源与实施边界
 
 | 文档 | 本次核对 | 对后续建模的约束 |
 |---|---|---|
-| “RFC 8345bis” | 检索到的是 IETF 会议中的修订计划/讨论，未核实到可直接引用为已发布 RFC 的同名完整模型。[会议资料](https://datatracker.ietf.org/meeting/interim-2024-nmop-01/materials/slides-interim-2024-nmop-01-sessa-rfc8345-gaps-for-digital-map-modelling-00) | 不使用虚构的 RFC 编号、模块版本或草案路径；继续以实际文档标识核对。 |
+| “RFC 8345bis” 补充工作 | 已核实 refinements → SIMAP YANG 的后继关系及 `RFC8345Bis` 仓库关联。[官方沿革](https://datatracker.ietf.org/doc/draft-havel-nmop-simap-yang/history/) | 已决定采纳，以后继固定版本 -03 为当前依据；旧草案用于理解沿革，不与后继版本混装。 |
 | `draft-ietf-nmop-simap-concept-13` | 2026-09-04 的工作组草案；说明 SIMAP 概念、要求与用例，具体建模语言和实现并非由此文完成。[原文](https://datatracker.ietf.org/doc/html/draft-ietf-nmop-simap-concept-13) | 不能将概念要求直接转成自定义模型，并声称来自已完成的 IETF YANG。 |
-| `draft-havel-nmop-simap-yang-03` | 已核对该版本；移动链接/搜索曾返回旧版 -02，必须固定文档版本。正文有 TODO 和提议中的结构。[原文](https://datatracker.ietf.org/doc/html/draft-havel-nmop-simap-yang-03) | 区分提议、树图和完整模块代码；不自行补全 TODO，不把个人草案等同已发布标准。 |
+| `draft-havel-nmop-simap-yang-03` | 已采纳的个人草案，模块 `ietf-simap-topology`；移动链接/搜索曾返回旧版 -02，必须固定文档版本。[原文](https://datatracker.ietf.org/doc/html/draft-havel-nmop-simap-yang-03) | 纳入 IETF-0 审查、IETF-1 模块与依赖验证、IETF-2 实例验证；区分提议、树图和模块代码，不自行补全 TODO，不将其标为已发布 RFC。 |
 | `draft-ietf-ivy-network-inventory-yang-19` | 2026-09-17 工作组草案；面向全网 installed inventory，基础版仅涵盖物理 NE，软件/虚拟扩展另行定义。[原文](https://datatracker.ietf.org/doc/html/draft-ietf-ivy-network-inventory-yang-19) | 不用 RFC 8348 的单设备树假装全网 inventory；VSR 是虚拟设备，不能硬填为物理 NE。 |
 | `draft-ietf-ivy-network-inventory-topology-11` | 2026-09-11 工作组草案；定义 inventory-topology 及 `ne-ref`、`port-ref` 等映射。[原文](https://datatracker.ietf.org/doc/html/draft-ietf-ivy-network-inventory-topology-11) | 拓扑与资源清单的关联已有 IETF 工作，继续核对原生映射和物理实体适用范围，不自行设计另一套关系。 |
 | `draft-ietf-ivy-network-inventory-software-04` | 工作组草案；扩展非物理网元、软件组件，包括 `ne-virtual` 等 identity。[原文](https://datatracker.ietf.org/doc/html/draft-ietf-ivy-network-inventory-software-04) | 虚拟路由器需核对此扩展及基础版本兼容性，不新建项目 virtual-device 类型。 |
@@ -105,7 +120,7 @@ IETF 模块的标准依赖也必须保留来源边界。例如 RFC 8944 引用�
 2. 逐项核对 topology、device、inventory、service 之间的标准关联方式，包括虚拟设备与多实例；找不到已定义关联时记录缺口。
 3. 完整审查 TE 与目标涉及的协议扩展，不从当前 H3C 样本反推或删减模型。
 4. 用未经修改的原生模块验证正式示例和反例；既检查编译，也检查实例语义、数据存储范围和挂载关系。工具通过不能替代原文理解。
-5. 固定草案版本，区分已定义内容与 TODO；未完成部分不由项目补写。
+5. 以已采纳的 SIMAP YANG -03 为补充基线，逐项建立需求/章节、原生路径、feature、依赖和实例验证记录；与配套 concept -13 的要求核对差异。区分已定义内容与 TODO，未完成部分不由项目补写。版本与定义核验是实施工作，不再重新讨论是否因草案状态而排除。
 
 本次只形成研究与纠偏记录。未新增生产 YANG、数据实体、迁移或 API；资料位于忽略目录 `.runtime/ietf-study/`，没有把未闭合的下载目录发布成模型包。P2-3 保持暂停、未完成状态。
 
@@ -115,3 +130,4 @@ IETF 模块的标准依赖也必须保留来源边界。例如 RFC 8944 引用�
 - 使用隔离的研究环境 `pyang==2.7.1` 编译上述文件：退出码 0，`.runtime/ietf-study/pyang.log` 无诊断；生成 `.runtime/ietf-study/topology-tree.txt` 用于核对扩展位置。TE 和草案组合不在这次编译范围。
 - 用 `yangson==1.6.3` 对首版冻结的 RFC 8345 原生模块运行 5 个语义正反例：允许不同网络相同 node-id；允许标准明示的未解析 leafref；拒绝同网络重复 node-id；拒绝自定义 confidence；拒绝基础 link 上不存在的 direction 字段。结果 `.runtime/ietf-study/base-semantics.json`，5 项通过。
 - 这些结果验证具体标准约束，不能证明全部协议理解或完整模型交付。涉及草案的正式示例还需单独编译、回放和语义核对。
+- RFC 8345 基础 link 拒绝 direction 的反例仅验证基础 Schema，不适用于判断 SIMAP 命名空间下的方向扩展。SIMAP 组合尚未编译或通过实例验证；本次采纳决定不改变这一验证状态。
