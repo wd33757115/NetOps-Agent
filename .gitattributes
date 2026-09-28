@@ -36,3 +36,6 @@ tests/fixtures/topology/**/*.txt -text whitespace=-blank-at-eol
 models/network-twin/mount/cases/*.xml text eol=lf
 models/network-twin/mount/operational/*.xml text eol=lf
 models/network-twin/mount/Dockerfile* text eol=lf
+
+# Device evidence keeps trailing spaces as printed and LF bytes matching its manifest digests.
+models/network-twin/evidence/**/*.txt text eol=lf whitespace=-blank-at-eol
