@@ -30,6 +30,9 @@ from src.platform.device_access.security import CredentialStore
 from . import storage
 from .collectors.collect import collect_node, command_allowlist
 from .collectors.identify import TopologyDiscoveryPlan as DiscoveryPlan
+from .collectors.tiers.common import valid_mac
+from .model.builder import build_topology, device_node_ids
+from .model.view import canvas
 from .models import (
     Alias,
     Link,
@@ -43,7 +46,7 @@ from .models import (
     TerminationPoint,
     now,
 )
-from .normalize import build_graph, diff, identifier, parse, rfc8345
+from .normalize import diff, parse, rfc8345
 from .repository import owned, sessions
 
 APP_ID = "topology"
@@ -201,16 +204,64 @@ def _observations(session, run_id):
     return list(latest.values())
 
 
-def _graph(session, run):
-    network = session.get(Network, run.network_id)
-    previous = session.get(Snapshot, network.current_snapshot) if network.current_snapshot else None
-    observations = _observations(session, run.id)
-    graph = build_graph(
-        network.id,
-        network.domain,
-        observations,
-        previous.graph if previous else None,
+# Observations from the manual LLDP-only plan or offline import carry these profile ids.
+LEGACY_PLATFORMS = {"comware-lldp-v1": "comware", "nxos-lldp-v1": "nxos"}
+
+
+def _facts(data):
+    """Builder input for one observation; LLDP-only observations become lldp records."""
+    platform = data.get("platform") or {}
+    if "facts" in data:
+        facts = dict(data["facts"])
+    else:
+        facts = {
+            "lldp": [
+                {
+                    "local_if": n["local_port"],
+                    # Same normalisation as the generic parser, so one device stays one node.
+                    "remote_chassis_id": valid_mac(n["chassis_id"]) or n["chassis_id"],
+                    "remote_chassis_subtype": n.get("chassis_subtype"),
+                    "remote_port_id": n["remote_port"],
+                    "remote_port_subtype": n.get("port_subtype"),
+                    "remote_sysname": n.get("name"),
+                    "remote_mgmt_addresses": n.get("addresses", []),
+                }
+                for n in data.get("neighbors", [])
+            ]
+        }
+    identity = platform.get("identity") or {}
+    facts["platform"] = identity.get("os_family") or LEGACY_PLATFORMS.get(
+        platform.get("profile_id"), ""
     )
+    return facts
+
+
+def _graph(session, run):
+    """The run's own observations as SIMAP L2/L3, plus a canvas view and coverage."""
+    network = session.get(Network, run.network_id)
+    observations = _observations(session, run.id)
+    base = f"urn:netops:topology:{network.id}:"
+    devices = {o["address"]: _facts(o["data"]) for o in observations}
+    tree, links_evidence = build_topology(devices, base)
+    ids = device_node_ids(devices, base)
+    collected = {
+        ids[o["address"]]: {
+            "address": o["address"],
+            "evidence_id": o["id"],
+            "observed_at": o["observed_at"],
+        }
+        for o in observations
+    }
+    nodes, links = canvas(tree, links_evidence, collected, base)
+    graph = {
+        "network_id": network.id,
+        "domain": network.domain,
+        "model_profile": "rfc8345+simap-yang-03:l2-l3",
+        "nodes": nodes,
+        "links": links,
+        "simap": tree,
+        "evidence": links_evidence,
+    }
     targets = session.scalars(select(Target).where(Target.run_id == run.id)).all()
     addresses = {target.address: target for target in targets}
     unexplored = []
@@ -238,7 +289,6 @@ def _graph(session, run):
             for t in targets
         ],
         "unexplored": unexplored,
-        "adjacency_validation": "single_advertisement",
         "observed_from": min((o["observed_at"] for o in observations), default=None),
         "observed_to": max((o["observed_at"] for o in observations), default=None),
     }
@@ -258,44 +308,9 @@ def _finish(session, run, status=None):
     graph = _graph(session, run)
     snap = Snapshot(id=uuid4().hex, network_id=run.network_id, run_id=run.id, graph=graph)
     session.add(snap)
-    # Projection is rebuildable from immutable snapshots and observations.
+    # The old projection tables have no reader; the snapshot holds the model.
     for model in (Link, TerminationPoint, Alias, Node):
         session.execute(delete(model).where(model.network_id == run.network_id))
-    for node in graph["nodes"]:
-        session.add(Node(network_id=run.network_id, node_id=node["id"], properties=node))
-    session.flush()
-    for node in graph["nodes"]:
-        for tp in node["tps"]:
-            session.add(
-                TerminationPoint(
-                    network_id=run.network_id, node_id=node["id"], tp_id=tp["id"], properties=tp
-                )
-            )
-        for kind in ("address", "chassis_id"):
-            if node.get(kind):
-                session.add(
-                    Alias(
-                        id=identifier(run.network_id, node["id"], kind, node[kind]),
-                        network_id=run.network_id,
-                        node_id=node["id"],
-                        kind=kind,
-                        value=node[kind],
-                        status=node["identity_status"],
-                    )
-                )
-    session.flush()
-    for link in graph["links"]:
-        session.add(
-            Link(
-                network_id=run.network_id,
-                link_id=link["id"],
-                source_node=link["source"],
-                source_tp=link["source_tp"],
-                dest_node=link["target"],
-                dest_tp=link["target_tp"],
-                properties=link,
-            )
-        )
     network = session.get(Network, run.network_id)
     network.current_snapshot, network.active_run = snap.id, None
     run.status, run.finished_at = status, now()
@@ -402,7 +417,9 @@ def compare(owner, before_id, after_id):
 
 
 def export(owner, snapshot_id):
-    return rfc8345(snapshot(owner, snapshot_id))
+    graph = snapshot(owner, snapshot_id)
+    # Snapshots before the SIMAP builder keep their original RFC 8345 base export.
+    return graph["simap"] if "simap" in graph else rfc8345(graph)
 
 
 def evidence(owner, observation_id):

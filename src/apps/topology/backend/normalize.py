@@ -1,15 +1,10 @@
 """Versioned LLDP adapters. Unrecognized or incomplete output is never an empty graph."""
 
-import hashlib
 import ipaddress
 import re
 
 from src.platform.device_access.catalog import DISCOVERY_PROFILES as PROFILES
 from src.platform.device_access.contracts import DeviceAccessError
-
-
-def identifier(*parts):
-    return hashlib.sha256("\x00".join(parts).encode()).hexdigest()[:32]
 
 
 def parse(profile, outputs, complete=True):
@@ -95,113 +90,6 @@ def parse(profile, outputs, complete=True):
     ):
         raise DeviceAccessError("parse_failed", "LLDP 标识超过限制")
     return {"neighbors": neighbors, "parser": profile, "complete": True}
-
-
-def build_graph(network_id, domain, observations, previous=None):
-    """A run is an observation overlay, not proof that unobserved objects disappeared.
-
-    Addresses are scoped to a network/domain. Remote chassis aliases remain candidates;
-    a management-address advertisement alone does not prove physical asset identity.
-    """
-    import copy
-    from datetime import datetime, timezone
-
-    graph = copy.deepcopy(previous) if previous else {"nodes": [], "links": []}
-    nodes = {node["id"]: {**node, "freshness": "not_observed"} for node in graph["nodes"]}
-    links = {link["id"]: {**link, "freshness": "not_observed"} for link in graph["links"]}
-    for observation in observations:
-        address = observation["address"]
-        node_id = identifier(domain, "address", address)
-        local = nodes.setdefault(
-            node_id,
-            {
-                "id": node_id,
-                "name": address,
-                "address": address,
-                "identity_status": "address_scoped",
-                "tps": [],
-            },
-        )
-
-        def timestamp(value):
-            parsed = datetime.fromisoformat(value)
-            return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed
-
-        if local.get("observed_at") and timestamp(local["observed_at"]) > timestamp(
-            observation["observed_at"]
-        ):
-            continue  # Late evidence stays in the log; it cannot replace newer state.
-        local.update(
-            freshness="observed",
-            observed_at=observation["observed_at"],
-            evidence_id=observation["id"],
-        )
-        if observation["data"].get("platform"):
-            local["platform"] = observation["data"]["platform"]
-        # A successful complete LLDP table supersedes that source's previous adjacency.
-        for link in links.values():
-            if link["source"] == node_id:
-                link["freshness"] = "absent_in_observation"
-        for neighbor in observation["data"]["neighbors"]:
-            remote_id = identifier(
-                domain,
-                "lldp-chassis",
-                neighbor.get("chassis_subtype", "unknown"),
-                neighbor["chassis_id"],
-            )
-            remote = nodes.setdefault(
-                remote_id,
-                {
-                    "id": remote_id,
-                    "name": neighbor["name"],
-                    "identity_status": "candidate",
-                    "chassis_id": neighbor["chassis_id"],
-                    "chassis_subtype": neighbor.get("chassis_subtype", "unknown"),
-                    "addresses": neighbor["addresses"],
-                    "tps": [],
-                },
-            )
-            if not remote.get("observed_at") or timestamp(remote["observed_at"]) <= timestamp(
-                observation["observed_at"]
-            ):
-                remote.update(
-                    name=neighbor["name"],
-                    addresses=neighbor["addresses"],
-                    freshness="advertised",
-                    observed_at=observation["observed_at"],
-                    evidence_id=observation["id"],
-                    system_description=neighbor.get("system_description"),
-                )
-            source_tp = identifier(neighbor["local_port"])
-            dest_tp = identifier(neighbor["remote_port"])
-            for node, tp, label in (
-                (local, source_tp, neighbor["local_port"]),
-                (remote, dest_tp, neighbor["remote_port"]),
-            ):
-                if not any(item["id"] == tp for item in node["tps"]):
-                    node["tps"].append({"id": tp, "name": label})
-            key = identifier(node_id, source_tp, remote_id, dest_tp)
-            links[key] = {
-                "id": key,
-                "source": node_id,
-                "source_tp": source_tp,
-                "target": remote_id,
-                "target_tp": dest_tp,
-                "freshness": "observed",
-                "direction": "advertisement",
-                "evidence_id": observation["id"],
-                "observed_at": observation["observed_at"],
-            }
-    return {
-        "network_id": network_id,
-        "domain": domain,
-        "model_profile": "rfc8345-base+netops-observation-v1",
-        "identity_policy": "conservative-candidate-v1",
-        "network_types": graph.get("network_types", {}),
-        "supporting_networks": graph.get("supporting_networks", []),
-        "nodes": sorted(nodes.values(), key=lambda n: n["id"]),
-        "links": sorted(links.values(), key=lambda n: n["id"]),
-    }
 
 
 def rfc8345(graph):

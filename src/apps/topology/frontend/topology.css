@@ -15,6 +15,7 @@
 .topology-map-caption { position: absolute; top: 12px; left: 14px; color: #647583; background: #ffffffeb; padding: 7px 10px; font-size: 12px; pointer-events: none; }
 .topology-node { width: 192px; border: 1px solid #547c8a !important; border-radius: 5px !important; background: #fff !important; box-shadow: 0 3px 10px #244a5810; text-align: left !important; padding: 14px !important; }
 .topology-node.candidate { border-style: dashed !important; border-color: #9aa8b3 !important; }
+.topology-node.segment { width: 150px; border-radius: 18px !important; background: #eef4f6 !important; }
 .topology-node strong { display: block; font-size: 13px; color: #263d4b; overflow-wrap: anywhere; }
 .topology-node span, .topology-node small { display: block; color: #6b7d89; margin-top: 5px; font-size: 11px; }
 .topology-targets { margin-top: 26px; }

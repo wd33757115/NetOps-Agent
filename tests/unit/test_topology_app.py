@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 from datetime import timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -11,7 +12,7 @@ from sqlalchemy.orm import Session
 from src.apps.topology.backend import service
 from src.apps.topology.backend.collectors import collect as collectors
 from src.apps.topology.backend.models import Base, Network, Observation, Run, Snapshot, Target, now
-from src.apps.topology.backend.normalize import build_graph, parse, rfc8345
+from src.apps.topology.backend.normalize import parse
 from src.apps.topology.backend.schemas import Discovery, Import, Resolve
 from src.platform.device_access.contracts import CommandResult, DeviceAccessError
 
@@ -78,6 +79,7 @@ def world(monkeypatch):
         after_connect = None
         versions = {}
         outputs = {}
+        captures = {}
         sent = []
 
         def __init__(self, **kwargs):
@@ -168,7 +170,9 @@ def world(monkeypatch):
         for cap, spec in profile.selected(mode).items():
             if cap == "version":
                 continue
-            output = Access.outputs.get(address, Access.output) if cap == "lldp" else ""
+            output = Access.captures.get(
+                (address, cap), Access.outputs.get(address, Access.output) if cap == "lldp" else ""
+            )
             result.results[cap] = run(cap, spec.command, output)
             result.parsed[cap] = collectors.parse(identity, cap, output)
         return result
@@ -246,79 +250,6 @@ def test_invalid_or_partial_table_never_means_empty(text, complete):
 
 def test_explicit_zero_is_valid():
     assert parse("nxos-lldp-v1", {"neighbors": "Total entries displayed: 0"})["neighbors"] == []
-
-
-def test_address_does_not_automatically_merge_advertised_identity():
-    data = parse("comware-lldp-v1", {"neighbors": COMWARE})
-    observations = [
-        dict(id="a", address="10.0.0.1", observed_at="2026-09-28T00:00:00Z", data=data),
-        dict(
-            id="b", address="10.0.0.2", observed_at="2026-09-28T00:00:00Z", data={"neighbors": []}
-        ),
-    ]
-    graph = build_graph("network", "site-a", observations)
-    assert len(graph["nodes"]) == 3
-    assert len({node["id"] for node in graph["nodes"]}) == 3
-    other = build_graph("network", "site-b", observations)
-    assert {node["id"] for node in graph["nodes"]}.isdisjoint(
-        {node["id"] for node in other["nodes"]}
-    )
-
-
-def test_snapshot_overlay_keeps_unobserved_and_rejects_late_regression():
-    observation = dict(
-        id="a",
-        address="10.0.0.1",
-        observed_at="2026-09-28T00:00:00Z",
-        data=parse("comware-lldp-v1", {"neighbors": COMWARE}),
-    )
-    first = build_graph("network", "default", [observation])
-    missing = build_graph("network", "default", [], first)
-    assert missing["links"][0]["freshness"] == "not_observed"
-    assert first["links"][0]["freshness"] == "observed"
-    old = {**observation, "observed_at": "2026-09-27T00:00:00Z", "data": {"neighbors": []}}
-    assert (
-        build_graph("network", "default", [old], first)["links"][0]["freshness"] == "not_observed"
-    )
-    new = {**old, "observed_at": "2026-09-29T00:00:00Z"}
-    assert (
-        build_graph("network", "default", [new], first)["links"][0]["freshness"]
-        == "absent_in_observation"
-    )
-
-
-def test_new_advertisement_updates_candidate_without_mutating_history():
-    old = dict(
-        id="old",
-        address="10.0.0.1",
-        observed_at="2026-09-28T00:00:00Z",
-        data=parse("comware-lldp-v1", {"neighbors": COMWARE}),
-    )
-    first = build_graph("network", "default", [old])
-    new = {
-        **old,
-        "id": "new",
-        "observed_at": "2026-09-28T00:01:00Z",
-        "data": parse(
-            "comware-lldp-v1",
-            {"neighbors": COMWARE.replace("edge-b", "renamed-b").replace("10.0.0.2", "10.0.0.22")},
-        ),
-    }
-    latest = build_graph("network", "default", [new], first)
-    candidate = next(n for n in latest["nodes"] if n["identity_status"] == "candidate")
-    assert candidate["name"] == "renamed-b"
-    assert candidate["addresses"] == ["10.0.0.22"]
-    assert candidate["evidence_id"] == "new"
-    original = next(n for n in first["nodes"] if n["identity_status"] == "candidate")
-    assert original["name"] == "edge-b"
-    assert original["addresses"] == ["10.0.0.2"]
-    assert original["id"] == candidate["id"]
-    # An older report from another source must not roll back the shared candidate.
-    late = build_graph("network", "default", [{**old, "address": "10.0.0.3"}], latest)
-    after_late = next(n for n in late["nodes"] if n["id"] == candidate["id"])
-    assert after_late["name"] == "renamed-b"
-    assert after_late["observed_at"] == new["observed_at"]
-    assert after_late["evidence_id"] == "new"
 
 
 def test_submit_is_idempotent_and_never_persists_password(world):
@@ -492,11 +423,19 @@ def test_offline_import_projects_valid_references_and_protects_evidence(world):
     row = service.import_captures("user", offline())
     assert service.import_captures("user", offline())["id"] == row["id"]
     assert row["status"] == "completed"
-    network = rfc8345(row["graph"])["ietf-network:networks"]["network"][0]
-    node_ids = {node["node-id"] for node in network["node"]}
-    for link in network["ietf-network-topology:link"]:
-        assert link["source"]["source-node"] in node_ids
-        assert link["destination"]["dest-node"] in node_ids
+    exported = service.export("user", row["snapshot_id"])
+    for network in exported["ietf-network:networks"]["network"]:
+        tps = {
+            (node["node-id"], tp["tp-id"])
+            for node in network["node"]
+            for tp in node["ietf-network-topology:termination-point"]
+        }
+        for link in network["ietf-network-topology:link"]:
+            ends = link["ietf-simap-topology:tp"]
+            assert link["ietf-simap-topology:link-direction"].endswith("link-direction-bi")
+            assert all((end["node-ref"], end["tp-ref"]) in tps for end in ends)
+    # An LLDP-only import still yields the seed and its advertised neighbour, once each.
+    assert len(row["graph"]["nodes"]) == 2 and len(row["graph"]["links"]) == 1
     assert not world.executions
     with pytest.raises(HTTPException) as exc:
         service.evidence("stranger", row["targets"][0]["evidence_id"])
@@ -542,3 +481,45 @@ def test_unparsed_lldp_waits_for_a_human_instead_of_meaning_no_neighbours(world)
     target = service.read("user", row["id"])["targets"][0]
     assert target["status"] == "waiting_for_input"
     assert target["reason"] in {"parse_failed", "parse_incomplete"}
+
+
+LAB = Path(__file__).resolve().parents[1] / "fixtures/topology/h3c/vsr1000-7.1.064"
+LAB_FILES = {
+    "lldp_local": "lldp_local",
+    "lldp": "lldp_verbose",
+    "interfaces": "interfaces",
+    "ip": "ip_interfaces",
+    "arp": "arp",
+    "mac": "mac",
+}
+
+
+def test_discovery_of_the_lab_publishes_one_simap_topology(world):
+    for address, device in (("10.10.1.1", "vsr-1"), ("10.10.1.2", "vsr-2")):
+        for cap, name in LAB_FILES.items():
+            world.access.captures[(address, cap)] = (LAB / device / f"{name}.txt").read_text(
+                encoding="utf-8"
+            )
+    body = discovery(credentials_for_neighbors=True, max_depth=1)
+    body.seeds, body.allowed_cidrs = ["10.10.1.1"], ["10.10.1.0/24"]
+    row = service.submit("user", body)
+    service.execute_run(row["id"], lambda *args: None)
+    service.execute_run(row["id"], lambda *args: None)
+    result = service.read("user", row["id"])
+    assert result["status"] == "completed"
+    assert {t["address"] for t in result["targets"]} == {"10.10.1.1", "10.10.1.2"}
+    graph = result["graph"]
+    kinds = sorted(n["identity_status"] for n in graph["nodes"])
+    assert kinds == ["collected", "collected", "host", "host", "host", "segment"]
+    segment = next(n for n in graph["nodes"] if n["identity_status"] == "segment")
+    assert segment["members"] == 3 and segment["subnets"] == ["10.10.1.0/24"]
+    assert sorted(link["link_type"] for link in graph["links"]) == ["mp2mp"] * 3 + ["p2p"] * 3
+    exported = service.export("user", result["snapshot_id"])
+    assert [
+        n["network-id"].rsplit(":", 1)[1] for n in exported["ietf-network:networks"]["network"]
+    ] == [
+        "l2",
+        "l3",
+    ]
+    # 2.2.2.x is advertised on the direct link but lies outside the task scope.
+    assert {u["address"] for u in graph["coverage"]["unexplored"]} == {"2.2.2.1", "2.2.2.2"}

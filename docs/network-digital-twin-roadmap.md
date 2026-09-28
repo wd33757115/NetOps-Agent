@@ -1045,6 +1045,7 @@ P2-9 根据 Q5 取消，不引入 SNMP。P3 及后续仍在进入阶段时展开
 | IETF-2.3 L2/L3 基础拓扑 | 已完成 | 按负责人确认的设计，以 RFC 8345 + SIMAP -03 为基线生成 `topology.json`，替换旧的 `topology-observed.json`（4 条单向链路，且把经 Hub 的 GE1/0 误当点到点）。L2：4 条双向链路，共享网段为 1 条 mp2mp 链路；L3：4 个网段链路，带层间 supporting。生成时与 11.0 期望逐条比对；Yangson 26/26 | 路由、ACL 仍在设备树，不进拓扑；inventory 关联按 Q-IETF-1 不建立 |
 | D-1 拓扑构建器入 App（拓扑发现第 1 步） | 已完成 | 新增 `src/apps/topology/backend/model/builder.py`：输入每台设备的解析记录（lldp_local/lldp/interfaces/ip/arp/mac），输出 SIMAP L2/L3。设备身份用自报机箱 ID，与邻居通告同键，已采集设备和被通告邻居合为一个节点。主机按证据强弱接入：边缘口的 MAC/ARP 优先，只在 LLDP 口出现时才用该口。研究脚本删除自带的 `topology()`，改为调用 App 解析器和构建器，`topology.json` 重新生成（只有标识变化）。新增 8 项单元测试 | 第 2 步：把 collect_node 接进发现任务 |
 | D-2 采集接入发现任务（拓扑发现第 2 步） | 已完成（离线测试；实机验收在第 4 步） | 自动识别的节点改用 `collect_node` 的新 `topology` 模式（version/lldp_local/lldp/interfaces/ip/arp/mac），经 `VaultDriver` 使用凭据库和节点临时凭据，按命令白名单授权。节点预算 240 秒，租约 300 秒。观测记录保存各项解析结果和状态，并由 LLDP 生成旧格式邻居供扩散与现有画布使用。LLDP 未解析完整则进入人工处理；其余项只降级。人工指定平台的节点仍走原来的只采 LLDP 路径。修正通用 LLDP 解析器：支持 NX-OS“Chassis id 在前、Local Port id 在后”的真实顺序和 Comware 标题中的空格；P2-8 合成 NX-OS 样本顺序与真实输出不符 | 已知限制：Cisco IOS/NX-OS 档案没有 lldp_local，这类设备仍按采集地址标识，需要实机或可信样本后补；离线导入仍只处理 LLDP |
+| D-3 快照、导出与画布（拓扑发现第 3 步） | 已完成（离线测试；实机验收在第 4 步） | 快照改为本次任务观测的 SIMAP L2/L3 树、每条链路依据、画布视图和覆盖信息，不再叠加上一次快照；旧格式（人工平台、离线导入）观测先转换成构建器输入，机箱 ID 同样规范化。导出直接返回标准树，旧快照仍走原 RFC 8345 导出。新增 `model/view.py`：设备、主机为节点，mp2mp 共享网段画成汇聚点，链路标注承载的三层网段。删除被取代的 `build_graph` 及 3 个旧语义测试；投影表只清不写。App `resources/yang` 更新为导出所需的 11 个模块（来自已验证模型包，SIMAP 注明本地补丁），导出按 operational 内容校验。前端补新状态标签、共享网段样式和说明。新增端到端离线测试：从 10.10.1.1 用真实样本走完整发现流程，得到 2 设备、3 主机、1 个 3 端点共享网段，导出含 L2/L3 | 应用版本号和 `generated.ts` 摘要仍归在暂停的 P2-3 改动里，未随本步提交 |
 | IETF-2.1 VSR 实验实例 | 已完成本批次映射核验；完整实例未通过 | `build_ietf_lab_instances.py` 校验全部既有样本摘要、重建并比较 6 个原生实例与清单。2 节点/4 TP/4 LLDP 邻接、2 个虚拟 NE、18+19 路由通过；各 6 条 IP 接口行因缺 statistics/discontinuity-time 按预期失败。`validate_ietf_model_package.py` 共 24 项结果匹配，负例检查具体诊断；结果已保存 `models/network-twin/reports/`。 | 不虚构计数器时间、默认 VRF、OSPF 版本或物理关系。路由子集未填出口引用，特殊下一跳动作、序列号组件归属、ARP/MAC/VLAN/Hub 与完整路径仍未映射验收。 |
 
 本轮 IETF-1/2 改动文件：`.gitignore` 仅放行 `models/network-twin/` 验证资料；该目录的来源锁、profile、补丁、说明、关联核验、实例及报告；研究脚本 `build_ietf_model_package.py`、`build_ietf_lab_instances.py`、`validate_ietf_model_package.py`；本台账和核验文档。生产代码及 P2-3 未提交修改不包含在本轮。
@@ -1077,7 +1078,9 @@ IETF-2.3：`build_ietf_lab_instances.py` 新增 `topology()`，由 LLDP/ARP/MAC/
 
 拓扑发现改造（负责人确认方案，4 步：构建器入 App → 采集接入发现 → 快照/导出/画布 → 实机验收）。D-1 命令：`venv/Scripts/python.exe -m pytest tests/unit -k topology`，400 通过、5 失败、1 跳过；5 个失败均为工作区中暂停的 P2-3 VLAN 模板测试，与本步无关，新增 8 项全部通过。研究 Python 执行 `build_ietf_lab_instances.py`、`--check`（9 文件一致）和 `validate_ietf_model_package.py`（26/26）；Ruff 通过。P2-3 工作区改动未提交。
 
-D-2 命令：在只含已提交代码加本步改动的临时 worktree 中，`pytest tests/unit -k "topology or device_access"` 1043 通过、1 跳过、1 失败。失败项 `test_frozen_yang_checksums` 是仓库原有问题：`resources/yang/*.yang` 未固定 LF，Windows 新检出会变成 CRLF，已另行修正。主工作区 1079 通过、5 失败，失败的均为暂停中的 P2-3 VLAN 测试。`profiles.py` 只暂存本步两处修改，P2-3 那段仍留在工作区。Ruff 通过。设备内配置/合成状态挂载已单独通过，不把它当全网关联的替代。不能把本轮有限数据投影当“完整 IETF 模型已交付”，P2-3/P2-10 继续暂停。
+D-2 命令：在只含已提交代码加本步改动的临时 worktree 中，`pytest tests/unit -k "topology or device_access"` 1043 通过、1 跳过、1 失败。失败项 `test_frozen_yang_checksums` 是仓库原有问题：`resources/yang/*.yang` 未固定 LF，Windows 新检出会变成 CRLF，已另行修正。主工作区 1079 通过、5 失败，失败的均为暂停中的 P2-3 VLAN 测试。`profiles.py` 只暂存本步两处修改，P2-3 那段仍留在工作区。Ruff 通过。
+
+D-3 命令：干净 worktree（已提交代码 + 本步改动）`pytest tests/unit -k "topology or device_access"` 1042 通过、2 跳过（App 环境无 yangson）；研究 Python 运行 `test_topology_yang.py` 与 `test_topology_builder.py` 共 10 通过、1 跳过（旧格式导出需要 App 环境）。主工作区 1077 通过、5 失败，均为 P2-3 VLAN。前端 `npm run build` 通过；该项目没有 tsconfig，不做 tsc 检查。Ruff 通过。设备内配置/合成状态挂载已单独通过，不把它当全网关联的替代。不能把本轮有限数据投影当“完整 IETF 模型已交付”，P2-3/P2-10 继续暂停。
 
 分项记录与证据详见 [原生模型核验清单](network-digital-twin-model-audit.md)。IETF-0 整体仍进行中；上述“完成”只针对已列出的核验范围。
 

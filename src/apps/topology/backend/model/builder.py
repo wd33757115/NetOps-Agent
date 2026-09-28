@@ -372,6 +372,16 @@ class _Topology:
         }
 
 
+def device_node_ids(devices, base):
+    """{target_key: node-id} for collected devices, using the builder's identity rule."""
+    topology = _Topology(devices, base)
+    return {key: topology.device_node(chassis) for key, chassis in topology.chassis.items()}
+
+
+def host_node_prefix(base):
+    return base + "host:"
+
+
 def build_topology(devices, base):
     """devices: {target_key: {"platform", "lldp_local", "lldp", "interfaces", "ip", "arp", "mac"}}.
 
