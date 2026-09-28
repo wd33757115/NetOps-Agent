@@ -251,6 +251,8 @@ app.include_router(artifacts_router)
 app.include_router(official_documents_router)  # Legacy URL, same application admission
 from src.platform.kernel.registry import mount_apps
 mount_apps(app)
+from src.gateway.device_terminal import router as device_terminal_router
+app.include_router(device_terminal_router)
 app.include_router(workflow_router)
 app.include_router(notification_router)
 app.include_router(events_router)

@@ -1,0 +1,209 @@
+"""Authorized, bounded batch execution. No transport objects are returned."""
+
+from __future__ import annotations
+
+import time
+import uuid
+from contextlib import contextmanager
+from dataclasses import replace
+from datetime import datetime, timezone
+
+from .admission import SSHAdmission
+from .contracts import BatchResult, CommandResult, DeviceAccessError
+from .drivers.paramiko_driver import ParamikoDriver
+from .errors import failure_code
+from .policy import authorize, validate_profile
+
+
+def _now():
+    return datetime.now(timezone.utc).isoformat()
+
+
+class DeviceAccessService:
+    def __init__(self, *, target_resolver, profile_resolver, driver=None, admission=None):
+        self.target_resolver = target_resolver
+        self.profile_resolver = profile_resolver
+        self.driver = driver or ParamikoDriver()
+        self.admission = admission or SSHAdmission()
+
+    @contextmanager
+    def terminal(self, context, target_ref, profile_id, *, should_continue=None):
+        """A separately authorized human channel; never share a batch SSH session."""
+        if (
+            not context.actor_id
+            or not context.source_app
+            or not any(
+                g.action == "device.terminal"
+                and g.target_ref == target_ref
+                and g.connection_profile_id == profile_id
+                for g in context.grants
+            )
+        ):
+            raise DeviceAccessError("not_authorized", "terminal grant required")
+        target, profile = self.target_resolver(target_ref), self.profile_resolver(profile_id)
+        if target.target_ref != target_ref or profile.profile_id != profile_id:
+            raise DeviceAccessError("not_authorized", "resolved reference mismatch")
+        validate_profile(profile)
+        with self.admission.hold(target, profile) as lease:
+
+            def guard():
+                lease()
+                if should_continue is not None and should_continue() is False:
+                    raise DeviceAccessError("cancelled", "terminal was cancelled")
+
+            guard()
+            connection = self.driver.connect(target, profile, interactive=True)
+            try:
+                guard()
+                yield connection.channel, guard
+            finally:
+                connection.disconnect()
+
+    def execute_batch(
+        self, context, request, *, on_result=None, should_continue=None, command_filter=None
+    ):
+        # Refuse before resolving secrets, waiting for capacity, or opening SSH.
+        authorize(context, request)
+        target = self.target_resolver(request.target_ref)
+        profile = self.profile_resolver(request.connection_profile_id)
+        if (
+            target.target_ref != request.target_ref
+            or profile.profile_id != request.connection_profile_id
+        ):
+            raise DeviceAccessError("not_authorized", "resolved device access reference mismatch")
+        validate_profile(profile)
+        execution_id = uuid.uuid4().hex
+        results = []
+        prompt = None
+        connection = None
+        stopped = None
+        with self.admission.hold(target, profile) as assert_lease:
+            deadline = time.monotonic() + request.budget_seconds
+
+            def guard():
+                assert_lease()
+                if should_continue is not None and should_continue() is False:
+                    raise DeviceAccessError("cancelled", "device execution was cancelled")
+                if time.monotonic() >= deadline:
+                    raise DeviceAccessError("budget_exceeded", "device execution budget exceeded")
+
+            try:
+                for attempt in range(max(1, profile.connection_attempts)):
+                    guard()
+                    try:
+                        remaining = max(0.001, deadline - time.monotonic())
+                        connection = self.driver.connect(
+                            target,
+                            replace(
+                                profile,
+                                conn_timeout=min(profile.conn_timeout, remaining),
+                                auth_timeout=min(profile.auth_timeout, remaining),
+                                banner_timeout=min(profile.banner_timeout, remaining),
+                                prompt_timeout=min(profile.prompt_timeout, remaining),
+                                session_setup_timeout=min(profile.session_setup_timeout, remaining),
+                            ),
+                        )
+                        break
+                    except Exception as exc:
+                        code = failure_code(exc)
+                        # Never cycle credentials or retry trust/authorization errors.
+                        if (
+                            code not in {"connection_failed", "timeout"}
+                            or attempt + 1 >= profile.connection_attempts
+                        ):
+                            raise DeviceAccessError(code, self._safe_error(exc, profile)) from None
+                        time.sleep(
+                            min(max(0, profile.retry_delay), max(0, deadline - time.monotonic()))
+                        )
+                guard()
+                if request.capture_prompt:
+                    find_prompt = getattr(connection, "find_prompt", None)
+                    prompt = str(find_prompt() or "") if callable(find_prompt) else ""
+                for command in request.commands:
+                    guard()
+                    # Server-only selector may skip already-authorized commands, never add any.
+                    if command_filter is not None and not command_filter(command, tuple(results)):
+                        continue
+                    started = _now() if stopped is None else None
+                    output, error, code = "", None, stopped
+                    if stopped is None:
+                        try:
+                            output = str(
+                                connection.send_command(
+                                    command.text,
+                                    read_timeout=min(
+                                        command.read_timeout,
+                                        max(0.001, deadline - time.monotonic()),
+                                    ),
+                                )
+                                or ""
+                            )
+                        except Exception as exc:
+                            code = failure_code(exc)
+                            if code == "connection_failed":
+                                code = "command_failed"
+                            error = self._safe_error(exc, profile)
+                            output = getattr(exc, "output", "")
+                            if request.stop_on_error or code in {
+                                "timeout",
+                                "connection_closed",
+                                "output_incomplete",
+                                "output_limit",
+                            }:
+                                stopped = "previous_command_failed"
+                    # A stale executor cannot publish output or send another command.
+                    guard()
+                    result = CommandResult(
+                        execution_id=execution_id,
+                        command_id=command.command_id,
+                        started_at=started,
+                        finished_at=_now(),
+                        execution_status=(
+                            "not_executed" if started is None else "failed" if code else "succeeded"
+                        ),
+                        output_complete=code is None,
+                        output=output,
+                        failure_code=code,
+                        error=error,
+                        driver=self.driver.name,
+                        driver_version=self.driver.version,
+                    )
+                    if on_result:
+                        evidence_ref = on_result(result)
+                        if isinstance(evidence_ref, str):
+                            result = replace(result, evidence_ref=evidence_ref)
+                    results.append(result)
+                guard()
+            finally:
+                if connection is not None:
+                    try:
+                        connection.disconnect()
+                    except Exception:
+                        pass
+        failures = [result for result in results if result.failure_code]
+        return BatchResult(
+            execution_id=execution_id,
+            results=tuple(results),
+            prompt=prompt,
+            execution_status=(
+                "partial"
+                if failures and len(failures) < len(results)
+                else "failed" if failures else "succeeded"
+            ),
+            failure_code=failures[0].failure_code if failures else None,
+            error=failures[0].error if failures else None,
+        )
+
+    @staticmethod
+    def _safe_error(exc, profile):
+        message = str(exc)
+        # Resolve only in the execution path, after authorization.
+        secret = profile.password
+        if secret is None and profile.credential_ref:
+            from src.platform.inventory.credentials import CredentialResolver
+
+            try:
+                secret = CredentialResolver().resolve_password(profile.credential_ref)
+            except ValueError:
+                pass
+        return message.replace(secret, "[redacted]") if secret else message

@@ -1,0 +1,18 @@
+manifest_version: 1
+id: device-access
+name: 设备访问
+version: 0.1.0
+platform_api: '>=1.0,<2.0'
+icon: terminal
+dependencies: {}
+backend:
+  router: src.apps.device_access.backend.api:router
+frontend:
+  entry: frontend/index.tsx
+agent:
+  tools: src.apps.device_access.backend.tools:TOOLS
+database:
+  mode: package
+  migrations: migrations
+  head: device_access_0001
+  tables: [app_device_access_connections, app_device_access_operations]

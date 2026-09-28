@@ -1,0 +1,2 @@
+# Optional new SSH capability. Existing inspection dependencies are unchanged.
+paramiko>=3.4,<5
