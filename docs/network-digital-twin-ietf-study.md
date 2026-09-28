@@ -71,6 +71,8 @@ RFC 8349 的下一跳有 choice：简单下一跳、特殊下一跳、多下一�
 
 “未采到”不能统一编码为 `unknown`、空数组、0、false 或 null：必须逐字段检查类型、是否必填、默认值及所在 datastore 的约束。RFC 7951 的 empty 编码为 `[null]`，并非“未知”；64 位整数也有规定的 JSON 编码。依据：[RFC 7951 §6](https://www.rfc-editor.org/rfc/rfc7951.html#section-6)、[RFC 7950 §7、§9](https://www.rfc-editor.org/rfc/rfc7950.html#section-7)。
 
+续查的 39 项 [RFC 8349 可执行核验](../models/network-twin/routing-semantics.md) 明确配置/状态列表不能共用字段编码：配置 next-hop 有 index，状态没有；状态列表地址叶叫 address，简单下一跳叫 next-hop-address。多下一跳本身不表达负载权重或证明 ECMP；同前缀多个 active 记录、缺目的前缀等 Schema 接受结果，不代表已经完成选路与转发分析。未据此添加项目模型或修改标准约束。
+
 ### 3.4 NMDA 与模型来源
 
 `intended`、`operational` 是 NMDA 数据存储语义。`ietf-origin:unknown` 表示无法识别配置来源，并不是不知道链路是否存在；`learned` 也不等于模型做出的推测。不能将 confidence、evidence_ref 等自定义属性套进 origin。依据：[RFC 8342 §5.3.4](https://www.rfc-editor.org/rfc/rfc8342.html#section-5.3.4)。

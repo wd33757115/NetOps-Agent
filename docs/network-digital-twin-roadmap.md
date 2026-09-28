@@ -1,6 +1,7 @@
 # 网络数字孪生与 AI 故障诊断落地路线图
 
-- 版本：v1.10（2026-09-28）
+- 版本：v1.11（2026-09-28）
+  - v1.11 核实原生路由配置/状态下一跳编码与模型边界：多下一跳不等于已验证 ECMP，Schema 接受不代替选路或路径验收；保持不增加自定义字段。
   - v1.10 区分完整 Schema 检查、NMDA operational 语义例外与部分观测解析；完成原生状态挂载验证，不以缺少必填证据为由丢弃已知观测，也不以 parse-only 或工具退出 0 冒充完整性验收。
   - v1.9 将设备内 NI 挂载与全网虚拟关联分开验收；原生 Schema Mount 配置级验证通过，禁止将其视为拓扑节点到远端设备的自动映射。
   - v1.8 按负责人“好，继续”实施独立、可审查的 SIMAP 语法兼容补丁及原生实例验证；补丁不补写缺失的字段、feature、默认值或关系，原文继续保存。
@@ -1014,6 +1015,7 @@ P2-9 根据 Q5 取消，不引入 SNMP。P3 及后续仍在进入阶段时展开
 | IETF-1.3 原生挂载运行时 | 已完成配置级验证 | 新增 `mount/` 锁定源码、隔离 Docker 环境、12 个生成文件；`build_ietf_mount_cases.py`、`validate_ietf_mount.py`。libyang 5.8.6 的 8 个实例结果匹配：shared-schema/inline 正例保留两棵路由树；跨 VRF、缺失引用、无 parent-reference、自定义字段等反例拒绝。3.12.2 崩溃证据独立保存。 | 未实现生产挂载服务、operational 全量数据、NACM/协议服务或实机验收。 |
 | IETF-1.4 虚拟关联与挂载点续查 | 已完成本轮候选审计；虚拟关联仍未闭合 | `audit_ietf_mount_associations.py` 扫描 41 文件，仅 LNE/NI 共 4 个声明挂载点。锁定历史 inventory-topology -00/-01，确认空锚点未声明 mount-point；Peer-Mount -01 原文模块语法失败且机制不同。证据见 `reports/mount-associations.json`，更新 `associations.md`。 | 不据此断言所有 IETF 方案都不存在；不降级当前草案、不补项目 augment、不扩展 SIMAP 之外的补丁授权。 |
 | IETF-1.5 运行状态挂载与部分观测 | 已完成离线边界验证 | 新增 `build_ietf_operational_cases.py`、`mount/operational/` 16 文件、`reports/operational-validation.json`；扩展既有验证器，21 项预期匹配。完整合成状态/库/RIB/接口约束通过；VSR 两份部分接口文件原样解析、严格缺项诊断保留；非法类型/层级/自定义字段和跨 VRF 引用按相应模式拒绝。 | 不为 VSR 补造统计时间；parse-only 不能证明引用已解析；operational 警告不等于完整性通过；全网虚拟关联与设备全量状态仍未闭合。 |
+| IETF-1.6 原生路由结构语义 | 已完成本轮基础模型核验 | 新增 `validate_ietf_routing_semantics.py`、`routing-semantics.md` 及同名报告，39 个 IPv4/IPv6 单/多/特殊下一跳与边界用例。37 项 Yangson 结果匹配；2 项内部 TypeError 保留，libyang 用 2 个负例和 2 个正对照验证 mandatory choice。 | 不把状态 next-hop 列表套用配置字段；不造权重/metric；多路径列表及同前缀 active 记录不证明转发路径或 ECMP。尚未完成协议/TE 全审查或实机多路径验收。 |
 | IETF-2.1 VSR 实验实例 | 已完成本批次映射核验；完整实例未通过 | `build_ietf_lab_instances.py` 校验全部既有样本摘要、重建并比较 6 个原生实例与清单。2 节点/4 TP/4 LLDP 邻接、2 个虚拟 NE、18+19 路由通过；各 6 条 IP 接口行因缺 statistics/discontinuity-time 按预期失败。`validate_ietf_model_package.py` 共 24 项结果匹配，负例检查具体诊断；结果已保存 `models/network-twin/reports/`。 | 不虚构计数器时间、默认 VRF、OSPF 版本或物理关系。路由子集未填出口引用，特殊下一跳动作、序列号组件归属、ARP/MAC/VLAN/Hub 与完整路径仍未映射验收。 |
 
 本轮 IETF-1/2 改动文件：`.gitignore` 仅放行 `models/network-twin/` 验证资料；该目录的来源锁、profile、补丁、说明、关联核验、实例及报告；研究脚本 `build_ietf_model_package.py`、`build_ietf_lab_instances.py`、`validate_ietf_model_package.py`；本台账和核验文档。生产代码及 P2-3 未提交修改不包含在本轮。
@@ -1025,6 +1027,10 @@ P2-9 根据 Q5 取消，不引入 SNMP。P3 及后续仍在进入阶段时展开
 本轮 IETF-1.5 文件：新生成脚本与 16 个状态用例文件、扩展 `validate_ietf_mount.py`、新增状态报告、XML 的 LF 属性、模型包/挂载/关联说明、标准研读与审计及本台账。运行研究 Python 的 `build_ietf_operational_cases.py --check`、`validate_ietf_mount.py --cases models/network-twin/mount/operational --output models/network-twin/reports/operational-validation.json`，16 文件一致、21 项预期匹配。固定 libyang 5.8.6 源码确认显式 data 模式开启语义告警，严格模式不传 -t；统一验证使用 --merge 延迟至兄弟模块解析完毕。此为工具调用修正，不是标准模块补丁。两棵 VSR 树的原始字节摘要保留，未进行新设备采集、发布或生产改动。
 
 IETF-1.5 回归：原配置挂载 12 文件重建一致、8/8 预期匹配（`.runtime/ietf-study/mount-regression.json`）；实验投影 7 文件重建一致；既有模型包 24/24 预期匹配。两个研究脚本 Ruff 检查/格式检查和范围内 diff 检查通过。未重跑无修改的生产采集测试，未将 P2-3 遗留变更混入本卡。
+
+IETF-1.6 文件与命令：新增路由研究脚本、语义说明与报告；验证器允许无挂载的普通数据树；更新模型包 README、研读/审计及本台账。研究 Python 执行 `validate_ietf_routing_semantics.py`，39 项预期匹配，libyang 独立 4 项匹配；报告含全部输入、脚本/模型摘要和工具异常，未改 41 个模块或 profile。Yangson 内部异常不算标准拒绝，不依靠关闭 mandatory 完成验收。没有设备、数据库、巡检或 P2-3 修改。
+
+IETF-1.6 回归与复现：`validate_ietf_mount.py` 配置 8/8、状态用例 21/21 预期匹配；路由脚本 `--output .runtime/ietf-study/routing-replay.json` 重放报告字节一致，脚本 SHA-256 与独立拒绝证据核对通过。两脚本 Ruff 检查/格式检查及范围内 diff 检查通过。无需为未改动的模型与实验采集重复实机访问。
 
 下一步：继续核实虚拟 node→NE→设备树标准关联及尚未审查的协议模型，再按模型缺口重排采集。设备内配置/合成状态挂载已单独通过，不把它当全网关联的替代。不能把本轮有限数据投影当“完整 IETF 模型已交付”，P2-3/P2-10 继续暂停。
 

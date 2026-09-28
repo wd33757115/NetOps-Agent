@@ -25,8 +25,9 @@ for case in spec['cases']:
     mode_args = ['--merge'] if mode == 'strict' else ['-t', mode]
     if mode == 'data':
         mode_args += ['--merge']
+    extension_args = ['-x', '/cases/' + case['extension']] if case.get('extension') else []
     cmd = ['yanglint', '-p', '/modules', '-Y', '/cases/parent-library.json',
-           '-x', '/cases/' + case['extension'], *mode_args, '-f', 'json',
+           *extension_args, *mode_args, '-f', 'json',
            '/cases/' + case['data']]
     run = subprocess.run(cmd, text=True, capture_output=True, timeout=30)
     retained = None

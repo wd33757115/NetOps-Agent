@@ -37,6 +37,8 @@
 
 完整模型仍有未闭合项：虚拟 topology node→inventory/device 的标准关联、SIMAP 原文语义缺口、生产挂载服务及设备全量 operational 验收、全部 TE/协议扩展。缺口不以项目新字段填补。
 
+基础路由模型续查见 [RFC 8349 路由语义核验](routing-semantics.md)：39 项 IPv4/IPv6、配置/状态和下一跳用例。Yangson 的 2 项内部异常保留，并由 libyang 正负对照复核；多下一跳及 Schema 接受不等于转发路径已证明。
+
 ## 实验实例和验证边界
 
 `instances/` 包含 6 个原生 RFC 7951 实例文件及独立工程溯源清单。清单不送入 YANG 数据树；其中没有认证信息。`build_ietf_lab_instances.py` 只针对已审查的固定批次进行离线映射，先检查所有原始/清理后文件的摘要，再生成实例。它不是通用 CLI 解析器，也不接入生产采集流程。`--check` 比较已提交实例与重建结果，省略时重新生成。

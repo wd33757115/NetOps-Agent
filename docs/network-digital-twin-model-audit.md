@@ -156,3 +156,7 @@ IETF-1.1 完成兼容包范围；IETF-1.2 完成当前候选关联与工具边�
 新增 21 项离线检查，详见[运行状态验证说明](../models/network-twin/mount/README.md)及[报告](../models/network-twin/reports/operational-validation.json)。完整合成父接口/NI/挂载 RIB/YANG Library 通过严格约束检查，跨 VRF 引用拒绝；合成缺项和两台 VSR 部分接口树的完整性诊断保留。两棵 VSR 树在 parse-only 下往返相等，非法类型、层级及自定义字段被拒绝；parse-only 故意不解析跨 VRF 引用，不能作为完整语义验收。
 
 按 RFC 8342 §5.3 修正“缺必填就不能保留任何观测”的潜在误读。libyang 5.8.6 显式 `-t data` 对部分语义缺失只告警，严格模式与其参数不同；脚本检查诊断和输出，不只看退出码。CLI 缺采集证据不能被认定为设备的合法语义例外。计数器时间仍缺失、未造值，生产挂载服务及全网虚拟关联仍未完成。
+
+## 10. 基础路由选择结构（IETF-1.6）
+
+39 项 IPv4/IPv6、配置/状态、单/多/特殊下一跳及 Schema 边界用例结果匹配，见[路由语义核验](../models/network-twin/routing-semantics.md)。Yangson 的两个 mandatory choice 内部异常未当作负例通过，改用 libyang 的两个负例及两个正对照核实；保留原始诊断与实际工具归属。完整模块与 profile 未改，不等于其他路由协议、TE、ECMP 实际转发或全网关联已经验收。
