@@ -1,0 +1,48 @@
+# Trusted policy data; unknown syntax requires approval. No device support claim.
+# Traceroute variants cannot uniformly express all budgets; remain L3.
+schema_version: 1
+platform: nxos
+aliases:
+  sh: show
+  sho: show
+readonly:
+- show
+- dir
+blocked:
+- install
+- boot
+- boot-loader
+- reinitialize
+approval:
+- show tech-support
+- debug
+- terminal monitor
+- traceroute
+deny_regex:
+- ^(?:show|display)\s+\S+.*\s(?:redirect|append|tee)\b
+- ^dir\s+.*(?:ftp|http|scp|tftp)://
+probes:
+  ping:
+    layout: after
+    vrf_prefix: false
+    ip_marker: false
+    options:
+      count:
+        kind: count
+        min: 1
+        max: 5
+        default: 3
+      packet-size:
+        kind: size
+        min: 20
+        max: 1500
+        default: 56
+      timeout:
+        kind: timeout_s
+        min: 1
+        max: 2
+        default: 2
+      source:
+        kind: source
+      vrf:
+        kind: vrf

@@ -456,6 +456,16 @@ class DeviceAccessService:
 - 判定结果写入审计：用户、会话、设备、原始命令、规范化命令、级别、结果、输出摘要哈希。
 - 设备返回“无法识别命令”时，结果返回给 Agent 并提示“请在资料库核对该型号的命令语法”。
 
+P1-3 实施细化（2026-09-28）：
+
+- 自由文本分类器不授予 L0；L0 必须来自既有服务端固定命令包。分类结果不是执行授权；调用方只能在完成设备授权、审批和预算检查后执行 `normalized`。
+- 新增可选 `required_vrf` 参数。要求 VRF 时必须在探测命令中明确指定且名称精确匹配，不静默切换到默认路由域。
+- L2 自动补齐显式预算：ping 默认 3 次、56 字节、2 秒；tracert 默认每跳 3 次、2 秒、最多 30 跳。次数上限 5 对 tracert 指每跳探测数；单会话 10 次主动探测的累计额度与总时间预算由后续 P1-4 会话层执行，纯分类器不维护计数。
+- Comware/VRP 的 `-t` / `-w` 按毫秒上限 2000 校验，Cisco ping 的 `timeout` 按秒上限 2 校验。重复参数、越界参数和多命令/重定向直接 L4；未知参数、未覆盖地址族和无法确认安全预算的语法归 L3。
+- IOS/NX-OS 的 traceroute 命令形式随系统版本变化；首批规则只自动放行有明确预算语法的 ping，将 traceroute 保留为 L3，不能通过猜测参数获得 L2。平台规则测试通过不代表具体厂商型号实机验证通过。
+- 命令首词与已知选项规范化，保留接口、VRF、过滤表达式的大小写；先拒绝换行、控制符和重定向，再处理空白。受信任 YAML 在模块初始化时加载、校验并冻结，`classify()` 不读文件或网络。
+- 语法核对来源：[H3C ping/tracert 参数](https://www.h3c.com/en/d_201906/1198079_294551_0.htm)、[Cisco NX-OS 基础命令](https://www.cisco.com/c/en/us/td/docs/switches/datacenter/nexus3000/sw/command/reference/5_0_3/fund/3k_cmd_ref_fund/3k_cmd_ref_fund_cmds.html)、[Cisco 扩展 ping/traceroute](https://www.cisco.com/c/en/us/support/docs/ip/routing-information-protocol-rip/13730-ext-ping-trace.html)。未据此宣称所有版本通用。
+
 ### 8.4 主机密钥（D7）
 
 表 `app_device_access_host_keys`：`domain`、`host`、`port`、`key_type`、`fingerprint_sha256`、`first_seen`、`status`(pinned/verified/revoked)。
@@ -849,6 +859,8 @@ VSR-2 GE3/0(二层 access VLAN 100) ── Switch1(不可管理) ── PC1 1.1.
 | P0-1 | 已完成 | 2026-09-28 | 分组提交后工作区干净；三个设备访问/拓扑目录分别跟踪 24/15/14 个文件；`.env`、`.runtime/` 未跟踪且忽略规则生效 | 负责人确认后在 `feat/network-twin` 建立基线，未 push；详见下方记录 |
 | P0-2 | 已完成（基线非全绿） | 2026-09-28 | Python 主集 2396 通过 / 162 失败 / 3 跳过；包内另 24 通过；YANG 补跑 2 通过；前端单测 256 通过、构建通过；BFF、浏览器及视觉失败详见下方 | 只记录基线，不修改业务代码或测试预期；剩余未验证项为可选语义模型及 Linux 专属测试 |
 | P0-3 | 已完成 | 2026-09-28 | 首版文首已链接后续路线图且文件存在；`git ls-files scripts/topology/collect_lab_samples.py` 非空；`git diff --check` 通过 | 仅文档衔接；采样脚本在 P0-1 已纳入；按最新授权继续 P1-3 |
+| P1-3 | 已完成 | 2026-09-28 | 新增策略矩阵 458 项通过；连同现有设备访问回归共 525 项通过；Ruff 检查通过 | 新分类器与四平台 YAML；未接入 DSH、未改变 `authorize()`；见 8.3 实施细化 |
+| P1-1 | 未开始 | | | |
 
 ### P0-1 基线记录（2026-09-28）
 
@@ -923,6 +935,15 @@ VSR-2 GE3/0(二层 access VLAN 100) ── Switch1(不可管理) ── PC1 1.1.
 - 本卡新增测试：无；不修改业务代码、不调整断言或截图来消除基线失败。原巡检不修改的约束继续有效。修复这些失败需要另行明确范围，不在 P0-2 内展开。
 - 全部测试结束后，已按容器 ID 和标签核对并清理 3 个临时容器；原服务容器仍在运行。更新本文前 `git status --short` 为空；本卡只提交本路线图的台账更新，不提交日志、测试数据库或构建产物，不 push。
 - 下一张为 P0-3（文档衔接）；本卡完成后停下汇报，未进入 P0-3 或 P1-3。
+
+### P1-3 命令策略引擎记录（2026-09-28）
+
+- 文件：新增 `src/platform/device_access/command_policy.py`、`policy_rules/{comware,nxos,ios,vrp}.yaml`、`tests/unit/test_device_access_command_policy.py`；修改本路线图第 8.3、14 节。既有 `policy.py`、执行服务、巡检和 DSH 不变。
+- 新增 458 项测试，四平台分别覆盖只读命令、主动探测预算、审批命令、配置/写命令与缩写、过滤管道、多命令注入、Unicode 空白/控制符、大小写、VRF、YAML 错误、无 I/O 和不可变规则；测试文件文首包含命令级别对照表。
+- 实际运行：`python -m pytest tests/unit/test_device_access_command_policy.py tests/unit/test_device_access.py tests/unit/test_device_access_admission.py tests/unit/test_device_access_app.py tests/unit/test_device_access_detection.py tests/unit/test_device_access_dsh.py tests/unit/test_device_access_ssh.py tests/unit/test_device_access_terminal_ws.py --junitxml=.runtime/p1-3-tests.xml`：**525 通过**，2 条依赖弃用告警，约 6 秒；日志 `.runtime/p1-3-tests.log`。
+- `python -m ruff check src/platform/device_access/command_policy.py tests/unit/test_device_access_command_policy.py` 与 `git diff --check` 通过；使用 Ruff 格式化，环境未安装 Black，未声称 Black 检查通过。
+- 方案逻辑修正：自由文本不能自行成为 L0、未写参数必须显式补齐预算、毫秒/秒不能混用、不能给未知 Cisco traceroute 语法推定 L2；累计配额与执行审批属于后续会话层。未进行本阶段最终实机验收，未宣称多厂商实机已支持。
+- 回滚：回退本卡提交即可；无迁移和执行路径接线。按持续执行授权进入 P1-1。
 
 **待决问题**
 
