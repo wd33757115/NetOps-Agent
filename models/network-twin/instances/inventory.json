@@ -1,0 +1,34 @@
+{
+  "ietf-network-inventory:network-inventory": {
+    "network-elements": {
+      "network-element": [
+        {
+          "ne-id": "urn:example:vsr-lab:vsr-1",
+          "ne-type": "ietf-network-inventory-sw-ext:ne-virtual",
+          "name": "H3C",
+          "mfg-name": "H3C",
+          "product-name": "VSR1000",
+          "software-rev": [
+            {
+              "name": "Comware",
+              "revision": "7.1.064, Release 1362P12"
+            }
+          ]
+        },
+        {
+          "ne-id": "urn:example:vsr-lab:vsr-2",
+          "ne-type": "ietf-network-inventory-sw-ext:ne-virtual",
+          "name": "H3C",
+          "mfg-name": "H3C",
+          "product-name": "VSR1000",
+          "software-rev": [
+            {
+              "name": "Comware",
+              "revision": "7.1.064, Release 1362P12"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

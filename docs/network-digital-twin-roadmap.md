@@ -1,6 +1,7 @@
 # 网络数字孪生与 AI 故障诊断落地路线图
 
-- 版本：v1.7（2026-09-28）
+- 版本：v1.8（2026-09-28）
+  - v1.8 按负责人“好，继续”实施独立、可审查的 SIMAP 语法兼容补丁及原生实例验证；补丁不补写缺失的字段、feature、默认值或关系，原文继续保存。
   - v1.7 明确采纳 RFC 8345bis 补充工作的后继 SIMAP YANG -03，作为 RFC 8345 之上的模型依据；固定版本并纳入 IETF-0～IETF-2，不以草案状态排除。更正研读记录中的文档沿革。
   - v1.6 按负责人最新要求改为标准研读先行、采用 IETF 完整原生模型、禁止项目自定义模型；暂停采集与模板扩展。下方旧事实表/投影设计保留作实施历史，不再作为新模型定义。见第 0 节最新约束和 `network-digital-twin-ietf-study.md`。
   - v1.5 依据迷你实验真实配置与样本（批次 20260928-163159）写死实验环境、期望结果与故障集；更正“VSR 拿不到序列号”（LLDP-MED 可取）
@@ -21,6 +22,7 @@
 - 当前转入 IETF-0 标准研读与原方案审查。P2-3、P2-10 及后续采集扩展暂停；P2-3 未完成代码保留，不能标记验收通过或顺带提交为完成。
 - 模型以标准原文及原生 YANG 为依据，不从已有 ORM、CLI 样本或界面反推 Schema。不自行给未知值加枚举，不利用 anydata 夹带自定义结构，不把应用内部字段冒充标准字段。
 - 标准模块已有的扩展定义与项目自定义扩展是两回事：可核对采用对应 RFC/固定版本草案原文，禁止项目补写缺失定义或草案 TODO。正式 RFC、工作组草案、个人草案、IRTF 架构研究必须准确区分。
+- 最新授权允许对已明确确定的 SIMAP 语法问题制作独立兼容补丁：保留原文、精确差异与前后摘要，不冒充上游修订。已核验模块可先形成验证包并构造实例；整体 IETF-0 的未闭合部分继续保留，不能标为完整数字孪生交付。
 - 负责人已明确采纳 RFC 8345bis 相关补充：以 RFC 8345 为基础，固定采用其补充工作后继 `draft-havel-nmop-simap-yang-03`，配套核对 `draft-ietf-nmop-simap-concept-13`。SIMAP 原生定义属于本次模型范围，不因个人草案状态排除，不等待发布 RFC 才建模；保留真实来源状态，未定义内容不自行补写。文档沿革和核验要求见研读记录第 4 节。
 - 新顺序：IETF-0 标准语义/范围/依赖审查 → IETF-1 原生标准模型与完整依赖验证 → IETF-2 标准实例与现有实验数据映射核验 → 按模型缺口重排采集任务。尚未完成前一项，不提前建立自定义替代模型。
 - 研究结论与未核实项见 [IETF 标准研读与原方案审查](network-digital-twin-ietf-study.md)。不以“下载了模块”或“编译通过”代替语义理解，不声称一套未闭合的基础模块就是完整数字孪生。
@@ -1004,6 +1006,15 @@ P2-9 根据 Q5 取消，不引入 SNMP。P3 及后续仍在进入阶段时展开
 | IETF-0.2 配套模型与关联 | 已完成本项候选定义核验（关联未全部闭合） | 清单第 5 节逐路径核对设备接口/NI/路由/SAP、inventory -19 / topology -11 / software -04；核对 external-relationship 后继 -00。物理映射不能用于 VSR，外部引用未限定完整作用域，请求构造器仍为空。发现 inventory 文件标签与内部 revision 不同、类型依赖已更新到 RFC 9911。 | 虚拟 node→NE→设备/挂载树完整标准关联尚未解决；TE/协议全面审查仍待完成，不新增关系字段。 |
 | IETF-0.3 本轮选定模块与实例验证 | 已完成本轮核验（整体模型未通过） | `audit_ietf_models.py`、`docs/ietf-model-audit/` 固定 38 来源及摘要；空缓存下载与离线重放一致。30 文件基础、10 文件 inventory/external、35 文件 RFC/扩展组合编译通过；SIMAP 原文组合失败。36 项需求完整覆盖；18 个实例结果符合预期，其中 4 项明确展示 Schema 与语义的差距。 | SIMAP 双向/多点/生命周期实例因原文语法错误未运行；挂载、TE/协议和全量依赖闭合仍待核验。 |
 | IETF-0.4 作者仓库修正版排查 | 已完成本项核验（未找到可用修正版） | 固定 RFC8345Bis 提交 `79b88040877b509b630a9186e458892188d6cad7`；原始 YANG SHA-256 和诊断见 `simap-upstream-report.json`。执行 pyang 2.7.1，退出 1，第 249 行同一 description 错误；排除 txt 提取导致该错误。与 -03 规范化空白后只差两处注释。 | 不据此替换已采纳版本；SIMAP 模块仍未通过，继续保留定义和依赖缺口。 |
+| IETF-1.1 SIMAP 兼容补丁与本轮模型包 | 已完成本项 | `models/network-twin/patches/` 四处精确编辑：两个已有类型 prefix 的 import、一处 description 引号、两个导航 list 闭合。`build_ietf_model_package.py` 校验来源/补丁前后摘要并独立生成原文和工作副本；初版 36 文件编译通过；补齐 RFC 9129 OSPF 及依赖后共 41 文件，topology/device 两个验证 profile 加载通过。`validate_ietf_model_package.py` 首轮 14 项结果符合预期，覆盖双向、多点、导航、历史、NI 引用和保留的原文约束缺口。 | 本地兼容补丁不是上游标准修订；feature/default/关系缺口未补写，挂载运行时仍需核验。 |
+| IETF-1.2 模型关联与挂载核验 | 已完成当前候选核验；端到端关联未完成 | 新增 `models/network-twin/associations.md`；接口→NI 正反例、物理 node→NE、未解析 inventory 引用、虚拟误用物理映射均已核验。当前 Yangson 拒绝未装载的挂载子树，保存具体 RawMemberError。 | 虚拟 node→NE→设备树与 RFC 8528 挂载服务仍待实现/核验，不以分树通过冒充完整关联。 |
+| IETF-2.1 VSR 实验实例 | 已完成本批次映射核验；完整实例未通过 | `build_ietf_lab_instances.py` 校验全部既有样本摘要、重建并比较 6 个原生实例与清单。2 节点/4 TP/4 LLDP 邻接、2 个虚拟 NE、18+19 路由通过；各 6 条 IP 接口行因缺 statistics/discontinuity-time 按预期失败。`validate_ietf_model_package.py` 共 24 项结果匹配，负例检查具体诊断；结果已保存 `models/network-twin/reports/`。 | 不虚构计数器时间、默认 VRF、OSPF 版本或物理关系。路由子集未填出口引用，特殊下一跳动作、序列号组件归属、ARP/MAC/VLAN/Hub 与完整路径仍未映射验收。 |
+
+本轮 IETF-1/2 改动文件：`.gitignore` 仅放行 `models/network-twin/` 验证资料；该目录的来源锁、profile、补丁、说明、关联核验、实例及报告；研究脚本 `build_ietf_model_package.py`、`build_ietf_lab_instances.py`、`validate_ietf_model_package.py`；本台账和核验文档。生产代码及 P2-3 未提交修改不包含在本轮。
+
+实际命令：研究 Python 执行 `build_ietf_model_package.py --fetch --cache .runtime/ietf-study/package-fresh-sources --output .runtime/ietf-study/package-fresh-build`（空缓存下载，41 文件通过），再离线重建并比对清单；执行 `build_ietf_lab_instances.py --check`（7 文件重建一致）和 `validate_ietf_model_package.py`（24 项预期匹配，含 2 个不完整接口实例）；运行 3 个研究脚本的 Ruff 和本轮 `git diff --check`。复现结果和源码完整性拒绝检查见 `models/network-twin/reports/reproducibility.json`。
+
+下一步：优先核实虚拟 node→NE→设备树的标准关联与 RFC 8528 挂载运行时，明确完整 operational 必填数据如何获得，再重排采集。不能把本轮有限数据投影当“完整 IETF 模型已交付”，P2-3/P2-10 继续暂停。
 
 分项记录与证据详见 [原生模型核验清单](network-digital-twin-model-audit.md)。IETF-0 整体仍进行中；上述“完成”只针对已列出的核验范围。
 
@@ -1014,7 +1025,7 @@ P2-9 根据 Q5 取消，不引入 SNMP。P3 及后续仍在进入阶段时展开
 - 本次改动文件：`docs/network-digital-twin-ietf-study.md`、本路线图。更新来源、基线、原生扩展适用范围与后续核验要求；未改生产代码。验证：核对 Datatracker 官方沿革和 -03 固定原文；运行 `git diff --check -- docs/network-digital-twin-ietf-study.md docs/network-digital-twin-roadmap.md`。本次为文档修订，不新增或运行应用测试；SIMAP 组合编译、章节/模块覆盖核对和实例验证待完成。
 - IETF-0：**进行中**。已形成 `docs/network-digital-twin-ietf-study.md`，核对基础 RFC 的作用域、扩展关系、方向、NI、SAP、路由、NMDA 与 JSON 编码，并记录 SIMAP/IVY/NDT 草案版本和未核实项；不声称已完成所有相关协议、依赖及实例语义核验。
 - 已做研究验证：18 个基础入口及依赖共 30 个原生模块通过 pyang 2.7.1 编译；RFC 8345 的 5 个语义正反例通过 yangson 1.6.3（允许跨网络同 node-id、标准允许的未解析引用；拒绝重复键和自定义字段）。研究文件与结果位于 `.runtime/ietf-study/`，不作为生产模型发布。
-- 尚未完成：目标全套依赖闭合、TE/协议扩展审查、全网拓扑与设备树的原生关联、虚拟设备的标准模型组合、草案完整性、完整实例验证。已找到 IVY inventory-topology -11 和 software -04 中的标准草案关联/非物理网元定义，继续核对组合，不自行补关系。未开始 IETF-1，不新增自定义模型。
+- 尚未完成：目标全套依赖闭合、TE/协议扩展审查、全网拓扑与设备树的原生关联、虚拟设备的标准模型组合、草案完整性、完整实例验证。已找到 IVY inventory-topology -11 和 software -04 中的标准草案关联/非物理网元定义，继续核对组合，不自行补关系。此前未开始 IETF-1；本轮已按授权形成兼容验证包，进展以分项台账为准，不新增自定义模型。
 - 当前阶段更新研究文档、研究脚本、来源/结果记录与路线图；下载资料留在忽略目录 `.runtime/ietf-study/`，未新增生产 YANG、ORM、迁移、API 或采集代码。未发布、未操作设备。
 - P2-3：**暂停且未完成**。此前实机采集记录保留；最近回归为 1062 通过、5 个 VLAN 相关失败、1 跳过（`.runtime/p2-3-tests.log`）。本轮不继续修解析器，不将其提交或登记为完成。
 - 文档检查：下方执行记录仍为历史记录。第 5/6 节旧模型与算法已明确标记待审，禁止由旧内容继续推导自定义字段。当前研究阶段不把旧测试结果作为标准模型验收。

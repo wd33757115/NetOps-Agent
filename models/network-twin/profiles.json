@@ -1,0 +1,36 @@
+{
+  "topology": {
+    "roots": [
+      "ietf-network",
+      "ietf-network-topology",
+      "ietf-simap-topology",
+      "ietf-l2-topology",
+      "ietf-l3-unicast-topology",
+      "ietf-network-inventory",
+      "ietf-network-inventory-topology",
+      "ietf-network-inventory-sw-ext",
+      "draft-template",
+      "draft-relation"
+    ],
+    "features": {
+      "ietf-l2-topology": [
+        "VLAN",
+        "QinQ",
+        "VXLAN"
+      ]
+    }
+  },
+  "device": {
+    "roots": [
+      "ietf-interfaces",
+      "ietf-ip",
+      "ietf-routing",
+      "ietf-ipv4-unicast-routing",
+      "ietf-ipv6-unicast-routing",
+      "ietf-network-instance",
+      "iana-if-type",
+      "ietf-ospf"
+    ],
+    "features": {}
+  }
+}

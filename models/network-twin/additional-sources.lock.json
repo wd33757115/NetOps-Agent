@@ -1,0 +1,50 @@
+{
+  "purpose": "Native RFC 9129 OSPF protocol identity and complete dependencies",
+  "sources": [
+    {
+      "file": "ietf-ospf@2022-10-19.yang",
+      "url": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ietf/RFC/ietf-ospf@2022-10-19.yang",
+      "sha256": "5b544e4753ffd1da9e7236f556a8b21524112223d70e3349cffbeaf5e6c92d7f",
+      "format": "yang",
+      "modules": {
+        "ietf-ospf@2022-10-19.yang": "5b544e4753ffd1da9e7236f556a8b21524112223d70e3349cffbeaf5e6c92d7f"
+      }
+    },
+    {
+      "file": "ietf-bfd-types@2022-09-22.yang",
+      "url": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ietf/RFC/ietf-bfd-types@2022-09-22.yang",
+      "sha256": "65abd568987103be19342cdfb1611970f59577b97cf760455a553a6149c0fb88",
+      "format": "yang",
+      "modules": {
+        "ietf-bfd-types@2022-09-22.yang": "65abd568987103be19342cdfb1611970f59577b97cf760455a553a6149c0fb88"
+      }
+    },
+    {
+      "file": "ietf-key-chain@2017-06-15.yang",
+      "url": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ietf/RFC/ietf-key-chain@2017-06-15.yang",
+      "sha256": "6250705f59fc9ad786e8d74172ce90d58deec437982cbca7922af40b3ae8107c",
+      "format": "yang",
+      "modules": {
+        "ietf-key-chain@2017-06-15.yang": "6250705f59fc9ad786e8d74172ce90d58deec437982cbca7922af40b3ae8107c"
+      }
+    },
+    {
+      "file": "iana-bfd-types@2021-10-21.yang",
+      "url": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ietf/RFC/iana-bfd-types@2021-10-21.yang",
+      "sha256": "1aa6103af9143e7095a9fd4295f8f42090b8cefb790518406eab2232f9bf89d9",
+      "format": "yang",
+      "modules": {
+        "iana-bfd-types@2021-10-21.yang": "1aa6103af9143e7095a9fd4295f8f42090b8cefb790518406eab2232f9bf89d9"
+      }
+    },
+    {
+      "file": "iana-routing-types@2017-12-04.yang",
+      "url": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ietf/RFC/iana-routing-types@2017-12-04.yang",
+      "sha256": "560eef90e2a7f51ed1f521824eb42558e6bb65135d2a33d62cf80a5af79643f4",
+      "format": "yang",
+      "modules": {
+        "iana-routing-types@2017-12-04.yang": "560eef90e2a7f51ed1f521824eb42558e6bb65135d2a33d62cf80a5af79643f4"
+      }
+    }
+  ]
+}

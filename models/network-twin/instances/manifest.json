@@ -1,0 +1,321 @@
+{
+  "scope": "Offline fixture projection, not a device datastore or a complete twin",
+  "capture_batch": "20260928-163159",
+  "capture_manifest_sha256": "ce2a3906e1f216bd91f0201cd555122173144ffdea7457ebf4f4d8083c002ffb",
+  "entries": [
+    {
+      "file": "vsr-1-interfaces.partial.json",
+      "sha256": "b91468d38fb18657eaf711c4a3282e21806766ea938f6c718cbcf24b1d3efcaf",
+      "profile": "device",
+      "expected_valid": false,
+      "expected_diagnostic": "missing-data: expected 'statistics'",
+      "sources": [
+        "vsr-1/ip_interfaces.txt"
+      ]
+    },
+    {
+      "file": "vsr-1-routes.json",
+      "sha256": "3cee2ff3e3c67eb16a666b7e7bb9ebcc5572029f35616aed2fcd853fb8dcd4b0",
+      "profile": "device",
+      "expected_valid": true,
+      "expected_diagnostic": null,
+      "sources": [
+        "vsr-1/routes.txt"
+      ]
+    },
+    {
+      "file": "vsr-2-interfaces.partial.json",
+      "sha256": "1b6bfc6ad19dad4304d4987b1911ad7932de78aff299debd3cf3441aa40c7137",
+      "profile": "device",
+      "expected_valid": false,
+      "expected_diagnostic": "missing-data: expected 'statistics'",
+      "sources": [
+        "vsr-2/ip_interfaces.txt"
+      ]
+    },
+    {
+      "file": "vsr-2-routes.json",
+      "sha256": "aa1d12f3b114c4c7bac1122b1ebd836195a0c1d225e43145559e09a20a99864e",
+      "profile": "device",
+      "expected_valid": true,
+      "expected_diagnostic": null,
+      "sources": [
+        "vsr-2/routes.txt"
+      ]
+    },
+    {
+      "file": "topology-observed.json",
+      "sha256": "b08528d45258478d2db779aa70bcca117e48c73959debc0eb4bcb4e696f4b312",
+      "profile": "topology",
+      "expected_valid": true,
+      "expected_diagnostic": null,
+      "sources": [
+        "vsr-1/lldp_local.txt",
+        "vsr-1/lldp_list.txt",
+        "vsr-2/lldp_local.txt",
+        "vsr-2/lldp_list.txt"
+      ]
+    },
+    {
+      "file": "inventory.json",
+      "sha256": "4544698f49b8d678737496f27c4a8f537fef221ce094e75b1341848908956ba1",
+      "profile": "topology",
+      "expected_valid": true,
+      "expected_diagnostic": null,
+      "sources": [
+        "vsr-1/version.txt",
+        "vsr-1/lldp_local.txt",
+        "vsr-2/version.txt",
+        "vsr-2/lldp_local.txt"
+      ]
+    }
+  ],
+  "counts": {
+    "vsr-1": {
+      "routes": 18,
+      "partial_interfaces": 6
+    },
+    "vsr-2": {
+      "routes": 19,
+      "partial_interfaces": 6
+    }
+  },
+  "unmapped_route_fields": [
+    {
+      "device": "vsr-1",
+      "prefix": "0.0.0.0/32",
+      "cost": 0,
+      "interface": "InLoop0"
+    },
+    {
+      "device": "vsr-1",
+      "prefix": "1.1.1.0/24",
+      "cost": 2,
+      "interface": "GE2/0"
+    },
+    {
+      "device": "vsr-1",
+      "prefix": "2.2.2.0/24",
+      "cost": 0,
+      "interface": "GE2/0"
+    },
+    {
+      "device": "vsr-1",
+      "prefix": "2.2.2.2/32",
+      "cost": 0,
+      "interface": "InLoop0"
+    },
+    {
+      "device": "vsr-1",
+      "prefix": "2.2.2.255/32",
+      "cost": 0,
+      "interface": "GE2/0"
+    },
+    {
+      "device": "vsr-1",
+      "prefix": "4.4.4.4/32",
+      "cost": 0,
+      "interface": "InLoop0"
+    },
+    {
+      "device": "vsr-1",
+      "prefix": "10.10.1.0/24",
+      "cost": 0,
+      "interface": "GE1/0"
+    },
+    {
+      "device": "vsr-1",
+      "prefix": "10.10.1.1/32",
+      "cost": 0,
+      "interface": "InLoop0"
+    },
+    {
+      "device": "vsr-1",
+      "prefix": "10.10.1.255/32",
+      "cost": 0,
+      "interface": "GE1/0"
+    },
+    {
+      "device": "vsr-1",
+      "prefix": "127.0.0.0/8",
+      "cost": 0,
+      "interface": "InLoop0"
+    },
+    {
+      "device": "vsr-1",
+      "prefix": "127.0.0.1/32",
+      "cost": 0,
+      "interface": "InLoop0"
+    },
+    {
+      "device": "vsr-1",
+      "prefix": "127.255.255.255/32",
+      "cost": 0,
+      "interface": "InLoop0"
+    },
+    {
+      "device": "vsr-1",
+      "prefix": "192.168.1.0/24",
+      "cost": 0,
+      "interface": "Vlan200"
+    },
+    {
+      "device": "vsr-1",
+      "prefix": "192.168.1.1/32",
+      "cost": 0,
+      "interface": "InLoop0"
+    },
+    {
+      "device": "vsr-1",
+      "prefix": "192.168.1.255/32",
+      "cost": 0,
+      "interface": "Vlan200"
+    },
+    {
+      "device": "vsr-1",
+      "prefix": "224.0.0.0/4",
+      "cost": 0,
+      "interface": "NULL0"
+    },
+    {
+      "device": "vsr-1",
+      "prefix": "224.0.0.0/24",
+      "cost": 0,
+      "interface": "NULL0"
+    },
+    {
+      "device": "vsr-1",
+      "prefix": "255.255.255.255/32",
+      "cost": 0,
+      "interface": "InLoop0"
+    },
+    {
+      "device": "vsr-2",
+      "prefix": "0.0.0.0/32",
+      "cost": 0,
+      "interface": "InLoop0"
+    },
+    {
+      "device": "vsr-2",
+      "prefix": "1.1.1.0/24",
+      "cost": 0,
+      "interface": "Vlan100"
+    },
+    {
+      "device": "vsr-2",
+      "prefix": "1.1.1.1/32",
+      "cost": 0,
+      "interface": "InLoop0"
+    },
+    {
+      "device": "vsr-2",
+      "prefix": "1.1.1.255/32",
+      "cost": 0,
+      "interface": "Vlan100"
+    },
+    {
+      "device": "vsr-2",
+      "prefix": "2.2.2.0/24",
+      "cost": 0,
+      "interface": "GE2/0"
+    },
+    {
+      "device": "vsr-2",
+      "prefix": "2.2.2.1/32",
+      "cost": 0,
+      "interface": "InLoop0"
+    },
+    {
+      "device": "vsr-2",
+      "prefix": "2.2.2.255/32",
+      "cost": 0,
+      "interface": "GE2/0"
+    },
+    {
+      "device": "vsr-2",
+      "prefix": "3.3.3.3/32",
+      "cost": 0,
+      "interface": "InLoop0"
+    },
+    {
+      "device": "vsr-2",
+      "prefix": "4.4.4.4/32",
+      "cost": 1,
+      "interface": "GE2/0"
+    },
+    {
+      "device": "vsr-2",
+      "prefix": "10.10.1.0/24",
+      "cost": 0,
+      "interface": "GE1/0"
+    },
+    {
+      "device": "vsr-2",
+      "prefix": "10.10.1.2/32",
+      "cost": 0,
+      "interface": "InLoop0"
+    },
+    {
+      "device": "vsr-2",
+      "prefix": "10.10.1.255/32",
+      "cost": 0,
+      "interface": "GE1/0"
+    },
+    {
+      "device": "vsr-2",
+      "prefix": "127.0.0.0/8",
+      "cost": 0,
+      "interface": "InLoop0"
+    },
+    {
+      "device": "vsr-2",
+      "prefix": "127.0.0.1/32",
+      "cost": 0,
+      "interface": "InLoop0"
+    },
+    {
+      "device": "vsr-2",
+      "prefix": "127.255.255.255/32",
+      "cost": 0,
+      "interface": "InLoop0"
+    },
+    {
+      "device": "vsr-2",
+      "prefix": "192.168.1.0/24",
+      "cost": 2,
+      "interface": "GE2/0"
+    },
+    {
+      "device": "vsr-2",
+      "prefix": "224.0.0.0/4",
+      "cost": 0,
+      "interface": "NULL0"
+    },
+    {
+      "device": "vsr-2",
+      "prefix": "224.0.0.0/24",
+      "cost": 0,
+      "interface": "NULL0"
+    },
+    {
+      "device": "vsr-2",
+      "prefix": "255.255.255.255/32",
+      "cost": 0,
+      "interface": "InLoop0"
+    }
+  ],
+  "gaps": [
+    "Interface statistics/discontinuity-time is absent; partial instances intentionally fail full validation.",
+    "Six IP-interface rows per device only; bridge and special internal interfaces are not represented.",
+    "RIB key is an example projection label, not a device-reported native YANG RIB name.",
+    "Route outgoing-interface is omitted in standalone route subsets; no closed forwarding-path model.",
+    "OSPF version is not inferred from O_INTRA; area-route type and metric remain in source evidence.",
+    "No receive/blackhole next-hop semantics inferred from InLoop0, NULL0 or address alone.",
+    "No default route synthesized; 0.0.0.0/32 is preserved unchanged.",
+    "No default VRF synthesized; captured device has zero configured VPN instances.",
+    "Virtual NE type comes from the documented GNS3 VSR lab deployment, not LLDP alone.",
+    "No virtual node-to-inventory mapping claimed by reusing identical example keys.",
+    "LLDP serial number is retained in capture; no invented physical component for the VM.",
+    "Hub, unmanaged switches, ARP/MAC/VLAN, IPv6, counters and physical wiring remain outside these subsets."
+  ]
+}

@@ -189,6 +189,10 @@ temp/
 # ============================================================
 cache/
 models/
+# Track the native network model validation specifications, not ML model weights.
+!/models/
+/models/*
+!/models/network-twin/
 *.bin
 *.safetensors
 *.onnx

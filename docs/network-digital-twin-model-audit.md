@@ -79,14 +79,14 @@
 ## 4. SIMAP 原文的一致性与实现缺口
 
 1. **可复现编译错误**：从官方 txt 的 §9 提取模块，仅去除分页页眉页脚；pyang 2.7.1 报 `link-type-hybrid` 的 description 字符串结束后出现未引用文本，退出码 1。没有修改该模块以制造通过结果。
-2. **静态检查的其他问题，尚不是编译器验证通过的结果**：使用 `yang:date-and-time`、`inet:uri` 但只 import nw/nt；两个导航 augment 各少一个闭合括号。须由可追溯的后续原生版本解决后重新编译，不能把这些修补冒充原文。
+2. **静态检查的其他问题，尚不是原文编译器验证通过的结果**：使用 `yang:date-and-time`、`inet:uri` 但只 import nw/nt；两个导航 augment 各少一个闭合括号。后续原生修订应重新核验；本轮经授权的独立兼容补丁见第 7 节，不能把这些修补冒充原文。
 3. **feature 不一致**：§7.1 给出 core-topology/navigation/lifecycle/external 四项 feature，多个片段包含 if-feature；§9 没有这些 feature 或 if-feature。不能在 YANG Library 宣告 §9 已实现这四项。
 4. **生命周期约束不一致**：`network-category-none` 缺少 network-category base；category 描述称默认 live，但没有 default 语句。live-network-ref 和 timestamp 的描述写 required，但没有 mandatory/when。它们不能成为已由 Schema 强制的规则；不自行补默认值。
 5. **引用要求不同**：网络扩展 live-network-ref、subnetwork-ref 明示 require-instance false；历史记录的 live-network-ref 没有此声明，按 YANG 默认要求目标存在。不能对所有引用使用一种容错策略。
 6. **方向、端点和角色**：link-direction、link-type、tp-direction 有原生派生 identity；tp-role 仅有 base，没有具体派生角色。tp 列表重用 nt:tp-ref，组合键是 network/node/TP；不能缩成 TP 名。§9 没有与 source/destination 的一致性 must，也没有强制多点数量。
 7. **树图不能替代源码**：§8 缺导航结构；§7 的 parent-ref 候选和四项 feature 也不能视为已经合入 §9。§5 明确当前 augment 方案用于建模审查，最终承载模块方式尚未定案。
 
-已进一步核验作者 [RFC8345Bis 仓库固定提交](https://github.com/OlgaHuawei/RFC8345Bis/tree/79b88040877b509b630a9186e458892188d6cad7)，而非因文档提取错误就停止调查：原始 `.yang` 同样在 description 处编译失败（第 249 行，退出 1）。与 -03 提取物忽略空行和行首尾空白后，仅有两处注释行不同；此提交没有可替换的已修复模块。源码摘要和诊断保存于 `ietf-model-audit/simap-upstream-report.json`。没有改变采纳版本或本地修正原生定义。
+已进一步核验作者 [RFC8345Bis 仓库固定提交](https://github.com/OlgaHuawei/RFC8345Bis/tree/79b88040877b509b630a9186e458892188d6cad7)，而非因文档提取错误就停止调查：原始 `.yang` 同样在 description 处编译失败（第 249 行，退出 1）。与 -03 提取物忽略空行和行首尾空白后，仅有两处注释行不同；此提交没有可替换的已修复模块。源码摘要和诊断保存于 `ietf-model-audit/simap-upstream-report.json`。该次核验没有改变采纳版本或本地修正原生定义。
 
 结论：**继续采纳 SIMAP 补充工作；当前冻结版本的定义核验已产出明确结果，生产可执行模型尚未通过。** 先完成配套关联和可用模块的验证。SIMAP 未定义或原文错误的部分列为待解决项，不退回自定义模型，不把参考代码静默修补后标为原生标准。
 
@@ -131,3 +131,14 @@ YANG -03 引用的旧 external-relationship 草案已被 [draft-vivek-nmop-simap
 - yangson 1.6.3：16 个原生定义正反例和 inventory-topology -11 附录 A/B 两个原始实例，共 18 项结果符合预期。其中 4 项是“Schema 接受但语义仍有问题”的证据，分别涉及 supporting 环、物理映射到虚拟 NE、port-ref 目标 class、外部 node-ref 作用域歧义。
 - 附录 A 原始示例把 port-ref 写为完整路径字符串；实际类型引用组件 ID，而 require-instance false 使其未解析也能通过。保留原始示例和这个差异，不把验证通过说成关联已解析。
 - 脚本整体退出 **1**，报告 `all_checks_passed=false`，因 SIMAP 原文不能编译；没有运行其双向/多点/生命周期实例。挂载实例、TE 和协议扩展全面核验仍待完成。脚本 Ruff 检查与文档 diff 检查用于验证研究产物，不替代模型验收。
+
+## 7. 经授权的兼容包与实验实例（2026-09-28 续）
+
+负责人批准继续制作独立语法补丁。第 4～6 节保留原文审计结果；它们不代表兼容包仍不能编译。原始来源、失败诊断和 -03 原文保持不变。补丁仅四处精确编辑，前后 SHA-256 固定，并与人工可审查 diff 交叉校验；没有补定义、feature、default 或语义约束。
+
+- [验证包及复现命令](../models/network-twin/README.md)：完整 41 文件编译通过，topology/device 两个 profile 装载成功，包含新增 RFC 9129 OSPF 和完整依赖。
+- [关联核验](../models/network-twin/associations.md)：已验证接口→NI；物理 inventory 引用允许未解析目标。虚拟 NE 不能借用物理映射，Yangson 不自动实现 RFC 8528 mount。这两项尚未完成可运行的端到端闭环。
+- [实验溯源清单](../models/network-twin/instances/manifest.json)：既有捕获批次离线生成 2 节点/4 TP/4 LLDP 邻接、2 个虚拟 NE、37 条路由和 12 条部分接口实例。拓扑、清单、路由子集通过；接口因缺统计中断时间按预期失败，未补虚假值或裁剪必填约束。
+- [验证结果](../models/network-twin/reports/validation.json)：24 个结果均符合预期，负例检查具体诊断；其中含 Schema 语义缺口和接口数据缺失，不能将结果理解为全量模型或全部实例验收通过。
+
+IETF-1.1 完成兼容包范围；IETF-1.2 完成当前候选关联与工具边界核验，挂载实现和虚拟映射仍未完成；IETF-2.1 完成本批次有限字段映射核验，未完成整台设备状态和路径计算闭环。继续维持模型优先，下一步解决虚拟关联、挂载运行时及标准必填数据的获取依据；本轮不修改应用、设备访问、巡检或暂停的采集代码。
