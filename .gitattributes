@@ -39,3 +39,6 @@ models/network-twin/mount/Dockerfile* text eol=lf
 
 # Device evidence keeps trailing spaces as printed and LF bytes matching its manifest digests.
 models/network-twin/evidence/**/*.txt text eol=lf whitespace=-blank-at-eol
+
+# Frozen YANG resources are checked against SHA-256 digests of their LF bytes.
+src/apps/topology/resources/yang/*.yang text eol=lf
