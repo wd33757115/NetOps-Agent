@@ -7,12 +7,15 @@ import logging
 import os
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from uuid import uuid4
 
 from fastapi import HTTPException
 from sqlalchemy import delete, func, select, update
 
+from src.apps.device_access.backend.credentials import CredentialVault
 from src.apps.device_access.backend.grants import authorize_address
+from src.apps.device_access.backend.vault_driver import VaultDriver
 from src.platform.device_access import AccessContext, AccessGrant, BatchRequest, DeviceAccessService
 from src.platform.device_access.contracts import (
     ConnectionProfile,
@@ -21,9 +24,11 @@ from src.platform.device_access.contracts import (
 from src.platform.device_access.contracts import (
     Target as AccessTarget,
 )
+from src.platform.device_access.drivers.paramiko_driver import ParamikoDriver
 from src.platform.device_access.security import CredentialStore
 
 from . import storage
+from .collectors.collect import collect_node, command_allowlist
 from .collectors.identify import TopologyDiscoveryPlan as DiscoveryPlan
 from .models import (
     Alias,
@@ -43,6 +48,10 @@ from .repository import owned, sessions
 
 APP_ID = "topology"
 ACTIVE = ("queued", "running", "waiting_for_input")
+TOPOLOGY_FACTS = ("lldp_local", "lldp", "interfaces", "ip", "arp", "mac")
+NODE_BUDGET_SECONDS = 240
+# A lease outlives the node budget, so a live collection is never reclaimed mid-way.
+LEASE_SECONDS = NODE_BUDGET_SECONDS + 60
 logger = logging.getLogger(__name__)
 
 
@@ -486,6 +495,168 @@ def cancel(owner, run_id):
     return read(owner, run_id)
 
 
+def _recorder():
+    outputs, command_metadata = {}, []
+
+    def capture(item):
+        outputs[item.command_id] = item.output
+        command_metadata.append(
+            {key: value for key, value in asdict(item).items() if key != "output"}
+        )
+
+    return outputs, command_metadata, capture
+
+
+def _failure(exc):
+    return exc.failure_code if isinstance(exc, DeviceAccessError) else "execution_unavailable"
+
+
+def _collect_lldp(job, choice):
+    """Manual platform override: the original single-session LLDP plan."""
+    plan = DiscoveryPlan(choice)
+    outputs, command_metadata, capture = _recorder()
+    data, reason = {"complete": False}, None
+    try:
+        username, password = CredentialStore().get(
+            job.ref, job.owner, job.settings["domain"], job.address
+        )
+        commands = plan.commands
+        profile = ConnectionProfile(
+            profile_id=job.target_id,
+            username=username,
+            password=password,
+            port=job.settings["port"],
+            known_hosts_file=os.getenv("DEVICE_ACCESS_KNOWN_HOSTS"),
+        )
+        access = DeviceAccessService(
+            target_resolver=lambda _: AccessTarget(
+                job.target_id, job.address, management_domain=job.settings["domain"]
+            ),
+            profile_resolver=lambda _: profile,
+        )
+        result = access.execute_batch(
+            AccessContext(
+                job.owner,
+                APP_ID,
+                (AccessGrant(job.target_id, job.target_id, frozenset(c.text for c in commands)),),
+                job.run_id,
+            ),
+            BatchRequest(job.target_id, job.target_id, commands, budget_seconds=90),
+            on_result=capture,
+            should_continue=job.guard,
+            command_filter=plan.select,
+        )
+        if result.execution_status != "succeeded":
+            raise DeviceAccessError(
+                result.failure_code or "output_incomplete", "设备采集未完整完成"
+            )
+        data = parse(plan.profile_id, plan.parser_outputs(outputs))
+    except Exception as exc:
+        reason = _failure(exc)
+    return outputs, command_metadata, {**data, "platform": plan.metadata()}, reason
+
+
+def _collect_topology(job, choice):
+    """Identify the platform, then collect every topology fact in one node budget."""
+    outputs, command_metadata, capture = _recorder()
+    data = {"complete": False, "platform": {"source": "version_probe", "status": "failed"}}
+    reason = None
+    try:
+        # The vault tries the domain's credential sets plus this target's temporary one,
+        # and pins whichever succeeds for the identified platform's second session.
+        driver = VaultDriver(
+            CredentialVault(),
+            job.owner,
+            temporary_ref=job.ref,
+            guard=job.guard,
+            driver=ParamikoDriver(),
+        )
+        profile = ConnectionProfile(
+            profile_id=job.target_id,
+            username="credential-vault",
+            password=None,
+            port=job.settings["port"],
+            known_hosts_file=os.getenv("DEVICE_ACCESS_KNOWN_HOSTS"),
+        )
+        access = DeviceAccessService(
+            target_resolver=lambda _: AccessTarget(
+                job.target_id, job.address, management_domain=job.settings["domain"]
+            ),
+            profile_resolver=lambda _: profile,
+            driver=driver,
+        )
+        context = AccessContext(
+            job.owner,
+            APP_ID,
+            (AccessGrant(job.target_id, job.target_id, command_allowlist()),),
+            job.run_id,
+        )
+        result = collect_node(
+            access,
+            context,
+            job.target_id,
+            job.target_id,
+            mode="topology",
+            budget_seconds=NODE_BUDGET_SECONDS,
+            should_continue=job.guard,
+            on_result=capture,
+        )
+        data = topology_observation(result)
+        reason = data.get("failure_code")
+    except Exception as exc:
+        reason = _failure(exc)
+    return outputs, command_metadata, data, reason
+
+
+def topology_observation(result):
+    """Parsed facts for the SIMAP builder plus LLDP neighbours for expansion.
+
+    LLDP must be complete: it drives expansion and device adjacency. Other facts
+    degrade the topology (no hosts or subnets) instead of failing the node.
+    """
+    status = {cap: parsed.status for cap, parsed in result.parsed.items()}
+    facts = {
+        cap: parsed.summary if cap == "lldp_local" else parsed.records
+        for cap, parsed in result.parsed.items()
+        if cap in TOPOLOGY_FACTS and parsed.status in {"complete", "partial"}
+    }
+    lldp = result.parsed.get("lldp")
+    complete = lldp is not None and lldp.status == "complete"
+    neighbors = [
+        {
+            "local_port": rec["local_if"],
+            "chassis_id": rec["remote_chassis_id"],
+            "chassis_subtype": rec.get("remote_chassis_subtype") or "unknown",
+            "port_subtype": rec.get("remote_port_subtype") or "unknown",
+            "remote_port": rec["remote_port_id"],
+            "name": rec.get("remote_sysname") or rec["remote_chassis_id"],
+            "system_description": (rec.get("remote_system_description") or None),
+            "addresses": sorted(set(rec.get("remote_mgmt_addresses", []))),
+        }
+        for rec in (lldp.records if complete else [])
+    ]
+    return {
+        "complete": complete,
+        "parser": "topology-facts-v1",
+        "neighbors": neighbors,
+        "facts": facts,
+        "capabilities": status,
+        "failure_code": None
+        if complete
+        else (
+            "parse_incomplete" if lldp is not None and lldp.status == "partial" else "parse_failed"
+        ),
+        "platform": {
+            "profile_id": result.profile_id,
+            "source": "version_probe",
+            "status": "identified",
+            "mode": result.mode,
+            "driver": result.driver,
+            "identity": asdict(result.identity),
+        },
+    }
+
+
 def execute_run(run_id, authority):
     def authorize_owner(owner):
         decision = authority(owner, APP_ID)
@@ -532,7 +703,7 @@ def execute_run(run_id, authority):
         target.status, target.lease_token, target.lease_until = (
             "running",
             token,
-            now() + timedelta(seconds=180),
+            now() + timedelta(seconds=LEASE_SECONDS),
         )
         run.status = "running"
         target_id, address, attempt, depth, ref = (
@@ -566,55 +737,29 @@ def execute_run(run_id, authority):
     choice = settings.get("target_profiles", {}).get(
         target_id, settings.get("profile_id", "auto") if depth == 0 else "auto"
     )
-    plan = DiscoveryPlan(choice)
-    outputs, data, reason = {}, {"complete": False}, None
-    command_metadata = []
-
-    def capture(item):
-        outputs[item.command_id] = item.output
-        command_metadata.append(
-            {key: value for key, value in asdict(item).items() if key != "output"}
-        )
-
+    job = SimpleNamespace(
+        owner=owner,
+        run_id=run_id,
+        target_id=target_id,
+        address=address,
+        ref=ref,
+        settings=settings,
+        guard=guard,
+    )
+    # Automatic identification collects every topology fact; a human-chosen platform
+    # keeps the LLDP-only plan because collect_node never skips identification.
+    collector = _collect_topology if choice == "auto" else _collect_lldp
     try:
-        if not guard():
-            return
-        username, password = CredentialStore().get(ref, owner, settings["domain"], address)
-        commands = plan.commands
-        profile = ConnectionProfile(
-            profile_id=target_id,
-            username=username,
-            password=password,
-            port=settings["port"],
-            known_hosts_file=os.getenv("DEVICE_ACCESS_KNOWN_HOSTS"),
-        )
-        access = DeviceAccessService(
-            target_resolver=lambda _: AccessTarget(
-                target_id, address, management_domain=settings["domain"]
-            ),
-            profile_resolver=lambda _: profile,
-        )
-        result = access.execute_batch(
-            AccessContext(
-                owner,
-                APP_ID,
-                (AccessGrant(target_id, target_id, frozenset(c.text for c in commands)),),
-                run_id,
-            ),
-            BatchRequest(target_id, target_id, commands, budget_seconds=90),
-            on_result=capture,
-            should_continue=guard,
-            command_filter=plan.select,
-        )
-        if result.execution_status != "succeeded":
-            raise DeviceAccessError(
-                result.failure_code or "output_incomplete", "设备采集未完整完成"
-            )
-        data = parse(plan.profile_id, plan.parser_outputs(outputs))
+        proceed = guard()
     except Exception as exc:
-        reason = exc.failure_code if isinstance(exc, DeviceAccessError) else "execution_unavailable"
+        proceed = True
+        outputs, command_metadata, reason = {}, [], _failure(exc)
+        data = {"complete": False, "platform": {"source": "version_probe", "status": "failed"}}
+    else:
+        if not proceed:
+            return
+        outputs, command_metadata, data, reason = collector(job, choice)
     observed_at = now()
-    data = {**data, "platform": plan.metadata()}
     try:
         key = storage.put(
             run_id,
@@ -624,8 +769,8 @@ def execute_run(run_id, authority):
                 "outputs": outputs,
                 "commands": command_metadata,
                 "observed_at": observed_at.isoformat(),
-                "profile_id": plan.profile_id,
-                "platform": plan.metadata(),
+                "profile_id": data["platform"].get("profile_id"),
+                "platform": data["platform"],
                 "complete": data.get("complete", False),
                 "failure_code": reason,
             },

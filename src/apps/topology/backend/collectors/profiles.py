@@ -20,6 +20,8 @@ CAPABILITIES = frozenset(
 )
 MODE_CAPABILITIES = {
     "fast": ("version", "lldp_local", "lldp", "interfaces"),
+    # Exactly the facts the SIMAP L2/L3 builder consumes.
+    "topology": ("version", "lldp_local", "lldp", "interfaces", "ip", "arp", "mac"),
     "standard": (
         "version",
         "lldp_local",
@@ -78,6 +80,7 @@ class SessionSpec(StrictModel):
 
 class BudgetSpec(StrictModel):
     fast: int = Field(default=120, ge=1, le=600)
+    topology: int = Field(default=240, ge=1, le=600)
     standard: int = Field(default=300, ge=1, le=600)
     full: int = Field(default=600, ge=1, le=600)
 

@@ -1,5 +1,6 @@
 # Exact normalized keys. Do not turn these into prefix matches.
-local_if: [local intf, local interface, local port id, local port]
+# A per-neighbour key line; port headers yield local_if and cover every block below them.
+local_port: [local intf, local interface, local port id, local port]
 chassis: [chassis id, chassisid]
 chassis_subtype: [chassis type, chassis id subtype]
 port: [port id, portid]

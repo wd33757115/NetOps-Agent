@@ -9,6 +9,7 @@ from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session
 
 from src.apps.topology.backend import service
+from src.apps.topology.backend.collectors import collect as collectors
 from src.apps.topology.backend.models import Base, Network, Observation, Run, Snapshot, Target, now
 from src.apps.topology.backend.normalize import build_graph, parse, rfc8345
 from src.apps.topology.backend.schemas import Discovery, Import, Resolve
@@ -122,6 +123,57 @@ def world(monkeypatch):
                 results.append(item)
             return SimpleNamespace(execution_status="succeeded")
 
+    def collect_node(
+        access, context, target_ref, profile_ref, *, mode, should_continue, on_result, **_
+    ):
+        """Stand-in for the real collector: real identification, profiles and parsers.
+
+        Transport is the Access double above, so failure/cancel/output knobs apply.
+        """
+        executions.append((target_ref, mode))
+        address = access.address
+        assert should_continue()
+        if Access.failure:
+            raise DeviceAccessError(Access.failure, "failure")
+        if Access.after_connect:
+            Access.after_connect(None)
+        if not should_continue():
+            raise DeviceAccessError("cancelled", "cancelled")
+
+        def run(command_id, text, output):
+            Access.sent.append((address, text))
+            item = CommandResult(
+                execution_id="execution",
+                command_id=command_id,
+                started_at=now().isoformat(),
+                finished_at=now().isoformat(),
+                execution_status="succeeded",
+                output_complete=True,
+                output=output,
+            )
+            on_result(item)
+            return item
+
+        probes, identity = [], collectors.Identity()
+        for text in collectors.PROBES:
+            command_id = "detect-" + text.split()[0]
+            default = "H3C Comware Software, Version 7.1" if command_id == "detect-display" else ""
+            item = run(command_id, text, Access.versions.get((address, command_id), default))
+            probes.append(collectors.Probe(text, item.output, True))
+            identity = collectors.identify(probes)
+            if identity.status in {"identified", "generic"}:
+                break
+        profile = collectors.select_profile(identity, collectors.load_profiles())
+        result = collectors.CollectionResult(identity, profile.id, mode, "paramiko")
+        for cap, spec in profile.selected(mode).items():
+            if cap == "version":
+                continue
+            output = Access.outputs.get(address, Access.output) if cap == "lldp" else ""
+            result.results[cap] = run(cap, spec.command, output)
+            result.parsed[cap] = collectors.parse(identity, cap, output)
+        return result
+
+    monkeypatch.setattr(service, "collect_node", collect_node)
     monkeypatch.setattr(service, "sessions", sessions)
     monkeypatch.setattr(service, "CredentialStore", Credentials)
     monkeypatch.setattr(service, "authorize_address", lambda *args: None)
@@ -355,16 +407,18 @@ def test_mixed_platform_neighbors_are_identified_independently(world, seed_profi
     service.execute_run(row["id"], lambda *args: None)
     result = service.read("user", row["id"])
     assert result["status"] == "completed"
+    # A human-chosen seed platform keeps the LLDP-only plan; automatic identification
+    # uses the installed profile and collects every topology fact.
     assert {t["address"]: t["platform"]["profile_id"] for t in result["targets"]} == {
-        "10.0.0.1": "comware-lldp-v1",
-        "10.0.0.2": "nxos-lldp-v1",
+        "10.0.0.1": "h3c-comware7" if seed_profile == "auto" else "comware-lldp-v1",
+        "10.0.0.2": "cisco-nxos",
     }
     neighbor_commands = [command for address, command in world.access.sent if address == "10.0.0.2"]
+    nxos = collectors.load_profiles()["cisco-nxos"].selected("topology")
     assert neighbor_commands == [
         "display version",
         "show version",
-        "terminal length 0",
-        "show lldp neighbors detail",
+        *(spec.command for cap, spec in nxos.items() if cap != "version"),
     ]
     assert len(world.executions) == 2
 
@@ -405,7 +459,7 @@ def test_unknown_platform_waits_and_manual_override_is_target_local(world):
     assert result["status"] == "completed"
     assert (
         next(t for t in result["targets"] if t["depth"] == 1)["platform"]["profile_id"]
-        == "nxos-lldp-v1"
+        == "cisco-nxos"
     )
 
 
@@ -458,3 +512,33 @@ def test_offline_invalid_import_has_no_business_side_effect(world):
         service.import_captures("user", body)
     with world.sessions() as session:
         assert session.scalars(select(Network)).all() == []
+
+
+def test_auto_identification_collects_topology_facts_in_one_budget(world):
+    row = service.submit("user", discovery(max_depth=0))
+    service.execute_run(row["id"], lambda *args: None)
+    result = service.read("user", row["id"])
+    assert result["status"] == "completed"
+    assert world.executions == [(result["targets"][0]["id"], "topology")]
+    comware = collectors.load_profiles()["h3c-comware7"].selected("topology")
+    assert [command for _, command in world.access.sent] == [
+        "display version",
+        *(spec.command for cap, spec in comware.items() if cap != "version"),
+    ]
+    with world.sessions() as session:
+        data = session.scalars(select(Observation)).one().data
+    assert data["platform"]["mode"] == "topology"
+    assert data["capabilities"]["lldp"] == "complete"
+    assert data["facts"]["lldp"][0]["remote_mgmt_addresses"] == ["10.0.0.2"]
+    # Facts that did not parse are reported, never stored as empty tables.
+    assert data["capabilities"]["arp"] != "complete" and "arp" not in data["facts"]
+    assert service.LEASE_SECONDS > service.NODE_BUDGET_SECONDS
+
+
+def test_unparsed_lldp_waits_for_a_human_instead_of_meaning_no_neighbours(world):
+    world.access.output = "LLDP neighbor-information of port 1 [GigabitEthernet1/0/1]:\n garbage\n"
+    row = service.submit("user", discovery(max_depth=0))
+    service.execute_run(row["id"], lambda *args: None)
+    target = service.read("user", row["id"])["targets"][0]
+    assert target["status"] == "waiting_for_input"
+    assert target["reason"] in {"parse_failed", "parse_incomplete"}

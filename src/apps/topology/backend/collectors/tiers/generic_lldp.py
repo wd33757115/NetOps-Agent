@@ -8,7 +8,7 @@ import yaml
 
 from .common import Parsed, interface, valid_ip, valid_mac
 
-HEADER = re.compile(r"^\s*LLDP (?:neighbor|local)-information of port \d+\[([^]]+)\]:\s*$", re.I)
+HEADER = re.compile(r"^\s*LLDP (?:neighbor|local)-information of port \d+\s*\[([^]]+)\]:\s*$", re.I)
 VRP_HEADER = re.compile(r"^\s*(\S+)\s+has\s+\d+\s+neighbor(?:s|\(s\))?:?\s*$", re.I)
 KEY = re.compile(r"^(\s*)([A-Za-z][A-Za-z0-9 ()/_-]*?)\s*:\s*(.*)$")
 
@@ -55,17 +55,24 @@ def fields(text):
 
 
 def parse(text, family):
+    """A header (Comware/VRP) gives the local port to every block under it.
+
+    A "Local ..." key belongs to one neighbour and may come before the chassis
+    (IOS "Local Intf") or after chassis and port (NX-OS "Local Port id").
+    """
     result = Parsed()
     local = None
     local_lines = []
     block = {}
     lines = []
+    block_local = False
+    header_local = False
 
     def flush():
         if not block:
             return
         result.candidates += 1
-        if not local or not block.get("chassis") or not block.get("port"):
+        if not local or not block_local or not block.get("chassis") or not block.get("port"):
             result.reject(lines[0], "incomplete_lldp_block")
             return
         try:
@@ -109,16 +116,19 @@ def parse(text, family):
         result.add(record, lines, {"local_if": local, **block})
 
     for key, value, source in fields(text):
-        if key == "local_if":
+        if key == "local_port" and "chassis" in block and not block_local:
+            local, block_local = value, True
+            lines.extend(source)
+        elif key in {"local_if", "local_port"}:
             flush()
             local, block, lines = value, {}, source[:]
             local_lines = source[:]
-        elif key == "chassis_subtype" and "chassis" in block:
+            header_local = key == "local_if"
+            block_local = True
+        elif key in {"chassis_subtype", "chassis"} and "chassis" in block:
             flush()
-            block, lines = {key: value}, local_lines + source
-        elif key == "chassis" and "chassis" in block:
-            flush()
-            block, lines = {"chassis": value}, local_lines + source
+            block, block_local = {key: value}, header_local
+            lines = (local_lines if header_local else []) + source
         elif key in {
             "chassis",
             "port",
