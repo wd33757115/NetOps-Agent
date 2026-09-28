@@ -980,6 +980,7 @@ P2-9 根据 Q5 取消，不引入 SNMP。P3 及后续仍在进入阶段时展开
 | P1-6 | 已完成 | 2026-09-28 | 设备访问/拓扑 Python 699 通过、1 条可选 YANG 跳过；PostgreSQL 并发 1 通过；前端 10 通过、构建通过；双 H3C 双驱动采集/会话撤销成功 | 0005 迁移、数据库授权及导入界面；device-access 0.6.0 / topology 0.2.1；未发布 |
 | P2-0 | 已完成 | 2026-09-28 | 新增样本回放 44 通过，连同 SSH/拓扑回归 87 通过；56 个数据文件 Git 索引摘要一致，扫描无命中 | 两台 VSR ×14 能力 ×规范化/raw；修正文档 E4/E6/E10/E12 与 raw 证据表述 |
 | P2-1 | 已完成 | 2026-09-28 | 新增事实仓储 30 通过；设备访问/拓扑全量 773 通过、1 跳过；PostgreSQL 并发/迁移 1 通过；前端构建通过 | Q7 团队共享；topology 0.3.0，0002 迁移；尚未发布 |
+| P2-4 | 已完成 | 2026-09-28 | 新增规范化 76 通过；连同实机夹具和原拓扑回归 142 通过；Ruff 通过 | 未接线旧解析器；保留原文、未知名称和分页标志 |
 
 ### P0-1 基线记录（2026-09-28）
 
@@ -1160,6 +1161,15 @@ P1-1 实机补验与驱动修复（2026-09-28）：
 - `venv/Scripts/python.exe -m pytest <rg 选出的 test_device_access*.py 与 test_topology*.py> -q --junitxml=.runtime/p2-1-regression.xml`：773 通过、1 条已有可选 YANG 跳过；定向事实仓储 30 通过；Ruff、前端隔离构建 `.runtime/p2-1/frontend-dist` 通过。
 - PostgreSQL 16 一次性数据库：拓扑 0001→0002、重复迁移、双账号并发创建只产生 1 个候选、共享 complete/failed 当前视图；`tests/integration/test_topology_facts_postgres.py` 1 通过。临时容器已停止自动删除，未改运行数据库。
 - 未完成项：现场发现接线、强身份合并、事实投影和团队界面按后续卡；无巡检变更、无发布。下一卡 P2-4 规范化。
+
+
+### P2-4 执行记录（2026-09-28）
+
+- 新增 `collectors/{__init__,ifname,normalize}.py`、`tests/unit/test_topology_normalization.py`；topology 0.3.1，迁移不变；前端注册与台账更新。
+- 接口按平台映射，保留 raw_name，未知名称不猜类型；两段/三段接口及子接口保持编号，逻辑聚合/VLAN/Loop/InLoop/NULL/REG 不标为物理端口。Unicode 相似字符不能冒充已识别 ASCII 类型。MAC、IP、前缀、接口地址、VRF 和 UTC 命令结束时间分别规范化；路由前缀严格校验，不静默清除主机位。
+- 速度必须显式 K/M/G/T 单位，年龄必须显式秒/分/时/天；缺失保留 None，不猜单位。当前事实表为整数 Mbps，非整 Mbps 值明确拒绝，不舍入为 0；若后续出现低速链路，应通过独立迁移调整精度后扩展。行尾/ANSI/NUL/分页只清理解析副本，保留 had_paging 标志，不能由清理动作推断采集完整。
+- `python -m pytest tests/unit/test_topology_normalization.py tests/unit/test_topology_lab_fixtures.py tests/unit/test_topology_app.py -q --junitxml=.runtime/p2-4-tests.xml`：142 通过，其中新增 76；Ruff 通过。两台 VSR 实际接口简写与 LLDP 全称规范为同一接口，原 CR CR LF 不产生伪空行；其他平台映射仅样本/合成测试，未新增实机支持声明。
+- 未完成项：后续通用解析器在 P2-8 调用这些纯函数；未改原 normalize.py/巡检，无上线或数据库迁移。下一卡 P2-7 多信号识别。
 
 ## 参考
 
