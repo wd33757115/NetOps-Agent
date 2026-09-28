@@ -1003,6 +1003,7 @@ P2-9 根据 Q5 取消，不引入 SNMP。P3 及后续仍在进入阶段时展开
 | IETF-0.1 RFC 8345 / SIMAP 定义对应 | 已完成本项核验（非模型验收通过） | `network-digital-twin-model-audit.md` 第 1～4 节：基础原生节点/引用、concept -13 全部 36 项需求、-03 章节/树图/代码差异；对比 concept -12/-13 §4。原文 §9 提取后 pyang 退出 1，定位 description 语法错误；静态检查还发现缺 import/闭合及 feature 不一致。 | 原生 SIMAP 组合尚不可执行；不自行补写缺失模型或静默修补原文。 |
 | IETF-0.2 配套模型与关联 | 已完成本项候选定义核验（关联未全部闭合） | 清单第 5 节逐路径核对设备接口/NI/路由/SAP、inventory -19 / topology -11 / software -04；核对 external-relationship 后继 -00。物理映射不能用于 VSR，外部引用未限定完整作用域，请求构造器仍为空。发现 inventory 文件标签与内部 revision 不同、类型依赖已更新到 RFC 9911。 | 虚拟 node→NE→设备/挂载树完整标准关联尚未解决；TE/协议全面审查仍待完成，不新增关系字段。 |
 | IETF-0.3 本轮选定模块与实例验证 | 已完成本轮核验（整体模型未通过） | `audit_ietf_models.py`、`docs/ietf-model-audit/` 固定 38 来源及摘要；空缓存下载与离线重放一致。30 文件基础、10 文件 inventory/external、35 文件 RFC/扩展组合编译通过；SIMAP 原文组合失败。36 项需求完整覆盖；18 个实例结果符合预期，其中 4 项明确展示 Schema 与语义的差距。 | SIMAP 双向/多点/生命周期实例因原文语法错误未运行；挂载、TE/协议和全量依赖闭合仍待核验。 |
+| IETF-0.4 作者仓库修正版排查 | 已完成本项核验（未找到可用修正版） | 固定 RFC8345Bis 提交 `79b88040877b509b630a9186e458892188d6cad7`；原始 YANG SHA-256 和诊断见 `simap-upstream-report.json`。执行 pyang 2.7.1，退出 1，第 249 行同一 description 错误；排除 txt 提取导致该错误。与 -03 规范化空白后只差两处注释。 | 不据此替换已采纳版本；SIMAP 模块仍未通过，继续保留定义和依赖缺口。 |
 
 分项记录与证据详见 [原生模型核验清单](network-digital-twin-model-audit.md)。IETF-0 整体仍进行中；上述“完成”只针对已列出的核验范围。
 

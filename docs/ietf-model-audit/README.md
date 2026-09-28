@@ -4,6 +4,7 @@
 
 - `sources.lock.json`：38 个来源的固定 URL、SHA-256、提取后模块 SHA-256 和四组编译清单。共 38 个不同版本的模块文件，包括历史与新版公共类型。
 - `report.json`：本次检查快照，包含工具版本、脚本/来源清单摘要、诊断、需求覆盖和逐实例结果。`all_checks_passed=false` 是真实结果，不能解释为全部通过。
+- `simap-upstream-report.json`：单独记录作者仓库固定提交的源码摘要和 pyang 诊断，不计入上述 38 来源。该原始 YANG 同样失败，尚无可直接替换 -03 的修正版；这也排除了文档分页提取造成此语法问题的可能。
 - 语义结论、关联边界和待解决项见 [原生模型核验清单](../network-digital-twin-model-audit.md)。
 
 ## 复现命令

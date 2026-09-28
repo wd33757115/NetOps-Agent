@@ -86,6 +86,8 @@
 6. **方向、端点和角色**：link-direction、link-type、tp-direction 有原生派生 identity；tp-role 仅有 base，没有具体派生角色。tp 列表重用 nt:tp-ref，组合键是 network/node/TP；不能缩成 TP 名。§9 没有与 source/destination 的一致性 must，也没有强制多点数量。
 7. **树图不能替代源码**：§8 缺导航结构；§7 的 parent-ref 候选和四项 feature 也不能视为已经合入 §9。§5 明确当前 augment 方案用于建模审查，最终承载模块方式尚未定案。
 
+已进一步核验作者 [RFC8345Bis 仓库固定提交](https://github.com/OlgaHuawei/RFC8345Bis/tree/79b88040877b509b630a9186e458892188d6cad7)，而非因文档提取错误就停止调查：原始 `.yang` 同样在 description 处编译失败（第 249 行，退出 1）。与 -03 提取物忽略空行和行首尾空白后，仅有两处注释行不同；此提交没有可替换的已修复模块。源码摘要和诊断保存于 `ietf-model-audit/simap-upstream-report.json`。没有改变采纳版本或本地修正原生定义。
+
 结论：**继续采纳 SIMAP 补充工作；当前冻结版本的定义核验已产出明确结果，生产可执行模型尚未通过。** 先完成配套关联和可用模块的验证。SIMAP 未定义或原文错误的部分列为待解决项，不退回自定义模型，不把参考代码静默修补后标为原生标准。
 
 ## 5. 配套关联核验
