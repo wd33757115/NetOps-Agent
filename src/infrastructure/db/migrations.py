@@ -8,7 +8,7 @@ from alembic import command
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from sqlalchemy import inspect, text
+from sqlalchemy import inspect
 
 from src.infrastructure.db.postgres import engine
 
@@ -44,8 +44,6 @@ def adopt_legacy_schema() -> bool:
 
 
 def upgrade_database(revision: str = "head") -> None:
-    with engine.begin() as connection:
-        connection.execute(text("CREATE SCHEMA IF NOT EXISTS django"))
     command.upgrade(alembic_config(), revision)
 
 
@@ -56,5 +54,5 @@ def require_database_schema_current() -> None:
         raise RuntimeError(
             "PostgreSQL schema is not current: "
             f"current={current or 'unversioned'}, expected={head}. "
-            "Run: python scripts/migrate_db.py"
+            "Run: python -m src.platform.database.bootstrap apply"
         )

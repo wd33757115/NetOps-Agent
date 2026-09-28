@@ -154,7 +154,9 @@ def operate(action, app_id, *, gateway_urls=None, frontend_url=None):
             try:
                 check_dependencies(manifest)
                 archive(manifest)
-                head = migrate(manifest)
+                # Schema changes belong to the platform deployment entry point.
+                # Installing an App records its release; it never runs DDL.
+                head = migrate(manifest, check=True)
                 record.migration_head = head or ""
                 record.installed_version = manifest.data["version"]
                 record.deployment_digest = manifest.digest

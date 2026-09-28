@@ -1,44 +1,10 @@
-# SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
-# SPDX-License-Identifier: Apache-2.0
+# Full Windows/application installation. App pins are merged by install.ps1.
+-r deployment/requirements/gateway.txt
+-r deployment/requirements/ai-worker.txt
+-r web/django_backend/requirements.txt
 
-fastapi==0.115.*
-uvicorn[standard]==0.32.*
-websockets>=12.0
-langchain-core>=1.4.0,<2.0.0
-deepseek-harness-sdk==0.1.5rc1
-mcp==1.26.0
-sse-starlette==2.4.1
-langchain-deepseek
-openai>=1.109.0,<2.0.0
-celery[redis]==5.4.*
-redis==5.*
-kombu==5.4.*
-psycopg2-binary==2.9.*
-asyncpg>=0.30.0
-sqlalchemy>=2.0.25
-minio>=7.2.0
-python-multipart>=0.0.12
-
-python-dotenv==1.0.*
-pydantic==2.*
-pydantic-settings>=2.3.*
-httpx
-tenacity>=8.3.*
-structlog>=24.0.*
-prometheus-client>=0.20.*
-
-alembic>=1.13.*
-
-python-docx>=1.1.0
-openpyxl>=3.1.0
-docxtpl>=0.16.7
-
-pyyaml>=6.0
-textfsm==2.1.0
-netmiko>=4.7.0,<5.0.0
-
-
-black>=24.0.*
-ruff>=0.4.*
-pytest>=8.0.*
-pytest-asyncio>=0.23.*
+# Development and validation tools
+black>=24.0
+ruff>=0.4
+pytest>=8.0
+pytest-asyncio>=0.23

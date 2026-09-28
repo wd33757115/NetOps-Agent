@@ -9,7 +9,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import psycopg2
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -68,23 +67,10 @@ def main() -> int:
             check=True,
         )
 
-    connection = psycopg2.connect(
-        dbname=os.getenv("POSTGRES_DB", "netops_agent"),
-        user=os.getenv("POSTGRES_USER", "netops"),
-        password=os.getenv("POSTGRES_PASSWORD", "netops123456"),
-        host=os.getenv("POSTGRES_HOST", "localhost"),
-        port=os.getenv("POSTGRES_PORT", "5432"),
-    )
-    try:
-        with connection.cursor() as cursor:
-            cursor.execute("CREATE SCHEMA IF NOT EXISTS django")
-        connection.commit()
-    finally:
-        connection.close()
-
     postgres_env = dict(os.environ)
     postgres_env["DJANGO_DATABASE_ENGINE"] = "postgresql"
-    _run_manage("migrate", "--noinput", env=postgres_env)
+    subprocess.run([sys.executable, "-m", "src.platform.database.bootstrap", "check"],
+                   cwd=PROJECT_ROOT, env=postgres_env, check=True)
     _run_manage("loaddata", str(fixture_path), env=postgres_env)
     _run_manage("check", env=postgres_env)
     print(f"Django data migrated to PostgreSQL; fixture: {fixture_path}")

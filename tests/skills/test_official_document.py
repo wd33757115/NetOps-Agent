@@ -35,9 +35,6 @@ def test_official_document_json_render_produces_docx_bytes():
     assert data[:2] == b"PK"
 
 
-def test_resolve_celery_task_skips_sync_skill():
+def test_document_application_is_not_registered_as_a_global_skill():
     skill_registry.sync_skills_from_files(force_replace=True)
-    meta = skill_registry.get_metadata("official-document-writing")
-    assert meta is not None
-    assert meta.execution_mode == "sync"
-    assert skill_registry._resolve_celery_task("official-document-writing", meta) is None
+    assert skill_registry.get_metadata("official-document-writing") is None

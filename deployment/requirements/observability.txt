@@ -1,0 +1,2 @@
+# Optional; add to the full installation with install.ps1 -WithLangfuse.
+langfuse>=2.0.0,<3.0.0

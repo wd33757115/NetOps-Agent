@@ -22,7 +22,7 @@ class _FakeSkillSystem:
         )
 
 
-def _run_bootstrap(monkeypatch, tmp_path, *, index_on_bootstrap: bool):
+def _run_bootstrap(monkeypatch, tmp_path, *, persist_catalog: bool):
     fake_system = _FakeSkillSystem()
     catalog_calls: list[dict[str, object]] = []
 
@@ -49,7 +49,6 @@ def _run_bootstrap(monkeypatch, tmp_path, *, index_on_bootstrap: bool):
         "get_settings",
         lambda: SimpleNamespace(
             SKILL_CATALOG_ENABLED=True,
-            SKILL_CATALOG_INDEX_ON_BOOTSTRAP=index_on_bootstrap,
         ),
     )
 
@@ -58,6 +57,7 @@ def _run_bootstrap(monkeypatch, tmp_path, *, index_on_bootstrap: bool):
         count = bootstrap.bootstrap_skills(
             skill_dirs=[str(tmp_path)],
             force=True,
+            persist_catalog=persist_catalog,
         )
     finally:
         bootstrap.reset_bootstrap_state()
@@ -72,7 +72,7 @@ def test_bootstrap_syncs_catalog_metadata_without_loading_embedding_model(
     count, fake_system, catalog_calls = _run_bootstrap(
         monkeypatch,
         tmp_path,
-        index_on_bootstrap=False,
+        persist_catalog=True,
     )
 
     assert count == 1
@@ -85,14 +85,14 @@ def test_bootstrap_syncs_catalog_metadata_without_loading_embedding_model(
     ]
 
 
-def test_bootstrap_indexes_catalog_only_when_explicitly_enabled(monkeypatch, tmp_path):
+def test_runtime_bootstrap_does_not_write_catalog(monkeypatch, tmp_path):
     _, _, catalog_calls = _run_bootstrap(
         monkeypatch,
         tmp_path,
-        index_on_bootstrap=True,
+        persist_catalog=False,
     )
 
-    assert catalog_calls[0]["index"] is True
+    assert catalog_calls == []
 
 
 def test_skill_system_does_not_enable_local_embedder_from_catalog_flag_alone(

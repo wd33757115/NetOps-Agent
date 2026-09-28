@@ -25,6 +25,14 @@ from sqlalchemy.orm import declarative_base
 Base = declarative_base()
 
 
+class BootstrapStepRecord(Base):
+    """Platform ledger; App seed definitions remain in the owning package."""
+    __tablename__ = "netops_bootstrap_steps"
+    owner = Column(String(128), primary_key=True)
+    version = Column(String(64), primary_key=True)
+    completed_at = Column(DateTime(timezone=True), nullable=False)
+
+
 class TaskStatus(Base):
     __tablename__ = "netops_task_status"
 
@@ -999,6 +1007,8 @@ class OfflinePatrolJobRecord(Base):
         Index("ix_offline_patrol_jobs_status_created", "status", "created_at"),
         Index("ix_offline_patrol_jobs_archived", "archived"),
         Index("ix_offline_patrol_jobs_workflow", "workflow_run_id"),
+        Index("ix_offline_jobs_workspace_page", "purpose", "archived", created_at.desc(), id.desc()),
+        Index("ix_offline_jobs_owner_page", "owner_id", "purpose", "archived", created_at.desc(), id.desc()),
     )
 
     def to_dict(self):
@@ -1577,6 +1587,7 @@ class StateObservationRecord(Base):
             "entity_type",
             "entity_key",
         ),
+        Index("ix_state_observation_device_history", "mode", "device_id", observed_at.desc()),
     )
 
     def to_dict(self):
@@ -6633,38 +6644,6 @@ def _sync_rule_generation_job_projections(_mapper, connection, target) -> None:
     )
 
     synchronize_rule_job_projections(connection, target)
-
-
-class AgentModuleControlRecord(Base):
-    __tablename__ = "netops_agent_module_controls"
-
-    id = Column(String(64), primary_key=True)
-    module_id = Column(String(128), nullable=False, index=True)
-    status = Column(String(32), nullable=False, default="enabled", index=True)
-    maintenance_reason = Column(Text, nullable=True)
-    maintenance_starts_at = Column(DateTime, nullable=True)
-    maintenance_ends_at = Column(DateTime, nullable=True)
-    updated_by = Column(String(128), nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-
-    __table_args__ = (
-        UniqueConstraint(
-            "module_id", name="uq_netops_agent_module_controls_module_id"
-        ),
-        Index(
-            "ix_netops_agent_module_controls_maintenance_window",
-            "maintenance_starts_at",
-            "maintenance_ends_at",
-        ),
-        CheckConstraint(
-            "status IN ('enabled','disabled','maintenance')",
-            name="ck_agent_module_control_status",
-        ),
-    )
-
-    def to_dict(self):
-        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
 
 
 class LegacyPathObservationRecord(Base):

@@ -8,6 +8,7 @@ from typing import Any
 import httpx
 from django.conf import settings
 from django.http import JsonResponse
+from src.platform.http_tls import client_tls_context
 
 from .response import bff_error, bff_success
 
@@ -29,6 +30,7 @@ def _get_client() -> httpx.AsyncClient:
         _client = httpx.AsyncClient(
             timeout=httpx.Timeout(DEFAULT_TIMEOUT),
             limits=httpx.Limits(max_keepalive_connections=20, max_connections=100),
+            verify=client_tls_context(),
         )
     return _client
 

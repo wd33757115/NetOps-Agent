@@ -3,7 +3,7 @@
 
 FROM python:3.11-slim
 
-ARG REQUIREMENTS_FILE=requirements-gateway.txt
+ARG REQUIREMENTS_FILE=deployment/requirements/gateway.txt
 
 # 设置工作目录
 WORKDIR /app
@@ -21,7 +21,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # 复制角色依赖清单
-COPY requirements*.txt /app/
+COPY requirements.txt /app/
+COPY deployment/requirements /app/deployment/requirements
+COPY web/django_backend/requirements.txt /app/web/django_backend/requirements.txt
 COPY src/__init__.py /app/src/__init__.py
 COPY src/platform /app/src/platform
 COPY src/apps /app/src/apps

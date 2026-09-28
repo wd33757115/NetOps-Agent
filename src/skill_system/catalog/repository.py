@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any
 
@@ -14,6 +15,21 @@ from src.infrastructure.db.postgres import get_db_session
 from src.skill_system.metadata import SkillMetadata
 
 logger = logging.getLogger(__name__)
+
+
+def prune_missing_file_entries() -> int:
+    """Drop obsolete local discovery entries, retaining execution history and external Skills."""
+    from src.infrastructure.db.models import SkillCatalogRecord
+
+    root = Path(__file__).resolve().parents[2] / 'skills'
+    with get_db_session() as session:
+        removed = 0
+        for row in session.query(SkillCatalogRecord).all():
+            directory = Path(row.skill_path).resolve() if row.skill_path else None
+            if directory and directory.parent == root and not (directory / 'SKILL.md').is_file():
+                session.delete(row)
+                removed += 1
+        return removed
 
 
 def _catalog_text(meta: SkillMetadata) -> str:

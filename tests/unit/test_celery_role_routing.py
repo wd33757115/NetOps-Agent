@@ -82,27 +82,18 @@ def test_local_worker_scripts_consume_role_queues():
     root = Path(__file__).resolve().parents[2]
     required = {"netops.patrol", "netops.ai", "netops.health"}
 
-    for relative_path in ["scripts/test/start.ps1", "scripts/test/celery_worker.ps1"]:
+    for relative_path in ["scripts/windows/start.ps1", "scripts/windows/celery_worker.ps1"]:
         content = (root / relative_path).read_text(encoding="utf-8")
         assert all(queue in content for queue in required), relative_path
 
 
 def test_production_start_enables_core_profile_and_verifies_beat():
     root = Path(__file__).resolve().parents[2]
-    powershell_start = (root / "scripts/prod/start.ps1").read_text(encoding="utf-8")
     shell_start = (root / "scripts/prod/start.sh").read_text(encoding="utf-8")
-    powershell_smoke = (root / "scripts/prod/smoke_test.ps1").read_text(encoding="utf-8")
     shell_smoke = (root / "scripts/prod/smoke_test.sh").read_text(encoding="utf-8")
-
-    assert powershell_start.isascii()
-    assert powershell_smoke.isascii()
-    assert '"--profile", "core", "up", "-d"' in powershell_start
     assert "--profile core up -d" in shell_start
-    assert "-SkipDockerCheck" not in powershell_start
     assert "SKIP_DOCKER_CHECK=1" not in shell_start
-    assert "netops-celery-beat" in powershell_smoke
     assert "netops-celery-beat" in shell_smoke
-    assert 'id -eq "celery_beat"' in powershell_smoke
     assert "c.get('id') == 'celery_beat'" in shell_smoke
 
 

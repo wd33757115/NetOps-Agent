@@ -6,11 +6,12 @@ import httpx
 from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.http import HttpResponse, StreamingHttpResponse
-from src.platform.http_tls import client_tls_context
 
 from ..app_access import decision
 from ..decorators import _authenticate_request
 from ..response import bff_error
+from ..proxy_client import _get_client
+from ..sync_async import release_proxy_connections
 from ._helpers import forward_client_headers
 
 
@@ -44,10 +45,8 @@ async def forward(request, app_id, path):
     )
     if len(request.body) > 20 * 1024 * 1024:
         return bff_error("上传内容过大", 413)
-    client = httpx.AsyncClient(
-        timeout=httpx.Timeout(320, connect=5), follow_redirects=False,
-        verify=client_tls_context(),
-    )
+    # Reuse the BFF pool; response streams own a connection, not the client.
+    client = _get_client()
     try:
         response = await client.send(
             client.build_request(
@@ -56,11 +55,11 @@ async def forward(request, app_id, path):
                 headers=headers,
                 params=request.GET.urlencode(),
                 content=request.body,
+                timeout=httpx.Timeout(320, connect=5, pool=10),
             ),
             stream=True,
         )
     except httpx.HTTPError:
-        await client.aclose()
         return bff_error("业务服务暂不可用", 502)
     content_type = response.headers.get("content-type", "application/octet-stream")
     allowed = {
@@ -82,12 +81,11 @@ async def forward(request, app_id, path):
         async def chunks():
             try:
                 async for chunk in response.aiter_bytes():
-                    if await sync_to_async(decision)(request.user, app_id) != 200:
+                    if await sync_to_async(_stream_decision)(request.user, app_id) != 200:
                         return
                     yield chunk
             finally:
                 await response.aclose()
-                await client.aclose()
 
         result = StreamingHttpResponse(
             chunks(), status=response.status_code, content_type=content_type, headers=allowed
@@ -107,18 +105,32 @@ async def forward(request, app_id, path):
         return bff_error("业务服务连接中断", 502)
     finally:
         await response.aclose()
-        await client.aclose()
+
+
+def _stream_decision(user, app_id):
+    try:
+        return decision(user, app_id)
+    finally:
+        release_proxy_connections()
+
+
+def _admit(request, app_id):
+    try:
+        authenticated = _authenticate_request(request, required=True)
+        if isinstance(authenticated, HttpResponse):
+            return authenticated
+        code = decision(request.user, app_id)
+        return bff_error("应用不可用或没有使用权限", code) if code != 200 else None
+    finally:
+        release_proxy_connections()
 
 
 async def proxy_app(request, app_id, path=""):
-    authenticated = await sync_to_async(_authenticate_request)(request, required=True)
-    if isinstance(authenticated, HttpResponse):
-        return authenticated
+    denied = await sync_to_async(_admit)(request, app_id)
+    if denied is not None:
+        return denied
     if not valid_path(path):
         return bff_error("无效路径", 400)
-    code = await sync_to_async(decision)(request.user, app_id)
-    if code != 200:
-        return bff_error("应用不可用或没有使用权限", code)
     return await forward(request, app_id, path)
 
 

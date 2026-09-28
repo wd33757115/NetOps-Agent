@@ -38,7 +38,7 @@ def runtime_admission(request):
     try:
         authenticate(request.headers.get("Authorization", ""))
         body = json.loads(request.body)
-        manifests = discover()
+        manifests = discover(app_id=body["app_id"])
         manifest = manifests.get(body["app_id"])
         ready = (
             manifest

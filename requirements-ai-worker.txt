@@ -1,2 +1,0 @@
--r requirements-ai.txt
--r requirements-documents.txt

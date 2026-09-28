@@ -374,6 +374,26 @@ def _rank_inventory_matches(
     return matches
 
 
+def _inventory_match_index(inventory: list[NetworkDevice]) -> dict[tuple[str, str], list[NetworkDevice]]:
+    index: dict[tuple[str, str], list[NetworkDevice]] = {}
+    for device in inventory:
+        name = str(device.device_name or "").strip().casefold()
+        ip = str(device.management_ip or "").strip()
+        if name:
+            index.setdefault(("name", name), []).append(device)
+        if ip:
+            index.setdefault(("ip", ip), []).append(device)
+    return index
+
+
+def _indexed_inventory_candidates(index, *, device_name, management_ip):
+    matches = [
+        *index.get(("name", str(device_name or "").strip().casefold()), []),
+        *index.get(("ip", str(management_ip or "").strip()), []),
+    ]
+    return list({str(device.id): device for device in matches}.values())
+
+
 def _serialize_device_binding(
     binding: OfflinePatrolDeviceBindingRecord,
     *,
@@ -646,7 +666,10 @@ class OfflinePatrolJobService:
                 .limit(page_size)
                 .all()
             )
-            self._sync_workflow_rows(db, rows)
+            # Completed legacy results are reconciled when their detail is opened.
+            # A list only needs active status; don't lazy-load two large JSON
+            # columns for every historical row (N+1 queries on each poll).
+            self._sync_workflow_rows(db, rows, include_completed=False)
             items = [self._serialize_job_summary(row) for row in rows]
         return {"items": items, "total": total, "page": page, "page_size": page_size}
 
@@ -703,18 +726,24 @@ class OfflinePatrolJobService:
                 .all()
             )
             inventory = (
-                db.query(NetworkDevice)
+                db.query(NetworkDevice).options(load_only(
+                    NetworkDevice.id, NetworkDevice.device_name, NetworkDevice.management_ip,
+                    NetworkDevice.vendor, NetworkDevice.model,
+                ))
                 .filter(NetworkDevice.status == "active")
                 .order_by(NetworkDevice.device_name, NetworkDevice.management_ip)
                 .all()
             )
+            inventory_index = _inventory_match_index(inventory)
             result = self._serialize_job_summary(row)
             normalized_preview = _normalized_preview(row.preview_json)
             result.update(
                 periods=[_json_safe(item.to_dict()) for item in periods],
                 source_files=[_json_safe(item.to_dict()) for item in sources],
                 device_bindings=[
-                    _serialize_device_binding(item, inventory=inventory)
+                    _serialize_device_binding(item, inventory=_indexed_inventory_candidates(
+                        inventory_index, device_name=item.device_name, management_ip=item.management_ip,
+                    ))
                     for item in bindings
                 ],
                 preview=_json_safe(normalized_preview),
@@ -2426,6 +2455,7 @@ class OfflinePatrolJobService:
             },
             "quality": quality,
             "change_count": len(changes),
+            "change_policy_missing_count": int((((detail.get('result') or {}).get('steps') or {}).get('change_detection') or {}).get('change_policy_missing_count') or 0),
             "event_count": len(events),
             "workflow_run_id": detail.get("workflow_run_id"),
             "analysis": {
@@ -2503,7 +2533,7 @@ class OfflinePatrolJobService:
             }
         )
 
-    def _sync_workflow_rows(self, db, rows: list[OfflinePatrolJobRecord]) -> None:
+    def _sync_workflow_rows(self, db, rows: list[OfflinePatrolJobRecord], *, include_completed=True) -> None:
         ids = [
             row.workflow_run_id
             for row in rows
@@ -2511,7 +2541,7 @@ class OfflinePatrolJobService:
             and (
                 row.status in JOB_ACTIVE_STATUSES
                 or (
-                    row.status == "completed"
+                    include_completed and row.status == "completed"
                     and (
                         not row.artifacts_json
                         or (

@@ -38,10 +38,10 @@ ps: ## 查看服务状态
 	$(COMPOSE) ps
 
 init-db: ## 初始化数据库
-	cd "$(PROJECT_ROOT)" && python scripts/init_db.py
+	cd "$(PROJECT_ROOT)" && python -m src.platform.database.bootstrap apply
 
 django-migrate: ## Django 数据库迁移
-	$(COMPOSE) exec django python manage.py migrate
+	$(COMPOSE) run --rm migrate
 
 django-shell: ## 进入 Django Shell
 	$(COMPOSE) exec django python manage.py shell

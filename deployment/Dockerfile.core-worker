@@ -3,7 +3,7 @@
 
 FROM python:3.11-slim
 
-ARG REQUIREMENTS_FILE=requirements-core.txt
+ARG REQUIREMENTS_FILE=deployment/requirements/core.txt
 
 WORKDIR /app
 
@@ -17,7 +17,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements*.txt /app/
+COPY requirements.txt /app/
+COPY deployment/requirements /app/deployment/requirements
+COPY web/django_backend/requirements.txt /app/web/django_backend/requirements.txt
 COPY src/__init__.py /app/src/__init__.py
 COPY src/platform /app/src/platform
 COPY src/apps /app/src/apps

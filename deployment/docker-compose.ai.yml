@@ -13,7 +13,7 @@ services:
       context: ..
       dockerfile: deployment/Dockerfile.core-worker
       args:
-        REQUIREMENTS_FILE: requirements-ai-worker.txt
+        REQUIREMENTS_FILE: deployment/requirements/ai-worker.txt
     container_name: netops-celery-ai
     env_file:
       - ../.env

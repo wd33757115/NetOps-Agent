@@ -75,18 +75,12 @@ class DeleteBodyProxyTests(SimpleTestCase):
         )
         request.bff_request_id = "parser-delete-test"
 
-        with patch(
-            "bff.views.parser.proxy_to_fastapi",
-            new_callable=AsyncMock,
-        ) as proxy:
-            from bff.views.parser import _proxy
+        with patch("bff.views.parser.proxy_app", new_callable=AsyncMock) as proxy:
+            from bff.views.parser import proxy_parser_job_detail
+            await proxy_parser_job_detail(request, "job-1")
+        proxy.assert_awaited_once_with(request, "rule-governance", "parser/jobs/job-1")
+        self.assertEqual(request.body, b'{"reason": "operator cleanup"}')
 
-            await _proxy(request, "jobs/job-1")
-
-        self.assertEqual(
-            proxy.await_args.kwargs["data"],
-            {"reason": "operator cleanup"},
-        )
 
 
 class PatrolBatchDownloadRouteTests(SimpleTestCase):

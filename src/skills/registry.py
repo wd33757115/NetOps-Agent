@@ -936,6 +936,15 @@ class SkillRegistry:
 
         discovered_count = 0
 
+        roots = {Path(directory).resolve() for directory in skill_dirs}
+        for name, metadata in list(self._metadata_cache.items()):
+            path = getattr(metadata, 'skill_path', None)
+            directory = Path(path).resolve() if path else None
+            if directory and directory.parent in roots and not (directory / 'SKILL.md').is_file():
+                self._skills.pop(name, None)
+                self._metadata_cache.pop(name, None)
+                self._embedding_cache.pop(name, None)
+
         for skill_dir_str in skill_dirs:
             skill_dir = Path(skill_dir_str)
 

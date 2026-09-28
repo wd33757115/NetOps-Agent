@@ -6,6 +6,8 @@ import hashlib
 import importlib
 import os
 import re
+from copy import deepcopy
+from functools import lru_cache
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -86,10 +88,17 @@ class AppManifest:
         }
 
 
-def discover(root: Path = APPS_ROOT) -> dict[str, AppManifest]:
+@lru_cache(maxsize=128)
+def _parse_manifest(content: str):
+    # Keyed by file contents, not time: edits take effect on the next request.
+    return yaml.safe_load(content)
+
+
+def discover(root: Path = APPS_ROOT, *, app_id: str | None = None) -> dict[str, AppManifest]:
+    requested_id = app_id
     manifests = {}
     for path in sorted(root.glob("*/app.yaml")):
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        data = deepcopy(_parse_manifest(path.read_text(encoding="utf-8")))
         if not isinstance(data, dict) or data.get("manifest_version") != 1:
             raise ValueError(f"Unsupported manifest: {path}")
         app_id = data.get("id", "")
@@ -111,6 +120,11 @@ def discover(root: Path = APPS_ROOT) -> dict[str, AppManifest]:
             raise ValueError(f"Invalid frontend feature flag: {app_id}")
         backend = data["backend"]
         symbols = [backend["router"], *backend.get("task_modules", [])]
+        database = data.get("database", {"mode": "none"})
+        if database.get("bootstrap"):
+            if type(database.get("bootstrap_version")) is not int or database["bootstrap_version"] < 1:
+                raise ValueError(f"Bootstrap requires a positive version: {app_id}")
+            symbols.append(database["bootstrap"])
         if data.get("agent", {}).get("tools"):
             symbols.append(data["agent"]["tools"])
         lifecycle = data.get("lifecycle", {})
@@ -157,8 +171,7 @@ def discover(root: Path = APPS_ROOT) -> dict[str, AppManifest]:
             r"[a-zA-Z0-9_.-]+", backend.get("queue", "")
         ):
             raise ValueError(f"Invalid task queue: {app_id}")
-        digest = package_digest(path.parent)
-        manifests[app_id] = AppManifest(path, data, digest)
+        manifests[app_id] = AppManifest(path, data, "")
     owners = {}
     for manifest in manifests.values():
         for table in manifest.data.get("database", {}).get("tables", []):
@@ -181,9 +194,10 @@ def discover(root: Path = APPS_ROOT) -> dict[str, AppManifest]:
                 raise ValueError(f"Unsatisfied dependency: {app_id} -> {dependency}")
             visit(dependency)
         visiting.remove(app_id)
-        ordered[app_id] = manifests[app_id]
+        manifest = manifests[app_id]
+        ordered[app_id] = AppManifest(manifest.path, manifest.data, package_digest(manifest.path.parent))
 
-    for app_id in manifests:
+    for app_id in (manifests if requested_id is None else [requested_id] if requested_id in manifests else []):
         visit(app_id)
     return ordered
 

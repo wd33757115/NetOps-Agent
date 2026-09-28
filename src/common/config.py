@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 
 from dotenv import load_dotenv
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -49,6 +49,11 @@ class Settings(BaseSettings):
     POSTGRES_DB: str = "netops_agent"
     POSTGRES_USER: str = "netops"
     POSTGRES_PASSWORD: str = "netops123456"
+    # Per process, per engine. Windows solo workers use a smaller explicit budget.
+    POSTGRES_POOL_SIZE: int = Field(default=5, ge=1, le=50)
+    POSTGRES_MAX_OVERFLOW: int = Field(default=5, ge=0, le=50)
+    POSTGRES_POOL_TIMEOUT: int = Field(default=10, ge=1, le=120)
+    POSTGRES_CONNECT_TIMEOUT: int = Field(default=10, ge=1, le=60)
 
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
@@ -129,7 +134,6 @@ class Settings(BaseSettings):
     SKILL_CATALOG_USE_TIERED_ROUTING: bool = True
     SKILL_CATALOG_SEMANTIC_ROUTING_ENABLED: bool = False
     SKILL_CATALOG_SEMANTIC_MIN_SCORE: float = 0.72
-    SKILL_CATALOG_INDEX_ON_BOOTSTRAP: bool = False
     PRE_PROCESS_TOP_K: int = 5
     PRE_PROCESS_HARD_LIMIT: int = 8
 
@@ -184,7 +188,6 @@ class Settings(BaseSettings):
     PRODUCTION_PARSER_BACKLOG_ENABLED: bool = False
     PARSER_LLM_GENERATION_ENABLED: bool = False
     PARSER_BACKFILL_ENABLED: bool = False
-    PARSER_BOOTSTRAP_SHARED_TEMPLATES_ON_STARTUP: bool = False
     PARSER_BACKLOG_ALERT_THRESHOLD: int = 20
     PARSER_CANDIDATE_STALE_MINUTES: int = 60
     # Stale parser-job reclamation: dispatched-but-unclaimed jobs and jobs whose

@@ -12,7 +12,7 @@ from .roles import get_user_role
 
 
 def deployment_decision(app_id, manifests=None):
-    manifests = manifests if manifests is not None else discover()
+    manifests = manifests if manifests is not None else discover(app_id=app_id)
     manifest = manifests.get(app_id)
     if manifest is None:
         return 404

@@ -87,8 +87,29 @@ class BFFRateLimitMiddleware:
         self.get_response = get_response
         self._window: dict[str, list[float]] = defaultdict(list)
         self._limit_chat = getattr(settings, "BFF_RATE_LIMIT_CHAT", 30)
-        self._limit_default = getattr(settings, "BFF_RATE_LIMIT_DEFAULT", 60)
+        self._limit_default = getattr(settings, "BFF_RATE_LIMIT_DEFAULT", 600)
         self._window_seconds = getattr(settings, "BFF_RATE_LIMIT_WINDOW", 60)
+
+    def _identity(self, request):
+        # Validate the signature before using a claimed user ID as a quota key.
+        # The view still checks account status, revocation and App grants.
+        from rest_framework_simplejwt.tokens import AccessToken
+        from rest_framework_simplejwt.exceptions import TokenError
+        header = request.META.get("HTTP_AUTHORIZATION", "")
+        if header.lower().startswith("bearer "):
+            try:
+                token = AccessToken(header[7:])
+                claim = settings.SIMPLE_JWT.get("USER_ID_CLAIM", "user_id")
+                if token.get(claim) is not None:
+                    return f"user:{token[claim]}"
+            except TokenError:
+                pass
+        return "ip:" + get_client_ip(request)
+
+    def _limit(self, identity, path):
+        if "/chat/" in path:
+            return self._limit_chat
+        return self._limit_default if identity.startswith("user:") else min(60, self._limit_default)
 
     def _redis_rate_limit(self, ip: str, path: str) -> tuple[bool, int]:
         try:
@@ -103,7 +124,7 @@ class BFFRateLimitMiddleware:
             client = get_redis()
             if not client:
                 return False, 0
-            limit = self._limit_chat if "/chat/" in path else self._limit_default
+            limit = self._limit(ip, path)
             bucket = int(time.time()) // self._window_seconds
             key = f"ratelimit:bff:{ip}:{bucket}:{ 'chat' if '/chat/' in path else 'default'}"
             count = client.incr(key)
@@ -121,30 +142,32 @@ class BFFRateLimitMiddleware:
         self._window[ip] = [t for t in self._window[ip] if t > cutoff]
 
     def _is_rate_limited(self, ip: str, path: str) -> bool:
-        self._clean_window(ip)
-        limit = self._limit_chat if "/chat/" in path else self._limit_default
-        return len(self._window[ip]) >= limit
+        bucket = f"{ip}:{'chat' if '/chat/' in path else 'default'}"
+        self._clean_window(bucket)
+        limit = self._limit(ip, path)
+        return len(self._window[bucket]) >= limit
 
     def _check_rate_limit(self, request: HttpRequest):
         # Each external App request already consumes the user-facing budget.
         # Only a cryptographically authenticated service can avoid counting its
         # internal authorization callback a second time; the view still checks
         # the original user/worker token, current App grant and package digest.
+        runtime = request.path == "/api/platform/apps/runtime/"
         if request.method == "POST" and request.path.startswith("/api/platform/apps/") and (
-            request.path.endswith("/authorize/") or request.path.endswith("/worker-authorize/")
+            runtime or request.path.endswith("/authorize/") or request.path.endswith("/worker-authorize/")
         ):
             import jwt
             from src.platform.kernel.runtime import authenticate
 
             try:
-                authenticate(request.headers.get("X-Netops-App-Service", ""))
+                authenticate(request.headers.get("Authorization" if runtime else "X-Netops-App-Service", ""))
             except (ValueError, jwt.InvalidTokenError):
                 pass
             else:
                 return None
         if settings.DEBUG and not getattr(settings, "BFF_RATE_LIMIT_IN_DEBUG", False):
             return None
-        ip = get_client_ip(request)
+        ip = self._identity(request)
         limited, retry_after = self._redis_rate_limit(ip, request.path)
         if limited:
             return bff_error(
@@ -158,7 +181,8 @@ class BFFRateLimitMiddleware:
                 429,
                 data={"retry_after_seconds": self._window_seconds},
             )
-        self._window[ip].append(time.monotonic())
+        bucket = f"{ip}:{'chat' if '/chat/' in request.path else 'default'}"
+        self._window[bucket].append(time.monotonic())
         return None
 
     def __call__(self, request: HttpRequest):

@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
+﻿# SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
 # SPDX-License-Identifier: Apache-2.0
 
 # Validate PowerShell script syntax under scripts/ (test + prod)
@@ -14,6 +14,8 @@ $ErrorActionPreference = "Stop"
 $ScriptsRoot = (Resolve-Path $ScriptsRoot).Path
 
 $files = @(
+
+    Get-ChildItem -Path (Join-Path $ScriptsRoot "windows") -Filter "*.ps1" -ErrorAction SilentlyContinue
 
     Get-ChildItem -Path (Join-Path $ScriptsRoot "test") -Filter "*.ps1" -ErrorAction SilentlyContinue
 

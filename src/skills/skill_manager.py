@@ -315,7 +315,7 @@ class SkillManager:
 
             from src.skills.bootstrap import bootstrap_skills
 
-            bootstrap_skills(force=True)
+            bootstrap_skills(force=True, persist_catalog=True)
             from src.skill_system import get_skill_system
 
             get_skill_system().reload_skill(skill_name)
@@ -342,7 +342,7 @@ class SkillManager:
         try:
             from src.skills.bootstrap import bootstrap_skills
 
-            bootstrap_skills(force=True)
+            bootstrap_skills(force=True, persist_catalog=True)
             from src.skill_system import get_skill_system
 
             get_skill_system().reload_skill(skill_name)
@@ -365,7 +365,7 @@ class SkillManager:
         try:
             from src.skills.bootstrap import bootstrap_skills
 
-            count = bootstrap_skills(force=True)
+            count = bootstrap_skills(force=True, persist_catalog=True)
 
             logger.info(f"重新加载了 {count} 个 Skill")
 

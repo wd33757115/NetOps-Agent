@@ -1,3 +1,47 @@
+# Repository distribution: source, manuals and installation/operation scripts.
+# New root directories are local until explicitly allowed here.
+/*
+!/.gitignore
+!/.gitattributes
+!/.dockerignore
+!/.editorconfig
+!/.env.example
+!/.github/
+!/LICENSE
+!/README.md
+!/alembic.ini
+!/pyproject.toml
+!/requirements*.txt
+!/src/
+!/web/
+!/migrations/
+!/schemas/
+!/config/
+!/tests/
+!/scripts/
+!/deployment/
+!/docs/
+
+# Local plans, review output and historical validation notes (keep on disk).
+/docs/adr/
+/docs/*-validation.md
+/docs/*-plan.md
+!/docs/team-capacity-plan.md
+!/docs/device-access-topology-plan.md
+/docs/netops-capability-packages-*.md
+/docs/assistant-runtime-stability.md
+
+# Database exports and process/runtime artifacts, including nested locations.
+*.dump
+*.backup
+*.sql.gz
+*.sql.bz2
+.codex-artifacts/
+outputs/
+artifacts/
+playwright-report/
+test-results/
+
 # ============================================================
 # Python
 # ============================================================
@@ -181,7 +225,6 @@ src/skills/shared/textfsm-templates/H3C/Comware7/*
 !src/skills/shared/textfsm-templates/H3C/Comware7/display_interface_values__1.0.0.textfsm
 src/skills/shared/outputs/*
 !src/skills/shared/outputs/.gitkeep
-templates/**/*.textfsm
 
 # Local patrol captures and artifacts derived from private captures
 dev_test/
@@ -203,9 +246,7 @@ yarn-debug.log*
 yarn-error.log*
 lerna-debug.log*
 .pnpm-debug.log*
-package-lock.json
-yarn.lock
-pnpm-lock.yaml
+# Dependency lockfiles belong to the source distribution.
 .eslintcache
 .stylelintcache
 

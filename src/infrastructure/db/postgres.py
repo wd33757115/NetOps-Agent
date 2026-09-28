@@ -20,16 +20,22 @@ settings = get_settings()
 engine = create_engine(
     settings.postgres_url,
     pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20,
+    pool_size=settings.POSTGRES_POOL_SIZE,
+    max_overflow=settings.POSTGRES_MAX_OVERFLOW,
+    pool_timeout=settings.POSTGRES_POOL_TIMEOUT,
+    pool_use_lifo=True,
+    connect_args={"connect_timeout": settings.POSTGRES_CONNECT_TIMEOUT},
     echo=False
 )
 
 async_engine = create_async_engine(
     settings.postgres_url_asyncpg,
     pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20,
+    pool_size=settings.POSTGRES_POOL_SIZE,
+    max_overflow=settings.POSTGRES_MAX_OVERFLOW,
+    pool_timeout=settings.POSTGRES_POOL_TIMEOUT,
+    pool_use_lifo=True,
+    connect_args={"timeout": settings.POSTGRES_CONNECT_TIMEOUT},
     echo=False
 )
 

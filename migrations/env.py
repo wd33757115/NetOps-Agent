@@ -18,16 +18,28 @@ settings = get_settings()
 config.set_main_option("sqlalchemy.url", settings.postgres_url.replace("%", "%%"))
 target_metadata = Base.metadata
 
+# Autogeneration must not propose changes/drops to App-owned business tables.
+# Existing historical revision files remain immutable and continue to replay.
+from src.platform.kernel.registry import discover
+app_owned_tables = {
+    table for manifest in discover().values()
+    for table in manifest.data.get("database", {}).get("tables", [])
+}
+
 
 def include_name(name: str | None, type_: str, parent_names: dict[str, str]) -> bool:
     """Leave LangGraph-managed checkpoint tables outside application migrations."""
-    if type_ == "table" and name in {
+    if type_ == "table" and name in app_owned_tables | {
         "checkpoint_blobs",
         "checkpoint_writes",
         "checkpoints",
     }:
         return False
     return True
+
+
+def include_object(obj, name, type_, reflected, compare_to):
+    return not (type_ == "table" and name in app_owned_tables)
 
 
 def run_migrations_offline() -> None:
@@ -39,6 +51,7 @@ def run_migrations_offline() -> None:
         compare_type=True,
         compare_server_default=True,
         include_name=include_name,
+        include_object=include_object,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -57,6 +70,7 @@ def run_migrations_online() -> None:
             compare_type=True,
             compare_server_default=True,
             include_name=include_name,
+            include_object=include_object,
         )
         with context.begin_transaction():
             context.run_migrations()

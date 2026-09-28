@@ -155,7 +155,7 @@ def list_templates() -> list[WorkflowTemplate]:
     load_workflows()
     # Retain definitions for historical reads, but do not offer migrated business
     # workflows as executable templates.
-    retired = {"patrol-change-event", "patrol-attested-offline-current", "patrol-offline-current", "patrol-history-change-event", "rule-asset-generation", "rule-asset-submit", "rule-asset-approve", "parser-validation-ingest", "rollout-live-capture"}
+    retired = {"patrol-change-event", "patrol-attested-offline-current", "patrol-offline-current", "patrol-history-change-event", "rule-asset-generation", "rule-asset-submit", "rule-asset-approve", "parser-validation-ingest", "rollout-live-capture", "itsm-firewall-change", "itsm-firewall-llm-analysis"}
     return [template for name, template in _TEMPLATES.items() if name not in retired]
 
 

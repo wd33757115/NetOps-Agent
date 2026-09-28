@@ -15,6 +15,7 @@ from src.skill_system.catalog.repository import (
     list_catalog_entries,
     list_entries_needing_embedding,
     save_embedding,
+    prune_missing_file_entries,
     upsert_catalog_entry,
 )
 from src.skill_system.metadata import SkillMetadata
@@ -39,8 +40,9 @@ class SkillCatalogService:
         for meta in skills:
             if upsert_catalog_entry(meta):
                 synced += 1
+        removed = prune_missing_file_entries()
         cls.refresh_memory_index()
-        return {"synced": synced, "total": len(skills)}
+        return {"synced": synced, "total": len(skills), "removed": removed}
 
     @classmethod
     def index_embeddings(cls, *, force: bool = False) -> dict[str, int]:

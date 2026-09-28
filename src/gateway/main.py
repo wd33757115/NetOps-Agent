@@ -107,37 +107,9 @@ from src.infrastructure.db.postgres import (
 CELERY_AVAILABLE = False
 EXECUTE_FIREWALL_POLICY_TASK = None
 
-# =============================================================================
-# 数据库初始化（非阻塞，失败不阻止启动）
-# =============================================================================
+# Services verify platform schema readiness; only platform bootstrap writes DDL/seeds.
 require_postgres_connection()
 require_database_schema_current()
-from src.core.parser.bootstrap import bootstrap_shared_templates
-from src.core.check_items.catalog import CheckItemCatalogRepository
-from src.core.check_items.identity import EntityIdentityPolicyRepository
-from src.core.check_items.text_comparison import TextComparisonProfileRepository
-
-parser_bootstrap = (
-    bootstrap_shared_templates()
-    if settings.PARSER_BOOTSTRAP_SHARED_TEMPLATES_ON_STARTUP
-    else {"enabled": False, "imported": 0, "skipped": 0, "errors": []}
-)
-log.info("parser_assets_bootstrapped", **parser_bootstrap)
-
-check_item_bootstrap = CheckItemCatalogRepository().bootstrap(
-    actor="gateway-startup"
-)
-log.info("check_item_catalog_bootstrapped", **check_item_bootstrap)
-
-identity_policy_bootstrap = EntityIdentityPolicyRepository().bootstrap(
-    actor="gateway-startup"
-)
-log.info("entity_identity_policy_bootstrapped", **identity_policy_bootstrap)
-
-text_comparison_bootstrap = TextComparisonProfileRepository().bootstrap(
-    actor="gateway-startup"
-)
-log.info("text_comparison_profiles_bootstrapped", **text_comparison_bootstrap)
 
 
 # =============================================================================

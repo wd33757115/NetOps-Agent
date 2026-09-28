@@ -21,6 +21,8 @@ class LifecycleTests(TestCase):
             "src.platform.kernel.migrations.business_engine", return_value=self.engine
         )
         self.patch.start()
+        from src.platform.kernel.migrations import migrate
+        migrate(discover()["delivery-probe"], engine=self.engine)
 
     def tearDown(self):
         self.patch.stop()
@@ -53,6 +55,17 @@ class LifecycleTests(TestCase):
         self.assertEqual(previous.state, "failed")
         self.assertEqual(previous.deployment_digest, discover()["delivery-probe"].digest)
         self.assertEqual(operate("upgrade", "delivery-probe").state, "installed")
+
+    def test_install_requires_platform_migration_and_never_creates_tables(self):
+        from sqlalchemy import inspect
+        empty = create_engine('sqlite://')
+        try:
+            with patch('src.platform.kernel.migrations.business_engine', return_value=empty):
+                with self.assertRaisesMessage(ValueError, 'bootstrap apply'):
+                    operate('install', 'delivery-probe')
+            self.assertEqual(inspect(empty).get_table_names(), [])
+        finally:
+            empty.dispose()
 
     def test_drain_does_not_finish_while_work_is_active(self):
         operate("install", "delivery-probe")

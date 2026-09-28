@@ -31,6 +31,7 @@ def bootstrap_skills(
     skill_dirs: list[str] | None = None,
     *,
     force: bool = False,
+    persist_catalog: bool = False,
 ) -> int:
     """
     统一加载 Skill（幂等，force=True 时强制全量刷新）。
@@ -57,17 +58,18 @@ def bootstrap_skills(
     skill_system.reload_all(skill_dirs=dirs)
 
     settings = get_settings()
-    if settings.SKILL_CATALOG_ENABLED:
+    if settings.SKILL_CATALOG_ENABLED and persist_catalog:
         try:
             from src.skill_system.catalog import sync_and_index
 
             catalog_stats = sync_and_index(
                 skill_system.loader.list_all_metadata(),
-                index=settings.SKILL_CATALOG_INDEX_ON_BOOTSTRAP,
+                index=False,
             )
             logger.info("Skill Catalog 同步完成: %s", catalog_stats)
         except Exception as exc:
-            logger.warning("Skill Catalog 同步失败（降级为文件路由）: %s", exc)
+            logger.error("Skill Catalog 初始化失败: %s", exc)
+            raise
 
     _BOOTSTRAP_DONE = True
     _LAST_COUNT = count

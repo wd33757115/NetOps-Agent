@@ -222,7 +222,7 @@ BFF_REQUIRE_AUTH = os.getenv('BFF_REQUIRE_AUTH', '').lower() in ('true', '1', 'y
 
 # BFF 限流（Redis 优先；DEBUG 下默认关闭，设 BFF_RATE_LIMIT_IN_DEBUG=true 启用）
 BFF_RATE_LIMIT_CHAT = int(os.getenv('BFF_RATE_LIMIT_CHAT', '30'))
-BFF_RATE_LIMIT_DEFAULT = int(os.getenv('BFF_RATE_LIMIT_DEFAULT', '60'))
+BFF_RATE_LIMIT_DEFAULT = int(os.getenv('BFF_RATE_LIMIT_DEFAULT', '600'))
 BFF_RATE_LIMIT_WINDOW = int(os.getenv('BFF_RATE_LIMIT_WINDOW', '60'))
 BFF_RATE_LIMIT_IN_DEBUG = os.getenv('BFF_RATE_LIMIT_IN_DEBUG', '').lower() in ('true', '1', 'yes')
 

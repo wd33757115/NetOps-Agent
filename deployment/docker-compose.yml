@@ -118,39 +118,17 @@ services:
       context: ..
       dockerfile: deployment/Dockerfile.fastapi
       args:
-        REQUIREMENTS_FILE: requirements-gateway.txt
+        REQUIREMENTS_FILE: deployment/requirements/bootstrap.txt
     container_name: netops-migrate
     env_file:
       - ../.env
     environment:
       - POSTGRES_HOST=postgres
       - TZ=Asia/Shanghai
-    command: python scripts/migrate_db.py
+    command: python -m src.platform.database.bootstrap apply
     depends_on:
       postgres:
         condition: service_healthy
-    restart: "no"
-    networks:
-      - netops-network
-
-  django-migrate:
-    profiles: ["core"]
-    build:
-      context: ..
-      dockerfile: deployment/Dockerfile.django
-    container_name: netops-django-migrate
-    env_file:
-      - ../.env
-    environment:
-      - POSTGRES_HOST=postgres
-      - DJANGO_DATABASE_ENGINE=postgresql
-      - TZ=Asia/Shanghai
-    command: python manage.py migrate --noinput
-    depends_on:
-      postgres:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
     restart: "no"
     networks:
       - netops-network
@@ -161,7 +139,7 @@ services:
       context: ..
       dockerfile: deployment/Dockerfile.fastapi
       args:
-        REQUIREMENTS_FILE: requirements-gateway.txt
+        REQUIREMENTS_FILE: deployment/requirements/gateway.txt
     container_name: netops-fastapi
     # 仅内网可达，不映射 host 8000（前端统一走 Django :8001）
     expose:
@@ -197,7 +175,7 @@ services:
       context: ..
       dockerfile: deployment/Dockerfile.core-worker
       args:
-        REQUIREMENTS_FILE: requirements-core.txt
+        REQUIREMENTS_FILE: deployment/requirements/core.txt
     container_name: netops-celery-patrol
     env_file:
       - ../.env
@@ -232,7 +210,7 @@ services:
       context: ..
       dockerfile: deployment/Dockerfile.core-worker
       args:
-        REQUIREMENTS_FILE: requirements-core.txt
+        REQUIREMENTS_FILE: deployment/requirements/core.txt
     container_name: netops-celery-control
     env_file:
       - ../.env
@@ -267,7 +245,7 @@ services:
       context: ..
       dockerfile: deployment/Dockerfile.core-worker
       args:
-        REQUIREMENTS_FILE: requirements-core.txt
+        REQUIREMENTS_FILE: deployment/requirements/core.txt
     container_name: netops-celery-beat
     env_file:
       - ../.env
@@ -314,8 +292,6 @@ services:
       postgres:
         condition: service_healthy
       migrate:
-        condition: service_completed_successfully
-      django-migrate:
         condition: service_completed_successfully
     restart: unless-stopped
     networks:

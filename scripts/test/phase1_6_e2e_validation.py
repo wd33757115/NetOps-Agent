@@ -51,7 +51,7 @@ def _failure_payload(error: Exception) -> dict[str, Any]:
         },
         "recovery": [
             "Start Docker Desktop or the Docker daemon.",
-            "Run: docker compose -f deployment/docker-compose.middleware.yml up -d postgres",
+            "Run: powershell -File scripts/windows/containers.ps1 -Action up",
             "Run: venv\\Scripts\\python.exe -m alembic upgrade head",
             "Re-run: venv\\Scripts\\python.exe scripts\\test\\phase1_6_e2e_validation.py",
         ],

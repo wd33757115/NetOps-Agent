@@ -117,7 +117,7 @@ def migrate(manifest, engine=None, *, check=False):
             raise ValueError("Unknown database revision; downgrade/automatic stamp is forbidden")
         if check:
             if current != (target,):
-                raise ValueError("Package database migration is not ready")
+                raise ValueError("Package database migration is not ready; run python -m src.platform.database.bootstrap apply")
         else:
             # A new chain cannot silently adopt already existing tables.
             existing = set(inspect(connection).get_table_names())

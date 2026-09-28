@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 #!/usr/bin/env bash
-# 生产环境 - 一键启动（Compose + 迁移 + 种子用户 + 冒烟）
+# 生产环境 - 一键启动（Compose bootstrap job + 只读检查 + 冒烟）
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -12,7 +12,6 @@ COMPOSE_PROD="$PROJECT_ROOT/deployment/docker-compose.prod.yml"
 
 DEV="${DEV:-0}"
 SKIP_PREFLIGHT="${SKIP_PREFLIGHT:-0}"
-SKIP_SEED="${SKIP_SEED:-0}"
 SKIP_SMOKE="${SKIP_SMOKE:-0}"
 SKIP_BUILD="${SKIP_BUILD:-0}"
 WITH_AI="${WITH_AI:-0}"
@@ -80,11 +79,8 @@ echo "==> Wait ${WAIT_SECONDS}s for healthchecks"
 sleep "$WAIT_SECONDS"
 
 echo ""
-echo "==> Django migrate"
-docker compose "${COMPOSE_ARGS[@]}" exec -T django python manage.py migrate --noinput
-
-echo "==> Prepare discovered Apps (preserve enablement and grants)"
-docker compose "${COMPOSE_ARGS[@]}" exec -T django python manage.py app_packages prepare
+echo "==> Check platform database readiness"
+docker compose "${COMPOSE_ARGS[@]}" run --rm --no-deps migrate python -m src.platform.database.bootstrap check
 APP_PROBE_ARGS=(--gateway-url http://fastapi:8000 --frontend-url http://react --wait-seconds 60)
 echo "==> Verify enabled App deployments"
 docker compose "${COMPOSE_ARGS[@]}" exec -T django python manage.py app_packages verify "${APP_PROBE_ARGS[@]}"
@@ -94,12 +90,6 @@ for app_id in "${requested_apps[@]}"; do
     docker compose "${COMPOSE_ARGS[@]}" exec -T django python manage.py app_packages enable "$app_id" "${APP_PROBE_ARGS[@]}"
 done
 
-if [[ "$SKIP_SEED" != "1" ]]; then
-    echo ""
-    echo "==> Seed auth users"
-    docker compose "${COMPOSE_ARGS[@]}" exec -T django python manage.py seed_auth_users || \
-        echo "  [WARN] seed_auth_users skipped or failed"
-fi
 
 echo ""
 echo "==> Container status"

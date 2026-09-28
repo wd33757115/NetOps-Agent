@@ -36,7 +36,7 @@ def test_optional_python_dependencies_are_not_in_default_runtime_set():
 
 
 def test_core_data_plane_dependency_set_excludes_optional_product_roles():
-    requirements = Path("requirements-core.txt").read_text(encoding="utf-8").splitlines()
+    requirements = Path("deployment/requirements/core.txt").read_text(encoding="utf-8").splitlines()
     normalized = {line.strip().lower() for line in requirements if line.strip()}
 
     forbidden = (
@@ -58,7 +58,7 @@ def test_core_data_plane_dependency_set_excludes_optional_product_roles():
 
 
 def test_gateway_dependency_set_supports_advertised_xlsx_import():
-    requirements = Path("requirements-gateway.txt").read_text(encoding="utf-8").splitlines()
+    requirements = Path("deployment/requirements/gateway.txt").read_text(encoding="utf-8").splitlines()
     normalized = {line.strip().lower() for line in requirements if line.strip()}
 
     assert any(requirement.startswith("openpyxl") for requirement in normalized)
@@ -90,10 +90,10 @@ def test_compose_runtime_roles_use_separate_dependencies_and_queues():
 
     assert services["fastapi"]["profiles"] == ["core"]
     assert services["fastapi"]["build"]["args"]["REQUIREMENTS_FILE"] == (
-        "requirements-gateway.txt"
+        "deployment/requirements/gateway.txt"
     )
     assert services["celery-patrol"]["build"]["args"]["REQUIREMENTS_FILE"] == (
-        "requirements-core.txt"
+        "deployment/requirements/core.txt"
     )
     assert "-Q netops.patrol" in services["celery-patrol"]["command"]
     assert "netops.ai" not in services["celery-patrol"]["command"]
@@ -105,7 +105,7 @@ def test_compose_runtime_roles_use_separate_dependencies_and_queues():
     ai_services = ai_overlay["services"]
     assert ai_services["celery-ai"]["profiles"] == ["ai"]
     assert ai_services["celery-ai"]["build"]["args"]["REQUIREMENTS_FILE"] == (
-        "requirements-ai-worker.txt"
+        "deployment/requirements/ai-worker.txt"
     )
     assert "--queues netops.ai" in ai_services["celery-ai"]["command"]
     assert ai_services["fastapi"]["build"]["args"]["REQUIREMENTS_FILE"] == (
