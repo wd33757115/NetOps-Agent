@@ -13,7 +13,11 @@ param(
     [switch]$AllowNoDocker,
     [switch]$DevMode,
     [string[]]$EnableApps = @(),
+    # Changed Apps to redeploy: disable + drain on the running deployment, bootstrap apply, enable.
+    [string[]]$UpgradeApps = @(),
     [switch]$CheckOnly,
+    # Explicit administrative step: run bootstrap apply (Schema + package registration) first.
+    [switch]$ApplyDatabase,
     [switch]$NoBrowser
 )
 
@@ -52,6 +56,71 @@ function Start-LauncherProcess {
     return Start-Process -FilePath "powershell.exe" -ArgumentList @(
         "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$LauncherPath`""
     ) -PassThru -WindowStyle Hidden
+}
+
+function Assert-PlatformDatabaseReady {
+    $checkLog = Join-Path $logDir 'database-check.log'
+    $checkOutput = & $venvPython -m src.platform.database.bootstrap check 2>&1
+    $checkExitCode = $LASTEXITCODE
+    $checkOutput | Out-File -LiteralPath $checkLog -Encoding utf8
+    if ($checkExitCode -ne 0) {
+        $checkOutput | ForEach-Object { Write-Host $_ }
+        $text = ($checkOutput | Out-String)
+        if ($text -match 'disable/drain the deployed release') {
+            Write-ColorOutput '  An enabled App changed: rerun with -UpgradeApps APP_ID (disables and drains it on the running deployment, applies, then re-enables).' "Yellow"
+        } elseif ($text -match 'bootstrap apply') {
+            Write-ColorOutput '  Pending migrations or package registration: rerun with -ApplyDatabase; add -EnableApps for disabled Apps you want enabled.' "Yellow"
+        }
+        throw "Database/App readiness check failed; existing app processes were left running. Resolve the cause above before retrying. Full log: $checkLog"
+    }
+}
+
+function Get-AppState {
+    param([string]$AppId)
+    $line = & $venvPython web/django_backend/manage.py app_packages status --compact 2>$null |
+        Where-Object { $_ -match "^$([regex]::Escape($AppId)) " } | Select-Object -First 1
+    if (-not $line) { return $null }
+    return ($line -split '\s+')[2]
+}
+
+function Invoke-AppDisableDrain {
+    # The documented redeploy path, run against the still-running deployment.
+    param([string]$AppId, [int]$TimeoutSeconds = 180)
+    & $venvPython web/django_backend/manage.py app_packages disable $AppId
+    if ($LASTEXITCODE -ne 0) {
+        throw "Disable failed for $AppId; existing app processes were left running. Disable dependent Apps first or list them in -UpgradeApps."
+    }
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while (($state = Get-AppState -AppId $AppId) -ne 'disabled') {
+        if ((Get-Date) -gt $deadline) {
+            throw "$AppId is still '$state' after $TimeoutSeconds s; existing app processes were left running. See manage.py app_packages status for the drain error."
+        }
+        Start-Sleep -Seconds 5
+        & $venvPython web/django_backend/manage.py app_packages drain $AppId | Out-Null
+    }
+    Write-ColorOutput "  [OK] $AppId disabled and drained" "Green"
+}
+
+function Invoke-PlatformDatabaseApply {
+    # bootstrap apply takes its own lock and still refuses changed Apps that are enabled.
+    # Running rule-governance work holds the same advisory lock in shared mode, so
+    # only that contention is retried; every other failure stops immediately.
+    $applyLog = Join-Path $logDir 'database-apply.log'
+    $deadline = (Get-Date).AddSeconds(120)
+    while ($true) {
+        $applyOutput = & $venvPython -m src.platform.database.bootstrap apply 2>&1
+        $applyExitCode = $LASTEXITCODE
+        $busy = ($applyOutput | Out-String) -match 'Database bootstrap is already running'
+        if ($applyExitCode -eq 0 -or -not $busy -or (Get-Date) -gt $deadline) { break }
+        Write-ColorOutput '  Bootstrap lock busy (running rule-governance work); retrying in 5 s...' "Gray"
+        Start-Sleep -Seconds 5
+    }
+    $applyOutput | Out-File -LiteralPath $applyLog -Encoding utf8
+    if ($applyExitCode -ne 0) {
+        $applyOutput | ForEach-Object { Write-Host $_ }
+        throw "Database bootstrap apply failed; existing app processes were left running. Full log: $applyLog"
+    }
+    Write-ColorOutput '  [OK] Database bootstrap apply complete' "Green"
 }
 
 function Wait-ProjectPythonCommand {
@@ -101,8 +170,11 @@ if (-not (Test-Path $venvPython)) {
 }
 
 $dotEnv = Import-DotEnvFile -Path (Join-Path $ProjectRoot ".env")
-if ($DevMode -and $EnableApps.Count) {
+if ($DevMode -and ($EnableApps.Count -or $UpgradeApps.Count)) {
     throw "App enablement requires a production build; omit -DevMode."
+}
+if ($CheckOnly -and ($ApplyDatabase -or $UpgradeApps.Count)) {
+    throw "-CheckOnly is read-only; run -ApplyDatabase / -UpgradeApps without it."
 }
 # All local processes and management commands must share authority and transport.
 $env:NETOPS_AUTHORITY_URL = "http://127.0.0.1:$DjangoPort"
@@ -125,15 +197,45 @@ if (-not ($SkipMiddleware -and $SkipLangfuse) -and -not $AllowNoDocker) {
     & (Join-Path $PSScriptRoot 'containers.ps1') -ProjectRoot $ProjectRoot -Action check -SkipMiddleware:$SkipMiddleware -WithLangfuse:(-not $SkipLangfuse)
 }
 if ($CheckOnly) {
-    & $venvPython -m src.platform.database.bootstrap check
-    if ($LASTEXITCODE -ne 0) { throw 'Database not ready. Run scripts\windows\bootstrap.ps1 -Action apply.' }
+    Assert-PlatformDatabaseReady
     Write-ColorOutput '  [OK] Startup checks passed. No services were stopped or started.' "Green"
     return
 }
 
-Write-ColorOutput "[Step 0/7] Stop old processes and free ports..." "Yellow"
-Stop-ProjectAppProcesses -ProjectRoot $ProjectRoot
 $dockerOk = Test-DockerAvailable -TimeoutSec 5 -Quiet
+Write-ColorOutput "[Step 0/7] Check Docker..." "Yellow"
+if ($SkipMiddleware -and $SkipLangfuse) {
+    Write-ColorOutput '  [SKIP] SkipMiddleware + SkipLangfuse (no Docker stacks)' "Gray"
+} elseif ($dockerOk) {
+    Write-ColorOutput "  [OK] Docker is available" "Green"
+} elseif ($AllowNoDocker) {
+    Write-ColorOutput '  [WARN] Docker not available; continuing (AllowNoDocker)' "Yellow"
+} else {
+    Write-ColorOutput "  [ERROR] Docker Desktop is not running." "Red"
+    Write-ColorOutput "  Start Docker Desktop, wait until Ready, then run start.ps1 again." "Yellow"
+    Write-ColorOutput '  Or use -SkipMiddleware -SkipLangfuse -AllowNoDocker for UI-only (backend will fail).' "Gray"
+    exit 1
+}
+
+Write-ColorOutput "[Step 1/7] Start Docker dependencies..." "Yellow"
+if ($dockerOk) {
+    & (Join-Path $PSScriptRoot 'containers.ps1') -ProjectRoot $ProjectRoot -Action up -SkipMiddleware:$SkipMiddleware -WithLangfuse:(-not $SkipLangfuse)
+} else {
+    Write-ColorOutput '  [SKIP] Docker dependencies' 'Gray'
+}
+
+Write-ColorOutput "[Step 2/7] Check platform database and App readiness before stopping services..." "Yellow"
+# Dependants are listed after their dependencies, so disable in reverse order.
+for ($i = $UpgradeApps.Count - 1; $i -ge 0; $i--) {
+    Invoke-AppDisableDrain -AppId $UpgradeApps[$i]
+}
+if ($ApplyDatabase -or $UpgradeApps.Count) {
+    Invoke-PlatformDatabaseApply
+}
+Assert-PlatformDatabaseReady
+
+Write-ColorOutput "[Step 3/7] Stop old processes and free ports..." "Yellow"
+Stop-ProjectAppProcesses -ProjectRoot $ProjectRoot
 if ($dockerOk) {
     $dockerOk = [bool](Stop-DockerAppContainers -SkipAvailabilityCheck)
     if (-not $dockerOk) {
@@ -164,33 +266,6 @@ foreach ($round in 1..2) {
     Start-Sleep -Seconds 2
 }
 Write-ColorOutput "  [OK] Ports cleared" "Green"
-
-Write-ColorOutput "[Step 1/7] Check Docker..." "Yellow"
-if ($SkipMiddleware -and $SkipLangfuse) {
-    Write-ColorOutput '  [SKIP] SkipMiddleware + SkipLangfuse (no Docker stacks)' "Gray"
-} elseif ($dockerOk) {
-    Write-ColorOutput "  [OK] Docker is available" "Green"
-} elseif ($AllowNoDocker) {
-    Write-ColorOutput '  [WARN] Docker not available; continuing (AllowNoDocker)' "Yellow"
-} else {
-    Write-ColorOutput "  [ERROR] Docker Desktop is not running." "Red"
-    Write-ColorOutput "  Start Docker Desktop, wait until Ready, then run start.ps1 again." "Yellow"
-    Write-ColorOutput '  Or use -SkipMiddleware -SkipLangfuse -AllowNoDocker for UI-only (backend will fail).' "Gray"
-    exit 1
-}
-
-Write-ColorOutput "[Step 2/7] Start Docker dependencies..." "Yellow"
-if ($dockerOk) {
-    & (Join-Path $PSScriptRoot 'containers.ps1') -ProjectRoot $ProjectRoot -Action up -SkipMiddleware:$SkipMiddleware -WithLangfuse:(-not $SkipLangfuse)
-} else {
-    Write-ColorOutput '  [SKIP] Docker dependencies' 'Gray'
-}
-
-Write-ColorOutput "[Step 3/7] Check platform database readiness..." "Yellow"
-& $venvPython -m src.platform.database.bootstrap check *>&1 | Out-File (Join-Path $logDir "database-check.log") -Encoding utf8
-if ($LASTEXITCODE -ne 0) {
-    throw "Database is not ready. Run scripts\windows\bootstrap.ps1 -Action apply. See database-check.log."
-}
 
 $pids = @{}
 $py = Escape-SingleQuotedPath $venvPython
@@ -387,7 +462,7 @@ if (-not $bffOk) {
 if (-not $DevMode) {
     Write-ColorOutput 'Verify enabled App deployments (Gateway / frontend / Workers / Beat)...' "Yellow"
     $appProbe = @("--gateway-url", "http://127.0.0.1:$FastAPIPort", "--frontend-url", "http://localhost:$ReactPort", "--wait-seconds", "60")
-    foreach ($appId in $EnableApps) {
+    foreach ($appId in @(@($UpgradeApps) + @($EnableApps) | Select-Object -Unique)) {
         & $venvPython web/django_backend/manage.py app_packages enable $appId @appProbe
         if ($LASTEXITCODE -ne 0) { throw "App enablement failed: $appId" }
     }

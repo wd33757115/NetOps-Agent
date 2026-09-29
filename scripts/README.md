@@ -56,8 +56,15 @@
 核心 Worker 消费 `netops.patrol` 等原有基础队列，AI Worker 自动发现业务 App 队列，并排除
 已由核心 Worker 消费的巡检队列；保留一个 Beat。无需在启动脚本逐个追加新 App 队列。
 
-正在启用的包若源码摘要已变化，需先用旧部署执行 `app_packages disable APP_ID` 并完成 drain，
-再升级启动。脚本不会替代排空或擅自恢复启用。`-DevMode` 仅用于热更新开发，不能与 `-EnableApps`
+App 代码或迁移变化后，启动检查会拒绝继续，并提示下一步（已运行的进程保持不动）：
+
+- 包已停用、只差迁移或版本登记：加 `-ApplyDatabase` 先执行 `bootstrap apply`；需要启用时再加 `-EnableApps`。
+- 包正在启用且源码摘要已变化：加 `-UpgradeApps APP_ID`（可列多个，依赖在前）。脚本在服务仍运行时按逆序执行
+  `app_packages disable` 并轮询 drain 至 `disabled`（最长 180 秒，超时即停止且保留进程），然后 `bootstrap apply`、
+  启动服务，再按顺序启用这些包。未列出的包仍受保护，不会被自动停用或启用。
+- 服务运行中的规则治理任务会以共享方式持有 bootstrap 锁；apply 遇到“already running”时每 5 秒重试，最长 120 秒。
+
+`-DevMode` 仅用于热更新开发，不能与 `-EnableApps`
 组合，也不作为生产 App 部署验收；正式启用使用默认构建预览。
 
 原始巡检的规则/设备业务就绪检查仍在巡检启动入口执行；环境冒烟不再要求停用的巡检 App
