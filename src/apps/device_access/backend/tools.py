@@ -3,18 +3,20 @@ from pydantic import BaseModel, ConfigDict
 
 from src.platform.tools.registry import Tool
 
-from . import saved, service
-from .schemas import Collect, Read
+from . import diagnosis, saved, service
+from .schemas import DiagnosisRun, Read
 
 
 class Empty(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-def collect(user, body):
+def run(user, body):
     if not user.can_execute_skills():
-        raise HTTPException(403, "当前账号不能采集设备")
-    return tool_view(service.collect(user.user_id, body))
+        raise HTTPException(403, "当前账号不能登录设备诊断")
+    return diagnosis.run(
+        user.user_id, body.host, body.platform, body.commands, body.purpose, body.turn_id
+    )
 
 
 def tool_view(result):
@@ -33,10 +35,11 @@ def tool_view(result):
 
 TOOLS = [
     Tool(
-        "collect",
-        "主动采集：只能使用人工选定的已保存会话和固定诊断命令集；失败需人工处理，不自动重试",
-        Collect,
-        collect,
+        "run",
+        "登录本轮路径计算或终端定位结果中出现的设备，执行只读 display/show 或有限 ping/tracert，"
+        "一次最多 5 条；配置导出、需审批和配置命令不会执行；每步写入审计，登录失败不自动重试",
+        DiagnosisRun,
+        run,
         mutates=True,
     ),
     Tool(

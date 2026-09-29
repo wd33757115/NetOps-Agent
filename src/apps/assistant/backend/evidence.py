@@ -29,7 +29,8 @@ def capture(tool, result):
         "revision": revision,
         "excerpt": excerpt,
         "retrieved_at": retrieved_at,
-        "observed_at": result.get("observed_at"),
+        # List answers (one per network, per session) carry their own times inside.
+        "observed_at": result.get("observed_at") if isinstance(result, dict) else None,
         "citation": f"[{identifier}]",
     }
 

@@ -1,4 +1,5 @@
 import ipaddress
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
@@ -91,10 +92,29 @@ class HostKeyAccept(Schema):
         return _address(value)
 
 
-class Collect(Schema):
-    request_id: str = Field(min_length=1, max_length=100)
-    session_id: str = Field(min_length=1, max_length=32)
-    profile_id: str = Field(min_length=1, max_length=64)
+class DiagnosisRun(Schema):
+    host: str = Field(description="路径计算或终端定位结果中的设备管理地址")
+    commands: list[str] = Field(
+        min_length=1,
+        max_length=5,
+        description="只读 display/show 或有限 ping/tracert，一次最多 5 条",
+    )
+    purpose: str = Field(min_length=1, max_length=512, description="为什么执行，写入审计")
+    # Filled by the server from the turn's own topology results, never by the model.
+    platform: Literal["comware", "nxos", "ios", "vrp"]
+    turn_id: str = Field(min_length=1, max_length=64)
+
+    @field_validator("host")
+    @classmethod
+    def valid_host(cls, value):
+        return _address(value)
+
+    @field_validator("commands")
+    @classmethod
+    def bounded(cls, value):
+        if any(not item.strip() or len(item) > 256 for item in value):
+            raise ValueError("each command is one non-empty line of at most 256 characters")
+        return value
 
 
 class Read(Schema):

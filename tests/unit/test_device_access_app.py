@@ -7,16 +7,16 @@ from fastapi import HTTPException
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from src.apps.device_access.backend import saved, service
-from src.apps.device_access.backend.models import Base, DefaultLogin, Operation, SavedSession
+from src.apps.device_access.backend import diagnosis, saved, service
+from src.apps.device_access.backend.models import Base, DefaultLogin, SavedSession
 from src.apps.device_access.backend.schemas import (
     BatchLogin,
-    Collect,
     Login,
     SessionCreate,
     SessionUpdate,
     Ticket,
 )
+from src.platform.device_access.command_policy import classify
 from src.platform.device_access.contracts import DeviceAccessError
 from src.platform.device_access.security import CredentialStore
 
@@ -75,7 +75,32 @@ def world(monkeypatch):
     monkeypatch.setattr(
         service, "authorize_worker", lambda *args: SimpleNamespace(can_execute_skills=lambda: True)
     )
-    calls = []
+    calls, opened, handles, sent = [], [], [], []
+
+    class Handle:
+        """Stand-in for the platform session: real command classification, no device."""
+
+        output = "output"
+
+        def __init__(self, platform):
+            self.platform, self.closed = platform, False
+
+        def run(self, text, read_timeout=30):
+            decision = classify(self.platform, text)
+            sent.append(decision.normalized)
+            ran = decision.level in {"L1", "L2"}
+            return SimpleNamespace(
+                normalized_command=decision.normalized,
+                policy_level=decision.level,
+                execution_status="succeeded" if ran else "denied",
+                evidence_ref="device-access:audit:" + str(len(sent)),
+                output=self.output if ran else "",
+                output_complete=True,
+                failure_code=None,
+            )
+
+        def close(self):
+            self.closed = True
 
     class Access:
         failure = None
@@ -86,12 +111,30 @@ def world(monkeypatch):
                 raise DeviceAccessError(self.failure, "failure")
             return SimpleNamespace(execution_status="succeeded", failure_code=None)
 
+        def open_session(self, context, ref, **kwargs):
+            opened.append((ref, kwargs["platform"], kwargs["purpose"], kwargs["budget"]))
+            kwargs["should_continue"]()
+            if self.failure:
+                raise DeviceAccessError(self.failure, "failure")
+            handles.append(Handle(kwargs["platform"]))
+            return handles[-1]
+
     def access(ref, host, port, username, password, **kwargs):
         calls.append((ref, host, port, username, password))
         return Access()
 
     monkeypatch.setattr(service, "access", access)
-    yield SimpleNamespace(store=store, redis=redis, calls=calls, access=Access, sessions=sessions)
+    yield SimpleNamespace(
+        store=store,
+        redis=redis,
+        calls=calls,
+        access=Access,
+        sessions=sessions,
+        opened=opened,
+        handles=handles,
+        sent=sent,
+        handle=Handle,
+    )
     engine.dispose()
 
 
@@ -173,21 +216,66 @@ def test_batch_edit_sets_one_login_on_selected_sessions(world):
     assert saved.login("u", first["id"]) == ("ops", "new")
 
 
-def test_collect_uses_the_saved_session_and_does_not_repeat_a_failed_login(world):
-    row = new_session(username="operator", password="session-secret")
-    body = Collect(request_id="1", session_id=row["id"], profile_id="comware-lldp-v1")
-    with pytest.raises(HTTPException):
-        service.collect("v", body)
-    with pytest.raises(HTTPException):
-        service.collect("u", Collect(request_id="2", session_id=row["id"], profile_id="unknown"))
+def test_diagnosis_logs_in_with_the_hosts_session_else_the_default(world):
+    saved.save_default("u", Login(username="admin", password="default-secret"))
+    new_session(host="10.0.0.2", username="operator", password="session-secret")
+    diagnosis.run("u", "10.0.0.2", "comware", ["display version"], "核对版本", "turn-1")
+    diagnosis.run("u", "10.0.0.3", "comware", ["display version"], "核对版本", "turn-1")
+    assert [call[1:] for call in world.calls] == [
+        ("10.0.0.2", 22, "operator", "session-secret"),
+        ("10.0.0.3", 22, "admin", "default-secret"),
+    ]
+    ref, platform, purpose, budget = world.opened[0]
+    assert (ref, platform, purpose) == ("diagnosis:turn-1:10.0.0.2", "comware", "核对版本")
+    assert budget.max_commands == 5 and budget.total_seconds <= 75
+    assert all(handle.closed for handle in world.handles)
+
+
+def test_diagnosis_runs_read_only_commands_and_never_sends_the_rest(world):
+    saved.save_default("u", Login(username="admin", password="default-secret"))
+    view = diagnosis.run(
+        "u",
+        "10.0.0.2",
+        "comware",
+        [
+            "display ip routing-table",
+            "display current-configuration",
+            "system-view",
+            "debugging ospf event",
+            "ping -c 2 192.168.1.2",
+        ],
+        "核对路由",
+        "turn-1",
+    )
+    assert view["login"] == "succeeded"
+    status = {c["command"]: (c.get("policy_level"), c["status"]) for c in view["commands"]}
+    assert status["display ip routing-table"] == ("L1", "succeeded")
+    assert status["display current-configuration"] == ("L1", "not_executed")
+    assert status["debugging ospf event"] == ("L3", "not_executed")
+    assert status["system-view"][1] == "not_executed"
+    assert status["ping -c 2 192.168.1.2"][0] == "L2"
+    # A configuration dump never reaches the session; the policy decides the rest there.
+    assert "display current-configuration" not in world.sent
+    routes = next(c for c in view["commands"] if c["command"] == "display ip routing-table")
+    assert routes["output"] == "output" and routes["evidence_ref"].startswith("device-access:audit")
+
+
+def test_diagnosis_login_failure_is_reported_once_and_not_retried(world):
+    saved.save_default("u", Login(username="admin", password="default-secret"))
     world.access.failure = "authentication_failed"
-    first = service.collect("u", body)
-    assert first["status"] == "waiting_for_input"
-    assert first["result"]["failure_code"] == "authentication_failed"
-    assert service.collect("u", body)["id"] == first["id"]
-    assert world.calls == [(row["id"], "10.0.0.1", 22, "operator", "session-secret")]
-    with world.sessions() as session:
-        assert "secret" not in repr(session.scalar(select(Operation)).result)
+    view = diagnosis.run("u", "10.0.0.2", "comware", ["display version"], "核对版本", "turn-1")
+    assert (view["login"], view["failure_code"]) == ("failed", "authentication_failed")
+    assert len(world.opened) == 1 and "secret" not in repr(view)
+
+
+def test_diagnosis_bounds_output_and_skips_login_for_dumps_only(world):
+    saved.save_default("u", Login(username="admin", password="default-secret"))
+    # Bytes, not characters: interface descriptions may be Chinese.
+    world.handle.output = "接口描述" * diagnosis.EXCERPT_BYTES
+    [item] = diagnosis.run("u", "10.0.0.2", "comware", ["display arp"], "看 ARP", "t")["commands"]
+    assert len(item["output"].encode()) <= diagnosis.EXCERPT_BYTES and item["output_truncated"]
+    view = diagnosis.run("u", "10.0.0.2", "comware", ["display this"], "看配置", "t")
+    assert view["login"] == "not_needed" and len(world.opened) == 1
 
 
 def test_terminal_ticket_is_one_time_and_bound_to_its_operation(world):
@@ -245,34 +333,99 @@ def test_saving_a_typed_login_waits_for_a_successful_login(world):
         saved.login("u", row["id"])
 
 
-def test_active_dsh_scope_and_repeat_suppression(monkeypatch):
-    from src.apps.assistant.backend.diagnostic_workspace import DiagnosticWorkspace
+def trace_answer(*devices):
+    hops = [
+        {"device": d, "in_interface": None, "out_interface": None, "route": None} for d in devices
+    ]
+    return [{"forward": {"paths": [{"hops": hops, "end": {"status": "delivered"}}]}}]
+
+
+def device(address, platform="comware", collected=True):
+    return {
+        "node_id": "n" + address,
+        "address": address,
+        "collected": collected,
+        "platform": platform,
+    }
+
+
+@pytest.fixture
+def workspace(monkeypatch):
+    from src.apps.assistant.backend import diagnostic_workspace
     from src.platform.tools import registry
 
     calls = []
 
-    def invoke(name, args, **kwargs):
-        calls.append(args)
-        return {
-            "id": "op",
-            "status": "waiting_for_input",
-            "result": {"failure_code": "authentication_failed"},
-        }
+    def invoke(name, arguments, **kwargs):
+        calls.append((name, arguments))
+        if name == "topology__trace_path":
+            return trace_answer(
+                device("10.0.0.1"),
+                device("10.0.0.2", platform=None),
+                device("10.0.0.3", collected=False),
+                device("10.0.0.4"),
+            )
+        return {"host": arguments["host"], "login": "succeeded", "commands": []}
 
     monkeypatch.setattr(registry, "invoke", invoke)
-    workspace = DiagnosticWorkspace(
-        "u", session_ids=["allowed"], run_id="run", reader=object(), check=lambda: None
+    space = diagnostic_workspace.DiagnosticWorkspace(
+        "u", run_id="turn-1", reader=object(), check=lambda: None
     )
+    space.evidence_tools = {"topology__trace_path", "topology__locate"}
+    return SimpleNamespace(space=space, calls=calls, module=diagnostic_workspace)
+
+
+def test_diagnosis_can_only_reach_devices_this_turns_topology_answer_named(workspace):
+    space = workspace.space
+    run = {"host": "10.0.0.1", "commands": ["display version"], "purpose": "核对"}
     with pytest.raises(PermissionError):
-        workspace.invoke(
-            "device_access__collect", {"session_id": "forbidden", "profile_id": "comware-lldp-v1"}
-        )
-    arguments = {"session_id": "allowed", "profile_id": "comware-lldp-v1"}
-    first = workspace.invoke("device_access__collect", arguments)
-    assert workspace.invoke("device_access__collect", arguments) == first
-    assert len(calls) == 1
+        space.invoke("device_access__run", run)
+    space.invoke("topology__trace_path", {"src": "1.1.1.2", "dst": "192.168.1.2"})
+    # Collected devices with an identified platform only.
+    assert space.scope == {"10.0.0.1": "comware", "10.0.0.4": "comware"}
+    answer = space.invoke("device_access__run", run)
+    assert "citation" in answer
+    name, arguments = workspace.calls[-1]
+    assert (name, arguments["platform"], arguments["turn_id"]) == (
+        "device_access__run",
+        "comware",
+        "turn-1",
+    )
+    for host in ("10.0.0.2", "10.0.0.3", "10.9.9.9"):
+        with pytest.raises(PermissionError):
+            space.invoke("device_access__run", {**run, "host": host})
     with pytest.raises(PermissionError):
-        workspace.invoke(
-            "device_access__collect", {"session_id": "allowed", "profile_id": "comware-routes-v1"}
-        )
-    assert "citation" in first
+        space.invoke("device_access__run", {**run, "platform": "ios"})
+
+
+def test_diagnosis_budgets_commands_and_devices_per_turn(workspace):
+    space = workspace.space
+    space.invoke("topology__trace_path", {"src": "1.1.1.2", "dst": "192.168.1.2"})
+    five = {"host": "10.0.0.1", "commands": ["display version"] * 5, "purpose": "核对"}
+    for _ in range(workspace.module.MAX_COMMANDS // 5):
+        space.invoke("device_access__run", five)
+    with pytest.raises(PermissionError):
+        space.invoke("device_access__run", {**five, "commands": ["display version"]})
+    many = [device(f"10.1.0.{n}") for n in range(20)]
+    space.scope.clear()
+    space.widen(trace_answer(*many))
+    assert len(space.scope) == workspace.module.MAX_DEVICES
+
+
+def test_the_model_never_sees_server_owned_run_fields(workspace, monkeypatch):
+    from src.apps.device_access.backend.schemas import DiagnosisRun
+    from src.platform.tools import registry
+
+    definition = {
+        "name": "device_access__run",
+        "description": "run",
+        "input_schema": DiagnosisRun.model_json_schema(),
+        "mutates": True,
+    }
+    monkeypatch.setattr(
+        registry, "available_tools", lambda **kwargs: [definition] if kwargs.get("names") else []
+    )
+    monkeypatch.setattr(workspace.module.DocumentWorkspace, "definitions", lambda self: [])
+    [offered] = workspace.space.definitions()
+    assert not {"platform", "turn_id"} & set(offered["input_schema"]["properties"])
+    assert not {"platform", "turn_id"} & set(offered["input_schema"]["required"])

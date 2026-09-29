@@ -5,7 +5,6 @@ import { inspectionBatchApi, inspectionDeviceApi } from '../../../../src/apps/in
 import { api, getChatWebSocketUrl, type AuthSession, API_BASE_URL } from '../config/api'
 
 export interface ChatRequest {
-  diagnostic_sessions?: string[]
   query: string
   thread_id?: string
   uploaded_file_path?: string

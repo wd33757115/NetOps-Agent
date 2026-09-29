@@ -65,7 +65,6 @@ def scope_key(catalog, tools):
                 "files": sorted(catalog.files),
                 "filters": catalog.filters,
                 "tools": sorted(tools),
-                "sessions": sorted(getattr(catalog, "session_ids", [])),
             },
             sort_keys=True,
             ensure_ascii=False,

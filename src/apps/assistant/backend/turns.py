@@ -17,19 +17,20 @@ from src.platform.agent_runtime.base import AgentEvent, RunContext
 from src.platform.authorization.client import authority_session, authorize_worker
 
 from . import history, progress
+from .diagnostic_workspace import DiagnosticWorkspace
 from .models import Turn
 from .repository import now, sessions
-from .workspace import DocumentWorkspace
 
 ACTIVE = ("running", "cancel_requested")
 
+
+TURN_SECONDS = 300
 
 class Question(BaseModel):
     model_config = ConfigDict(extra="forbid")
     request_id: str = Field(min_length=1, max_length=64)
     text: str = Field(min_length=1, max_length=4000)
     filters: dict[str, str] = Field(default_factory=dict)
-    diagnostic_sessions: list[str] = Field(default_factory=list, max_length=2)
 
 
 def expire(session):
@@ -87,8 +88,7 @@ def begin(actor_id, conversation_id, body):
         raise HTTPException(422, "不支持的资料过滤条件")
     signature = digest(
         json.dumps(
-            {"conversation": conversation_id, "text": body.text, "filters": body.filters,
-             "diagnostic_sessions": body.diagnostic_sessions},
+            {"conversation": conversation_id, "text": body.text, "filters": body.filters},
             sort_keys=True,
             ensure_ascii=False,
         )
@@ -115,7 +115,7 @@ def begin(actor_id, conversation_id, body):
                     active_conversation=conversation_id,
                     created_at=now(),
                     event_count=0,
-                    expires_at=now() + timedelta(seconds=110),
+                    expires_at=now() + timedelta(seconds=TURN_SECONDS + 20),
                 )
                 session.add(row)
                 session.flush()
@@ -225,19 +225,22 @@ async def _execute(actor_id, run, body, *, agent_runtime=None, on_event=None):
             finish, actor_id, run["id"], "failed", "", [], 0, "model_configuration_unavailable"
         )
         return await asyncio.to_thread(read, actor_id, run["id"])
-    context = RunContext(run["id"], actor_id, run["conversation_id"])
+    # A diagnosis logs into devices on the path, so turns use the platform's run ceiling.
+    context = RunContext(
+        run["id"],
+        actor_id,
+        run["conversation_id"],
+        timeout_seconds=TURN_SECONDS,
+        max_tool_calls=30,
+        max_model_rounds=15,
+    )
 
     def check():
         authorize_worker(actor_id, "assistant")
         if read(actor_id, run["id"])["status"] != "running":
             raise PermissionError("Turn no longer active")
 
-    if body.diagnostic_sessions:
-        from .diagnostic_workspace import DiagnosticWorkspace
-        tools = DiagnosticWorkspace(actor_id, filters=body.filters, check=check,
-            session_ids=body.diagnostic_sessions, run_id=run["id"])
-    else:
-        tools = DocumentWorkspace(actor_id, filters=body.filters, check=check)
+    tools = DiagnosticWorkspace(actor_id, filters=body.filters, check=check, run_id=run["id"])
     terminal, text, references, count, code = "failed", [], [], 0, "runtime_failed"
 
     async def monitor():

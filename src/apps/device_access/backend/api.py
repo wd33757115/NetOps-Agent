@@ -9,7 +9,7 @@ from src.platform.device_access.contracts import DeviceAccessError
 
 from . import saved, service
 from .host_keys import HostKeyStore
-from .schemas import BatchLogin, Collect, HostKeyAccept, Login, SessionCreate, SessionUpdate, Ticket
+from .schemas import BatchLogin, HostKeyAccept, Login, SessionCreate, SessionUpdate, Ticket
 from .sessions import read_audit
 
 
@@ -90,11 +90,6 @@ def accept_host_key(body: HostKeyAccept, user: CurrentUser = Depends(operator)):
 @router.post("/terminal-tickets")
 def ticket(body: Ticket, user: CurrentUser = Depends(operator)):
     return service.ticket(user.user_id, body)
-
-
-@router.post("/collect")
-def collect(body: Collect, user: CurrentUser = Depends(operator)):
-    return service.collect(user.user_id, body)
 
 
 @router.get("/operations/{operation_id}")

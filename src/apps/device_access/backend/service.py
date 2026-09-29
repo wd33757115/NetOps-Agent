@@ -1,10 +1,9 @@
-"""Saved-session SSH: human terminals and bounded diagnostic collection."""
+"""Saved-session SSH: human terminals; diagnosis logins live in diagnosis.py."""
 
 import json
 import secrets
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import asdict
 from datetime import timezone
 from uuid import uuid4
 
@@ -13,8 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.platform.authorization.client import authorize_worker
-from src.platform.device_access import AccessContext, AccessGrant, BatchRequest, DeviceAccessService
-from src.platform.device_access.catalog import DIAGNOSTIC_PROFILES
+from src.platform.device_access import DeviceAccessService
 from src.platform.device_access.contracts import ConnectionProfile, DeviceAccessError, Target
 from src.platform.device_access.drivers.paramiko_driver import ParamikoDriver
 from src.platform.device_access.security import CredentialStore
@@ -141,60 +139,6 @@ def _guard(owner, message):
         return True
 
     return guard
-
-
-def collect(owner, body):
-    if body.profile_id not in DIAGNOSTIC_PROFILES:
-        raise HTTPException(422, "未知诊断命令集")
-    _, host, _ = saved.target(owner, body.session_id)
-    operation_id, created = _begin(owner, body.request_id, body.session_id, host, body.profile_id)
-    if not created:
-        return read(owner, operation_id)
-    outputs = []
-    try:
-        commands = DIAGNOSTIC_PROFILES[body.profile_id]
-        guard = _guard(owner, "账号不能执行设备采集")
-        guard()
-        result = session_access(owner, body.session_id).execute_batch(
-            AccessContext(
-                owner,
-                APP_ID,
-                (
-                    AccessGrant(
-                        body.session_id, body.session_id, frozenset(c.text for c in commands)
-                    ),
-                ),
-                operation_id,
-            ),
-            BatchRequest(body.session_id, body.session_id, commands, budget_seconds=60),
-            should_continue=guard,
-            on_result=lambda item: outputs.append(asdict(item)),
-        )
-        finish(
-            operation_id,
-            result.execution_status,
-            {
-                "commands": outputs,
-                "failure_code": result.failure_code,
-                "observed_at": now().isoformat(),
-                "kind": "live_observation",
-            },
-        )
-    except Exception as exc:
-        finish(
-            operation_id,
-            "waiting_for_input",
-            {
-                "commands": outputs,
-                "failure_code": (
-                    exc.failure_code
-                    if isinstance(exc, DeviceAccessError)
-                    else "execution_unavailable"
-                ),
-                "notice": "本操作不会自动重试。请检查会话的地址、用户名密码或主机密钥后重新发起。",
-            },
-        )
-    return read(owner, operation_id)
 
 
 def ticket(owner, body):

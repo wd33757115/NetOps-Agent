@@ -1,7 +1,7 @@
 manifest_version: 1
 id: device-access
 name: SSH 终端
-version: 0.7.0
+version: 0.8.0
 platform_api: '>=1.0,<2.0'
 icon: terminal
 dependencies: {}

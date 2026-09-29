@@ -50,6 +50,9 @@ class _Locator:
         name = node.get(L2T + "l2-node-attributes", {}).get("name") or node_id
         key = self.collected.get(node_id)
         item = {"node_id": node_id, "name": name, "address": key, "collected": key is not None}
+        if key is not None:
+            # The identified platform lets a diagnosis log in with the right command policy.
+            item["platform"] = self.devices[key].get("platform") or None
         if key in self.observed:
             item.update(self.observed[key])
         return item

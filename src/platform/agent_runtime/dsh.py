@@ -368,7 +368,7 @@ class Bridge:
                     result = await asyncio.to_thread(self.catalog.submit_answer, arguments)
                     self.answer_feedback = result
                 else:
-                    live = name == "device_access__collect" and getattr(self.catalog, "active_diagnostics", False)
+                    live = name == "device_access__run" and getattr(self.catalog, "active_diagnostics", False)
                     remaining = self.context.timeout_seconds - (time.monotonic() - self.started_at)
                     result = await asyncio.wait_for(
                         asyncio.to_thread(self.catalog.invoke, name, arguments),
@@ -396,6 +396,17 @@ class Bridge:
             ]
         )
         return app
+
+
+DIAGNOSIS = """
+连通性故障的排查：先用 topology__locate 定位两端、topology__trace_path 计算去程和回程路径；
+再用 device_access__run 登录路径上的设备取证，一台设备一次可带多条命令。
+自下而上逐层核查：接口状态与错包 → VLAN、MAC、ARP → 路由表、路由协议邻居、回程
+→ ACL/包过滤；去程回程都要看。
+路径在某台设备处中断（无路由、黑洞、下一跳未纳管）时，重点核查该设备及其上一跳。
+导出配置的命令不会执行，用针对性的 display/show 查看具体特性。
+结论分四类：已证实（必须引用本次命令证据 [evidence-...]）、候选、已排除、待验证；
+未执行或失败的命令不能作为证据。"""
 
 
 def patch_file(home, port, *, active_diagnostics=False, durable=False):
@@ -599,9 +610,9 @@ class DshRuntime:
                 NETOPS_DSH_SESSION_ID=session_id,
                 DSH_SYSTEM_PROMPT=(PROMPT.replace(
                     "当前业务工具只查询已有记录；不能声称已执行采集、生成规则或修改配置。",
-                    "本轮允许调用 device_access__collect 对人工选定的已保存会话执行固定诊断命令；仅成功结果能证明已采集。不得生成规则或修改配置。"
-                ).replace("只可建议操作，不声称已执行。", "只可建议配置变更；主动采集必须引用本次工具证据，失败后等待人工。")
-                if getattr(bridge.catalog, "active_diagnostics", False) else PROMPT),
+                    "可调用 device_access__run 登录本轮路径计算或终端定位结果中的设备执行只读命令；只有它返回的执行结果能证明已采集。不得生成规则或修改配置。"
+                ).replace("只可建议操作，不声称已执行。", "只可建议配置变更；现场结论必须引用本次命令证据，登录或命令失败时说明缺口，不重复登录。")
+                + DIAGNOSIS if getattr(bridge.catalog, "active_diagnostics", False) else PROMPT),
             )
             from src.common.config import get_settings
 

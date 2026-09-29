@@ -67,12 +67,10 @@ def test_session_isolation_lock_and_workspace_refresh(tmp_path):
         assert resumed == home and not (resumed / "documents").exists()
 
 
-def test_scope_changes_with_materials_permissions_and_session_selection():
-    catalog = SimpleNamespace(files={"v1/section": None}, filters={}, session_ids=[])
+def test_scope_changes_with_materials_and_permissions():
+    # Diagnosis logins are scoped per turn by that turn's topology answers, not here.
+    catalog = SimpleNamespace(files={"v1/section": None}, filters={})
     original = scope_key(catalog, ["read"])
     assert original != scope_key(catalog, ["read", "business"])
     catalog.files = {"v2/section": None}
-    assert original != scope_key(catalog, ["read"])
-    catalog.files = {"v1/section": None}
-    catalog.session_ids = ["device-a"]
     assert original != scope_key(catalog, ["read"])
