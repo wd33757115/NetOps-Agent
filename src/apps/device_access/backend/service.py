@@ -1,12 +1,11 @@
-"""Human-created expiring connections and auditable bounded diagnostic calls."""
+"""Saved-session SSH: human terminals and bounded diagnostic collection."""
 
 import json
-import os
 import secrets
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import asdict
-from datetime import timedelta, timezone
+from datetime import timezone
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -21,11 +20,9 @@ from src.platform.device_access.drivers.paramiko_driver import ParamikoDriver
 from src.platform.device_access.security import CredentialStore
 from src.platform.kernel.migrations import business_engine
 
-from .credentials import CredentialVault
-from .grants import authorize_address
+from . import saved
 from .host_keys import HostKeyStore
-from .models import Connection, Operation, now
-from .vault_driver import VaultDriver
+from .models import DOMAIN, Operation, now
 
 APP_ID = "device-access"
 TICKET_PREFIX = "netops:device-access:terminal-ticket:"
@@ -38,156 +35,50 @@ def sessions():
         yield session
 
 
-def _owned(session, model, row_id, owner):
-    row = session.get(model, row_id)
-    if not row or row.owner_id != owner:
-        raise HTTPException(404, "设备访问记录不存在")
-    return row
-
-
-def connection(owner, connection_id, action="device.collect"):
-    with sessions() as session:
-        row = _owned(session, Connection, connection_id, owner)
-        expiry = (
-            row.expires_at.replace(tzinfo=timezone.utc)
-            if row.expires_at.tzinfo is None
-            else row.expires_at
-        )
-        if expiry <= now():
-            raise DeviceAccessError("credential_expired", "连接授权已过期，请人工重新输入凭据")
-        settings, ref = dict(row.settings), row.credential_ref
-    authorize_address(owner, settings["domain"], settings["address"], action)
-    if action == "device.terminal" and not settings["allow_terminal"]:
-        raise DeviceAccessError("not_authorized", "此连接未授权人工终端")
-    return settings, ref
-
-
-def create_connection(owner, body):
-    if any(profile not in DIAGNOSTIC_PROFILES for profile in body.profiles):
-        raise HTTPException(422, "未知诊断命令集")
-    authorize_address(owner, body.domain, body.address)
-    if body.allow_terminal:
-        authorize_address(owner, body.domain, body.address, "device.terminal")
-    ref = ""
-    if body.credential_mode == "vault" and body.password is None:
-        if not CredentialVault().candidates(
-            owner, body.domain, body.address, credential_set_id=body.credential_set_id
-        ):
-            raise DeviceAccessError("waiting_for_input", "没有适用凭据，请创建凭据集或提供临时凭据")
-    if body.password is not None:
-        ref = CredentialStore().put(
-            owner, body.domain, [body.address], body.username, body.password.get_secret_value()
-        )
-    try:
-        with sessions() as session:
-            row = Connection(
-                id=uuid4().hex,
-                owner_id=owner,
-                credential_ref=ref,
-                settings=body.model_dump(exclude={"username", "password"}),
-                expires_at=now() + timedelta(hours=1),
-            )
-            session.add(row)
-            result = {
-                "connection_id": row.id,
-                "expires_at": row.expires_at.isoformat(),
-                **row.settings,
-            }
-    except Exception:
-        if ref:
-            CredentialStore().revoke(ref)
-        raise
-    return result
-
-
-def list_connections(owner):
-    with sessions() as session:
-        return [
-            {"connection_id": row.id, "expires_at": row.expires_at.isoformat(), **row.settings}
-            for row in session.scalars(
-                select(Connection)
-                .where(Connection.owner_id == owner, Connection.expires_at > now())
-                .order_by(Connection.created_at.desc())
-                .limit(100)
-            )
-        ]
-
-
-def revoke(owner, connection_id):
-    with sessions() as session:
-        row = _owned(session, Connection, connection_id, owner)
-        row.expires_at = now()
-        ref = row.credential_ref
-    if ref:
-        CredentialStore().revoke(ref)
-    return {"revoked": True}
-
-
-def access(owner, connection_id, action="device.collect", *, driver_kind="paramiko", platform=None):
-    settings, ref = connection(owner, connection_id, action)
-    driver = None
+def access(
+    ref, host, port, username, password, *, driver_kind="paramiko", platform=None, auto_trust=False
+):
+    """One device, one login. Host keys come from this App's store."""
     trust = HostKeyStore()
-    policy = trust.policy(settings["domain"])
     if driver_kind == "netmiko":
         from src.platform.device_access.drivers.netmiko_driver import NetmikoDriver
 
         driver = NetmikoDriver(
-            platform,
-            known_hosts_provider=(
-                lambda target, port: trust.known_hosts(
-                    owner, target.management_domain, target.host, port
-                )
-            )
-            if policy is not None
-            else None,
+            platform, known_hosts_provider=lambda target, port: trust.known_hosts(target.host, port)
         )
-    elif driver_kind != "paramiko":
-        raise DeviceAccessError("invalid_request", "未知 SSH 驱动")
-    elif policy is not None:
+    elif driver_kind == "paramiko":
         driver = ParamikoDriver(
-            host_key_verifier=lambda target, port, key: trust.verify(owner, target, port, key)
-        )
-    if settings.get("credential_mode") == "vault":
-        username, password = "credential-vault", None
-
-        def guard():
-            checkpoint.get()()
-            user = authorize_worker(owner, APP_ID)
-            if not user.can_execute_skills():
-                raise DeviceAccessError("not_authorized", "账号不能执行设备访问")
-            connection(owner, connection_id, action)
-            return True
-
-        driver = VaultDriver(
-            CredentialVault(),
-            owner,
-            temporary_ref=ref or None,
-            credential_set_id=settings.get("credential_set_id"),
-            guard=guard,
-            driver=driver,
+            host_key_verifier=lambda target, port, key: trust.verify(
+                target.host, port, key, auto_trust=auto_trust
+            )
         )
     else:
-        username, password = CredentialStore().get(
-            ref, owner, settings["domain"], settings["address"]
-        )
+        raise DeviceAccessError("invalid_request", "未知 SSH 驱动")
     profile = ConnectionProfile(
-        connection_id,
-        username,
-        password,
-        port=settings["port"],
-        known_hosts_file=os.getenv("DEVICE_ACCESS_KNOWN_HOSTS"),
-        max_output_bytes=256 * 1024,
-        platform=platform,
+        ref, username, password, port=port, max_output_bytes=256 * 1024, platform=platform
     )
-    target = Target(connection_id, settings["address"], management_domain=settings["domain"])
+    target = Target(ref, host, management_domain=DOMAIN)
     return DeviceAccessService(
         target_resolver=lambda _: target, profile_resolver=lambda _: profile, driver=driver
     )
 
 
+def session_access(owner, session_id, **kwargs):
+    _, host, port = saved.target(owner, session_id)
+    username, password = saved.login(owner, session_id)
+    return access(session_id, host, port, username, password, **kwargs)
+
+
+def _owned_operation(session, owner, operation_id):
+    row = session.get(Operation, operation_id)
+    if not row or row.owner_id != str(owner):
+        raise HTTPException(404, "设备访问记录不存在")
+    return row
+
+
 def read(owner, operation_id):
     with sessions() as session:
-        row = _owned(session, Operation, operation_id, owner)
+        row = _owned_operation(session, owner, operation_id)
         created = (
             row.created_at.replace(tzinfo=timezone.utc)
             if row.created_at.tzinfo is None
@@ -199,11 +90,12 @@ def read(owner, operation_id):
             row.result = {
                 **row.result,
                 "failure_code": "execution_interrupted",
-                "notice": "执行未正常结束；本请求不会自动重试，请人工核对后重新授权。",
+                "notice": "执行未正常结束；本请求不会自动重试，请人工核对后重新发起。",
             }
         return {
             "id": row.id,
-            "connection_id": row.connection_id,
+            "session_id": row.session_id,
+            "host": row.host,
             "profile_id": row.profile_id,
             "status": row.status,
             "created_at": row.created_at.isoformat(),
@@ -211,22 +103,21 @@ def read(owner, operation_id):
         }
 
 
-def _begin(owner, body, profile_id):
+def _begin(owner, request_id, session_id, host, profile_id):
     with sessions() as session:
         existing = session.scalar(
-            select(Operation).where(
-                Operation.owner_id == owner, Operation.request_id == body.request_id
-            )
+            select(Operation).where(Operation.owner_id == owner, Operation.request_id == request_id)
         )
         if existing:
-            if existing.connection_id != body.connection_id or existing.profile_id != profile_id:
+            if existing.session_id != session_id or existing.profile_id != profile_id:
                 raise HTTPException(409, "请求编号已用于其他操作")
             return existing.id, False
         row = Operation(
             id=uuid4().hex,
             owner_id=owner,
-            connection_id=body.connection_id,
-            request_id=body.request_id,
+            session_id=session_id,
+            host=host,
+            request_id=request_id,
             profile_id=profile_id,
             status="running",
             result={},
@@ -242,38 +133,40 @@ def finish(operation_id, status, result):
             row.status, row.result, row.finished_at = status, result, now()
 
 
+def _guard(owner, message):
+    def guard():
+        checkpoint.get()()
+        if not authorize_worker(owner, APP_ID).can_execute_skills():
+            raise DeviceAccessError("not_authorized", message)
+        return True
+
+    return guard
+
+
 def collect(owner, body):
-    settings, _ = connection(owner, body.connection_id)
-    if body.profile_id not in settings["profiles"] or body.profile_id not in DIAGNOSTIC_PROFILES:
-        raise HTTPException(403, "此连接未授权该诊断命令集")
-    operation_id, created = _begin(owner, body, body.profile_id)
+    if body.profile_id not in DIAGNOSTIC_PROFILES:
+        raise HTTPException(422, "未知诊断命令集")
+    _, host, _ = saved.target(owner, body.session_id)
+    operation_id, created = _begin(owner, body.request_id, body.session_id, host, body.profile_id)
     if not created:
         return read(owner, operation_id)
     outputs = []
     try:
         commands = DIAGNOSTIC_PROFILES[body.profile_id]
-
-        def guard():
-            checkpoint.get()()
-            user = authorize_worker(owner, APP_ID)
-            if not user.can_execute_skills():
-                raise HTTPException(403, "账号不能执行设备采集")
-            connection(owner, body.connection_id)
-            return True
-
+        guard = _guard(owner, "账号不能执行设备采集")
         guard()
-        result = access(owner, body.connection_id).execute_batch(
+        result = session_access(owner, body.session_id).execute_batch(
             AccessContext(
                 owner,
                 APP_ID,
                 (
                     AccessGrant(
-                        body.connection_id, body.connection_id, frozenset(c.text for c in commands)
+                        body.session_id, body.session_id, frozenset(c.text for c in commands)
                     ),
                 ),
                 operation_id,
             ),
-            BatchRequest(body.connection_id, body.connection_id, commands, budget_seconds=60),
+            BatchRequest(body.session_id, body.session_id, commands, budget_seconds=60),
             should_continue=guard,
             on_result=lambda item: outputs.append(asdict(item)),
         )
@@ -298,40 +191,65 @@ def collect(owner, body):
                     if isinstance(exc, DeviceAccessError)
                     else "execution_unavailable"
                 ),
-                "notice": "本操作不会自动重试。请人工检查连接、主机密钥或更新凭据后发起新的请求。",
+                "notice": "本操作不会自动重试。请检查会话的地址、用户名密码或主机密钥后重新发起。",
             },
         )
     return read(owner, operation_id)
 
 
 def ticket(owner, body):
-    connection(owner, body.connection_id, "device.terminal")
-    operation_id, created = _begin(owner, body, "human-terminal")
+    """A 30-second single-use ticket; secrets stay in the backend."""
+    if body.session_id is not None:
+        _, host, port = saved.target(owner, body.session_id)
+    else:
+        host, port = body.host, body.port
+    ref = None
+    if body.login is not None:
+        username, password = body.login.username, body.login.password.get_secret_value()
+        ref = CredentialStore().put(owner, DOMAIN, [host], username, password, ttl=60)
+    operation_id, created = _begin(owner, body.request_id, body.session_id, host, "human-terminal")
     if not created:
         raise HTTPException(409, "该终端请求已经使用，请创建新请求")
     value = secrets.token_urlsafe(32)
+    payload = {
+        "owner": owner,
+        "session_id": body.session_id,
+        "host": host,
+        "port": port,
+        "credential_ref": ref,
+        # Saved to the session only after this login succeeds.
+        "save": body.save,
+        "operation_id": operation_id,
+    }
     try:
-        store = CredentialStore()
-        store.client.set(
-            TICKET_PREFIX + value,
-            json.dumps(
-                {"owner": owner, "connection_id": body.connection_id, "operation_id": operation_id}
-            ),
-            ex=30,
-        )
+        CredentialStore().client.set(TICKET_PREFIX + value, json.dumps(payload), ex=30)
     except Exception:
+        if ref:
+            CredentialStore().revoke(ref)
         finish(operation_id, "waiting_for_input", {"failure_code": "ticket_unavailable"})
         raise DeviceAccessError("ticket_unavailable", "终端票据服务不可用") from None
     return {"ticket": value, "session_id": operation_id, "expires_in": 30}
 
 
-def consume_ticket(value, session_id):
+def consume_ticket(value, operation_id):
     if not isinstance(value, str) or len(value) > 100:
         raise DeviceAccessError("not_authorized", "终端票据无效")
     raw = CredentialStore().client.getdel(TICKET_PREFIX + value)
     if not raw:
         raise DeviceAccessError("not_authorized", "终端票据已过期或已使用")
     payload = json.loads(raw)
-    if payload["operation_id"] != session_id:
+    if payload["operation_id"] != operation_id:
         raise DeviceAccessError("not_authorized", "终端票据不匹配")
     return payload
+
+
+def terminal_login(payload):
+    """A one-time typed login is read once and revoked; otherwise the saved one."""
+    ref = payload.get("credential_ref")
+    if not ref:
+        return saved.login(payload["owner"], payload.get("session_id"))
+    store = CredentialStore()
+    try:
+        return store.get(ref, payload["owner"], DOMAIN, payload["host"])
+    finally:
+        store.revoke(ref)

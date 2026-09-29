@@ -45,7 +45,7 @@ def read_audit(owner, session_id):
 
 def open_session(
     owner,
-    connection_id,
+    session_id,
     *,
     platform,
     purpose,
@@ -65,25 +65,22 @@ def open_session(
         user = authorize_worker(owner, service.APP_ID)
         if not user.can_execute_skills():
             raise DeviceAccessError("not_authorized", "账号不能执行诊断会话")
-        settings, _ = service.connection(owner, connection_id)
-        if not settings.get("allow_session", False):
-            raise DeviceAccessError("not_authorized", "此连接未授权受控诊断会话")
         return should_continue() if should_continue is not None else True
 
     if guard() is False:
         raise DeviceAccessError("cancelled", "诊断会话已取消")
     access = (
-        service.access(owner, connection_id)
+        service.session_access(owner, session_id)
         if driver_kind == "paramiko"
-        else service.access(owner, connection_id, driver_kind=driver_kind, platform=platform)
+        else service.session_access(owner, session_id, driver_kind=driver_kind, platform=platform)
     )
     return access.open_session(
         AccessContext(
             owner,
             service.APP_ID,
-            (AccessGrant(connection_id, connection_id, action="device.session"),),
+            (AccessGrant(session_id, session_id, action="device.session"),),
         ),
-        connection_id,
+        session_id,
         platform=platform,
         purpose=purpose,
         budget=budget,

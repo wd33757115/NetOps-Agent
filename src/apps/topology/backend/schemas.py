@@ -17,7 +17,6 @@ class Discovery(Schema):
     request_id: str = Field(min_length=1, max_length=100)
     network_id: str | None = None
     name: str = Field(default="网络拓扑", min_length=1, max_length=128)
-    domain: str = Field(default="default", min_length=1, max_length=64)
     seeds: list[str] = Field(min_length=1, max_length=200)
     allowed_cidrs: list[str] = Field(min_length=1, max_length=32)
     port: int = Field(default=22, ge=1, le=65535)
@@ -25,8 +24,8 @@ class Discovery(Schema):
     profile_id: Literal["auto", "comware-lldp-v1", "nxos-lldp-v1"] = "auto"
     max_depth: int = Field(default=8, ge=0, le=16)
     max_targets: int = Field(default=200, ge=1, le=200)
-    credentials: Credentials
-    credentials_for_neighbors: bool = False
+    # A temporary login for this run only, never saved; empty uses the default login.
+    credentials: Credentials | None = None
 
     @field_validator("seeds")
     @classmethod
@@ -73,6 +72,5 @@ class Import(Schema):
     request_id: str = Field(min_length=1, max_length=100)
     network_id: str | None = None
     name: str = Field(default="离线拓扑", max_length=128)
-    domain: str = Field(default="default", max_length=64)
     profile_id: Literal["comware-lldp-v1", "nxos-lldp-v1"]
     captures: list[Capture] = Field(min_length=1, max_length=200)

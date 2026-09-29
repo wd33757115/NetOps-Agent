@@ -4,7 +4,6 @@ import hashlib
 import ipaddress
 import json
 import logging
-import os
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -13,10 +12,7 @@ from uuid import uuid4
 from fastapi import HTTPException
 from sqlalchemy import delete, func, select, update
 
-from src.apps.device_access.backend.credentials import CredentialVault
-from src.apps.device_access.backend.grants import authorize_address
 from src.apps.device_access.backend.host_keys import HostKeyStore
-from src.apps.device_access.backend.vault_driver import VaultDriver
 from src.platform.device_access import AccessContext, AccessGrant, BatchRequest, DeviceAccessService
 from src.platform.device_access.contracts import (
     ConnectionProfile,
@@ -28,10 +24,11 @@ from src.platform.device_access.contracts import (
 from src.platform.device_access.drivers.paramiko_driver import ParamikoDriver
 from src.platform.device_access.security import CredentialStore
 
-from . import storage
+from . import logins, storage
 from .collectors.collect import collect_node, command_allowlist
 from .collectors.identify import TopologyDiscoveryPlan as DiscoveryPlan
 from .collectors.tiers.common import valid_mac
+from .logins import DOMAIN
 from .model.builder import build_topology, device_node_ids
 from .model.view import canvas
 from .models import (
@@ -87,7 +84,7 @@ def release_credentials(run_id):
         if not run or run.status in ACTIVE:
             return
         refs = set(session.scalars(select(Target.credential_ref).where(Target.run_id == run_id)))
-        refs.add(run.settings.get("neighbor_credential_ref"))
+        refs.add(run.settings.get("credential_ref"))
     refs.discard(None)
     if refs:
         try:
@@ -115,12 +112,10 @@ def _new_run(session, owner, body, settings, mode):
         )
         if not network:
             raise HTTPException(404, "网络不存在")
-        if network.domain != body.domain:
-            raise HTTPException(409, "网络管理域不能变更")
         if network.active_run:
             raise HTTPException(409, "该网络已有未结束任务")
     else:
-        network = Network(id=uuid4().hex, owner_id=owner, name=body.name, domain=body.domain)
+        network = Network(id=uuid4().hex, owner_id=owner, name=body.name, domain=DOMAIN)
         session.add(network)
         session.flush()
     run = Run(
@@ -144,37 +139,28 @@ def submit(owner, body):
         not scope(ip, body.allowed_cidrs) for ip in body.seeds
     ):
         raise HTTPException(422, "种子须在允许网段内，且数量不得超过节点上限")
-    for address in body.seeds:
-        authorize_address(owner, body.domain, address)
+    if body.credentials is None and not logins.has_default(owner):
+        raise HTTPException(422, "请填写本次用户名和密码，或先保存默认用户名密码")
     ref = None
     try:
         with sessions() as session:
             run, created = _new_run(session, owner, body, settings, "ssh")
             run_id = run.id
             if created:
-                store = CredentialStore()
-                ref = store.put(
-                    owner,
-                    body.domain,
-                    body.allowed_cidrs if body.credentials_for_neighbors else body.seeds,
-                    body.credentials.username,
-                    body.credentials.password.get_secret_value(),
-                )
+                if body.credentials is not None:
+                    # Every node of this run, new neighbours included, uses this login.
+                    ref = logins.put(owner, body.allowed_cidrs, body.credentials)
                 # The reference, never a secret, is the only credential value persisted/queued.
-                run.settings = {
-                    **run.settings,
-                    "neighbor_credential_ref": ref if body.credentials_for_neighbors else None,
-                }
+                run.settings = {**run.settings, "credential_ref": ref}
                 for address in body.seeds:
                     session.add(
                         Target(
                             id=uuid4().hex,
                             run_id=run.id,
-                            target_key=f"{body.domain}|{address}|{body.port}",
+                            target_key=f"{DOMAIN}|{address}|{body.port}",
                             address=address,
                             depth=0,
                             status="queued",
-                            credential_ref=ref,
                         )
                     )
     except Exception:
@@ -256,7 +242,6 @@ def _graph(session, run):
     nodes, links = canvas(tree, links_evidence, collected, base)
     graph = {
         "network_id": network.id,
-        "domain": network.domain,
         "model_profile": "rfc8345+simap-yang-03:l2-l3",
         "nodes": nodes,
         "links": links,
@@ -330,6 +315,7 @@ def read(owner, run_id):
             "status": run.status,
             "created_at": run.created_at.isoformat(),
             "mode": run.settings["mode"],
+            "port": run.settings.get("port"),
             "snapshot_id": snap.id if snap else None,
             "targets": [
                 {
@@ -369,7 +355,6 @@ def networks(owner):
             {
                 "id": n.id,
                 "name": n.name,
-                "domain": n.domain,
                 "active_run": n.active_run,
                 "current_snapshot": n.current_snapshot,
             }
@@ -434,7 +419,7 @@ def evidence(owner, observation_id):
 
 
 def resolve(owner, run_id, target_id, body):
-    ref = None
+    ref = stale = None
     try:
         with sessions() as session:
             run = session.scalar(
@@ -458,18 +443,10 @@ def resolve(owner, run_id, target_id, body):
                 ):
                     raise HTTPException(409, "节点状态已经变化，请刷新")
                 if body.action == "retry":
-                    authorize_address(owner, run.settings["domain"], target.address)
                     if body.credentials:
-                        ref = CredentialStore().put(
-                            owner,
-                            run.settings["domain"],
-                            [target.address],
-                            body.credentials.username,
-                            body.credentials.password.get_secret_value(),
-                        )
-                        target.credential_ref = ref
-                    if not target.credential_ref:
-                        raise HTTPException(422, "请为该节点提供用户名和密码")
+                        # Only this node retries with the newly typed login.
+                        ref = logins.put(owner, [target.address], body.credentials)
+                        stale, target.credential_ref = target.credential_ref, ref
                     if body.profile_id is not None:
                         run.settings = {
                             **run.settings,
@@ -490,6 +467,11 @@ def resolve(owner, run_id, target_id, body):
         if ref:
             CredentialStore().revoke(ref)
         raise
+    if stale:
+        try:
+            CredentialStore().revoke(stale)
+        except Exception:
+            logger.warning("topology credential revocation deferred to TTL for run %s", run_id)
     dispatch(run_id)
     release_credentials(run_id)
     return read(owner, run_id)
@@ -535,23 +517,8 @@ def _collect_lldp(job, choice):
     outputs, command_metadata, capture = _recorder()
     data, reason = {"complete": False}, None
     try:
-        username, password = CredentialStore().get(
-            job.ref, job.owner, job.settings["domain"], job.address
-        )
         commands = plan.commands
-        profile = ConnectionProfile(
-            profile_id=job.target_id,
-            username=username,
-            password=password,
-            port=job.settings["port"],
-            known_hosts_file=os.getenv("DEVICE_ACCESS_KNOWN_HOSTS"),
-        )
-        access = DeviceAccessService(
-            target_resolver=lambda _: AccessTarget(
-                job.target_id, job.address, management_domain=job.settings["domain"]
-            ),
-            profile_resolver=lambda _: profile,
-        )
+        access = _access(job)
         result = access.execute_batch(
             AccessContext(
                 job.owner,
@@ -574,54 +541,42 @@ def _collect_lldp(job, choice):
     return outputs, command_metadata, {**data, "platform": plan.metadata()}, reason
 
 
+def _access(job):
+    """One login for this node; a first-seen host key is recorded, a changed one stops it."""
+    username, password = logins.resolve(
+        job.owner, job.address, job.ref, job.settings.get("credential_ref")
+    )
+    trust = HostKeyStore()
+    profile = ConnectionProfile(
+        profile_id=job.target_id, username=username, password=password, port=job.settings["port"]
+    )
+    return DeviceAccessService(
+        target_resolver=lambda _: AccessTarget(
+            job.target_id, job.address, management_domain=DOMAIN
+        ),
+        profile_resolver=lambda _: profile,
+        driver=ParamikoDriver(
+            host_key_verifier=lambda target, port, key: trust.verify(
+                target.host, port, key, auto_trust=True
+            )
+        ),
+    )
+
+
 def _collect_topology(job, choice):
     """Identify the platform, then collect every topology fact in one node budget."""
     outputs, command_metadata, capture = _recorder()
     data = {"complete": False, "platform": {"source": "version_probe", "status": "failed"}}
     reason = None
     try:
-        # The vault tries the domain's credential sets plus this target's temporary one,
-        # and pins whichever succeeds for the identified platform's second session.
-        # Same host-key trust as the device-access App: a domain policy verifies and pins
-        # keys in its store; an unconfigured domain keeps the strict known_hosts file.
-        trust = HostKeyStore()
-        policy = trust.policy(job.settings["domain"])
-        verifier = known_hosts = None
-        if policy is not None:
-
-            def verifier(target, port, key):
-                return trust.verify(job.owner, target, port, key)
-
-            def known_hosts(target, port):
-                return trust.known_hosts(job.owner, target.management_domain, target.host, port)
-
-        driver = VaultDriver(
-            CredentialVault(),
-            job.owner,
-            temporary_ref=job.ref,
-            guard=job.guard,
-            driver=ParamikoDriver(host_key_verifier=verifier),
-        )
-        profile = ConnectionProfile(
-            profile_id=job.target_id,
-            username="credential-vault",
-            password=None,
-            port=job.settings["port"],
-            known_hosts_file=os.getenv("DEVICE_ACCESS_KNOWN_HOSTS"),
-        )
-        access = DeviceAccessService(
-            target_resolver=lambda _: AccessTarget(
-                job.target_id, job.address, management_domain=job.settings["domain"]
-            ),
-            profile_resolver=lambda _: profile,
-            driver=driver,
-        )
+        access = _access(job)
         context = AccessContext(
             job.owner,
             APP_ID,
             (AccessGrant(job.target_id, job.target_id, command_allowlist()),),
             job.run_id,
         )
+        trust = HostKeyStore()
         result = collect_node(
             access,
             context,
@@ -631,7 +586,7 @@ def _collect_topology(job, choice):
             budget_seconds=NODE_BUDGET_SECONDS,
             should_continue=job.guard,
             on_result=capture,
-            known_hosts_provider=known_hosts,
+            known_hosts_provider=lambda target, port: trust.known_hosts(target.host, port),
         )
         data = topology_observation(result)
         reason = data.get("failure_code")
@@ -749,7 +704,6 @@ def execute_run(run_id, authority):
 
     def guard():
         authorize_owner(owner)
-        authorize_address(owner, settings["domain"], address)
         with sessions() as session:
             return (
                 session.scalar(
@@ -849,21 +803,14 @@ def execute_run(run_id, authority):
                         or not scope(candidate, settings["allowed_cidrs"])
                     ):
                         continue
-                    target_key = f"{settings['domain']}|{candidate}|{settings['port']}"
+                    target_key = f"{DOMAIN}|{candidate}|{settings['port']}"
                     if session.scalar(
                         select(Target.id).where(
                             Target.run_id == run_id, Target.target_key == target_key
                         )
                     ):
                         continue
-                    status, why = "waiting_for_input", "credentials_required"
-                    candidate_ref = settings.get("neighbor_credential_ref")
-                    try:
-                        authorize_address(owner, settings["domain"], candidate)
-                        if candidate_ref:
-                            status, why = "queued", None
-                    except DeviceAccessError:
-                        why = "not_authorized"
+                    # New neighbours use the run's login, like the seeds.
                     session.add(
                         Target(
                             id=uuid4().hex,
@@ -871,9 +818,7 @@ def execute_run(run_id, authority):
                             target_key=target_key,
                             address=candidate,
                             depth=depth + 1,
-                            status=status,
-                            reason=why,
-                            credential_ref=candidate_ref,
+                            status="queued",
                         )
                     )
                     session.flush()
@@ -907,7 +852,7 @@ def import_captures(owner, body):
                     id=uuid4().hex,
                     run_id=run_id,
                     address=capture.address,
-                    target_key=f"{body.domain}|{capture.address}",
+                    target_key=f"{DOMAIN}|{capture.address}",
                     depth=0,
                     status="succeeded",
                     version=1,

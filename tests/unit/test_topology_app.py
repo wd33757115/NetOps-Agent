@@ -5,15 +5,16 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from cryptography.fernet import Fernet
 from fastapi import HTTPException
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session
 
-from src.apps.topology.backend import service
+from src.apps.topology.backend import logins, service
 from src.apps.topology.backend.collectors import collect as collectors
 from src.apps.topology.backend.models import Base, Network, Observation, Run, Snapshot, Target, now
 from src.apps.topology.backend.normalize import parse
-from src.apps.topology.backend.schemas import Discovery, Import, Resolve
+from src.apps.topology.backend.schemas import Credentials, Discovery, Import, Resolve
 from src.platform.device_access.contracts import CommandResult, DeviceAccessError
 
 # Synthetic fixtures use the field ordering documented by H3C/Cisco; no real credentials/devices.
@@ -50,10 +51,10 @@ def world(monkeypatch):
         with Session(engine) as session, session.begin():
             yield session
 
-    class Credentials:
+    class Store:
         values = {}
 
-        def put(self, owner, domain, addresses, username, password):
+        def put(self, owner, domain, addresses, username, password, ttl=None):
             ref = uuid4().hex
             self.values[ref] = (username, password)
             return ref
@@ -66,13 +67,17 @@ def world(monkeypatch):
         def revoke(self, ref):
             self.values.pop(ref, None)
 
-    blobs, dispatches, executions, trust_used = {}, [], [], []
+    blobs, dispatches, executions, trust_used, used_logins = {}, [], [], [], []
 
     class Trust:
-        policies = {}
+        verified = []
 
-        def policy(self, domain):
-            return self.policies.get(domain)
+        def verify(self, host, port, key, *, auto_trust=False):
+            self.verified.append((host, auto_trust))
+            return True
+
+        def known_hosts(self, host, port):
+            return ""
 
     def put(run, target, attempt, data):
         key = f"{run}/{target}/{attempt}"
@@ -91,6 +96,8 @@ def world(monkeypatch):
         def __init__(self, **kwargs):
             self.address = kwargs["target_resolver"](None).host
             self.driver = kwargs.get("driver")
+            profile = kwargs["profile_resolver"](None)
+            used_logins.append((self.address, profile.username, profile.password))
 
         def execute_batch(self, context, request, on_result, should_continue, command_filter=None):
             executions.append(request)
@@ -142,10 +149,11 @@ def world(monkeypatch):
         executions.append((target_ref, mode))
         trust_used.append(
             (
-                access.driver.driver.host_key_verifier is not None,
+                access.driver.host_key_verifier is not None,
                 _.get("known_hosts_provider") is not None,
             )
         )
+        access.driver.host_key_verifier(SimpleNamespace(host=access.address), 22, None)
         address = access.address
         assert should_continue()
         if Access.failure:
@@ -193,21 +201,24 @@ def world(monkeypatch):
     monkeypatch.setattr(service, "collect_node", collect_node)
     monkeypatch.setattr(service, "HostKeyStore", Trust)
     monkeypatch.setattr(service, "sessions", sessions)
-    monkeypatch.setattr(service, "CredentialStore", Credentials)
-    monkeypatch.setattr(service, "authorize_address", lambda *args: None)
+    monkeypatch.setattr(logins, "sessions", sessions)
+    monkeypatch.setattr(service, "CredentialStore", Store)
+    monkeypatch.setattr(logins, "CredentialStore", Store)
+    monkeypatch.setenv("DEVICE_ACCESS_CREDENTIAL_KEY", Fernet.generate_key().decode())
     monkeypatch.setattr(service, "dispatch", dispatches.append)
     monkeypatch.setattr(service.storage, "put", put)
     monkeypatch.setattr(service.storage, "get", blobs.__getitem__)
     monkeypatch.setattr(service, "DeviceAccessService", Access)
     yield SimpleNamespace(
         sessions=sessions,
-        credentials=Credentials,
+        credentials=Store,
         access=Access,
         blobs=blobs,
         executions=executions,
         dispatches=dispatches,
         trust=Trust,
         trust_used=trust_used,
+        logins=used_logins,
     )
     engine.dispose()
 
@@ -218,7 +229,7 @@ def discovery(**kwargs):
         seeds=["10.0.0.1"],
         allowed_cidrs=["10.0.0.0/24"],
         profile_id=kwargs.pop("profile_id", "auto"),
-        credentials={"username": "operator", "password": "SENSITIVE"},
+        credentials=kwargs.pop("credentials", {"username": "operator", "password": "SENSITIVE"}),
         **kwargs,
     )
 
@@ -313,33 +324,102 @@ def test_failure_waits_and_only_explicit_resolution_retries(world):
     assert service.evidence("user", done["targets"][0]["evidence_id"])["complete"]
 
 
-def test_neighbor_credentials_are_not_implicitly_reused(world):
+def test_new_neighbours_use_the_runs_login(world):
     row = service.submit("user", discovery())
     service.execute_run(row["id"], lambda *args: None)
+    service.execute_run(row["id"], lambda *args: None)
     result = service.read("user", row["id"])
-    assert result["status"] == "waiting_for_input"
-    neighbor = next(t for t in result["targets"] if t["address"] == "10.0.0.2")
-    assert neighbor["reason"] == "credentials_required"
-    with pytest.raises(HTTPException):
-        service.resolve(
-            "user",
-            row["id"],
-            neighbor["id"],
-            Resolve(request_id="no-creds", version=1, action="retry"),
-        )
-    resolved = service.resolve(
-        "user", row["id"], neighbor["id"], Resolve(request_id="skip", version=1, action="skip")
-    )
-    assert resolved["status"] == "partial"
+    assert result["status"] == "completed"
+    assert {t["address"] for t in result["targets"]} == {"10.0.0.1", "10.0.0.2"}
+    assert world.logins == [
+        ("10.0.0.1", "operator", "SENSITIVE"),
+        ("10.0.0.2", "operator", "SENSITIVE"),
+    ]
+    # The temporary login is not saved: it is revoked when the run ends.
+    assert world.credentials.values == {}
+    assert logins.read_default("user")["configured"] is False
 
 
-def test_shared_neighbor_credentials_still_respect_scope_depth_and_dedup(world):
-    row = service.submit("user", discovery(credentials_for_neighbors=True, max_depth=1))
+def test_neighbours_still_respect_scope_depth_and_dedup(world):
+    row = service.submit("user", discovery(max_depth=1))
     service.execute_run(row["id"], lambda *args: None)
     service.execute_run(row["id"], lambda *args: None)
     result = service.read("user", row["id"])
     assert result["status"] == "completed"
     assert len(result["targets"]) == 2
+
+
+def test_the_default_login_is_used_without_a_temporary_one(world):
+    with pytest.raises(HTTPException) as missing:
+        service.submit("user", discovery(credentials=None, max_depth=0))
+    assert missing.value.status_code == 422
+    logins.save_default("user", Credentials(username="admin", password="DEFAULT"))
+    assert logins.read_default("user") == {"username": "admin", "configured": True}
+    row = service.submit("user", discovery(credentials=None, max_depth=0))
+    service.execute_run(row["id"], lambda *args: None)
+    assert service.read("user", row["id"])["status"] == "completed"
+    # A temporary login wins over the default for its run.
+    other = discovery(max_depth=0)
+    other.request_id = "discovery-2"
+    service.submit("user", other)
+    service.execute_run(service.networks("user")[0]["active_run"], lambda *args: None)
+    assert [login[1:] for login in world.logins] == [
+        ("admin", "DEFAULT"),
+        ("operator", "SENSITIVE"),
+    ]
+    assert logins.resolve("user", "10.0.0.1") == ("admin", "DEFAULT")
+
+
+def test_a_login_typed_for_one_node_applies_to_that_node_only(world):
+    row = service.submit("user", discovery())
+    world.access.failure = "authentication_failed"
+    service.execute_run(row["id"], lambda *args: None)
+    target = service.read("user", row["id"])["targets"][0]
+    assert target["reason"] == "authentication_failed"
+    world.access.failure = None
+    service.resolve(
+        "user",
+        row["id"],
+        target["id"],
+        Resolve(
+            request_id="typed",
+            version=target["version"],
+            action="retry",
+            credentials={"username": "typed-user", "password": "typed"},
+        ),
+    )
+    service.execute_run(row["id"], lambda *args: None)
+    service.execute_run(row["id"], lambda *args: None)
+    assert service.read("user", row["id"])["status"] == "completed"
+    assert world.logins == [
+        ("10.0.0.1", "operator", "SENSITIVE"),
+        ("10.0.0.1", "typed-user", "typed"),
+        ("10.0.0.2", "operator", "SENSITIVE"),
+    ]
+
+
+def test_connection_failure_can_be_retried_or_skipped(world):
+    row = service.submit("user", discovery(max_depth=0))
+    world.access.failure = "connection_failed"
+    service.execute_run(row["id"], lambda *args: None)
+    target = service.read("user", row["id"])["targets"][0]
+    assert target["reason"] == "connection_failed"
+    retried = service.resolve(
+        "user",
+        row["id"],
+        target["id"],
+        Resolve(request_id="again", version=target["version"], action="retry"),
+    )
+    service.execute_run(row["id"], lambda *args: None)
+    target = service.read("user", row["id"])["targets"][0]
+    assert retried["targets"][0]["status"] == "queued" and target["reason"] == "connection_failed"
+    skipped = service.resolve(
+        "user",
+        row["id"],
+        target["id"],
+        Resolve(request_id="skip", version=target["version"], action="skip"),
+    )
+    assert skipped["status"] == "partial"
 
 
 @pytest.mark.parametrize("seed_profile", ["auto", "comware-lldp-v1"])
@@ -349,7 +429,7 @@ def test_mixed_platform_neighbors_are_identified_independently(world, seed_profi
         "Cisco Nexus Operating System (NX-OS) Software"
     )
     world.access.outputs["10.0.0.2"] = NXOS.replace("10.0.0.2", "10.0.0.1")
-    row = service.submit("user", discovery(profile_id=seed_profile, credentials_for_neighbors=True))
+    row = service.submit("user", discovery(profile_id=seed_profile))
     service.execute_run(row["id"], lambda *args: None)
     service.execute_run(row["id"], lambda *args: None)
     result = service.read("user", row["id"])
@@ -373,7 +453,7 @@ def test_mixed_platform_neighbors_are_identified_independently(world, seed_profi
 def test_unknown_platform_waits_and_manual_override_is_target_local(world):
     world.access.versions[("10.0.0.1", "detect-display")] = "Unsupported OS version"
     world.access.versions[("10.0.0.1", "detect-show")] = "Unsupported OS version"
-    row = service.submit("user", discovery(credentials_for_neighbors=True))
+    row = service.submit("user", discovery())
     service.execute_run(row["id"], lambda *args: None)
     failed = service.read("user", row["id"])
     target = failed["targets"][0]
@@ -516,7 +596,7 @@ def test_discovery_of_the_lab_publishes_one_simap_topology(world):
             world.access.captures[(address, cap)] = (LAB / device / f"{name}.txt").read_text(
                 encoding="utf-8"
             )
-    body = discovery(credentials_for_neighbors=True, max_depth=1)
+    body = discovery(max_depth=1)
     body.seeds, body.allowed_cidrs = ["10.10.1.1"], ["10.10.1.0/24"]
     row = service.submit("user", body)
     service.execute_run(row["id"], lambda *args: None)
@@ -550,12 +630,8 @@ def test_discovery_of_the_lab_publishes_one_simap_topology(world):
     assert {u["address"] for u in graph["coverage"]["unexplored"]} == {"2.2.2.1", "2.2.2.2"}
 
 
-@pytest.mark.parametrize("policy", [None, "strict"])
-def test_collection_uses_the_domain_host_key_policy(world, policy):
-    if policy:
-        world.trust.policies["default"] = policy
+def test_discovery_records_host_keys_itself_for_both_sessions(world):
     row = service.submit("user", discovery(max_depth=0))
     service.execute_run(row["id"], lambda *args: None)
-    # A configured domain verifies keys in its store for both sessions; otherwise
-    # the strict known_hosts file of the connection profile applies.
-    assert world.trust_used == [(bool(policy), bool(policy))]
+    assert world.trust_used == [(True, True)]
+    assert world.trust.verified[-1] == ("10.0.0.1", True)

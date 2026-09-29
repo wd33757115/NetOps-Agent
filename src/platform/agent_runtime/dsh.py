@@ -599,7 +599,7 @@ class DshRuntime:
                 NETOPS_DSH_SESSION_ID=session_id,
                 DSH_SYSTEM_PROMPT=(PROMPT.replace(
                     "当前业务工具只查询已有记录；不能声称已执行采集、生成规则或修改配置。",
-                    "本轮允许调用 device_access__collect 对人工选定连接执行固定诊断命令；仅成功结果能证明已采集。不得生成规则或修改配置。"
+                    "本轮允许调用 device_access__collect 对人工选定的已保存会话执行固定诊断命令；仅成功结果能证明已采集。不得生成规则或修改配置。"
                 ).replace("只可建议操作，不声称已执行。", "只可建议配置变更；主动采集必须引用本次工具证据，失败后等待人工。")
                 if getattr(bridge.catalog, "active_diagnostics", False) else PROMPT),
             )

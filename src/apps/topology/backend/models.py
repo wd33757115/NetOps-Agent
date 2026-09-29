@@ -10,6 +10,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Integer,
     String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import declarative_base
@@ -30,6 +31,16 @@ class Network(Base):
     current_snapshot = Column(String(32))
     active_run = Column(String(32))
     created_at = Column(DateTime(timezone=True), nullable=False, default=now)
+
+
+class DefaultLogin(Base):
+    """One saved discovery username/password per platform account."""
+
+    __tablename__ = "app_topology_default_logins"
+    owner_id = Column(String(64), primary_key=True)
+    username = Column(String(128), nullable=False)
+    secret_ciphertext = Column(Text, nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=now)
 
 
 class Run(Base):

@@ -5,8 +5,8 @@ from src.auth.models import CurrentUser
 from src.platform.authorization.client import require_app
 from src.platform.device_access.contracts import DeviceAccessError
 
-from . import service
-from .schemas import Discovery, Import, Resolve
+from . import logins, service
+from .schemas import Credentials, Discovery, Import, Resolve
 
 router = APIRouter(tags=["Topology"])
 actor = require_app("topology")
@@ -24,6 +24,17 @@ def call(fn, *args):
         raise HTTPException(422, {"code": exc.failure_code, "message": str(exc)}) from None
     except IntegrityError:
         raise HTTPException(409, "任务或节点状态已变化，请刷新后重试") from None
+
+
+@router.get("/default-login")
+def read_default(user: CurrentUser = Depends(actor)):
+    return logins.read_default(user.user_id)
+
+
+@router.put("/default-login")
+def save_default(body: Credentials, user: CurrentUser = Depends(actor)):
+    mutation(user)
+    return call(logins.save_default, user.user_id, body)
 
 
 @router.get("/networks")

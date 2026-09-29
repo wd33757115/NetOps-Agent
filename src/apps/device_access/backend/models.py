@@ -1,40 +1,45 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import (
-    JSON,
-    Boolean,
-    Column,
-    DateTime,
-    ForeignKey,
-    Integer,
-    String,
-    Text,
-    UniqueConstraint,
-)
+from sqlalchemy import JSON, Column, DateTime, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
+# The platform keeps its management-domain parameter; this App always passes one value.
+DOMAIN = "default"
 
 
 def now():
     return datetime.now(timezone.utc)
 
 
-class Connection(Base):
-    __tablename__ = "app_device_access_connections"
+class SavedSession(Base):
+    __tablename__ = "app_device_access_saved_sessions"
     id = Column(String(32), primary_key=True)
     owner_id = Column(String(64), nullable=False, index=True)
-    settings = Column(JSON, nullable=False)
-    credential_ref = Column(String(64), nullable=False)
-    expires_at = Column(DateTime(timezone=True), nullable=False)
+    name = Column(String(128), nullable=False)
+    host = Column(String(45), nullable=False)
+    port = Column(Integer, nullable=False, default=22)
+    # Both empty: log in with the owner's default username/password.
+    username = Column(String(128))
+    secret_ciphertext = Column(Text)
     created_at = Column(DateTime(timezone=True), nullable=False, default=now)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=now)
+
+
+class DefaultLogin(Base):
+    __tablename__ = "app_device_access_default_logins"
+    owner_id = Column(String(64), primary_key=True)
+    username = Column(String(128), nullable=False)
+    secret_ciphertext = Column(Text, nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=now)
 
 
 class Operation(Base):
     __tablename__ = "app_device_access_operations"
     id = Column(String(32), primary_key=True)
     owner_id = Column(String(64), nullable=False, index=True)
-    connection_id = Column(String(32), ForeignKey(Connection.id), nullable=False)
+    session_id = Column(String(32))
+    host = Column(String(45), nullable=False)
     request_id = Column(String(100), nullable=False)
     profile_id = Column(String(64), nullable=False)
     status = Column(String(32), nullable=False)
@@ -42,33 +47,6 @@ class Operation(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=now)
     finished_at = Column(DateTime(timezone=True))
     __table_args__ = (UniqueConstraint("owner_id", "request_id"),)
-
-
-class CredentialSet(Base):
-    __tablename__ = "app_device_access_credential_sets"
-    id = Column(String(32), primary_key=True)
-    owner_id = Column(String(64), nullable=False, index=True)
-    domain = Column(String(64), nullable=False, index=True)
-    name = Column(String(128), nullable=False)
-    username = Column(String(128), nullable=False)
-    secret_ciphertext = Column(Text, nullable=False)
-    enable_secret_ciphertext = Column(Text)
-    scope_kind = Column(String(16), nullable=False)
-    scope_value = Column(String(256), nullable=False)
-    priority = Column(Integer, nullable=False, default=0)
-    disabled = Column(Boolean, nullable=False, default=False)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=now)
-    rotated_at = Column(DateTime(timezone=True), nullable=False, default=now)
-
-
-class DeviceCredential(Base):
-    __tablename__ = "app_device_access_device_credentials"
-    owner_id = Column(String(64), primary_key=True)
-    domain = Column(String(64), primary_key=True)
-    device_key = Column(String(256), primary_key=True)
-    credential_set_id = Column(String(32), ForeignKey(CredentialSet.id))
-    last_success_at = Column(DateTime(timezone=True))
-    last_failure_code = Column(String(64))
 
 
 class HostKey(Base):
@@ -80,20 +58,15 @@ class HostKey(Base):
     public_key = Column(Text, nullable=False)
     fingerprint_sha256 = Column(String(64), nullable=False)
     first_seen = Column(DateTime(timezone=True), nullable=False, default=now)
+    # pending: seen once, waiting for the user; trusted: confirmed or recorded by discovery.
     status = Column(String(16), nullable=False)
     revision = Column(Integer, nullable=False, default=1)
     verified_by = Column(String(64))
     verified_at = Column(DateTime(timezone=True))
     observed_fingerprint = Column(String(64))
+    observed_key_type = Column(String(64))
+    observed_public_key = Column(Text)
     changed_at = Column(DateTime(timezone=True))
-
-
-class HostKeyPolicy(Base):
-    __tablename__ = "app_device_access_host_key_policies"
-    domain = Column(String(64), primary_key=True)
-    policy = Column(String(16), nullable=False)
-    updated_by = Column(String(64), nullable=False)
-    updated_at = Column(DateTime(timezone=True), nullable=False, default=now)
 
 
 class SessionAudit(Base):
@@ -103,26 +76,5 @@ class SessionAudit(Base):
     session_id = Column(String(32), nullable=False, index=True)
     target_ref = Column(String(256), nullable=False)
     event_kind = Column(String(32), nullable=False)
-    payload = Column(JSON, nullable=False)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=now)
-
-
-class AddressGrant(Base):
-    __tablename__ = "app_device_access_address_grants"
-    id = Column(String(64), primary_key=True)
-    owner_id = Column(String(64), nullable=False, index=True)
-    domain = Column(String(64), nullable=False)
-    cidr = Column(String(49), nullable=False)
-    action = Column(String(32), nullable=False)
-    enabled = Column(Boolean, nullable=False, default=True)
-    revision = Column(Integer, nullable=False, default=1)
-
-
-class GrantAudit(Base):
-    __tablename__ = "app_device_access_grant_audit"
-    id = Column(String(32), primary_key=True)
-    actor_id = Column(String(64), nullable=False)
-    grant_id = Column(String(64), nullable=False, index=True)
-    operation = Column(String(16), nullable=False)
     payload = Column(JSON, nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, default=now)

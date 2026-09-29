@@ -47,7 +47,6 @@ def test_shared_candidates_and_complete_view_in_postgres():
             return FactRepository(
                 CurrentUser(user_id=owner, username=owner),
                 sessions=sessions,
-                authorize=lambda *args: None,
                 evidence_reader=evidence.__getitem__,
             )
 

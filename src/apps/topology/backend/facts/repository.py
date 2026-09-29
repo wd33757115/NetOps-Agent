@@ -12,9 +12,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import Integer, String, func, select
 from sqlalchemy.exc import IntegrityError
 
-from src.apps.device_access.backend.grants import authorize_address
-from src.platform.device_access.contracts import DeviceAccessError
-
 from .. import storage
 from ..models import Network, Run, now
 from ..repository import sessions as default_sessions
@@ -107,11 +104,10 @@ def validate_records(body):
 
 
 class FactRepository:
-    def __init__(self, actor, *, sessions=None, authorize=None, evidence_reader=None):
+    def __init__(self, actor, *, sessions=None, evidence_reader=None):
         # Actor is authenticated by the App gateway/worker, never supplied by model tools.
         self.actor = actor
         self.sessions = sessions or default_sessions
-        self.authorize = authorize or authorize_address
         self.evidence_reader = evidence_reader or storage.get
 
     def _writer(self):
@@ -122,14 +118,7 @@ class FactRepository:
         row = session.get(Device, uid)
         if row is None or row.domain != domain:
             raise HTTPException(404, "设备事实不存在")
-        for address in row.mgmt_addresses:
-            try:
-                self.authorize(self.actor.user_id, domain, address)
-                return row
-            except DeviceAccessError as exc:
-                if exc.failure_code != "not_authorized":
-                    raise
-        raise HTTPException(404, "设备事实不存在")
+        return row
 
     def create_device(self, domain, addresses, *, hostname=None):
         """Create a weak managed identity; P3 resolves/merges strong identities."""
@@ -141,8 +130,6 @@ class FactRepository:
             raise ValueError("managed device requires bounded management addresses")
         if hostname is not None and (not isinstance(hostname, str) or len(hostname) > 256):
             raise ValueError("invalid hostname")
-        for address in addresses:
-            self.authorize(self.actor.user_id, domain, address)
         with self.sessions() as session:
             existing = session.scalar(
                 select(Device).where(Device.domain == domain, Device.seed_address == addresses[0])

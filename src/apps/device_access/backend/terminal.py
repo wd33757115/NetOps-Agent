@@ -16,43 +16,41 @@ from src.platform.device_access import AccessContext, AccessGrant
 from src.platform.device_access.contracts import DeviceAccessError
 from src.platform.kernel.runtime import invocation
 
-from . import service
+from . import saved, service
 
 
 def pump(payload, incoming, outgoing, stop):
-    owner, connection_id, operation_id = (
-        payload[k] for k in ("owner", "connection_id", "operation_id")
-    )
+    owner, operation_id = payload["owner"], payload["operation_id"]
+    host, port, session_id = payload["host"], payload["port"], payload.get("session_id")
     started, last_input, last_check = time.monotonic(), time.monotonic(), 0
     output_bytes, input_bytes, digest = 0, 0, hashlib.sha256()
     status, reason = "completed", None
+    ref = session_id or operation_id
     try:
 
         def authorized():
             if stop.is_set():
                 return False
-            user = authorize_worker(owner, service.APP_ID)
-            if not user.can_execute_skills():
+            if not authorize_worker(owner, service.APP_ID).can_execute_skills():
                 raise DeviceAccessError("not_authorized", "账号不能打开终端")
-            service.connection(owner, connection_id, "device.terminal")
             return True
 
         if not authorized():
             return
-        access = service.access(owner, connection_id, "device.terminal")
+        username, password = service.terminal_login(payload)
+        access = service.access(ref, host, port, username, password)
         context = AccessContext(
             owner,
             service.APP_ID,
-            (AccessGrant(connection_id, connection_id, action="device.terminal"),),
+            (AccessGrant(ref, ref, action="device.terminal"),),
             operation_id,
         )
         with (
             invocation(service.APP_ID),
-            access.terminal(context, connection_id, connection_id, should_continue=authorized) as (
-                channel,
-                lease,
-            ),
+            access.terminal(context, ref, ref, should_continue=authorized) as (channel, lease),
         ):
+            if payload.get("save") and session_id:
+                saved.save_login(owner, session_id, username, password)
             decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
             outgoing.put({"type": "ready"}, timeout=2)
             while not stop.is_set():
@@ -61,10 +59,7 @@ def pump(payload, incoming, outgoing, stop):
                     raise DeviceAccessError("terminal_expired", "终端已达到会话或空闲时限")
                 if current - last_check > 5:
                     lease()
-                    user = authorize_worker(owner, service.APP_ID)
-                    if not user.can_execute_skills():
-                        raise DeviceAccessError("not_authorized", "账号权限已改变")
-                    service.connection(owner, connection_id, "device.terminal")
+                    authorized()
                     last_check = current
                 try:
                     event = incoming.get_nowait()
@@ -119,7 +114,9 @@ def pump(payload, incoming, outgoing, stop):
             )
         finally:
             with contextlib.suppress(queue.Full):
-                outgoing.put({"type": "closed", "reason": reason}, timeout=2)
+                outgoing.put(
+                    {"type": "closed", "reason": reason, "host": host, "port": port}, timeout=2
+                )
             stop.set()
 
 

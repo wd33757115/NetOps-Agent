@@ -4,20 +4,19 @@ import { Background, Controls, Handle, MarkerType, Position, ReactFlow, ReactFlo
 import { layout, sides, type Side } from './layout'
 import '@xyflow/react/dist/style.css'
 import { api } from '@netops/config/api'
-import DeviceTerminal from '@netops/platform/terminal/DeviceTerminal'
-import { useAuth } from '@netops/context/AuthContext'
-import AccessScopes from './AccessScopes'
+import DeviceTerminal, { acceptHostKey, readHostKey, type HostKey } from '@netops/platform/terminal/DeviceTerminal'
 import './topology.css'
 
-interface Network { id: string; name: string; domain: string; active_run?: string; current_snapshot?: string }
+interface Network { id: string; name: string; active_run?: string; current_snapshot?: string }
 interface TopologyNode { id: string; name: string; address?: string; addresses?: string[]; identity_status: string; freshness: string; observed_at?: string; evidence_id?: string; members?: number; subnets?: string[]; tps: { id: string; name: string }[] }
 interface Link { id: string; source: string; target: string; source_tp: string; target_tp: string; freshness: string; observed_at?: string; evidence_id?: string; link_type?: string; direction?: string; label?: string; ends?: string[]; subnets?: string[]; evidence?: string[] }
-interface Graph { nodes: TopologyNode[]; links: Link[]; domain: string; model_profile: string }
+interface Graph { nodes: TopologyNode[]; links: Link[]; model_profile: string }
 interface Target { id: string; address: string; depth: number; status: string; reason?: string; version: number; evidence_id?: string }
-interface Run { id: string; network_id: string; status: string; snapshot_id?: string; graph: Graph; targets: Target[]; created_at: string }
+interface Run { id: string; network_id: string; status: string; port?: number; snapshot_id?: string; graph: Graph; targets: Target[]; created_at: string }
 interface History { id: string; status: string; created_at: string; snapshot_id?: string }
 const labels: Record<string, string> = { queued: '排队中', running: '发现中', waiting_for_input: '等待人工处理', completed: '已完成', partial: '部分完成', cancelled: '已取消', succeeded: '采集成功', skipped: '人工跳过', observed: '本次观测', advertised: '邻居通告', not_observed: '本次未观测', absent_in_observation: '本次邻接表中未出现', candidate: '候选身份', address_scoped: '地址范围内身份', collected: '已采集', host: '终端主机', segment: '共享网段', p2p: '点到点', mp2mp: '多点共享', bi: '双向', uni: '单向' }
-const failures: Record<string, string> = { platform_unrecognized: '平台未识别，请确认此节点平台或补充适配', platform_ambiguous: '平台识别证据冲突，请人工确认', platform_unsupported: '此平台尚无已验证适配', authentication_failed: '用户名或密码不正确', connection_failed: '无法连接设备', timeout: '连接或命令超时', credential_expired: '凭据已过期', credentials_required: '请为新节点提供凭据', host_key_rejected: '请管理员核验主机密钥', parse_failed: '无法识别设备输出，请检查适配与证据', output_incomplete: '设备输出未完整返回', not_authorized: '超出当前账号设备授权范围', worker_interrupted: '执行中断，请人工确认后重试' }
+const failures: Record<string, string> = { platform_unrecognized: '平台未识别，请确认此节点平台或补充适配', platform_ambiguous: '平台识别证据冲突，请人工确认', platform_unsupported: '此平台尚无已验证适配', authentication_failed: '用户名或密码不正确，请输入新的用户名密码', connection_failed: '无法连接设备，可重试或跳过', timeout: '连接或命令超时，可重试或跳过', credential_expired: '本次用户名密码已失效，请重新输入', credentials_required: '请输入用户名和密码', host_key_changed: '设备主机密钥已变化，请核对新指纹', host_key_rejected: '主机密钥未通过校验', parse_failed: '无法识别设备输出，请检查适配与证据', output_incomplete: '设备输出未完整返回', worker_interrupted: '执行中断，请人工确认后重试' }
+const loginReasons = ['authentication_failed', 'credential_expired', 'credentials_required']
 const profiles = [{ value: 'auto', label: '自动识别（无需预先知道型号）' }, { value: 'comware-lldp-v1', label: 'Comware · LLDP v1' }, { value: 'nxos-lldp-v1', label: 'NX-OS · LLDP v1' }]
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : '操作未完成，请重试'
 
@@ -68,8 +67,9 @@ export default function Page() {
   const [run, setRun] = useState<Run>()
   const [create, setCreate] = useState(false)
   const [offline, setOffline] = useState(false)
-  const [scopes, setScopes] = useState(false)
-  const { user } = useAuth()
+  const [defaultLogin, setDefaultLogin] = useState<{ username: string | null; configured: boolean }>()
+  const [editDefault, setEditDefault] = useState(false)
+  const [hostKey, setHostKey] = useState<HostKey>()
   const [importText, setImportText] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -82,15 +82,16 @@ export default function Page() {
   const [changes, setChanges] = useState<unknown>()
   const [form] = Form.useForm()
   const chosenNetwork = Form.useWatch('network_id', form)
-  // An existing network fixes the name and management domain; authorization is checked
-  // against that domain, so the form must never submit a different one.
+  // An existing network keeps its name.
   const applyNetwork = (id?: string) => {
     const chosen = networks.find(n => n.id === id)
-    if (chosen) form.setFieldsValue({ network_id: chosen.id, name: chosen.name, domain: chosen.domain })
+    if (chosen) form.setFieldsValue({ network_id: chosen.id, name: chosen.name })
   }
   const [retryForm] = Form.useForm()
+  const [defaultForm] = Form.useForm()
+  const refreshDefault = () => api.get<{ username: string | null; configured: boolean }>('/apps/topology/default-login').then(({ data }) => setDefaultLogin(data))
   const refreshNetworks = () => api.get<Network[]>('/apps/topology/networks').then(({ data }) => { setNetworks(data); setNetworkId(current => current || data[0]?.id) })
-  useEffect(() => { void refreshNetworks().catch(error => setError(errorMessage(error))) }, [])
+  useEffect(() => { void refreshNetworks().catch(error => setError(errorMessage(error))); void refreshDefault().catch(() => undefined) }, [])
   useEffect(() => {
     setRun(undefined); setSelected(undefined); setRunId(undefined)
     if (!networkId) return
@@ -123,20 +124,26 @@ export default function Page() {
     setHistory(data); setRunId(value.id); setRun(value)
   }
   const readEvidence = async (id?: string) => { if (!id) return; try { setEvidence((await api.get(`/apps/topology/evidence/${id}`)).data) } catch (error) { message.error(errorMessage(error)) } }
+  const openTarget = (row: Target) => {
+    setTarget(row); setRetryProfile(row.platform?.source === 'manual' ? row.platform.profile_id || 'auto' : 'auto')
+    setReplaceCredentials(loginReasons.includes(row.reason || '')); retryForm.resetFields(); setHostKey(undefined)
+    if (row.reason === 'host_key_changed') void readHostKey(row.address, run?.port || 22).then(setHostKey).catch(error => message.error(errorMessage(error)))
+  }
   const resolve = async (action: 'retry' | 'skip') => {
     if (!target || !run) return
     setBusy(true)
     try {
       const credentials = action === 'retry' && replaceCredentials ? await retryForm.validateFields() : undefined
+      if (action === 'retry' && hostKey) await acceptHostKey(hostKey)
       const { data } = await api.post<Run>(`/apps/topology/runs/${run.id}/targets/${target.id}/resolve`, { request_id: crypto.randomUUID(), version: target.version, action, credentials, profile_id: action === 'retry' ? retryProfile : undefined })
-      setRun(data); setTarget(undefined); retryForm.resetFields()
+      setRun(data); setTarget(undefined); setHostKey(undefined); retryForm.resetFields()
     } catch (error) { message.error(errorMessage(error)) }
     finally { retryForm.setFieldValue('password', ''); setBusy(false) }
   }
   return <main className="topology-workspace">
-    <header className="topology-heading"><div><Typography.Title level={2}>网络拓扑</Typography.Title><p>发现网络，保留观测，逐步构建数字孪生。</p></div><Space>{user?.role === 'admin' && <Button onClick={() => setScopes(true)}>访问范围</Button>}<Button onClick={() => setOffline(true)}>导入离线观测</Button><Button type="primary" onClick={() => { form.resetFields(); applyNetwork(networkId); setCreate(true) }}>新建发现任务</Button></Space></header>
+    <header className="topology-heading"><div><Typography.Title level={2}>网络拓扑</Typography.Title><p>发现网络，保留观测，逐步构建数字孪生。</p></div><Space><Button onClick={() => { defaultForm.resetFields(); setEditDefault(true) }}>默认登录{defaultLogin?.configured ? ` · ${defaultLogin.username}` : ''}</Button><Button onClick={() => setOffline(true)}>导入离线观测</Button><Button type="primary" onClick={() => { form.resetFields(); applyNetwork(networkId); setCreate(true) }}>新建发现任务</Button></Space></header>
     {error && <Alert type="error" message={error} action={<Button onClick={() => { setError(''); void refreshNetworks().catch(error => setError(errorMessage(error))) }}>刷新</Button>} />}
-    <div className="topology-toolbar"><Select aria-label="网络" placeholder="选择网络" value={networkId} onChange={setNetworkId} options={networks.map(n => ({ value: n.id, label: `${n.name} · ${n.domain}` }))} style={{ minWidth: 220 }} />
+    <div className="topology-toolbar"><Select aria-label="网络" placeholder="选择网络" value={networkId} onChange={setNetworkId} options={networks.map(n => ({ value: n.id, label: n.name }))} style={{ minWidth: 220 }} />
       <Select aria-label="观测任务" placeholder="观测任务" value={runId} onChange={value => { setSelected(undefined); setRunId(value) }} options={history.map(h => ({ value: h.id, label: `${new Date(h.created_at).toLocaleString()} · ${labels[h.status] || h.status}` }))} style={{ minWidth: 290 }} />
       {run && <Tag color={active ? 'processing' : 'default'}>{labels[run.status]}</Tag>}
       {run?.snapshot_id && <Button onClick={() => void api.get(`/apps/topology/snapshots/${run.snapshot_id}/rfc8345`).then(({ data }) => {
@@ -160,35 +167,46 @@ export default function Page() {
         { title: '管理地址', dataIndex: 'address' }, { title: '发现深度', dataIndex: 'depth', width: 100 },
         { title: '设备平台', render: (_, row) => row.platform?.profile_id ? `${profiles.find(p => p.value === row.platform?.profile_id)?.label || row.platform.profile_id} · ${row.platform.source === 'manual' ? '人工指定' : '自动识别'}` : '待识别' },
         { title: '状态', render: (_, row) => <><Tag color={row.status === 'waiting_for_input' ? 'warning' : 'default'}>{labels[row.status] || row.status}</Tag><span>{failures[row.reason || ''] || row.reason}</span></> },
-        { title: '操作', render: (_, row) => <Space>{row.status === 'waiting_for_input' && <Button size="small" onClick={() => { setTarget(row); setRetryProfile(row.platform?.source === 'manual' ? row.platform.profile_id || 'auto' : 'auto'); setReplaceCredentials(!row.reason?.startsWith('platform_')); retryForm.resetFields() }}>人工处理</Button>}<Button size="small" disabled={!row.evidence_id} onClick={() => void readEvidence(row.evidence_id)}>证据</Button><Button size="small" onClick={() => setTerminal(row.address)}>SSH</Button></Space> },
+        { title: '操作', render: (_, row) => <Space>{row.status === 'waiting_for_input' && <Button size="small" onClick={() => openTarget(row)}>人工处理</Button>}<Button size="small" disabled={!row.evidence_id} onClick={() => void readEvidence(row.evidence_id)}>证据</Button><Button size="small" onClick={() => setTerminal(row.address)}>SSH</Button></Space> },
       ]} />
     </section>
     <Drawer title="新建拓扑发现" open={create} onClose={() => { form.resetFields(); setCreate(false) }} destroyOnClose width={520}>
-      <Form form={form} layout="vertical" initialValues={{ name: '网络拓扑', domain: 'default', port: 22, profile_id: 'auto', max_depth: 3, max_targets: 30, credentials_for_neighbors: false }} onFinish={async values => {
+      <Form form={form} layout="vertical" initialValues={{ name: '网络拓扑', port: 22, profile_id: 'auto', max_depth: 3, max_targets: 30 }} onFinish={async values => {
+        const { username, password, ...rest } = values
+        if (!!username !== !!password) { message.error('本次用户名和密码需要同时填写，或都留空使用默认'); return }
+        if (!username && !defaultLogin?.configured) { message.error('请填写本次用户名和密码，或先设置默认登录'); return }
         setBusy(true)
-        try { const { data } = await api.post<Run>('/apps/topology/runs', { ...values, request_id: crypto.randomUUID(), seeds: values.seeds.split(/[\s,]+/).filter(Boolean), allowed_cidrs: values.allowed_cidrs.split(/[\s,]+/).filter(Boolean) }); await accept(data); setCreate(false); form.resetFields() }
+        try { const { data } = await api.post<Run>('/apps/topology/runs', { ...rest, ...(username ? { credentials: { username, password } } : {}), request_id: crypto.randomUUID(), seeds: values.seeds.split(/[\s,]+/).filter(Boolean), allowed_cidrs: values.allowed_cidrs.split(/[\s,]+/).filter(Boolean) }); await accept(data); setCreate(false); form.resetFields() }
         catch (error) { message.error(errorMessage(error)) }
-        finally { form.setFieldValue(['credentials', 'password'], ''); setBusy(false) }
+        finally { form.setFieldValue('password', ''); setBusy(false) }
       }}>
-        <Form.Item name="network_id" label="网络范围"><Select allowClear placeholder="创建新网络" onChange={value => applyNetwork(value)} options={networks.map(n => ({ value: n.id, label: `${n.name} · ${n.domain}` }))} /></Form.Item>
-        <Form.Item name="name" label="网络名称" rules={[{ required: true }]}><Input disabled={!!chosenNetwork} /></Form.Item><Form.Item name="domain" label="管理域" rules={[{ required: true }]} extra={chosenNetwork ? '沿用所选网络的管理域；设备授权按此管理域校验' : '设备授权按此管理域校验，须与本应用“访问范围”中的管理域一致'}><Input disabled={!!chosenNetwork} /></Form.Item>
+        <Form.Item name="network_id" label="网络范围"><Select allowClear placeholder="创建新网络" onChange={value => applyNetwork(value)} options={networks.map(n => ({ value: n.id, label: n.name }))} /></Form.Item>
+        <Form.Item name="name" label="网络名称" rules={[{ required: true }]}><Input disabled={!!chosenNetwork} /></Form.Item>
         <Form.Item name="seeds" label="种子设备地址" rules={[{ required: true }]} extra="多个 IP 以空格或换行分隔"><Input.TextArea rows={2} placeholder="10.10.1.1" /></Form.Item>
-        <Form.Item name="allowed_cidrs" label="本任务允许的管理网段" rules={[{ required: true }]} extra="发现范围同时受管理员授予的设备权限约束"><Input placeholder="10.10.1.0/24" /></Form.Item>
+        <Form.Item name="allowed_cidrs" label="本任务允许的管理网段" rules={[{ required: true }]} extra="只发现此网段内的邻居"><Input placeholder="10.10.1.0/24" /></Form.Item>
         <Form.Item name="profile_id" label="种子设备平台（可选）" extra="默认自动识别。手工选择只适用于种子；每个新邻居都独立识别，不继承种子平台。"><Select options={profiles} /></Form.Item>
         <Space><Form.Item name="port" label="SSH 端口"><InputNumber min={1} max={65535} /></Form.Item><Form.Item name="max_depth" label="最大深度"><InputNumber min={0} max={16} /></Form.Item><Form.Item name="max_targets" label="目标上限"><InputNumber min={1} max={200} /></Form.Item></Space>
-        <Form.Item name={['credentials', 'username']} label="用户名" rules={[{ required: true }]}><Input autoComplete="off" /></Form.Item><Form.Item name={['credentials', 'password']} label="密码" rules={[{ required: true }]}><Input.Password autoComplete="new-password" /></Form.Item>
-        <Form.Item name="credentials_for_neighbors" valuePropName="checked"><Checkbox>允许本次凭据用于上述网段内发现的新邻居</Checkbox></Form.Item>
-        <p>认证或连接失败后等待人工处理。凭据有效期 1 小时；不会从资产、巡检或历史密码中自动取用。</p><Button type="primary" htmlType="submit" loading={busy}>开始发现</Button>
+        <Form.Item name="username" label="本次用户名（可选）"><Input autoComplete="off" placeholder={defaultLogin?.configured ? `留空使用默认 ${defaultLogin.username}` : '尚未设置默认登录'} /></Form.Item><Form.Item name="password" label="本次密码（可选）"><Input.Password autoComplete="new-password" /></Form.Item>
+        <p>本次用户名密码只用于这次任务、不保存；本次所有节点（包括新发现的邻居）都使用同一组。某个节点登录失败时，会提示为该节点输入新的用户名密码。</p><Button type="primary" htmlType="submit" loading={busy}>开始发现</Button>
       </Form>
     </Drawer>
     <Modal open={!!target} title={`处理节点 · ${target?.address || ''}`} onCancel={() => { retryForm.resetFields(); setTarget(undefined) }} footer={<Space><Button onClick={() => void resolve('skip')} disabled={busy}>跳过此节点</Button><Button type="primary" loading={busy} onClick={() => void resolve('retry')}>确认并重试一次</Button></Space>} destroyOnClose>
-      <Alert type="warning" message={failures[target?.reason || ''] || target?.reason} style={{ marginBottom: 16 }} /><div style={{ marginBottom: 16 }}><Typography.Text>仅此节点的平台</Typography.Text><Select aria-label="仅此节点的平台" value={retryProfile} onChange={setRetryProfile} options={profiles} style={{ width: '100%', marginTop: 8 }} /><p>无法识别或尚未支持的设备可保留候选节点并跳过；此选择不会传给邻居。</p></div><Checkbox checked={replaceCredentials} onChange={event => setReplaceCredentials(event.target.checked)}>提供新的用户名和密码</Checkbox>
+      <Alert type="warning" message={failures[target?.reason || ''] || target?.reason} style={{ marginBottom: 16 }} /><div style={{ marginBottom: 16 }}><Typography.Text>仅此节点的平台</Typography.Text><Select aria-label="仅此节点的平台" value={retryProfile} onChange={setRetryProfile} options={profiles} style={{ width: '100%', marginTop: 8 }} /><p>无法识别或尚未支持的设备可保留候选节点并跳过；此选择不会传给邻居。</p></div>{hostKey && <Alert type="error" showIcon message="主机密钥已变化" description={<>已保存：<code>{hostKey.fingerprint}</code><br />设备当前：<code>{hostKey.observed_fingerprint}</code><br />核对无误后点“确认并重试一次”，将替换为新密钥。</>} style={{ marginBottom: 16 }} />}<Checkbox checked={replaceCredentials} onChange={event => setReplaceCredentials(event.target.checked)}>为此节点输入新的用户名和密码</Checkbox>
       {replaceCredentials && <Form form={retryForm} layout="vertical" style={{ marginTop: 16 }}><Form.Item name="username" label="用户名" rules={[{ required: true }]}><Input autoComplete="off" /></Form.Item><Form.Item name="password" label="密码" rules={[{ required: true }]}><Input.Password autoComplete="new-password" /></Form.Item></Form>}
     </Modal>
-    <Drawer title="访问范围" open={scopes} onClose={() => setScopes(false)} width={900} destroyOnClose><AccessScopes /></Drawer>
-    <Drawer title="导入离线 LLDP 观测" open={offline} onClose={() => setOffline(false)} width={660}><p>JSON 包含 profile_id、domain 和 captures。每项需提供 address、含时区的 observed_at、outputs.neighbors 与 complete。离线数据不会触发设备登录。</p><Input.TextArea aria-label="离线观测 JSON" rows={18} value={importText} onChange={event => setImportText(event.target.value)} placeholder={'{"profile_id":"comware-lldp-v1","domain":"default","captures":[{"address":"10.10.1.1","observed_at":"2026-09-28T08:00:00+08:00","outputs":{"neighbors":"完整 LLDP 命令输出"},"complete":true}]}'} /><Button type="primary" style={{ marginTop: 16 }} loading={busy} onClick={async () => { setBusy(true); try { const { data } = await api.post('/apps/topology/imports', { ...JSON.parse(importText), request_id: crypto.randomUUID() }); await accept(data); setOffline(false); setImportText('') } catch (error) { message.error(errorMessage(error)) } finally { setBusy(false) } }}>校验并导入</Button></Drawer>
+    <Modal open={editDefault} title="默认登录" okText="保存" cancelText="取消" confirmLoading={busy} onCancel={() => { defaultForm.resetFields(); setEditDefault(false) }} destroyOnClose
+      onOk={() => void defaultForm.validateFields().then(async values => {
+        setBusy(true)
+        try { await api.put('/apps/topology/default-login', values); await refreshDefault(); setEditDefault(false) }
+        catch (error) { message.error(errorMessage(error)) }
+        finally { defaultForm.resetFields(); setBusy(false) }
+      }).catch(() => undefined)}>
+      <p>新建发现任务时不填写本次用户名密码，就使用这一组。密码加密保存，不会显示。{defaultLogin?.configured && `当前：${defaultLogin.username}`}</p>
+      <Form form={defaultForm} layout="vertical" preserve={false}><Form.Item name="username" label="用户名" rules={[{ required: true }]}><Input autoComplete="off" /></Form.Item><Form.Item name="password" label="密码" rules={[{ required: true }]}><Input.Password autoComplete="new-password" /></Form.Item></Form>
+    </Modal>
+    <Drawer title="导入离线 LLDP 观测" open={offline} onClose={() => setOffline(false)} width={660}><p>JSON 包含 profile_id 和 captures。每项需提供 address、含时区的 observed_at、outputs.neighbors 与 complete。离线数据不会触发设备登录。</p><Input.TextArea aria-label="离线观测 JSON" rows={18} value={importText} onChange={event => setImportText(event.target.value)} placeholder={'{"profile_id":"comware-lldp-v1","captures":[{"address":"10.10.1.1","observed_at":"2026-09-28T08:00:00+08:00","outputs":{"neighbors":"完整 LLDP 命令输出"},"complete":true}]}'} /><Button type="primary" style={{ marginTop: 16 }} loading={busy} onClick={async () => { setBusy(true); try { const { data } = await api.post('/apps/topology/imports', { ...JSON.parse(importText), request_id: crypto.randomUUID() }); await accept(data); setOffline(false); setImportText('') } catch (error) { message.error(errorMessage(error)) } finally { setBusy(false) } }}>校验并导入</Button></Drawer>
     <Drawer title="原始观测证据" open={evidence !== undefined} onClose={() => setEvidence(undefined)} width={760}><pre className="topology-raw">{JSON.stringify(evidence, null, 2)}</pre></Drawer>
     <Drawer title="快照差异" open={changes !== undefined} onClose={() => setChanges(undefined)} width={600}><p>差异包含对象、新鲜度和观测时间变化；未观测不等于已经删除。</p><pre className="topology-raw">{JSON.stringify(changes, null, 2)}</pre></Drawer>
-    <DeviceTerminal open={!!terminal} onClose={() => setTerminal(undefined)} address={terminal} domain={run?.graph.domain} />
+    <DeviceTerminal open={!!terminal} onClose={() => setTerminal(undefined)} address={terminal} />
   </main>
 }

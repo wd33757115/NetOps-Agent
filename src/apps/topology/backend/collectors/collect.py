@@ -49,10 +49,8 @@ def collect_node(
 ):
     """Backend only. Caller supplies authenticated grants, revocation guard and evidence sink.
 
-    Probe connection always uses Paramiko; a second connection is initialized for
-    the confirmed platform. Both share a hard budget. A vault wrapper pins the
-    successful credential for that second connection even if the driver is unchanged.
-    The existing discovery UI/queue is wired in a later card, not bypassed here.
+    Probe connection always uses Paramiko; a second connection with the same login
+    is initialized for the confirmed platform. Both share a hard budget.
     """
     profiles = profiles if profiles is not None else load_profiles()
     if mode not in MODE_CAPABILITIES:
@@ -64,10 +62,8 @@ def collect_node(
     )
     if type(limit) not in (int, float) or not math.isfinite(limit) or not 0 < limit <= 600:
         raise ValueError("invalid node budget")
-    if access.driver.name != "paramiko" or not callable(
-        getattr(access.driver, "for_identified_driver", None)
-    ):
-        raise DeviceAccessError("invalid_request", "识别入口需要公共 Paramiko 凭据库驱动")
+    if access.driver.name != "paramiko":
+        raise DeviceAccessError("invalid_request", "识别入口需要公共 Paramiko 驱动")
     started = time.monotonic()
     deadline = started + limit
 
@@ -128,7 +124,7 @@ def collect_node(
         driver_name == "netmiko"
         and known_hosts_provider is None
         and (
-            getattr(access.driver.driver, "host_key_verifier", None) is not None
+            getattr(access.driver, "host_key_verifier", None) is not None
             or not original_profile.known_hosts_file
         )
     ):
@@ -136,10 +132,9 @@ def collect_node(
         driver_name = "paramiko"
         driver_warning = "netmiko_requires_matching_known_hosts_provider"
     if driver_name == "netmiko":
-        underlying = NetmikoDriver(profile.os_family, known_hosts_provider=known_hosts_provider)
+        driver = NetmikoDriver(profile.os_family, known_hosts_provider=known_hosts_provider)
     else:
-        underlying = access.driver.driver
-    driver = access.driver.for_identified_driver(underlying)
+        driver = access.driver
     connection = replace(
         original_profile,
         platform=profile.os_family,

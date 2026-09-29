@@ -12,7 +12,7 @@ from src.platform.agent_runtime.dsh import DshRuntime
 from tests.unit.test_dsh_runtime import response
 
 
-def test_official_dsh_can_collect_only_selected_connection_and_cite_result(tmp_path, monkeypatch):
+def test_official_dsh_can_collect_only_selected_session_and_cite_result(tmp_path, monkeypatch):
     source = tmp_path / "documents"
     source.mkdir()
     calls = []
@@ -29,17 +29,13 @@ def test_official_dsh_can_collect_only_selected_connection_and_cite_result(tmp_p
         lambda **kwargs: definitions if kwargs.get("names") else [],
     )
     monkeypatch.setattr(
-        "src.apps.device_access.backend.service.connection",
-        lambda *args: (
-            {"address": "10.0.0.1", "domain": "lab", "profiles": ["comware-interfaces-v1"]},
-            "ref",
-        ),
+        "src.apps.device_access.backend.saved.target", lambda *args: ("R1", "10.0.0.1", 22)
     )
     monkeypatch.setattr("src.apps.assistant.backend.workspace.authorize_worker", lambda *args: None)
 
     def invoke(name, arguments, **kwargs):
         calls.append((name, arguments))
-        assert arguments["connection_id"] == "approved"
+        assert arguments["session_id"] == "approved"
         assert len(arguments["request_id"]) == 64
         return {
             "id": "observation",
@@ -54,7 +50,7 @@ def test_official_dsh_can_collect_only_selected_connection_and_cite_result(tmp_p
     monkeypatch.setattr("src.platform.tools.registry.invoke", invoke)
     workspace = DiagnosticWorkspace(
         "operator",
-        connection_ids=["approved"],
+        session_ids=["approved"],
         run_id="live-diagnosis",
         reader=DocumentReader(source),
         check=lambda: None,
@@ -81,7 +77,7 @@ def test_official_dsh_can_collect_only_selected_connection_and_cite_result(tmp_p
                                 "name": "mcp__netops__device_access__collect",
                                 "arguments": json.dumps(
                                     {
-                                        "connection_id": "approved",
+                                        "session_id": "approved",
                                         "profile_id": "comware-interfaces-v1",
                                     }
                                 ),

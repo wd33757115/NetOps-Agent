@@ -29,7 +29,7 @@ class Question(BaseModel):
     request_id: str = Field(min_length=1, max_length=64)
     text: str = Field(min_length=1, max_length=4000)
     filters: dict[str, str] = Field(default_factory=dict)
-    diagnostic_connections: list[str] = Field(default_factory=list, max_length=2)
+    diagnostic_sessions: list[str] = Field(default_factory=list, max_length=2)
 
 
 def expire(session):
@@ -88,7 +88,7 @@ def begin(actor_id, conversation_id, body):
     signature = digest(
         json.dumps(
             {"conversation": conversation_id, "text": body.text, "filters": body.filters,
-             "diagnostic_connections": body.diagnostic_connections},
+             "diagnostic_sessions": body.diagnostic_sessions},
             sort_keys=True,
             ensure_ascii=False,
         )
@@ -232,10 +232,10 @@ async def _execute(actor_id, run, body, *, agent_runtime=None, on_event=None):
         if read(actor_id, run["id"])["status"] != "running":
             raise PermissionError("Turn no longer active")
 
-    if body.diagnostic_connections:
+    if body.diagnostic_sessions:
         from .diagnostic_workspace import DiagnosticWorkspace
         tools = DiagnosticWorkspace(actor_id, filters=body.filters, check=check,
-            connection_ids=body.diagnostic_connections, run_id=run["id"])
+            session_ids=body.diagnostic_sessions, run_id=run["id"])
     else:
         tools = DocumentWorkspace(actor_id, filters=body.filters, check=check)
     terminal, text, references, count, code = "failed", [], [], 0, "runtime_failed"

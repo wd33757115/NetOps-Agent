@@ -7,7 +7,7 @@ async function setup(page: Page, reason = 'authentication_failed') {
   page.on('pageerror', error => errors.push(error.message))
   await page.addInitScript(value => { localStorage.setItem('access_token', 'test'); localStorage.setItem('auth_user', JSON.stringify(value)) }, user)
   const run = { id: 'run-1', network_id: 'net-1', status: 'waiting_for_input', created_at: '2026-09-28T00:00:00Z', graph: {
-    domain: 'lab', model_profile: 'rfc8345-base+netops-observation-v1', nodes: [
+    model_profile: 'rfc8345-base+netops-observation-v1', nodes: [
       { id: 'a', name: '10.0.0.1', address: '10.0.0.1', identity_status: 'address_scoped', freshness: 'observed', observed_at: '2026-09-28T00:00:00Z', evidence_id: 'obs-1', tps: [{ id: 'a1', name: 'Ethernet1/1' }] },
       { id: 'b', name: 'edge-b', addresses: ['10.0.0.2'], identity_status: 'candidate', freshness: 'advertised', observed_at: '2026-09-28T00:00:00Z', tps: [{ id: 'b1', name: 'Ethernet1/2' }] },
     ], links: [{ id: 'ab', source: 'a', source_tp: 'a1', target: 'b', target_tp: 'b1', freshness: 'observed', evidence_id: 'obs-1' }],
@@ -19,7 +19,7 @@ async function setup(page: Page, reason = 'authentication_failed') {
     const path = new URL(route.request().url()).pathname
     if (path.endsWith('/auth/me/')) return route.fulfill({ json: user })
     if (path.endsWith('/desktop-layout/')) return route.fulfill({ json: { schemaVersion: 1, revision: 1, nodes: [], dockAppIds: [] } })
-    if (path === '/api/apps/topology/networks') return route.fulfill({ json: [{ id: 'net-1', name: '实验室观测网络', domain: 'lab', active_run: 'run-1' }] })
+    if (path === '/api/apps/topology/networks') return route.fulfill({ json: [{ id: 'net-1', name: '实验室观测网络', active_run: 'run-1' }] })
     if (path.endsWith('/net-1/runs')) return route.fulfill({ json: [{ id: run.id, status: run.status, created_at: run.created_at }] })
     if (path.endsWith('/targets/t2/resolve')) {
       resolutions.push(route.request().postDataJSON()); run.targets[1].status = 'queued'; run.status = 'running'
@@ -27,7 +27,8 @@ async function setup(page: Page, reason = 'authentication_failed') {
     }
     if (path.endsWith('/runs/run-1')) return route.fulfill({ json: run })
     if (path.endsWith('/evidence/obs-1')) return route.fulfill({ json: { outputs: { neighbors: 'Chassis id: synthetic-lab\nPort id: Ethernet1/2' }, complete: true } })
-    if (path === '/api/apps/device-access/connections') return route.fulfill({ json: [] })
+    if (path === '/api/apps/device-access/sessions') return route.fulfill({ json: [{ id: 's1', name: '核心交换机', host: '10.0.0.1', port: 22, username: null, uses_default: true }] })
+    if (path.endsWith('/default-login')) return route.fulfill({ json: { username: 'admin', configured: true } })
     return route.fulfill({ json: { items: [], unread_count: 0 } })
   })
   return { errors, resolutions }
@@ -52,13 +53,12 @@ test('topology renders evidence and requires explicit credential correction', as
   expect(state.errors).toEqual([])
 })
 
-test('device access offers independent credentials and terminal authorization', async ({ page }, info) => {
+test('SSH terminal lists saved sessions with the default login', async ({ page }, info) => {
   const state = await setup(page)
   await page.goto('/apps/device-access')
-  await expect(page.getByRole('heading', { name: '设备访问', exact: true })).toBeVisible()
-  await page.getByRole('button', { name: '新建连接授权', exact: true }).click()
-  await expect(page.getByLabel('密码', { exact: true })).toBeVisible()
-  await expect(page.getByRole('switch', { name: '允许人工 SSH 终端' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '打开一个会话', exact: true })).toBeVisible()
+  await expect(page.getByText('10.0.0.1 · 默认登录', { exact: true })).toBeVisible()
+  await expect(page.getByText('admin · 密码已加密保存', { exact: true })).toBeVisible()
   await page.screenshot({ path: `test-results/device-access-${info.project.name}.png`, fullPage: true })
   expect(state.errors).toEqual([])
 })
@@ -77,7 +77,7 @@ test('unknown platform offers per-node correction without requiring new credenti
   const state = await setup(page, 'platform_unrecognized')
   await page.goto('/apps/topology')
   await page.getByRole('button', { name: '人工处理', exact: true }).click()
-  await expect(page.getByLabel('提供新的用户名和密码')).not.toBeChecked()
+  await expect(page.getByLabel('为此节点输入新的用户名和密码')).not.toBeChecked()
   await page.getByText('自动识别（无需预先知道型号）', { exact: true }).click()
   await page.getByText('NX-OS · LLDP v1', { exact: true }).click()
   await page.getByRole('button', { name: '确认并重试一次', exact: true }).click()

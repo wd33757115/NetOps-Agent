@@ -61,3 +61,67 @@ def test_ticket_first_frame_and_bidirectional_resize_unicode(monkeypatch):
         {"type": "resize", "cols": 300, "rows": 5},
         {"type": "input", "data": "display version\n"},
     ]
+
+
+def run_pump(monkeypatch, *, failure=None, save=False):
+    import contextlib
+    import queue
+    import threading
+    from types import SimpleNamespace
+
+    saved_logins, finished = [], []
+
+    class Channel:
+        closed = False
+
+        def recv_ready(self):
+            return False
+
+        def exit_status_ready(self):
+            return True
+
+    class Access:
+        @contextlib.contextmanager
+        def terminal(self, *args, **kwargs):
+            if failure:
+                raise DeviceAccessError(failure, "failure")
+            yield Channel(), lambda: None
+
+    monkeypatch.setattr(
+        terminal, "authorize_worker", lambda *a: SimpleNamespace(can_execute_skills=lambda: True)
+    )
+    monkeypatch.setattr(terminal.service, "terminal_login", lambda payload: ("ops", "typed"))
+    monkeypatch.setattr(terminal.service, "access", lambda *args, **kwargs: Access())
+    monkeypatch.setattr(terminal.service, "finish", lambda *args: finished.append(args))
+    monkeypatch.setattr(terminal.saved, "save_login", lambda *args: saved_logins.append(args))
+    outgoing = queue.Queue()
+    payload = {
+        "owner": "u",
+        "operation_id": "op",
+        "session_id": "s1",
+        "host": "10.0.0.1",
+        "port": 22,
+        "credential_ref": "ref",
+        "save": save,
+    }
+    terminal.pump(payload, queue.Queue(), outgoing, threading.Event())
+    events = []
+    while not outgoing.empty():
+        events.append(outgoing.get())
+    return events, saved_logins, finished
+
+
+def test_failed_login_closes_with_a_reason_the_page_can_prompt_for(monkeypatch):
+    for failure in ("authentication_failed", "host_key_unknown", "host_key_changed"):
+        events, saved_logins, finished = run_pump(monkeypatch, failure=failure, save=True)
+        assert events[-1] == {"type": "closed", "reason": failure, "host": "10.0.0.1", "port": 22}
+        assert saved_logins == []
+        assert finished[-1][1] == "waiting_for_input"
+
+
+def test_typed_login_is_saved_only_after_a_successful_login(monkeypatch):
+    events, saved_logins, _ = run_pump(monkeypatch, save=True)
+    assert events[0] == {"type": "ready"} and events[-1]["reason"] is None
+    assert saved_logins == [("u", "s1", "ops", "typed")]
+    _, saved_logins, _ = run_pump(monkeypatch, save=False)
+    assert saved_logins == []

@@ -3,7 +3,7 @@ from pydantic import BaseModel, ConfigDict
 
 from src.platform.tools.registry import Tool
 
-from . import service
+from . import saved, service
 from .schemas import Collect, Read
 
 
@@ -34,7 +34,7 @@ def tool_view(result):
 TOOLS = [
     Tool(
         "collect",
-        "主动采集：只能使用人工创建、尚未过期的连接和固定诊断命令集；失败需人工处理，不自动重试",
+        "主动采集：只能使用人工选定的已保存会话和固定诊断命令集；失败需人工处理，不自动重试",
         Collect,
         collect,
         mutates=True,
@@ -47,10 +47,13 @@ TOOLS = [
         evidence=True,
     ),
     Tool(
-        "list_connections",
-        "列出人工授权的有效诊断连接、设备地址和允许的命令集，不返回凭据",
+        "list_sessions",
+        "列出本人已保存的 SSH 会话名称和设备地址，不返回用户名密码",
         Empty,
-        lambda user, body: service.list_connections(user.user_id),
+        lambda user, body: [
+            {key: row[key] for key in ("id", "name", "host", "port")}
+            for row in saved.list_sessions(user.user_id)
+        ],
         evidence=True,
     ),
 ]

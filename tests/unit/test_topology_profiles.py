@@ -8,7 +8,6 @@ from unittest.mock import create_autospec
 import pytest
 import yaml
 
-from src.apps.device_access.backend.vault_driver import VaultDriver
 from src.apps.topology.backend.collectors import collect as runtime
 from src.apps.topology.backend.collectors.identify import Probe, identify
 from src.apps.topology.backend.collectors.profiles import (
@@ -170,19 +169,6 @@ class Transport:
         yield lambda: None
 
 
-class Vault:
-    def __init__(self, trace):
-        self.trace = trace
-
-    def login(self, owner, domain, host, connect, **kwargs):
-        self.trace.credential_choices.append(kwargs["credential_set_id"])
-        result = connect(
-            SimpleNamespace(username="lab", password="unit-secret", enable_secret=None), 30
-        )
-        kwargs["on_success"]("accepted-credential")
-        return result
-
-
 @pytest.fixture
 def setup(monkeypatch):
     profiles = load_profiles()
@@ -195,12 +181,10 @@ def setup(monkeypatch):
         outputs=outputs,
         commands=[],
         connections=[],
-        credential_choices=[],
         closes=0,
         on_command=None,
     )
     transport = Transport(trace)
-    vault_driver = VaultDriver(Vault(trace), "actor", driver=transport)
 
     def provider(target, port):
         return "fixture-known-hosts"
@@ -215,8 +199,8 @@ def setup(monkeypatch):
     )
     access = DeviceAccessService(
         target_resolver=lambda _: Target("node", "192.0.2.1", management_domain="lab"),
-        profile_resolver=lambda _: ConnectionProfile("connection", "vault"),
-        driver=vault_driver,
+        profile_resolver=lambda _: ConnectionProfile("connection", "lab", "unit-secret"),
+        driver=transport,
         admission=transport,
     )
     context = AccessContext(
@@ -260,7 +244,7 @@ def test_real_fixtures_through_public_batch_pipeline(setup, mode, count):
     assert result.profile_id == "h3c-comware7" and result.driver == "netmiko"
     assert len(result.results) == count
     assert len(trace.commands) == count  # No repeated version command, no show fallback.
-    assert trace.credential_choices == [None, "accepted-credential"]
+    assert [profile.username for _, profile in trace.connections] == ["lab", "lab"]
     assert trace.closes == 2 and len(trace.connections) == 2
     assert trace.connections[0][1].platform is None
     assert trace.connections[1][1].platform == "comware"
@@ -276,13 +260,13 @@ def test_real_fixtures_through_public_batch_pipeline(setup, mode, count):
         assert result.missing["vxlan"] == "no_profile_command"
 
 
-def test_unverified_model_stays_paramiko_with_pinned_credential(setup):
+def test_unverified_model_stays_paramiko_with_the_same_login(setup):
     setup.trace.outputs["display version"] = (
         "H3C Comware Software, Version 7.1.064\nH3C S6850 uptime is 1 day"
     )
     result = setup.collect(mode="fast")
     assert result.driver == "paramiko"
-    assert setup.trace.credential_choices == [None, "accepted-credential"]
+    assert [p.password for _, p in setup.trace.connections] == ["unit-secret", "unit-secret"]
 
 
 @pytest.mark.parametrize(
@@ -383,7 +367,7 @@ def test_db_host_verifier_is_preserved_without_export_provider(setup):
     )
     assert result.driver == "paramiko"
     assert result.driver_warning == "netmiko_requires_matching_known_hosts_provider"
-    assert setup.trace.credential_choices == [None, "accepted-credential"]
+    assert [name for name, _ in setup.trace.connections] == ["paramiko", "paramiko"]
 
 
 def test_revoked_scope_stops_before_reconnect(setup):
@@ -403,7 +387,7 @@ def test_revoked_scope_stops_before_reconnect(setup):
     assert len(setup.trace.connections) == 1
 
 
-def test_reconnect_failure_never_restarts_credential_search(setup, monkeypatch):
+def test_reconnect_failure_is_not_retried_with_another_login(setup, monkeypatch):
     original = Transport.connect
 
     def fail_identified(self, target, profile, interactive=False):
@@ -414,4 +398,4 @@ def test_reconnect_failure_never_restarts_credential_search(setup, monkeypatch):
     monkeypatch.setattr(Transport, "connect", fail_identified)
     with pytest.raises(DeviceAccessError):
         setup.collect(mode="fast")
-    assert setup.trace.credential_choices == [None, "accepted-credential"]
+    assert [profile.platform for _, profile in setup.trace.connections] == [None]

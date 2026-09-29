@@ -310,7 +310,7 @@ def test_actual_paramiko_session_reuses_connection_and_blocks_configuration(tmp_
         assert [e["kind"] for e in events].count("command_finished") == 3
 
 
-def test_app_explicit_session_opt_in_audit_ownership_and_revocation(harness, monkeypatch, tmp_path):
+def test_app_session_audit_ownership_and_revocation(harness, monkeypatch, tmp_path):
     from fastapi import FastAPI, HTTPException
     from fastapi.testclient import TestClient
     from sqlalchemy import create_engine
@@ -329,19 +329,14 @@ def test_app_explicit_session_opt_in_audit_ownership_and_revocation(harness, mon
         with Session(engine) as session, session.begin():
             yield session
 
-    allowed = {"allow_session": False}
+    user = CurrentUser(user_id="alice", username="alice", role="viewer")
     monkeypatch.setattr(service, "sessions", sessions)
-    monkeypatch.setattr(service, "connection", lambda *a: (allowed, ""))
-    monkeypatch.setattr(service, "access", lambda *a: harness.service)
-    monkeypatch.setattr(
-        app_sessions,
-        "authorize_worker",
-        lambda *a: CurrentUser(user_id="alice", username="alice", role="operator"),
-    )
+    monkeypatch.setattr(service, "session_access", lambda *a, **k: harness.service)
+    monkeypatch.setattr(app_sessions, "authorize_worker", lambda *a: user)
     with pytest.raises(DeviceAccessError) as error:
         app_sessions.open_session("alice", "target", platform="comware", purpose="test")
     assert error.value.failure_code == "not_authorized" and harness.connects == 0
-    allowed["allow_session"] = True
+    user.role = "operator"
     session = app_sessions.open_session("alice", "target", platform="comware", purpose="test")
     result = session.run("display version")
     assert result.evidence_ref.startswith("device-access:audit:")
@@ -356,7 +351,7 @@ def test_app_explicit_session_opt_in_audit_ownership_and_revocation(harness, mon
     with pytest.raises(HTTPException) as not_found:
         app_sessions.read_audit("bob", session.session_id)
     assert not_found.value.status_code == 404
-    allowed["allow_session"] = False
+    user.role = "viewer"
     with pytest.raises(DeviceAccessError):
         session.run("display version")
     assert session.closed and len(harness.sent) == 1
@@ -367,7 +362,7 @@ def test_app_explicit_session_opt_in_audit_ownership_and_revocation(harness, mon
         user_id="bob", username="bob", role="operator"
     )
     with TestClient(app) as client:
-        assert client.get(f"/sessions/{session.session_id}/audit").status_code == 404
+        assert client.get(f"/operations/{session.session_id}/audit").status_code == 404
     engine.dispose()
 
 
@@ -404,24 +399,6 @@ def test_output_cap_retains_bounded_evidence_and_closes(harness):
         assert session.closed
     assert result.output == "outpu" and result.failure_code == "output_limit"
     assert not result.output_complete
-
-
-def test_vault_secrets_remain_redacted_through_final_close_audit(harness):
-    from src.apps.device_access.backend.vault_driver import RedactedConnection
-    from src.platform.device_access.security import CredentialMaterial
-
-    original = harness.service.driver.connect
-    harness.service.driver.connect = lambda *args: RedactedConnection(
-        original(*args), CredentialMaterial("operator", PASSWORD, "enable-test-secret")
-    )
-    original_profile = harness.service.profile_resolver
-    harness.service.profile_resolver = lambda ref: replace(original_profile(ref), password=None)
-    with harness.open(purpose=PASSWORD + " enable-test-secret") as session:
-        session.run("display version")
-    assert harness.events[0]["purpose"] is None
-    assert harness.events[-1]["purpose"] == "[redacted] [redacted]"
-    assert PASSWORD not in json.dumps(harness.events)
-    assert "enable-test-secret" not in json.dumps(harness.events)
 
 
 def test_peer_already_closed_still_releases_and_audits_once(harness):

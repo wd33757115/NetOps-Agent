@@ -1,4 +1,4 @@
-"""Shared facts enforce live device grants, atomic evidence and current-set semantics."""
+"""Shared facts keep atomic evidence and current-set semantics."""
 
 import hashlib
 import json
@@ -14,8 +14,6 @@ from sqlalchemy import create_engine, event, func, inspect, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from src.apps.device_access.backend.grants import GrantCreate, GrantState, GrantStore
-from src.apps.device_access.backend.models import Base as AccessBase
 from src.apps.topology.backend.collectors.parse import parse
 from src.apps.topology.backend.facts.models import ARP, FactSet
 from src.apps.topology.backend.facts.repository import FactInput, FactRepository
@@ -72,25 +70,18 @@ def env(tmp_path):
         connection.execute("PRAGMA foreign_keys=ON")
 
     Base.metadata.create_all(engine)
-    AccessBase.metadata.create_all(engine)
 
     @contextmanager
     def sessions():
         with Session(engine) as session, session.begin():
             yield session
 
-    grants, evidence = GrantStore(sessions=sessions), {}
-    for owner in ("alice", "bob"):
-        grants.create(
-            "admin",
-            GrantCreate(owner_id=owner, domain="lab", cidr="10.10.1.0/24", action="device.collect"),
-        )
+    evidence = {}
 
     def repo(owner="alice", role="operator"):
         return FactRepository(
             CurrentUser(user_id=owner, username=owner, role=role),
             sessions=sessions,
-            authorize=grants.authorize,
             evidence_reader=evidence.__getitem__,
         )
 
@@ -123,7 +114,6 @@ def env(tmp_path):
     yield SimpleNamespace(
         engine=engine,
         sessions=sessions,
-        grants=grants,
         evidence=evidence,
         repo=repo,
         uid=uid,
@@ -181,21 +171,16 @@ def test_tie_break_is_stable(env, monkeypatch):
     assert env.repo().current("lab", env.uid, "arp")["current"]["fact_set"]["id"] == expected
 
 
-def test_cross_domain_unknown_and_revoked_users_cannot_read_or_write(env):
+def test_a_device_is_only_found_under_its_own_key(env):
     item = env.repo().append("lab", env.uid, env.body())
-    for repo, domain in ((env.repo(), "production"), (env.repo("eve"), "lab")):
-        with pytest.raises(HTTPException) as error:
-            repo.read_set(domain, env.uid, item["id"])
-        assert error.value.status_code == 404
-        with pytest.raises(HTTPException):
-            repo.append(domain, env.uid, env.body())
-    grant = env.grants.list("bob")[0]
-    env.grants.set_state("admin", grant["id"], GrantState(revision=1, enabled=False))
+    with pytest.raises(HTTPException) as error:
+        env.repo().read_set("production", env.uid, item["id"])
+    assert error.value.status_code == 404
     with pytest.raises(HTTPException):
-        env.repo("bob").current("lab", env.uid, "arp")
+        env.repo().append("production", env.uid, env.body())
 
 
-def test_authorized_viewer_reads_shared_facts_but_cannot_submit(env):
+def test_viewer_reads_shared_facts_but_cannot_submit(env):
     env.repo().append("lab", env.uid, env.body())
     viewer = env.repo("bob", "viewer")
     assert viewer.current("lab", env.uid, "arp")["current"]
@@ -291,8 +276,8 @@ def test_migration_preserves_old_network_run_and_snapshot(tmp_path):
                 id="old-snapshot", network_id="old-net", run_id="old-run", graph={"nodes": ["old"]}
             )
         )
-        command.upgrade(config, "topology_0002")
-        command.upgrade(config, "topology_0002")
+        command.upgrade(config, manifest.data["database"]["head"])
+        command.upgrade(config, manifest.data["database"]["head"])
         assert connection.scalar(select(Snapshot.graph)) == {"nodes": ["old"]}
         assert set(inspect(connection).get_table_names()) == {
             "alembic_app_topology",
@@ -420,7 +405,7 @@ def test_evidence_storage_roundtrip_is_device_bound(env, monkeypatch):
             return data.get(key)
 
     monkeypatch.setattr(storage, "backend", Backend)
-    repo = FactRepository(env.repo().actor, sessions=env.sessions, authorize=env.grants.authorize)
+    repo = FactRepository(env.repo().actor, sessions=env.sessions)
     key = repo.save_evidence("lab", env.uid, {"version": "raw output"})
     row = repo.append("lab", env.uid, env.body(evidence_ref=key))
     assert row["evidence_ref"] == key
