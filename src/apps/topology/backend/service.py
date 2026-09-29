@@ -31,6 +31,7 @@ from .collectors.tiers.common import valid_mac
 from .logins import DOMAIN
 from .model.builder import build_topology, device_node_ids
 from .model.locate import locate as locate_in
+from .model.path import trace as trace_in
 from .model.view import canvas
 from .models import (
     Alias,
@@ -50,7 +51,7 @@ from .repository import owned, sessions
 
 APP_ID = "topology"
 ACTIVE = ("queued", "running", "waiting_for_input")
-TOPOLOGY_FACTS = ("lldp_local", "lldp", "interfaces", "ip", "arp", "mac")
+TOPOLOGY_FACTS = ("lldp_local", "lldp", "interfaces", "ip", "arp", "mac", "routes")
 NODE_BUDGET_SECONDS = 240
 # A lease outlives the node budget, so a live collection is never reclaimed mid-way.
 LEASE_SECONDS = NODE_BUDGET_SECONDS + 60
@@ -396,10 +397,11 @@ def snapshot(owner, snapshot_id):
         return row.graph
 
 
-def _locate(session, snap, query):
+def _analyse(session, snap, question, *args):
+    """Rebuild the snapshot's facts and answer one read-only question over them."""
     network = session.get(Network, snap.network_id)
     if "simap" not in snap.graph:
-        raise HTTPException(422, "该快照格式较旧，不支持定位，请重新发现")
+        raise HTTPException(422, "该快照格式较旧，不支持定位与路径计算，请重新发现")
     observations = _observations(session, snap.run_id)
     devices = {o["address"]: _facts(o["data"]) for o in observations}
     observed = {
@@ -407,10 +409,14 @@ def _locate(session, snap, query):
         for o in observations
     }
     try:
-        result = locate_in(devices, f"urn:netops:topology:{network.id}:", query, observed)
+        result = question(devices, f"urn:netops:topology:{network.id}:", *args, observed)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from None
     return {"network_id": network.id, "network": network.name, "snapshot_id": snap.id, **result}
+
+
+def _locate(session, snap, query):
+    return _analyse(session, snap, locate_in, query)
 
 
 def locate(owner, snapshot_id, query):
@@ -437,6 +443,34 @@ def locate_current(owner, query):
             if snap and "simap" in snap.graph:
                 result = _locate(session, snap, query)
                 if result["status"] != "not_found":
+                    found.append(result)
+        return found
+
+
+def trace(owner, snapshot_id, src, dst):
+    """Forwarding paths src->dst and dst->src in one snapshot, ending at data gaps."""
+    with sessions() as session:
+        snap = session.get(Snapshot, snapshot_id)
+        if not snap:
+            raise HTTPException(404, "快照不存在")
+        owned(session, Network, snap.network_id, owner)
+        return _analyse(session, snap, trace_in, src, dst)
+
+
+def trace_current(owner, src, dst):
+    """The same question over the current snapshot of every network that knows either end."""
+    with sessions() as session:
+        found = []
+        for network in session.scalars(
+            select(Network)
+            .where(Network.owner_id == owner, Network.current_snapshot.is_not(None))
+            .order_by(Network.created_at.desc())
+            .limit(200)
+        ):
+            snap = session.get(Snapshot, network.current_snapshot)
+            if snap and "simap" in snap.graph:
+                result = _analyse(session, snap, trace_in, src, dst)
+                if {result["forward"]["status"], result["reverse"]["status"]} != {"no_gateway"}:
                     found.append(result)
         return found
 

@@ -27,7 +27,8 @@ WHEN = datetime(2026, 9, 28, 8, 32, tzinfo=timezone.utc)
 
 @pytest.mark.parametrize("device", ["vsr-1", "vsr-2"])
 @pytest.mark.parametrize(
-    "capability", ["lldp", "lldp_local", "arp", "mac", "interfaces", "ip", "version"]
+    "capability",
+    ["lldp", "lldp_local", "arp", "mac", "interfaces", "ip", "version", "routes", "vlan"],
 )
 def test_parsed_real_facts_share_and_retain_evidence(env, device, capability):
     directory = Path(__file__).parents[1] / "fixtures/topology/h3c/vsr1000-7.1.064" / device
@@ -36,6 +37,7 @@ def test_parsed_real_facts_share_and_retain_evidence(env, device, capability):
     result = parse(
         {"os_family": "comware"}, capability, raw, command=raw.splitlines()[0], prompt="<H3C>"
     )
+    assert result.status == "complete"
     uid = env.repo().create_device("lab", ["10.10.1.1" if device == "vsr-1" else "10.10.1.2"])[
         "device_uid"
     ]

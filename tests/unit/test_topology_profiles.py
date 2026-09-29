@@ -256,7 +256,8 @@ def test_real_fixtures_through_public_batch_pipeline(setup, mode, count):
     if mode == "full":
         assert result.parsed["irf"].status == "unsupported"
         assert result.parsed["vrfs"].status == "complete"
-        assert result.parsed["routes"].status == "failed"  # Template is a later card.
+        assert result.parsed["routes"].status == "complete"
+        assert result.parsed["routes"].tier == "template"
         assert result.missing["vxlan"] == "no_profile_command"
 
 

@@ -90,6 +90,16 @@ def locate(
     return service.locate(user.user_id, snapshot_id, q)
 
 
+@router.get("/snapshots/{snapshot_id}/path")
+def trace(
+    snapshot_id: str,
+    src: str = Query(min_length=1, max_length=64),
+    dst: str = Query(min_length=1, max_length=64),
+    user: CurrentUser = Depends(actor),
+):
+    return service.trace(user.user_id, snapshot_id, src, dst)
+
+
 @router.get("/snapshots/{snapshot_id}/rfc8345")
 def export(snapshot_id: str, user: CurrentUser = Depends(actor)):
     return service.export(user.user_id, snapshot_id)

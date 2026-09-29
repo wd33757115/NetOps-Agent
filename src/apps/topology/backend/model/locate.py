@@ -152,7 +152,11 @@ def locate(devices, base, query, observed=None):
     several MACs for one IP are reported, never resolved by choosing one).
     """
     kind, value = _query(query)
-    locator = _Locator(devices, base, observed or {})
+    return answer(_Locator(devices, base, observed or {}), kind, value)
+
+
+def answer(locator, kind, value):
+    """One query against an already built locator (path tracing asks twice)."""
     result = {"query": value, "kind": kind, "gateways": [], "locations": []}
     own = locator.own(kind, value)
     if own:

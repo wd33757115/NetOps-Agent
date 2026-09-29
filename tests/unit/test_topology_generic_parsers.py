@@ -21,7 +21,9 @@ def lab(capability, device="vsr-1", raw=False):
 
 
 def run(capability, text, family="comware", **kwargs):
-    return parse({"os_family": family, "profile_id": None}, capability, text, **kwargs)
+    return parse(
+        {"os_family": family, "profile_id": None}, capability, text, use_templates=False, **kwargs
+    )
 
 
 @pytest.mark.parametrize("device", ["vsr-1", "vsr-2"])

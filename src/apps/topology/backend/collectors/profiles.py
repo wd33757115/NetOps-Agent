@@ -20,8 +20,9 @@ CAPABILITIES = frozenset(
 )
 MODE_CAPABILITIES = {
     "fast": ("version", "lldp_local", "lldp", "interfaces"),
-    # Exactly the facts the SIMAP L2/L3 builder consumes.
-    "topology": ("version", "lldp_local", "lldp", "interfaces", "ip", "arp", "mac"),
+    # The facts the SIMAP L2/L3 builder consumes, plus routes for path tracing (last, so a
+    # large table cannot starve the adjacency facts of the node budget).
+    "topology": ("version", "lldp_local", "lldp", "interfaces", "ip", "arp", "mac", "routes"),
     "standard": (
         "version",
         "lldp_local",
@@ -133,7 +134,10 @@ class Profile(StrictModel):
                 or spec.command in seen
             ):
                 raise ValueError("profile requires distinct normalized read-only commands")
-            if spec.parser is not None and spec.parser != GENERIC_NAMES.get(cap):
+            allowed = {GENERIC_NAMES.get(cap)}
+            if cap in {"routes", "vlan"} and self.os_family == "comware":
+                allowed.add("template_" + cap)
+            if spec.parser is not None and spec.parser not in allowed:
                 raise ValueError("unknown or mismatched parser reference")
             seen.add(spec.command)
         for evidence in self.verified:

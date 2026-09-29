@@ -587,6 +587,7 @@ LAB_FILES = {
     "ip": "ip_interfaces",
     "arp": "arp",
     "mac": "mac",
+    "routes": "routes",
 }
 
 
@@ -644,6 +645,22 @@ def lab_run(world):
     return service.read("user", row["id"])
 
 
+def test_discovery_keeps_each_route_table_for_path_tracing(world):
+    lab_run(world)
+    with world.sessions() as session:
+        observations = [o.data for o in session.scalars(select(Observation))]
+    assert {len(data["facts"]["routes"]) for data in observations} == {18, 19}
+    assert all(data["capabilities"]["routes"] == "complete" for data in observations)
+    route = next(
+        r
+        for data in observations
+        for r in data["facts"]["routes"]
+        if r["prefix"] == "192.168.1.0/24" and r["protocol"] == "O_INTRA"
+    )
+    hop = {"ip": "2.2.2.2", "ifname": "GigabitEthernet2/0", "vrf": "default"}
+    assert route["next_hops"] == [hop]
+
+
 def test_locate_answers_from_a_snapshot_with_evidence(world):
     result = lab_run(world)
     found = service.locate("user", result["snapshot_id"], "192.168.1.2")
@@ -677,6 +694,37 @@ def test_locate_searches_the_current_snapshot_of_every_network(world):
     assert [f["status"] for f in found] == ["confirmed"]
     assert service.locate_current("user", "10.200.0.1") == []
     assert service.locate_current("stranger", "0050.7966.6801") == []
+
+
+def test_trace_answers_both_directions_from_a_snapshot(world):
+    result = lab_run(world)
+    found = service.trace("user", result["snapshot_id"], "1.1.1.2", "192.168.1.2")
+    assert found["snapshot_id"] == result["snapshot_id"]
+    assert found["forward"]["status"] == found["reverse"]["status"] == "complete"
+    first = found["forward"]["paths"][0]["hops"][0]
+    assert (first["device"]["address"], first["route"]["next_hop"]) == ("10.10.1.2", "2.2.2.2")
+    # Each hop carries the observation it came from, like located ports do.
+    assert first["device"]["evidence_id"] == next(
+        t["evidence_id"] for t in result["targets"] if t["address"] == "10.10.1.2"
+    )
+    assert found["symmetric"] is True
+    with pytest.raises(HTTPException) as bad:
+        service.trace("user", result["snapshot_id"], "1.1.1.2", "224.0.0.5")
+    assert bad.value.status_code == 422
+    with pytest.raises(HTTPException) as foreign:
+        service.trace("stranger", result["snapshot_id"], "1.1.1.2", "192.168.1.2")
+    assert foreign.value.status_code == 404
+
+
+def test_trace_searches_current_snapshots_that_know_either_end(world):
+    lab_run(world)
+    [found] = service.trace_current("user", "192.168.1.2", "1.1.1.2")
+    assert [h["device"]["address"] for h in found["forward"]["paths"][0]["hops"]] == [
+        "10.10.1.1",
+        "10.10.1.2",
+    ]
+    assert service.trace_current("user", "10.200.0.1", "10.200.0.2") == []
+    assert service.trace_current("stranger", "192.168.1.2", "1.1.1.2") == []
 
 
 def test_offline_snapshots_without_facts_find_nothing(world):

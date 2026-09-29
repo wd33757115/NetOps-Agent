@@ -182,7 +182,11 @@ def collect_node(
         result.results[cap] = item
         # Even capabilities awaiting templates must classify unsupported/verified-empty output.
         parsed = parse(
-            identity, cap, item.output, complete=item.output_complete and not item.failure_code
+            identity,
+            cap,
+            item.output,
+            complete=item.output_complete and not item.failure_code,
+            model=version.summary.get("model"),
         )
         if (
             selected[cap].parser is None

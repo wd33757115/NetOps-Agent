@@ -72,7 +72,19 @@ class ParseResult:
         }
 
 
-def parse(identity, capability, raw, *, complete=True, command=None, prompt=None):
+def framed_text(raw, command=None, prompt=None):
+    clean = parser_text(raw)
+    lines = clean.text.split("\n")
+    occupied = [index for index, line in enumerate(lines) if line.strip()]
+    if occupied:
+        if command and lines[occupied[0]].strip() == command:
+            lines[occupied[0]] = ""
+        if prompt and lines[occupied[-1]].strip() == prompt:
+            lines[occupied[-1]] = ""
+    return "\n".join(lines)
+
+
+def parse_generic(identity, capability, raw, *, complete=True, command=None, prompt=None):
     """`complete` is transport evidence, not something inferred from cleaned CLI text.
 
     No route regex fallback, no profile/template lookup in this tier. Unknown
@@ -85,14 +97,7 @@ def parse(identity, capability, raw, *, complete=True, command=None, prompt=None
     clean = parser_text(raw)
     # Raw terminal captures may retain framing. Only remove exact values supplied
     # by the collector, at the edges; leave blank lines to preserve evidence offsets.
-    lines = clean.text.split("\n")
-    occupied = [index for index, line in enumerate(lines) if line.strip()]
-    if occupied:
-        if command and lines[occupied[0]].strip() == command:
-            lines[occupied[0]] = ""
-        if prompt and lines[occupied[-1]].strip() == prompt:
-            lines[occupied[-1]] = ""
-    text = "\n".join(lines)
+    text = framed_text(raw, command, prompt)
     decision = SimpleNamespace(canonical_command="", empty_semantics={})
     classified = (
         OutputClassifier()
@@ -155,3 +160,37 @@ def parse(identity, capability, raw, *, complete=True, command=None, prompt=None
     else:
         result.warnings.append("unparsed_output")
     return result
+
+
+def parse(
+    identity,
+    capability,
+    raw,
+    *,
+    complete=True,
+    command=None,
+    prompt=None,
+    use_templates=True,
+    model=None,
+):
+    result = parse_generic(
+        identity, capability, raw, complete=complete, command=command, prompt=prompt
+    )
+    # Classification and transport bounds always precede template execution.
+    if (
+        not use_templates
+        or result.status == "unsupported"
+        or any(w in result.warnings for w in {"input_invalid_or_over_limit", "command_error"})
+        or (result.status == "complete" and not result.records and not result.summary)
+    ):
+        return result
+    from .tiers.template import apply
+
+    return apply(
+        identity,
+        capability,
+        framed_text(raw, command, prompt),
+        result,
+        complete=complete,
+        model=model,
+    )
