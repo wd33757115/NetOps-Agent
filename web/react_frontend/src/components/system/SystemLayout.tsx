@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react'
 import { ConfigProvider } from 'antd'
-import { ArrowLeftOutlined, SafetyCertificateOutlined, TeamOutlined, UserOutlined, AppstoreOutlined, ClusterOutlined } from '@ant-design/icons'
+import { ArrowLeftOutlined, SafetyCertificateOutlined, TeamOutlined, UserOutlined, AppstoreOutlined } from '@ant-design/icons'
 import { Link, useLocation } from 'react-router-dom'
 import './system.css'
 import { useAuth } from '../../context/AuthContext'
@@ -35,7 +35,6 @@ export default function SystemLayout({ title, subtitle, toolbar, children }: {
             { path: '/system/users', title: '用户', hint: '账号、角色与登录状态', icon: UserOutlined },
             { path: '/system/groups', title: '用户组', hint: '业务分组与成员维护', icon: TeamOutlined },
             { path: '/system/apps', title: '应用授权', hint: '使用权限与授权来源', icon: AppstoreOutlined },
-            { path: '/system/device-scopes', title: '设备访问范围', hint: '账号可访问的管理域与网段', icon: ClusterOutlined },
           ].filter(item => isAdmin || item.path === '/system/apps').map(item => <Link key={item.path} to={item.path} aria-current={pathname === item.path ? 'page' : undefined}><item.icon aria-hidden="true" /><span>{item.title}<small>{item.hint}</small></span></Link>)}</nav>
           <div className="system-sidebar-note"><SafetyCertificateOutlined aria-hidden="true" /> {isAdmin ? 'admin · 平台管理员' : 'netops-config · 应用授权管理'}<p>{isAdmin ? '维护账号、用户组与全部系统权限。' : '为用户和用户组授予或撤销应用使用权。'}</p></div>
         </aside>
