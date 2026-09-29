@@ -5,6 +5,8 @@ import { layout, sides, type Side } from './layout'
 import '@xyflow/react/dist/style.css'
 import { api } from '@netops/config/api'
 import DeviceTerminal from '@netops/platform/terminal/DeviceTerminal'
+import { useAuth } from '@netops/context/AuthContext'
+import AccessScopes from './AccessScopes'
 import './topology.css'
 
 interface Network { id: string; name: string; domain: string; active_run?: string; current_snapshot?: string }
@@ -66,6 +68,8 @@ export default function Page() {
   const [run, setRun] = useState<Run>()
   const [create, setCreate] = useState(false)
   const [offline, setOffline] = useState(false)
+  const [scopes, setScopes] = useState(false)
+  const { user } = useAuth()
   const [importText, setImportText] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -130,7 +134,7 @@ export default function Page() {
     finally { retryForm.setFieldValue('password', ''); setBusy(false) }
   }
   return <main className="topology-workspace">
-    <header className="topology-heading"><div><Typography.Title level={2}>网络拓扑</Typography.Title><p>发现网络，保留观测，逐步构建数字孪生。</p></div><Space><Button onClick={() => setOffline(true)}>导入离线观测</Button><Button type="primary" onClick={() => { form.resetFields(); applyNetwork(networkId); setCreate(true) }}>新建发现任务</Button></Space></header>
+    <header className="topology-heading"><div><Typography.Title level={2}>网络拓扑</Typography.Title><p>发现网络，保留观测，逐步构建数字孪生。</p></div><Space>{user?.role === 'admin' && <Button onClick={() => setScopes(true)}>访问范围</Button>}<Button onClick={() => setOffline(true)}>导入离线观测</Button><Button type="primary" onClick={() => { form.resetFields(); applyNetwork(networkId); setCreate(true) }}>新建发现任务</Button></Space></header>
     {error && <Alert type="error" message={error} action={<Button onClick={() => { setError(''); void refreshNetworks().catch(error => setError(errorMessage(error))) }}>刷新</Button>} />}
     <div className="topology-toolbar"><Select aria-label="网络" placeholder="选择网络" value={networkId} onChange={setNetworkId} options={networks.map(n => ({ value: n.id, label: `${n.name} · ${n.domain}` }))} style={{ minWidth: 220 }} />
       <Select aria-label="观测任务" placeholder="观测任务" value={runId} onChange={value => { setSelected(undefined); setRunId(value) }} options={history.map(h => ({ value: h.id, label: `${new Date(h.created_at).toLocaleString()} · ${labels[h.status] || h.status}` }))} style={{ minWidth: 290 }} />
@@ -167,7 +171,7 @@ export default function Page() {
         finally { form.setFieldValue(['credentials', 'password'], ''); setBusy(false) }
       }}>
         <Form.Item name="network_id" label="网络范围"><Select allowClear placeholder="创建新网络" onChange={value => applyNetwork(value)} options={networks.map(n => ({ value: n.id, label: `${n.name} · ${n.domain}` }))} /></Form.Item>
-        <Form.Item name="name" label="网络名称" rules={[{ required: true }]}><Input disabled={!!chosenNetwork} /></Form.Item><Form.Item name="domain" label="管理域" rules={[{ required: true }]} extra={chosenNetwork ? '沿用所选网络的管理域；设备授权按此管理域校验' : '设备授权按此管理域校验，须与“设备访问 · 访问范围”中的管理域一致'}><Input disabled={!!chosenNetwork} /></Form.Item>
+        <Form.Item name="name" label="网络名称" rules={[{ required: true }]}><Input disabled={!!chosenNetwork} /></Form.Item><Form.Item name="domain" label="管理域" rules={[{ required: true }]} extra={chosenNetwork ? '沿用所选网络的管理域；设备授权按此管理域校验' : '设备授权按此管理域校验，须与本应用“访问范围”中的管理域一致'}><Input disabled={!!chosenNetwork} /></Form.Item>
         <Form.Item name="seeds" label="种子设备地址" rules={[{ required: true }]} extra="多个 IP 以空格或换行分隔"><Input.TextArea rows={2} placeholder="10.10.1.1" /></Form.Item>
         <Form.Item name="allowed_cidrs" label="本任务允许的管理网段" rules={[{ required: true }]} extra="发现范围同时受管理员授予的设备权限约束"><Input placeholder="10.10.1.0/24" /></Form.Item>
         <Form.Item name="profile_id" label="种子设备平台（可选）" extra="默认自动识别。手工选择只适用于种子；每个新邻居都独立识别，不继承种子平台。"><Select options={profiles} /></Form.Item>
@@ -181,6 +185,7 @@ export default function Page() {
       <Alert type="warning" message={failures[target?.reason || ''] || target?.reason} style={{ marginBottom: 16 }} /><div style={{ marginBottom: 16 }}><Typography.Text>仅此节点的平台</Typography.Text><Select aria-label="仅此节点的平台" value={retryProfile} onChange={setRetryProfile} options={profiles} style={{ width: '100%', marginTop: 8 }} /><p>无法识别或尚未支持的设备可保留候选节点并跳过；此选择不会传给邻居。</p></div><Checkbox checked={replaceCredentials} onChange={event => setReplaceCredentials(event.target.checked)}>提供新的用户名和密码</Checkbox>
       {replaceCredentials && <Form form={retryForm} layout="vertical" style={{ marginTop: 16 }}><Form.Item name="username" label="用户名" rules={[{ required: true }]}><Input autoComplete="off" /></Form.Item><Form.Item name="password" label="密码" rules={[{ required: true }]}><Input.Password autoComplete="new-password" /></Form.Item></Form>}
     </Modal>
+    <Drawer title="访问范围" open={scopes} onClose={() => setScopes(false)} width={900} destroyOnClose><AccessScopes /></Drawer>
     <Drawer title="导入离线 LLDP 观测" open={offline} onClose={() => setOffline(false)} width={660}><p>JSON 包含 profile_id、domain 和 captures。每项需提供 address、含时区的 observed_at、outputs.neighbors 与 complete。离线数据不会触发设备登录。</p><Input.TextArea aria-label="离线观测 JSON" rows={18} value={importText} onChange={event => setImportText(event.target.value)} placeholder={'{"profile_id":"comware-lldp-v1","domain":"default","captures":[{"address":"10.10.1.1","observed_at":"2026-09-28T08:00:00+08:00","outputs":{"neighbors":"完整 LLDP 命令输出"},"complete":true}]}'} /><Button type="primary" style={{ marginTop: 16 }} loading={busy} onClick={async () => { setBusy(true); try { const { data } = await api.post('/apps/topology/imports', { ...JSON.parse(importText), request_id: crypto.randomUUID() }); await accept(data); setOffline(false); setImportText('') } catch (error) { message.error(errorMessage(error)) } finally { setBusy(false) } }}>校验并导入</Button></Drawer>
     <Drawer title="原始观测证据" open={evidence !== undefined} onClose={() => setEvidence(undefined)} width={760}><pre className="topology-raw">{JSON.stringify(evidence, null, 2)}</pre></Drawer>
     <Drawer title="快照差异" open={changes !== undefined} onClose={() => setChanges(undefined)} width={600}><p>差异包含对象、新鲜度和观测时间变化；未观测不等于已经删除。</p><pre className="topology-raw">{JSON.stringify(changes, null, 2)}</pre></Drawer>

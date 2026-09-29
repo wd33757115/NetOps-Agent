@@ -1,24 +1,25 @@
 import React, { useEffect, useState } from 'react'
-import { Alert, Button, Drawer, Form, Input, Select, Space, Table, Typography, message } from 'antd'
+import { Alert, Button, Drawer, Form, Input, Select, Space, Table, message } from 'antd'
 import { api } from '@netops/config/api'
 
+// Which account may reach which management domain and CIDR. Data and API belong to the
+// device-access package this App depends on; discovery and the SSH terminal check it.
 interface Grant { id: string; owner_id: string; domain: string; cidr: string; action: string; enabled: boolean; revision: number }
 const endpoint = '/apps/device-access/grants'
 const actions = [{ value: 'device.collect', label: '采集 / 受控诊断' }, { value: 'device.terminal', label: '人工 SSH 终端' }]
 
-export default function Grants() {
+export default function AccessScopes() {
   const [rows, setRows] = useState<Grant[]>([])
   const [editing, setEditing] = useState(false)
   const [busy, setBusy] = useState(false)
   const [file, setFile] = useState<File>()
   const refresh = () => api.get<Grant[]>(endpoint).then(({ data }) => setRows(data)).catch(() => message.error('访问范围读取失败'))
   useEffect(() => { void refresh() }, [])
-  return <main style={{ padding: '24px 32px', maxWidth: 1400, margin: '0 auto' }}>
-    <Space style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 20 }}>
-      <Typography.Title level={2} style={{ margin: 0 }}>设备访问范围</Typography.Title>
-      <Button onClick={() => setEditing(true)}>新增范围</Button>
+  return <div>
+    <Space style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
+      <Button type="primary" onClick={() => setEditing(true)}>新增范围</Button>
     </Space>
-    <Alert type="info" showIcon message="账号只能访问已启用范围内的设备。受控诊断还需在连接授权中明确开启；人工 SSH 需同时具有采集和终端权限。" description="旧授权文件须导入一次。重复导入跳过已有记录，不会恢复已撤销的范围。" style={{ marginBottom: 20 }} />
+    <Alert type="info" showIcon message="账号只能访问已启用范围内的设备，管理域须与发现任务的管理域一致。人工 SSH 需同时具有采集和终端权限。" description="旧授权文件须导入一次。重复导入跳过已有记录，不会恢复已撤销的范围。" style={{ marginBottom: 20 }} />
     <Space style={{ marginBottom: 16 }}>
       <input type="file" accept=".json,application/json" aria-label="旧授权 JSON 文件" onChange={event => setFile(event.target.files?.[0])} />
       <Button disabled={!file} loading={busy} onClick={async () => {
@@ -56,5 +57,5 @@ export default function Grants() {
         <Button type="primary" htmlType="submit" loading={busy}>保存授权</Button>
       </Form>
     </Drawer>
-  </main>
+  </div>
 }

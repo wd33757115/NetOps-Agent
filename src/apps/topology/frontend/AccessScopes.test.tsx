@@ -1,7 +1,7 @@
 import React from 'react'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
-import Grants from './Grants'
+import AccessScopes from './AccessScopes'
 
 const mocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), patch: vi.fn() }))
 vi.mock('@netops/config/api', () => ({ api: mocks }))
@@ -14,14 +14,14 @@ beforeEach(() => {
 })
 
 test('revocation sends the displayed revision and refreshes', async () => {
-  render(<Grants />)
+  render(<AccessScopes />)
   fireEvent.click(await screen.findByRole('button', { name: /撤\s*销/ }))
   await waitFor(() => expect(mocks.patch).toHaveBeenCalledWith('/apps/device-access/grants/scope', { revision: 3, enabled: false }))
   await waitFor(() => expect(mocks.get).toHaveBeenCalledTimes(2))
 })
 
 test('file selection waits for explicit import and submits legacy JSON', async () => {
-  render(<Grants />)
+  render(<AccessScopes />)
   const legacy = { alice: [{ domain: 'lab', cidrs: ['10.0.0.0/24'], actions: ['device.collect'] }] }
   const file = new File([JSON.stringify(legacy)], 'grants.json', { type: 'application/json' })
   Object.defineProperty(file, 'text', { value: async () => JSON.stringify(legacy) })
@@ -32,7 +32,7 @@ test('file selection waits for explicit import and submits legacy JSON', async (
 })
 
 test('invalid file never sends an import request', async () => {
-  render(<Grants />)
+  render(<AccessScopes />)
   const file = new File(['invalid'], 'grants.json')
   Object.defineProperty(file, 'text', { value: async () => 'invalid' })
   fireEvent.change(screen.getByLabelText('旧授权 JSON 文件'), { target: { files: [file] } })

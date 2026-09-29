@@ -4,7 +4,6 @@ import { api } from '@netops/config/api'
 import DeviceTerminal, { ConnectionForm, DeviceConnection, profiles } from '@netops/platform/terminal/DeviceTerminal'
 import CredentialSets from './CredentialSets'
 import HostKeys from './HostKeys'
-import Grants from './Grants'
 import { useAuth } from '@netops/context/AuthContext'
 
 function ConnectionsPage() {
@@ -25,7 +24,7 @@ function ConnectionsPage() {
       { title: '授权到期', dataIndex: 'expires_at', render: value => new Date(value).toLocaleString() },
       { title: '操作', render: (_, row) => <Space><Button disabled={!row.allow_terminal} onClick={() => setTerminal(row)}>SSH 终端</Button><Button onClick={() => { setSelected(row); setProfile(row.profiles[0]); setResult(undefined) }}>诊断采集</Button><Button danger onClick={() => void api.delete(`/apps/device-access/connections/${row.connection_id}`).then(refresh).catch(() => message.error('撤销失败'))}>撤销</Button></Space> },
     ]} />
-    <Typography.Paragraph type="secondary">连接授权供人工终端与后端诊断调用。主机密钥与账号可访问的网段由管理员配置。</Typography.Paragraph>
+    <Typography.Paragraph type="secondary">连接授权供人工终端与后端诊断调用。主机密钥由管理员在此配置；账号可访问的网段在“网络拓扑 · 访问范围”中配置。</Typography.Paragraph>
     <Drawer open={create} onClose={() => setCreate(false)} title="新建连接授权" destroyOnClose width={480}><ConnectionForm onCreated={() => { setCreate(false); void refresh() }} /></Drawer>
     <DeviceTerminal open={!!terminal} onClose={() => setTerminal(undefined)} connection={terminal} address={terminal?.address} />
     <Drawer open={!!selected} onClose={() => setSelected(undefined)} title={`诊断采集 · ${selected?.address || ''}`} width={700} destroyOnClose>
@@ -46,6 +45,5 @@ export default function Page() {
     { key: 'connections', label: '连接授权', children: <ConnectionsPage /> },
     { key: 'credentials', label: '凭据集', children: <CredentialSets /> },
     ...(user?.role === 'admin' ? [{ key: 'host-keys', label: '主机密钥', children: <HostKeys /> }] : []),
-    ...(user?.role === 'admin' ? [{ key: 'grants', label: '访问范围', children: <Grants /> }] : []),
   ]} />
 }
