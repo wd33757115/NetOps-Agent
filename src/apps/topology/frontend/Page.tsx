@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Checkbox, Drawer, Empty, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography, message } from 'antd'
-import { Background, Controls, MarkerType, Position, ReactFlow, ReactFlowProvider, useReactFlow } from '@xyflow/react'
+import { Background, Controls, Handle, MarkerType, Position, ReactFlow, ReactFlowProvider, useReactFlow } from '@xyflow/react'
+import { layout, sides, type Side } from './layout'
 import '@xyflow/react/dist/style.css'
 import { api } from '@netops/config/api'
 import DeviceTerminal from '@netops/platform/terminal/DeviceTerminal'
@@ -18,25 +19,41 @@ const failures: Record<string, string> = { platform_unrecognized: '平台未识�
 const profiles = [{ value: 'auto', label: '自动识别（无需预先知道型号）' }, { value: 'comware-lldp-v1', label: 'Comware · LLDP v1' }, { value: 'nxos-lldp-v1', label: 'NX-OS · LLDP v1' }]
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : '操作未完成，请重试'
 
+const SIDES: [Side, Position][] = [['top', Position.Top], ['bottom', Position.Bottom], ['left', Position.Left], ['right', Position.Right]]
+
+// Handles on every side so each edge can use the sides that face each other.
+function TopologyNodeView({ data }: { data: { label: React.ReactNode } }) {
+  return <>{SIDES.map(([side, position]) => <React.Fragment key={side}>
+    <Handle type="source" id={`${side}-s`} position={position} isConnectable={false} />
+    <Handle type="target" id={`${side}-t`} position={position} isConnectable={false} />
+  </React.Fragment>)}{data.label}</>
+}
+const nodeTypes = { topology: TopologyNodeView }
+
 function Canvas({ graph, onNode, onLink }: { graph: Graph; onNode: (node: TopologyNode) => void; onLink: (link: Link) => void }) {
   const { fitView } = useReactFlow()
-  const nodes = useMemo(() => graph.nodes.map((node, i) => ({ id: node.id,
-    sourcePosition: Position.Right, targetPosition: Position.Left,
-    position: { x: (i % 4) * 350, y: Math.floor(i / 4) * 150 },
+  const positions = useMemo(() => layout(graph.nodes, graph.links), [graph])
+  const nodes = useMemo(() => graph.nodes.map(node => ({ id: node.id, type: 'topology',
+    position: positions.get(node.id) ?? { x: 0, y: 0 },
     ariaLabel: `${node.name} · ${labels[node.identity_status]}`,
     data: { label: <><strong>{node.name}</strong><span>{node.address || node.addresses?.join(', ') || '管理地址待确认'}</span><small>{labels[node.identity_status]} · {labels[node.freshness]}</small></> },
     className: node.identity_status === 'segment' ? 'topology-node segment' : ['candidate', 'advertised'].includes(node.identity_status) ? 'topology-node candidate' : 'topology-node',
-  })), [graph.nodes])
-  const edges = useMemo(() => graph.links.map(link => ({ id: link.id, source: link.source, target: link.target,
-    // SIMAP links carry both endpoints; older snapshots only name the source port.
-    label: link.label ?? graph.nodes.find(n => n.id === link.source)?.tps.find(tp => tp.id === link.source_tp)?.name,
-    ...(link.direction === 'bi' && link.link_type === 'p2p' ? { markerStart: { type: MarkerType.ArrowClosed }, markerEnd: { type: MarkerType.ArrowClosed } } : {}),
-    style: { stroke: link.freshness === 'observed' ? '#477b8a' : '#aeb8c3', strokeDasharray: link.freshness === 'observed' ? undefined : '5 5' },
-  })), [graph])
-  useEffect(() => { const timer = setTimeout(() => void fitView({ padding: 0.2, maxZoom: 1.1 }), 80); return () => clearTimeout(timer) }, [fitView, nodes.length])
-  return <ReactFlow nodes={nodes} edges={edges} nodesDraggable={false} nodesConnectable={false} minZoom={0.15} maxZoom={2}
+  })), [graph.nodes, positions])
+  const edges = useMemo(() => graph.links.map(link => {
+    const find = (id: string) => graph.nodes.find(n => n.id === id)
+    const [from, to] = sides(positions.get(link.source) ?? { x: 0, y: 0 }, positions.get(link.target) ?? { x: 0, y: 0 }, find(link.source), find(link.target))
+    return { id: link.id, source: link.source, target: link.target, sourceHandle: `${from}-s`, targetHandle: `${to}-t`,
+      // SIMAP links carry both endpoints; older snapshots only name the source port.
+      label: link.label ?? find(link.source)?.tps.find(tp => tp.id === link.source_tp)?.name,
+      labelBgPadding: [4, 2] as [number, number], labelStyle: { fontSize: 11 },
+      ...(link.direction === 'bi' && link.link_type === 'p2p' ? { markerStart: { type: MarkerType.ArrowClosed }, markerEnd: { type: MarkerType.ArrowClosed } } : {}),
+      style: { stroke: link.freshness === 'observed' ? '#477b8a' : '#aeb8c3', strokeDasharray: link.freshness === 'observed' ? undefined : '5 5' },
+    }
+  }), [graph, positions])
+  useEffect(() => { const timer = setTimeout(() => void fitView({ padding: 0.3, maxZoom: 1.1 }), 80); return () => clearTimeout(timer) }, [fitView, nodes.length])
+  return <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} nodesDraggable={false} nodesConnectable={false} minZoom={0.15} maxZoom={2}
     onNodeClick={(_, node) => onNode(graph.nodes.find(n => n.id === node.id)!)}
-    onEdgeClick={(_, edge) => onLink(graph.links.find(link => link.id === edge.id)!)} fitView fitViewOptions={{ maxZoom: 1.1 }}>
+    onEdgeClick={(_, edge) => onLink(graph.links.find(link => link.id === edge.id)!)} fitView fitViewOptions={{ padding: 0.3, maxZoom: 1.1 }}>
     <Background gap={24} color="#dce3e9" /><Controls showInteractive={false} />
   </ReactFlow>
 }
