@@ -280,6 +280,17 @@ def topology(source, devices):
     return build_topology(facts, LAB)
 
 
+def route_records(source, device):
+    """The App's route parser (P2-3 pinned template tier), never a second copy."""
+    sys.path.insert(0, str(ROOT))
+    from src.apps.topology.backend.collectors.parse import parse
+
+    result = parse({"os_family": "comware"}, "routes", source(device, "routes"))
+    if result.status != "complete" or result.tier != "template":
+        raise ValueError(f"{device} routes did not parse completely")
+    return result.records
+
+
 def render() -> dict[str, bytes]:
     manifest = json.loads((FIXTURES / "manifest.json").read_text(encoding="utf-8"))
     if manifest["batch"] != "20260928-163159":
@@ -363,25 +374,29 @@ def render() -> dict[str, bytes]:
             "missing-data: expected 'statistics'",
         )
         routes = []
-        for line in source(device, "routes").splitlines():
-            fields = line.split()
-            if not fields or not re.fullmatch(r"[\d.]+/\d+", fields[0]):
-                continue
-            prefix, protocol, preference, cost, next_hop, interface = fields
-            if protocol not in {"Direct", "O_INTRA"}:
+        for record in route_records(source, device):
+            if record["protocol"] not in {"Direct", "O_INTRA"}:
                 raise ValueError("Unreviewed route protocol")
+            if len(record["next_hops"]) != 1:
+                raise ValueError("Unreviewed equal-cost route")
+            hop = record["next_hops"][0]
             routes.append(
                 {
-                    "ietf-ipv4-unicast-routing:destination-prefix": prefix,
+                    "ietf-ipv4-unicast-routing:destination-prefix": record["prefix"],
                     "source-protocol": "ietf-routing:direct"
-                    if protocol == "Direct"
+                    if record["protocol"] == "Direct"
                     else "ietf-ospf:ospf",
-                    "route-preference": int(preference),
-                    "next-hop": {"ietf-ipv4-unicast-routing:next-hop-address": next_hop},
+                    "route-preference": record["preference"],
+                    "next-hop": {"ietf-ipv4-unicast-routing:next-hop-address": hop["ip"]},
                 }
             )
             omissions.append(
-                {"device": device, "prefix": prefix, "cost": int(cost), "interface": interface}
+                {
+                    "device": device,
+                    "prefix": record["prefix"],
+                    "cost": record["metric"],
+                    "interface": hop["ifname"],
+                }
             )
         expected_count = 18 if device == "vsr-1" else 19
         if len(routes) != expected_count:

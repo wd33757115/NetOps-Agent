@@ -80,7 +80,7 @@
 | 用途 | 路径/版本 |
 |---|---|
 | 应用 Python、Ruff | `venv/Scripts/python.exe` |
-| 独立模型研究 Python | `.runtime/yang-model-tools/Scripts/python.exe`，pyang 2.7.1、yangson 1.6.3 |
+| 独立模型研究 Python | `.runtime/yang-model-tools/Scripts/python.exe`，pyang 2.7.1、yangson 1.6.3；2026-09-30 加装 textfsm 2.1.0、ntc-templates 9.1.0（与拓扑 App 锁定一致，供实例构建调用 App 的路由模板层；本机 pip 镜像为 http，安装时显式用 `--index-url https://mirrors.aliyun.com/pypi/simple/`） |
 | 已构建模型包 | `.runtime/ietf-study/model-package/`，含 modules、manifest、topology/device-library |
 | 默认锁定源缓存 | `.runtime/ietf-study/reproducible-audit/sources/` |
 | 历史关联候选缓存 | `.runtime/ietf-study/mount-history/` |

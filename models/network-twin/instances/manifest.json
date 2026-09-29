@@ -123,91 +123,91 @@
       "device": "vsr-1",
       "prefix": "0.0.0.0/32",
       "cost": 0,
-      "interface": "InLoop0"
+      "interface": "InLoopBack0"
     },
     {
       "device": "vsr-1",
       "prefix": "1.1.1.0/24",
       "cost": 2,
-      "interface": "GE2/0"
+      "interface": "GigabitEthernet2/0"
     },
     {
       "device": "vsr-1",
       "prefix": "2.2.2.0/24",
       "cost": 0,
-      "interface": "GE2/0"
+      "interface": "GigabitEthernet2/0"
     },
     {
       "device": "vsr-1",
       "prefix": "2.2.2.2/32",
       "cost": 0,
-      "interface": "InLoop0"
+      "interface": "InLoopBack0"
     },
     {
       "device": "vsr-1",
       "prefix": "2.2.2.255/32",
       "cost": 0,
-      "interface": "GE2/0"
+      "interface": "GigabitEthernet2/0"
     },
     {
       "device": "vsr-1",
       "prefix": "4.4.4.4/32",
       "cost": 0,
-      "interface": "InLoop0"
+      "interface": "InLoopBack0"
     },
     {
       "device": "vsr-1",
       "prefix": "10.10.1.0/24",
       "cost": 0,
-      "interface": "GE1/0"
+      "interface": "GigabitEthernet1/0"
     },
     {
       "device": "vsr-1",
       "prefix": "10.10.1.1/32",
       "cost": 0,
-      "interface": "InLoop0"
+      "interface": "InLoopBack0"
     },
     {
       "device": "vsr-1",
       "prefix": "10.10.1.255/32",
       "cost": 0,
-      "interface": "GE1/0"
+      "interface": "GigabitEthernet1/0"
     },
     {
       "device": "vsr-1",
       "prefix": "127.0.0.0/8",
       "cost": 0,
-      "interface": "InLoop0"
+      "interface": "InLoopBack0"
     },
     {
       "device": "vsr-1",
       "prefix": "127.0.0.1/32",
       "cost": 0,
-      "interface": "InLoop0"
+      "interface": "InLoopBack0"
     },
     {
       "device": "vsr-1",
       "prefix": "127.255.255.255/32",
       "cost": 0,
-      "interface": "InLoop0"
+      "interface": "InLoopBack0"
     },
     {
       "device": "vsr-1",
       "prefix": "192.168.1.0/24",
       "cost": 0,
-      "interface": "Vlan200"
+      "interface": "Vlan-interface200"
     },
     {
       "device": "vsr-1",
       "prefix": "192.168.1.1/32",
       "cost": 0,
-      "interface": "InLoop0"
+      "interface": "InLoopBack0"
     },
     {
       "device": "vsr-1",
       "prefix": "192.168.1.255/32",
       "cost": 0,
-      "interface": "Vlan200"
+      "interface": "Vlan-interface200"
     },
     {
       "device": "vsr-1",
@@ -225,103 +225,103 @@
       "device": "vsr-1",
       "prefix": "255.255.255.255/32",
       "cost": 0,
-      "interface": "InLoop0"
+      "interface": "InLoopBack0"
     },
     {
       "device": "vsr-2",
       "prefix": "0.0.0.0/32",
       "cost": 0,
-      "interface": "InLoop0"
+      "interface": "InLoopBack0"
     },
     {
       "device": "vsr-2",
       "prefix": "1.1.1.0/24",
       "cost": 0,
-      "interface": "Vlan100"
+      "interface": "Vlan-interface100"
     },
     {
       "device": "vsr-2",
       "prefix": "1.1.1.1/32",
       "cost": 0,
-      "interface": "InLoop0"
+      "interface": "InLoopBack0"
     },
     {
       "device": "vsr-2",
       "prefix": "1.1.1.255/32",
       "cost": 0,
-      "interface": "Vlan100"
+      "interface": "Vlan-interface100"
     },
     {
       "device": "vsr-2",
       "prefix": "2.2.2.0/24",
       "cost": 0,
-      "interface": "GE2/0"
+      "interface": "GigabitEthernet2/0"
     },
     {
       "device": "vsr-2",
       "prefix": "2.2.2.1/32",
       "cost": 0,
-      "interface": "InLoop0"
+      "interface": "InLoopBack0"
     },
     {
       "device": "vsr-2",
       "prefix": "2.2.2.255/32",
       "cost": 0,
-      "interface": "GE2/0"
+      "interface": "GigabitEthernet2/0"
     },
     {
       "device": "vsr-2",
       "prefix": "3.3.3.3/32",
       "cost": 0,
-      "interface": "InLoop0"
+      "interface": "InLoopBack0"
     },
     {
       "device": "vsr-2",
       "prefix": "4.4.4.4/32",
       "cost": 1,
-      "interface": "GE2/0"
+      "interface": "GigabitEthernet2/0"
     },
     {
       "device": "vsr-2",
       "prefix": "10.10.1.0/24",
       "cost": 0,
-      "interface": "GE1/0"
+      "interface": "GigabitEthernet1/0"
     },
     {
       "device": "vsr-2",
       "prefix": "10.10.1.2/32",
       "cost": 0,
-      "interface": "InLoop0"
+      "interface": "InLoopBack0"
     },
     {
       "device": "vsr-2",
       "prefix": "10.10.1.255/32",
       "cost": 0,
-      "interface": "GE1/0"
+      "interface": "GigabitEthernet1/0"
     },
     {
       "device": "vsr-2",
       "prefix": "127.0.0.0/8",
       "cost": 0,
-      "interface": "InLoop0"
+      "interface": "InLoopBack0"
     },
     {
       "device": "vsr-2",
       "prefix": "127.0.0.1/32",
       "cost": 0,
-      "interface": "InLoop0"
+      "interface": "InLoopBack0"
     },
     {
       "device": "vsr-2",
       "prefix": "127.255.255.255/32",
       "cost": 0,
-      "interface": "InLoop0"
+      "interface": "InLoopBack0"
     },
     {
       "device": "vsr-2",
       "prefix": "192.168.1.0/24",
       "cost": 2,
-      "interface": "GE2/0"
+      "interface": "GigabitEthernet2/0"
     },
     {
       "device": "vsr-2",
@@ -339,7 +339,7 @@
       "device": "vsr-2",
       "prefix": "255.255.255.255/32",
       "cost": 0,
-      "interface": "InLoop0"
+      "interface": "InLoopBack0"
     }
   ],
   "unmapped_l2_fields": [
