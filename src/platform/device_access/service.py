@@ -57,7 +57,11 @@ class DeviceAccessService:
                     raise DeviceAccessError("cancelled", "terminal was cancelled")
 
             guard()
-            connection = self.driver.connect(target, profile, interactive=True)
+            try:
+                connection = self.driver.connect(target, profile, interactive=True)
+            except Exception as exc:
+                # Same classification as batch access, so callers can ask for a new login.
+                raise DeviceAccessError(failure_code(exc), self._safe_error(exc, profile)) from None
             try:
                 guard()
                 yield connection.channel, guard

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Checkbox, Drawer, Empty, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography, message } from 'antd'
 import { Background, Controls, Handle, MarkerType, Position, ReactFlow, ReactFlowProvider, useReactFlow } from '@xyflow/react'
 import { layout, sides, type Side } from './layout'
@@ -119,6 +119,7 @@ export default function Page() {
         const { data } = await api.get<Run>(`/apps/topology/runs/${runId}`)
         if (alive) {
           setRun(data); setError('')
+          setHistory(items => items.map(item => item.id === data.id ? { ...item, status: data.status } : item))
           if (['queued', 'running', 'waiting_for_input'].includes(data.status)) timer = setTimeout(refresh, 3000)
           else void api.get<History[]>(`/apps/topology/networks/${data.network_id}/runs`).then(({ data }) => { if (alive) setHistory(data) })
         }
@@ -128,18 +129,25 @@ export default function Page() {
     return () => { alive = false; clearTimeout(timer) }
   }, [runId])
   const active = run && ['queued', 'running', 'waiting_for_input'].includes(run.status)
-  const waiting = run?.targets.filter(t => t.status === 'waiting_for_input') || []
+  const waiting = useMemo(() => run?.targets.filter(t => t.status === 'waiting_for_input') || [], [run])
   const accept = async (value: Run) => {
     await refreshNetworks(); setNetworkId(value.network_id)
     const { data } = await api.get<History[]>(`/apps/topology/networks/${value.network_id}/runs`)
     setHistory(data); setRunId(value.id); setRun(value)
   }
   const readEvidence = async (id?: string) => { if (!id) return; try { setEvidence((await api.get(`/apps/topology/evidence/${id}`)).data) } catch (error) { message.error(errorMessage(error)) } }
-  const openTarget = (row: Target) => {
+  const openTarget = useCallback((row: Target) => {
     setTarget(row); setRetryProfile(row.platform?.source === 'manual' ? row.platform.profile_id || 'auto' : 'auto')
     setReplaceCredentials(loginReasons.includes(row.reason || '')); retryForm.resetFields(); setHostKey(undefined)
     if (row.reason === 'host_key_changed') void readHostKey(row.address, run?.port || 22).then(setHostKey).catch(error => message.error(errorMessage(error)))
-  }
+  }, [retryForm, run?.port])
+  // A node that needs a person asks right away, once per failed attempt; the table button reopens it.
+  const prompted = useRef(new Set<string>())
+  useEffect(() => {
+    if (target) return
+    const next = waiting.find(row => !prompted.current.has(`${row.id}:${row.version}`))
+    if (next) { prompted.current.add(`${next.id}:${next.version}`); openTarget(next) }
+  }, [waiting, target, openTarget])
   const resolve = async (action: 'retry' | 'skip') => {
     if (!target || !run) return
     setBusy(true)

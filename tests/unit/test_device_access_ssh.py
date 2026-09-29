@@ -124,6 +124,26 @@ def test_real_human_terminal_preserves_banner_and_closes(tmp_path):
         assert commands == ["display version"]
 
 
+def test_real_human_terminal_reports_a_rejected_login_as_authentication_failed(tmp_path):
+    with ssh_server(tmp_path) as (port, known_hosts, commands, _):
+        access = DeviceAccessService(
+            target_resolver=lambda _: Target("switch", "127.0.0.1"),
+            profile_resolver=lambda _: ConnectionProfile(
+                "manual", "operator", "wrong-secret", port=port, known_hosts_file=str(known_hosts)
+            ),
+            admission=LocalAdmission(),
+        )
+        context = AccessContext(
+            "user", "device-access", (AccessGrant("switch", "manual", action="device.terminal"),)
+        )
+        with pytest.raises(DeviceAccessError) as error:
+            with access.terminal(context, "switch", "manual"):
+                pytest.fail("rejected login opened a channel")
+        assert error.value.failure_code == "authentication_failed"
+        assert "wrong-secret" not in str(error.value)
+        assert commands == []
+
+
 def test_terminal_authorization_rechecked_after_admission_before_connect():
     calls = []
     access = DeviceAccessService(

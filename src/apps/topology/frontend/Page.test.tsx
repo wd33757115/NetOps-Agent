@@ -78,8 +78,9 @@ it('saves the default login', async () => {
 it('asks for a new login for a node whose login failed and retries only that node', async () => {
   state.networks = [{ id: 'n1', name: 'lab' }]
   render(<Page />)
-  fireEvent.click(await screen.findByRole('button', { name: '人工处理' }))
+  // The dialog opens by itself; nobody has to find the node in the table first.
   const dialog = await screen.findByRole('dialog')
+  expect(within(dialog).getByText('处理节点 · 10.0.0.1')).toBeInTheDocument()
   expect(within(dialog).getByLabelText('为此节点输入新的用户名和密码')).toBeChecked()
   fireEvent.change(within(dialog).getByLabelText('用户名'), { target: { value: 'typed' } })
   fireEvent.change(within(dialog).getByLabelText('密码'), { target: { value: 'node-test-secret' } })

@@ -50,7 +50,8 @@
 @media (max-width: 760px) {
   .ssh-toolbar { padding: 0 16px; }
   .ssh-window { grid-template-columns: 1fr; width: calc(100% - 32px); height: auto; }
-  .ssh-sidebar { border-right: 0; border-bottom: 1px solid #dee4ed; max-height: 50dvh; }
+  .ssh-sidebar { border-right: 0; border-bottom: 1px solid #dee4ed; }
+  .ssh-sessions { flex: none; max-height: 40dvh; }
   .ssh-main { padding: 16px; min-height: 60dvh; }
 }
 @media (prefers-reduced-motion: reduce) { .ssh-app *, .ssh-app *::before, .ssh-app *::after { transition: none !important; animation: none !important; } }
