@@ -66,7 +66,13 @@ def world(monkeypatch):
         def revoke(self, ref):
             self.values.pop(ref, None)
 
-    blobs, dispatches, executions = {}, [], []
+    blobs, dispatches, executions, trust_used = {}, [], [], []
+
+    class Trust:
+        policies = {}
+
+        def policy(self, domain):
+            return self.policies.get(domain)
 
     def put(run, target, attempt, data):
         key = f"{run}/{target}/{attempt}"
@@ -84,6 +90,7 @@ def world(monkeypatch):
 
         def __init__(self, **kwargs):
             self.address = kwargs["target_resolver"](None).host
+            self.driver = kwargs.get("driver")
 
         def execute_batch(self, context, request, on_result, should_continue, command_filter=None):
             executions.append(request)
@@ -133,6 +140,12 @@ def world(monkeypatch):
         Transport is the Access double above, so failure/cancel/output knobs apply.
         """
         executions.append((target_ref, mode))
+        trust_used.append(
+            (
+                access.driver.driver.host_key_verifier is not None,
+                _.get("known_hosts_provider") is not None,
+            )
+        )
         address = access.address
         assert should_continue()
         if Access.failure:
@@ -178,6 +191,7 @@ def world(monkeypatch):
         return result
 
     monkeypatch.setattr(service, "collect_node", collect_node)
+    monkeypatch.setattr(service, "HostKeyStore", Trust)
     monkeypatch.setattr(service, "sessions", sessions)
     monkeypatch.setattr(service, "CredentialStore", Credentials)
     monkeypatch.setattr(service, "authorize_address", lambda *args: None)
@@ -192,6 +206,8 @@ def world(monkeypatch):
         blobs=blobs,
         executions=executions,
         dispatches=dispatches,
+        trust=Trust,
+        trust_used=trust_used,
     )
     engine.dispose()
 
@@ -523,3 +539,14 @@ def test_discovery_of_the_lab_publishes_one_simap_topology(world):
     ]
     # 2.2.2.x is advertised on the direct link but lies outside the task scope.
     assert {u["address"] for u in graph["coverage"]["unexplored"]} == {"2.2.2.1", "2.2.2.2"}
+
+
+@pytest.mark.parametrize("policy", [None, "strict"])
+def test_collection_uses_the_domain_host_key_policy(world, policy):
+    if policy:
+        world.trust.policies["default"] = policy
+    row = service.submit("user", discovery(max_depth=0))
+    service.execute_run(row["id"], lambda *args: None)
+    # A configured domain verifies keys in its store for both sessions; otherwise
+    # the strict known_hosts file of the connection profile applies.
+    assert world.trust_used == [(bool(policy), bool(policy))]

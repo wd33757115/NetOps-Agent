@@ -15,6 +15,7 @@ from sqlalchemy import delete, func, select, update
 
 from src.apps.device_access.backend.credentials import CredentialVault
 from src.apps.device_access.backend.grants import authorize_address
+from src.apps.device_access.backend.host_keys import HostKeyStore
 from src.apps.device_access.backend.vault_driver import VaultDriver
 from src.platform.device_access import AccessContext, AccessGrant, BatchRequest, DeviceAccessService
 from src.platform.device_access.contracts import (
@@ -581,12 +582,25 @@ def _collect_topology(job, choice):
     try:
         # The vault tries the domain's credential sets plus this target's temporary one,
         # and pins whichever succeeds for the identified platform's second session.
+        # Same host-key trust as the device-access App: a domain policy verifies and pins
+        # keys in its store; an unconfigured domain keeps the strict known_hosts file.
+        trust = HostKeyStore()
+        policy = trust.policy(job.settings["domain"])
+        verifier = known_hosts = None
+        if policy is not None:
+
+            def verifier(target, port, key):
+                return trust.verify(job.owner, target, port, key)
+
+            def known_hosts(target, port):
+                return trust.known_hosts(job.owner, target.management_domain, target.host, port)
+
         driver = VaultDriver(
             CredentialVault(),
             job.owner,
             temporary_ref=job.ref,
             guard=job.guard,
-            driver=ParamikoDriver(),
+            driver=ParamikoDriver(host_key_verifier=verifier),
         )
         profile = ConnectionProfile(
             profile_id=job.target_id,
@@ -617,6 +631,7 @@ def _collect_topology(job, choice):
             budget_seconds=NODE_BUDGET_SECONDS,
             should_continue=job.guard,
             on_result=capture,
+            known_hosts_provider=known_hosts,
         )
         data = topology_observation(result)
         reason = data.get("failure_code")
