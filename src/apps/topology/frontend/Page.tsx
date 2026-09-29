@@ -167,7 +167,7 @@ export default function Page() {
         finally { form.setFieldValue(['credentials', 'password'], ''); setBusy(false) }
       }}>
         <Form.Item name="network_id" label="网络范围"><Select allowClear placeholder="创建新网络" onChange={value => applyNetwork(value)} options={networks.map(n => ({ value: n.id, label: `${n.name} · ${n.domain}` }))} /></Form.Item>
-        <Form.Item name="name" label="网络名称" rules={[{ required: true }]}><Input disabled={!!chosenNetwork} /></Form.Item><Form.Item name="domain" label="管理域" rules={[{ required: true }]} extra={chosenNetwork ? '沿用所选网络的管理域；设备授权按此管理域校验' : '设备授权按此管理域校验，须与“设备访问 · 访问范围”中的管理域一致'}><Input disabled={!!chosenNetwork} /></Form.Item>
+        <Form.Item name="name" label="网络名称" rules={[{ required: true }]}><Input disabled={!!chosenNetwork} /></Form.Item><Form.Item name="domain" label="管理域" rules={[{ required: true }]} extra={chosenNetwork ? '沿用所选网络的管理域；设备授权按此管理域校验' : '设备授权按此管理域校验，须与“系统管理 · 设备访问范围”中的管理域一致'}><Input disabled={!!chosenNetwork} /></Form.Item>
         <Form.Item name="seeds" label="种子设备地址" rules={[{ required: true }]} extra="多个 IP 以空格或换行分隔"><Input.TextArea rows={2} placeholder="10.10.1.1" /></Form.Item>
         <Form.Item name="allowed_cidrs" label="本任务允许的管理网段" rules={[{ required: true }]} extra="发现范围同时受管理员授予的设备权限约束"><Input placeholder="10.10.1.0/24" /></Form.Item>
         <Form.Item name="profile_id" label="种子设备平台（可选）" extra="默认自动识别。手工选择只适用于种子；每个新邻居都独立识别，不继承种子平台。"><Select options={profiles} /></Form.Item>

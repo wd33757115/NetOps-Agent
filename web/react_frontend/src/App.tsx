@@ -20,6 +20,7 @@ const StoragePage = React.lazy(() => import('./pages/StoragePage'))
 const UsersPage = React.lazy(() => import('./pages/UsersPage'))
 const SystemGroupsPage = React.lazy(() => import('./pages/SystemGroupsPage'))
 const SystemAppsPage = React.lazy(() => import('./pages/SystemAppsPage'))
+const SystemDeviceScopesPage = React.lazy(() => import('./pages/SystemDeviceScopesPage'))
 const LoginPage = React.lazy(() => import('./pages/LoginPage'))
 const DevicesPage = React.lazy(() => import('./pages/DevicesPage'))
 const WorkbenchPage = React.lazy(() => import('./pages/WorkbenchPage'))
@@ -75,6 +76,7 @@ const App: React.FC = () => {
             <Route path="system/users" element={<AdminRoute><UsersPage /></AdminRoute>} />
             <Route path="system/groups" element={<AdminRoute><SystemGroupsPage /></AdminRoute>} />
             <Route path="system/apps" element={<AdminRoute appGrants><SystemAppsPage /></AdminRoute>} />
+            <Route path="system/device-scopes" element={<AdminRoute><SystemDeviceScopesPage /></AdminRoute>} />
           </Route>
           </Routes>
         </Suspense>
