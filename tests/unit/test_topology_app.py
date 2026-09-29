@@ -630,6 +630,60 @@ def test_discovery_of_the_lab_publishes_one_simap_topology(world):
     assert {u["address"] for u in graph["coverage"]["unexplored"]} == {"2.2.2.1", "2.2.2.2"}
 
 
+def lab_run(world):
+    for address, device in (("10.10.1.1", "vsr-1"), ("10.10.1.2", "vsr-2")):
+        for cap, name in LAB_FILES.items():
+            world.access.captures[(address, cap)] = (LAB / device / f"{name}.txt").read_text(
+                encoding="utf-8"
+            )
+    body = discovery(max_depth=1)
+    body.seeds, body.allowed_cidrs = ["10.10.1.1"], ["10.10.1.0/24"]
+    row = service.submit("user", body)
+    service.execute_run(row["id"], lambda *args: None)
+    service.execute_run(row["id"], lambda *args: None)
+    return service.read("user", row["id"])
+
+
+def test_locate_answers_from_a_snapshot_with_evidence(world):
+    result = lab_run(world)
+    found = service.locate("user", result["snapshot_id"], "192.168.1.2")
+    assert found["status"] == "confirmed" and found["snapshot_id"] == result["snapshot_id"]
+    port = found["locations"][0]["ports"][0]
+    assert (port["address"], port["port"], port["vlan"]) == (
+        "10.10.1.1",
+        "GigabitEthernet3/0",
+        "200",
+    )
+    assert port["evidence_id"] == next(
+        t["evidence_id"] for t in result["targets"] if t["address"] == "10.10.1.1"
+    )
+    # Highlighted ids are canvas ids of the same snapshot.
+    canvas_ids = {n["id"] for n in result["graph"]["nodes"]}
+    assert {port["node_id"], found["locations"][0]["host_node"]} <= canvas_ids
+    assert service.locate("user", result["snapshot_id"], "10.10.1.254")["status"] == (
+        "shared_segment"
+    )
+    with pytest.raises(HTTPException) as bad:
+        service.locate("user", result["snapshot_id"], "not-an-address")
+    assert bad.value.status_code == 422
+    with pytest.raises(HTTPException) as foreign:
+        service.locate("stranger", result["snapshot_id"], "192.168.1.2")
+    assert foreign.value.status_code == 404
+
+
+def test_locate_searches_the_current_snapshot_of_every_network(world):
+    lab_run(world)
+    found = service.locate_current("user", "0050.7966.6801")
+    assert [f["status"] for f in found] == ["confirmed"]
+    assert service.locate_current("user", "10.200.0.1") == []
+    assert service.locate_current("stranger", "0050.7966.6801") == []
+
+
+def test_offline_snapshots_without_facts_find_nothing(world):
+    row = service.import_captures("user", offline())
+    assert service.locate("user", row["snapshot_id"], "10.0.0.2")["status"] == "not_found"
+
+
 def test_discovery_records_host_keys_itself_for_both_sessions(world):
     row = service.submit("user", discovery(max_depth=0))
     service.execute_run(row["id"], lambda *args: None)

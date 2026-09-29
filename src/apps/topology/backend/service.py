@@ -30,6 +30,7 @@ from .collectors.identify import TopologyDiscoveryPlan as DiscoveryPlan
 from .collectors.tiers.common import valid_mac
 from .logins import DOMAIN
 from .model.builder import build_topology, device_node_ids
+from .model.locate import locate as locate_in
 from .model.view import canvas
 from .models import (
     Alias,
@@ -393,6 +394,51 @@ def snapshot(owner, snapshot_id):
             raise HTTPException(404, "快照不存在")
         owned(session, Network, row.network_id, owner)
         return row.graph
+
+
+def _locate(session, snap, query):
+    network = session.get(Network, snap.network_id)
+    if "simap" not in snap.graph:
+        raise HTTPException(422, "该快照格式较旧，不支持定位，请重新发现")
+    observations = _observations(session, snap.run_id)
+    devices = {o["address"]: _facts(o["data"]) for o in observations}
+    observed = {
+        o["address"]: {"evidence_id": o["id"], "observed_at": o["observed_at"]}
+        for o in observations
+    }
+    try:
+        result = locate_in(devices, f"urn:netops:topology:{network.id}:", query, observed)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+    return {"network_id": network.id, "network": network.name, "snapshot_id": snap.id, **result}
+
+
+def locate(owner, snapshot_id, query):
+    """Where an IP or MAC attaches in one snapshot, with its gateways and evidence."""
+    with sessions() as session:
+        snap = session.get(Snapshot, snapshot_id)
+        if not snap:
+            raise HTTPException(404, "快照不存在")
+        owned(session, Network, snap.network_id, owner)
+        return _locate(session, snap, query)
+
+
+def locate_current(owner, query):
+    """The same question over the current snapshot of every network of the owner."""
+    with sessions() as session:
+        found = []
+        for network in session.scalars(
+            select(Network)
+            .where(Network.owner_id == owner, Network.current_snapshot.is_not(None))
+            .order_by(Network.created_at.desc())
+            .limit(200)
+        ):
+            snap = session.get(Snapshot, network.current_snapshot)
+            if snap and "simap" in snap.graph:
+                result = _locate(session, snap, query)
+                if result["status"] != "not_found":
+                    found.append(result)
+        return found
 
 
 def compare(owner, before_id, after_id):

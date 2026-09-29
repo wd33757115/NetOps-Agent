@@ -5,6 +5,7 @@ import { layout, sides, type Side } from './layout'
 import '@xyflow/react/dist/style.css'
 import { api } from '@netops/config/api'
 import DeviceTerminal, { acceptHostKey, readHostKey, type HostKey } from '@netops/platform/terminal/DeviceTerminal'
+import Located, { highlightIds, type LocateResult } from './Located'
 import './topology.css'
 
 interface Network { id: string; name: string; active_run?: string; current_snapshot?: string }
@@ -31,15 +32,15 @@ function TopologyNodeView({ data }: { data: { label: React.ReactNode } }) {
 }
 const nodeTypes = { topology: TopologyNodeView }
 
-function Canvas({ graph, onNode, onLink }: { graph: Graph; onNode: (node: TopologyNode) => void; onLink: (link: Link) => void }) {
+function Canvas({ graph, highlight, onNode, onLink }: { graph: Graph; highlight: Set<string>; onNode: (node: TopologyNode) => void; onLink: (link: Link) => void }) {
   const { fitView } = useReactFlow()
   const positions = useMemo(() => layout(graph.nodes, graph.links), [graph])
   const nodes = useMemo(() => graph.nodes.map(node => ({ id: node.id, type: 'topology',
     position: positions.get(node.id) ?? { x: 0, y: 0 },
     ariaLabel: `${node.name} · ${labels[node.identity_status]}`,
     data: { label: <><strong>{node.name}</strong><span>{node.address || node.addresses?.join(', ') || '管理地址待确认'}</span><small>{labels[node.identity_status]} · {labels[node.freshness]}</small></> },
-    className: node.identity_status === 'segment' ? 'topology-node segment' : ['candidate', 'advertised'].includes(node.identity_status) ? 'topology-node candidate' : 'topology-node',
-  })), [graph.nodes, positions])
+    className: (node.identity_status === 'segment' ? 'topology-node segment' : ['candidate', 'advertised'].includes(node.identity_status) ? 'topology-node candidate' : 'topology-node') + (highlight.has(node.id) ? ' located' : ''),
+  })), [graph.nodes, positions, highlight])
   const edges = useMemo(() => graph.links.map(link => {
     const find = (id: string) => graph.nodes.find(n => n.id === id)
     const [from, to] = sides(positions.get(link.source) ?? { x: 0, y: 0 }, positions.get(link.target) ?? { x: 0, y: 0 }, find(link.source), find(link.target))
@@ -48,9 +49,9 @@ function Canvas({ graph, onNode, onLink }: { graph: Graph; onNode: (node: Topolo
       label: link.label ?? find(link.source)?.tps.find(tp => tp.id === link.source_tp)?.name,
       labelBgPadding: [4, 2] as [number, number], labelStyle: { fontSize: 11 },
       ...(link.direction === 'bi' && link.link_type === 'p2p' ? { markerStart: { type: MarkerType.ArrowClosed }, markerEnd: { type: MarkerType.ArrowClosed } } : {}),
-      style: { stroke: link.freshness === 'observed' ? '#477b8a' : '#aeb8c3', strokeDasharray: link.freshness === 'observed' ? undefined : '5 5' },
+      style: highlight.has(link.source) && highlight.has(link.target) ? { stroke: '#1671e8', strokeWidth: 2.5 } : { stroke: link.freshness === 'observed' ? '#477b8a' : '#aeb8c3', strokeDasharray: link.freshness === 'observed' ? undefined : '5 5' },
     }
-  }), [graph, positions])
+  }), [graph, positions, highlight])
   useEffect(() => { const timer = setTimeout(() => void fitView({ padding: 0.3, maxZoom: 1.1 }), 80); return () => clearTimeout(timer) }, [fitView, nodes.length])
   return <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} nodesDraggable={false} nodesConnectable={false} minZoom={0.15} maxZoom={2}
     onNodeClick={(_, node) => onNode(graph.nodes.find(n => n.id === node.id)!)}
@@ -80,6 +81,16 @@ export default function Page() {
   const [retryProfile, setRetryProfile] = useState('auto')
   const [terminal, setTerminal] = useState<string>()
   const [changes, setChanges] = useState<unknown>()
+  const [located, setLocated] = useState<LocateResult>()
+  const [locating, setLocating] = useState(false)
+  const highlight = useMemo(() => highlightIds(located), [located])
+  const locate = async (query: string) => {
+    if (!run?.snapshot_id || !query.trim()) return
+    setLocating(true)
+    try { setLocated((await api.get<LocateResult>(`/apps/topology/snapshots/${run.snapshot_id}/locate`, { params: { q: query.trim() } })).data); setSelected(undefined) }
+    catch (error) { message.error(errorMessage(error)) }
+    finally { setLocating(false) }
+  }
   const [form] = Form.useForm()
   const chosenNetwork = Form.useWatch('network_id', form)
   // An existing network keeps its name.
@@ -93,7 +104,7 @@ export default function Page() {
   const refreshNetworks = () => api.get<Network[]>('/apps/topology/networks').then(({ data }) => { setNetworks(data); setNetworkId(current => current || data[0]?.id) })
   useEffect(() => { void refreshNetworks().catch(error => setError(errorMessage(error))); void refreshDefault().catch(() => undefined) }, [])
   useEffect(() => {
-    setRun(undefined); setSelected(undefined); setRunId(undefined)
+    setRun(undefined); setSelected(undefined); setRunId(undefined); setLocated(undefined)
     if (!networkId) return
     let alive = true
     void api.get<History[]>(`/apps/topology/networks/${networkId}/runs`).then(({ data }) => { if (alive) { setHistory(data); setRunId(data[0]?.id) } }).catch(error => setError(errorMessage(error)))
@@ -144,8 +155,9 @@ export default function Page() {
     <header className="topology-heading"><div><Typography.Title level={2}>网络拓扑</Typography.Title><p>发现网络，保留观测，逐步构建数字孪生。</p></div><Space><Button onClick={() => { defaultForm.resetFields(); setEditDefault(true) }}>默认登录{defaultLogin?.configured ? ` · ${defaultLogin.username}` : ''}</Button><Button onClick={() => setOffline(true)}>导入离线观测</Button><Button type="primary" onClick={() => { form.resetFields(); applyNetwork(networkId); setCreate(true) }}>新建发现任务</Button></Space></header>
     {error && <Alert type="error" message={error} action={<Button onClick={() => { setError(''); void refreshNetworks().catch(error => setError(errorMessage(error))) }}>刷新</Button>} />}
     <div className="topology-toolbar"><Select aria-label="网络" placeholder="选择网络" value={networkId} onChange={setNetworkId} options={networks.map(n => ({ value: n.id, label: n.name }))} style={{ minWidth: 220 }} />
-      <Select aria-label="观测任务" placeholder="观测任务" value={runId} onChange={value => { setSelected(undefined); setRunId(value) }} options={history.map(h => ({ value: h.id, label: `${new Date(h.created_at).toLocaleString()} · ${labels[h.status] || h.status}` }))} style={{ minWidth: 290 }} />
+      <Select aria-label="观测任务" placeholder="观测任务" value={runId} onChange={value => { setSelected(undefined); setLocated(undefined); setRunId(value) }} options={history.map(h => ({ value: h.id, label: `${new Date(h.created_at).toLocaleString()} · ${labels[h.status] || h.status}` }))} style={{ minWidth: 290 }} />
       {run && <Tag color={active ? 'processing' : 'default'}>{labels[run.status]}</Tag>}
+      <Input.Search aria-label="定位 IP 或 MAC" placeholder={run?.snapshot_id ? '定位 IP 或 MAC' : '任务完成后可定位'} enterButton="定位" loading={locating} disabled={!run?.snapshot_id} onSearch={value => void locate(value)} allowClear style={{ width: 280 }} />
       {run?.snapshot_id && <Button onClick={() => void api.get(`/apps/topology/snapshots/${run.snapshot_id}/rfc8345`).then(({ data }) => {
         const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })); const a = document.createElement('a'); a.href = url; a.download = `topology-${run.snapshot_id}.json`; a.click(); URL.revokeObjectURL(url)
       }).catch(error => message.error(errorMessage(error)))}>导出 RFC 8345 + SIMAP</Button>}
@@ -153,10 +165,10 @@ export default function Page() {
     </div>
     {waiting.length > 0 && <Alert type="warning" showIcon message={`${waiting.length} 个节点等待人工处理；成功节点的观测已保留`} />}
     <div className="topology-main"><section className="topology-canvas" aria-label="网络拓扑画布">
-      {run?.graph.nodes.length ? <ReactFlowProvider><Canvas graph={run.graph} onNode={setSelected} onLink={setSelected} /></ReactFlowProvider> : <div className="topology-empty"><Empty description={run ? '尚无成功的拓扑观测，请查看节点状态' : '从一个管理地址开始发现，或导入已有 LLDP 输出'} /><p>每条链路都保留来源与观测时间。未确认的邻居以候选身份展示。</p></div>}
+      {run?.graph.nodes.length ? <ReactFlowProvider><Canvas graph={run.graph} highlight={highlight} onNode={node => { setLocated(undefined); setSelected(node) }} onLink={link => { setLocated(undefined); setSelected(link) }} /></ReactFlowProvider> : <div className="topology-empty"><Empty description={run ? '尚无成功的拓扑观测，请查看节点状态' : '从一个管理地址开始发现，或导入已有 LLDP 输出'} /><p>每条链路都保留来源与观测时间。未确认的邻居以候选身份展示。</p></div>}
       {run && <div className="topology-map-caption">{run.graph.nodes.length} 个节点 · {run.graph.links.length} 条邻接记录 · L2/L3 拓扑（RFC 8345 + SIMAP）</div>}
-    </section><aside className="topology-inspector"><h3>{selected ? '观测详情' : '阅读这张拓扑'}</h3>
-      {selected ? <><dl>{Object.entries(selected).filter(([key]) => !['tps', 'id', 'source_tp', 'target_tp', 'source', 'target'].includes(key)).map(([key, value]) => <React.Fragment key={key}><dt>{({ name: '名称', address: '管理地址', addresses: '通告地址', identity_status: '身份状态', freshness: '新鲜度', observed_at: '观测时间', evidence_id: '证据编号', members: '端口数', subnets: '三层网段', link_type: '链路类型', evidence: '依据', direction: '方向', ends: '两端端口', label: '端口' } as Record<string, string>)[key] || key}</dt><dd>{labels[String(value)] || (typeof value === 'object' ? JSON.stringify(value) : String(value))}</dd></React.Fragment>)}</dl>
+    </section><aside className="topology-inspector"><h3>{located ? '定位结果' : selected ? '观测详情' : '阅读这张拓扑'}</h3>
+      {located ? <Located result={located} onEvidence={id => void readEvidence(id)} onClear={() => setLocated(undefined)} /> : selected ? <><dl>{Object.entries(selected).filter(([key]) => !['tps', 'id', 'source_tp', 'target_tp', 'source', 'target'].includes(key)).map(([key, value]) => <React.Fragment key={key}><dt>{({ name: '名称', address: '管理地址', addresses: '通告地址', identity_status: '身份状态', freshness: '新鲜度', observed_at: '观测时间', evidence_id: '证据编号', members: '端口数', subnets: '三层网段', link_type: '链路类型', evidence: '依据', direction: '方向', ends: '两端端口', label: '端口' } as Record<string, string>)[key] || key}</dt><dd>{labels[String(value)] || (typeof value === 'object' ? JSON.stringify(value) : String(value))}</dd></React.Fragment>)}</dl>
         {'tps' in selected && <><h4>终结点 / 端口</h4>{selected.tps.map(tp => <div key={tp.id}>{tp.name}</div>)}</>}
         <Space direction="vertical" style={{ marginTop: 16 }}><Button disabled={!selected.evidence_id} onClick={() => void readEvidence(selected.evidence_id)}>查看原始证据</Button>{'address' in selected && selected.address && <Button onClick={() => setTerminal(selected.address)}>打开 SSH 终端</Button>}</Space>
       </> : <><p>拓扑只展示本次任务的观测结果。链路表示二层邻接，不代表一根实际线缆；共享网段表示同一介质上的多个端口，例如经过 Hub。</p><p>只被邻居通告、尚未采集的设备用虚线框显示。设备按自身报告的机箱 ID 识别，采集后与通告合并为同一节点。</p><p>点击节点或链路可查看观测时间与命令证据。</p></>}

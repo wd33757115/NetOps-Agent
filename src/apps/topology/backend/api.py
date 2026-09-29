@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import IntegrityError
 
 from src.auth.models import CurrentUser
@@ -79,6 +79,15 @@ def resolve(run_id: str, target_id: str, body: Resolve, user: CurrentUser = Depe
 @router.get("/snapshots/{snapshot_id}")
 def snapshot(snapshot_id: str, user: CurrentUser = Depends(actor)):
     return service.snapshot(user.user_id, snapshot_id)
+
+
+@router.get("/snapshots/{snapshot_id}/locate")
+def locate(
+    snapshot_id: str,
+    q: str = Query(min_length=1, max_length=64),
+    user: CurrentUser = Depends(actor),
+):
+    return service.locate(user.user_id, snapshot_id, q)
 
 
 @router.get("/snapshots/{snapshot_id}/rfc8345")
