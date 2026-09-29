@@ -84,6 +84,7 @@ def test_lab_unknown_destination_ends_where_the_data_ends():
     [path] = result["forward"]["paths"]
     assert hops(path) == [("10.10.1.2", "Vlan-interface100", None)]
     assert path["end"] == {"status": "no_route"}
+    assert path["hops"][0]["route"] is None and path["hops"][0]["out_interface"] is None
     assert result["forward"]["status"] == "partial"
     assert result["reverse"]["status"] == "no_gateway"
     assert [(g["direction"], g["status"]) for g in result["gaps"]] == [

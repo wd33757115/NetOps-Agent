@@ -88,7 +88,14 @@ class _Tracer:
             paths.append({"hops": trail, "end": {"status": status, **extra}})
 
         def step(key, vrf, in_if, trail, visited):
-            hop = {"device": self.device(key), "vrf": vrf, "in_interface": in_if}
+            # A hop that ends the branch before a lookup keeps the same shape, with no route.
+            hop = {
+                "device": self.device(key),
+                "vrf": vrf,
+                "in_interface": in_if,
+                "out_interface": None,
+                "route": None,
+            }
             owner = self.topo.owner.get((vrf, dst))
             if owner and owner[0] == key:
                 end([*trail, hop], "delivered", to="device", interface=owner[1])
