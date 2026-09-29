@@ -1,10 +1,12 @@
 import React from 'react'
+import { MemoryRouter } from 'react-router-dom'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import Page from './Page'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn() }))
 vi.mock('@netops/config/api', () => ({ api }))
+vi.mock('@netops/context/AuthContext', () => ({ useAuth: () => ({ user: { username: 'operator', role: 'operator' } }) }))
 vi.mock('@netops/platform/terminal/DeviceTerminal', () => ({
   default: () => null,
   readHostKey: vi.fn().mockResolvedValue({ host: '10.0.0.1', port: 22, status: 'trusted', key_type: 'ssh-rsa', fingerprint: 'SHA256:old', observed_fingerprint: 'SHA256:new' }),
@@ -29,7 +31,7 @@ beforeEach(() => {
 afterEach(cleanup)
 
 const startDiscovery = async (login?: { username: string; password: string }) => {
-  render(<Page />)
+  render(<MemoryRouter><Page /></MemoryRouter>)
   fireEvent.click(await screen.findByRole('button', { name: '新建发现任务' }))
   fireEvent.change(screen.getByLabelText('种子设备地址'), { target: { value: '10.0.0.1' } })
   fireEvent.change(screen.getByLabelText('本任务允许的管理网段'), { target: { value: '10.0.0.0/24' } })
@@ -66,7 +68,7 @@ it('needs a temporary login when no default is saved', async () => {
 })
 
 it('saves the default login', async () => {
-  render(<Page />)
+  render(<MemoryRouter><Page /></MemoryRouter>)
   fireEvent.click(await screen.findByRole('button', { name: /默认登录/ }))
   const dialog = await screen.findByRole('dialog')
   fireEvent.change(within(dialog).getByLabelText('用户名'), { target: { value: 'admin' } })
@@ -77,7 +79,7 @@ it('saves the default login', async () => {
 
 it('asks for a new login for a node whose login failed and retries only that node', async () => {
   state.networks = [{ id: 'n1', name: 'lab' }]
-  render(<Page />)
+  render(<MemoryRouter><Page /></MemoryRouter>)
   // The dialog opens by itself; nobody has to find the node in the table first.
   const dialog = await screen.findByRole('dialog')
   expect(within(dialog).getByText('处理节点 · 10.0.0.1')).toBeInTheDocument()
@@ -91,7 +93,7 @@ it('asks for a new login for a node whose login failed and retries only that nod
 it('a connection failure offers retry or skip without asking for a login', async () => {
   state.networks = [{ id: 'n1', name: 'lab' }]
   state.reason = 'connection_failed'
-  render(<Page />)
+  render(<MemoryRouter><Page /></MemoryRouter>)
   fireEvent.click(await screen.findByRole('button', { name: '人工处理' }))
   const dialog = await screen.findByRole('dialog')
   expect(within(dialog).getByLabelText('为此节点输入新的用户名和密码')).not.toBeChecked()
@@ -103,7 +105,7 @@ it('shows both fingerprints when a node host key changed and trusts the new one 
   const terminal = await import('@netops/platform/terminal/DeviceTerminal')
   state.networks = [{ id: 'n1', name: 'lab' }]
   state.reason = 'host_key_changed'
-  render(<Page />)
+  render(<MemoryRouter><Page /></MemoryRouter>)
   fireEvent.click(await screen.findByRole('button', { name: '人工处理' }))
   const dialog = await screen.findByRole('dialog')
   expect(await within(dialog).findByText('SHA256:new')).toBeInTheDocument()
@@ -120,7 +122,7 @@ it('locates an IP in the viewed snapshot and shows the answer', async () => {
         : url.endsWith('/runs') ? [{ id: 'r1', status: 'completed', created_at: '2026-09-29T00:00:00Z', snapshot_id: 'snap-1' }]
           : url.endsWith('/locate') ? { query: '192.168.1.2', kind: 'ip', status: 'confirmed', gateways: [], locations: [{ status: 'confirmed', mac: '00:50:79:66:68:01', ports: [{ node_id: 'd', name: 'vsr-1', address: '10.10.1.1', collected: true, port: 'GigabitEthernet3/0', tp_id: 't', basis: 'mac', vlan: '200' }] }] }
             : { ...run('none'), status: 'completed', snapshot_id: 'snap-1', targets: [] } }))
-  render(<Page />)
+  render(<MemoryRouter><Page /></MemoryRouter>)
   const search = await screen.findByPlaceholderText('定位 IP 或 MAC')
   fireEvent.change(search, { target: { value: ' 192.168.1.2 ' } })
   fireEvent.keyDown(search, { key: 'Enter', code: 'Enter', keyCode: 13 })
@@ -131,6 +133,6 @@ it('locates an IP in the viewed snapshot and shows the answer', async () => {
 
 it('cannot locate before a run has a snapshot', async () => {
   state.networks = [{ id: 'n1', name: 'lab' }]
-  render(<Page />)
+  render(<MemoryRouter><Page /></MemoryRouter>)
   expect(await screen.findByPlaceholderText('任务完成后可定位')).toBeDisabled()
 })
