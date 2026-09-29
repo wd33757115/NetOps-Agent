@@ -161,7 +161,11 @@ class GrantStore:
                     return
         except (ValueError, SQLAlchemyError):
             raise DeviceAccessError("not_authorized", "设备授权校验不可用") from None
-        raise DeviceAccessError("not_authorized", "设备不在当前用户授权范围内")
+        # Name what did not match so the user can fix the domain or ask for the right grant.
+        kind = {"device.collect": "采集", "device.terminal": "终端"}.get(action, action)
+        raise DeviceAccessError(
+            "not_authorized", f"设备 {address} 不在当前用户于管理域“{domain}”的{kind}授权范围内"
+        )
 
 
 def authorize_address(owner, domain, address, action="device.collect"):

@@ -77,6 +77,13 @@ export default function Page() {
   const [terminal, setTerminal] = useState<string>()
   const [changes, setChanges] = useState<unknown>()
   const [form] = Form.useForm()
+  const chosenNetwork = Form.useWatch('network_id', form)
+  // An existing network fixes the name and management domain; authorization is checked
+  // against that domain, so the form must never submit a different one.
+  const applyNetwork = (id?: string) => {
+    const chosen = networks.find(n => n.id === id)
+    if (chosen) form.setFieldsValue({ network_id: chosen.id, name: chosen.name, domain: chosen.domain })
+  }
   const [retryForm] = Form.useForm()
   const refreshNetworks = () => api.get<Network[]>('/apps/topology/networks').then(({ data }) => { setNetworks(data); setNetworkId(current => current || data[0]?.id) })
   useEffect(() => { void refreshNetworks().catch(error => setError(errorMessage(error))) }, [])
@@ -123,7 +130,7 @@ export default function Page() {
     finally { retryForm.setFieldValue('password', ''); setBusy(false) }
   }
   return <main className="topology-workspace">
-    <header className="topology-heading"><div><Typography.Title level={2}>网络拓扑</Typography.Title><p>发现网络，保留观测，逐步构建数字孪生。</p></div><Space><Button onClick={() => setOffline(true)}>导入离线观测</Button><Button type="primary" onClick={() => { form.resetFields(); setCreate(true) }}>新建发现任务</Button></Space></header>
+    <header className="topology-heading"><div><Typography.Title level={2}>网络拓扑</Typography.Title><p>发现网络，保留观测，逐步构建数字孪生。</p></div><Space><Button onClick={() => setOffline(true)}>导入离线观测</Button><Button type="primary" onClick={() => { form.resetFields(); applyNetwork(networkId); setCreate(true) }}>新建发现任务</Button></Space></header>
     {error && <Alert type="error" message={error} action={<Button onClick={() => { setError(''); void refreshNetworks().catch(error => setError(errorMessage(error))) }}>刷新</Button>} />}
     <div className="topology-toolbar"><Select aria-label="网络" placeholder="选择网络" value={networkId} onChange={setNetworkId} options={networks.map(n => ({ value: n.id, label: `${n.name} · ${n.domain}` }))} style={{ minWidth: 220 }} />
       <Select aria-label="观测任务" placeholder="观测任务" value={runId} onChange={value => { setSelected(undefined); setRunId(value) }} options={history.map(h => ({ value: h.id, label: `${new Date(h.created_at).toLocaleString()} · ${labels[h.status] || h.status}` }))} style={{ minWidth: 290 }} />
@@ -159,8 +166,8 @@ export default function Page() {
         catch (error) { message.error(errorMessage(error)) }
         finally { form.setFieldValue(['credentials', 'password'], ''); setBusy(false) }
       }}>
-        <Form.Item name="network_id" label="网络范围"><Select allowClear placeholder="创建新网络" options={networks.map(n => ({ value: n.id, label: n.name }))} /></Form.Item>
-        <Form.Item name="name" label="网络名称" rules={[{ required: true }]}><Input /></Form.Item><Form.Item name="domain" label="管理域" rules={[{ required: true }]}><Input /></Form.Item>
+        <Form.Item name="network_id" label="网络范围"><Select allowClear placeholder="创建新网络" onChange={value => applyNetwork(value)} options={networks.map(n => ({ value: n.id, label: `${n.name} · ${n.domain}` }))} /></Form.Item>
+        <Form.Item name="name" label="网络名称" rules={[{ required: true }]}><Input disabled={!!chosenNetwork} /></Form.Item><Form.Item name="domain" label="管理域" rules={[{ required: true }]} extra={chosenNetwork ? '沿用所选网络的管理域；设备授权按此管理域校验' : '设备授权按此管理域校验，须与“设备访问 · 访问范围”中的管理域一致'}><Input disabled={!!chosenNetwork} /></Form.Item>
         <Form.Item name="seeds" label="种子设备地址" rules={[{ required: true }]} extra="多个 IP 以空格或换行分隔"><Input.TextArea rows={2} placeholder="10.10.1.1" /></Form.Item>
         <Form.Item name="allowed_cidrs" label="本任务允许的管理网段" rules={[{ required: true }]} extra="发现范围同时受管理员授予的设备权限约束"><Input placeholder="10.10.1.0/24" /></Form.Item>
         <Form.Item name="profile_id" label="种子设备平台（可选）" extra="默认自动识别。手工选择只适用于种子；每个新邻居都独立识别，不继承种子平台。"><Select options={profiles} /></Form.Item>
