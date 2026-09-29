@@ -530,6 +530,15 @@ def test_discovery_of_the_lab_publishes_one_simap_topology(world):
     segment = next(n for n in graph["nodes"] if n["identity_status"] == "segment")
     assert segment["members"] == 3 and segment["subnets"] == ["10.10.1.0/24"]
     assert sorted(link["link_type"] for link in graph["links"]) == ["mp2mp"] * 3 + ["p2p"] * 3
+    # The device-to-device link is one bidirectional SIMAP link showing both ends.
+    direct = next(
+        link
+        for link in graph["links"]
+        if link["link_type"] == "p2p" and "GigabitEthernet2/0" in link["label"]
+    )
+    assert direct["direction"] == "bi"
+    assert direct["label"] == "GigabitEthernet2/0 ⇄ GigabitEthernet2/0"
+    assert sorted(e.split()[1] for e in direct["ends"]) == ["10.10.1.1", "10.10.1.2"]
     exported = service.export("user", result["snapshot_id"])
     assert [
         n["network-id"].rsplit(":", 1)[1] for n in exported["ietf-network:networks"]["network"]

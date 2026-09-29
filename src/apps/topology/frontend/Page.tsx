@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Checkbox, Drawer, Empty, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography, message } from 'antd'
-import { Background, Controls, Position, ReactFlow, ReactFlowProvider, useReactFlow } from '@xyflow/react'
+import { Background, Controls, MarkerType, Position, ReactFlow, ReactFlowProvider, useReactFlow } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { api } from '@netops/config/api'
 import DeviceTerminal from '@netops/platform/terminal/DeviceTerminal'
@@ -8,12 +8,12 @@ import './topology.css'
 
 interface Network { id: string; name: string; domain: string; active_run?: string; current_snapshot?: string }
 interface TopologyNode { id: string; name: string; address?: string; addresses?: string[]; identity_status: string; freshness: string; observed_at?: string; evidence_id?: string; members?: number; subnets?: string[]; tps: { id: string; name: string }[] }
-interface Link { id: string; source: string; target: string; source_tp: string; target_tp: string; freshness: string; observed_at?: string; evidence_id?: string; link_type?: string; subnets?: string[]; evidence?: string[] }
+interface Link { id: string; source: string; target: string; source_tp: string; target_tp: string; freshness: string; observed_at?: string; evidence_id?: string; link_type?: string; direction?: string; label?: string; ends?: string[]; subnets?: string[]; evidence?: string[] }
 interface Graph { nodes: TopologyNode[]; links: Link[]; domain: string; model_profile: string }
 interface Target { id: string; address: string; depth: number; status: string; reason?: string; version: number; evidence_id?: string }
 interface Run { id: string; network_id: string; status: string; snapshot_id?: string; graph: Graph; targets: Target[]; created_at: string }
 interface History { id: string; status: string; created_at: string; snapshot_id?: string }
-const labels: Record<string, string> = { queued: '排队中', running: '发现中', waiting_for_input: '等待人工处理', completed: '已完成', partial: '部分完成', cancelled: '已取消', succeeded: '采集成功', skipped: '人工跳过', observed: '本次观测', advertised: '邻居通告', not_observed: '本次未观测', absent_in_observation: '本次邻接表中未出现', candidate: '候选身份', address_scoped: '地址范围内身份', collected: '已采集', host: '终端主机', segment: '共享网段', p2p: '点到点', mp2mp: '多点共享' }
+const labels: Record<string, string> = { queued: '排队中', running: '发现中', waiting_for_input: '等待人工处理', completed: '已完成', partial: '部分完成', cancelled: '已取消', succeeded: '采集成功', skipped: '人工跳过', observed: '本次观测', advertised: '邻居通告', not_observed: '本次未观测', absent_in_observation: '本次邻接表中未出现', candidate: '候选身份', address_scoped: '地址范围内身份', collected: '已采集', host: '终端主机', segment: '共享网段', p2p: '点到点', mp2mp: '多点共享', bi: '双向', uni: '单向' }
 const failures: Record<string, string> = { platform_unrecognized: '平台未识别，请确认此节点平台或补充适配', platform_ambiguous: '平台识别证据冲突，请人工确认', platform_unsupported: '此平台尚无已验证适配', authentication_failed: '用户名或密码不正确', connection_failed: '无法连接设备', timeout: '连接或命令超时', credential_expired: '凭据已过期', credentials_required: '请为新节点提供凭据', host_key_rejected: '请管理员核验主机密钥', parse_failed: '无法识别设备输出，请检查适配与证据', output_incomplete: '设备输出未完整返回', not_authorized: '超出当前账号设备授权范围', worker_interrupted: '执行中断，请人工确认后重试' }
 const profiles = [{ value: 'auto', label: '自动识别（无需预先知道型号）' }, { value: 'comware-lldp-v1', label: 'Comware · LLDP v1' }, { value: 'nxos-lldp-v1', label: 'NX-OS · LLDP v1' }]
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : '操作未完成，请重试'
@@ -28,7 +28,9 @@ function Canvas({ graph, onNode, onLink }: { graph: Graph; onNode: (node: Topolo
     className: node.identity_status === 'segment' ? 'topology-node segment' : ['candidate', 'advertised'].includes(node.identity_status) ? 'topology-node candidate' : 'topology-node',
   })), [graph.nodes])
   const edges = useMemo(() => graph.links.map(link => ({ id: link.id, source: link.source, target: link.target,
-    label: graph.nodes.find(n => n.id === link.source)?.tps.find(tp => tp.id === link.source_tp)?.name,
+    // SIMAP links carry both endpoints; older snapshots only name the source port.
+    label: link.label ?? graph.nodes.find(n => n.id === link.source)?.tps.find(tp => tp.id === link.source_tp)?.name,
+    ...(link.direction === 'bi' && link.link_type === 'p2p' ? { markerStart: { type: MarkerType.ArrowClosed }, markerEnd: { type: MarkerType.ArrowClosed } } : {}),
     style: { stroke: link.freshness === 'observed' ? '#477b8a' : '#aeb8c3', strokeDasharray: link.freshness === 'observed' ? undefined : '5 5' },
   })), [graph])
   useEffect(() => { const timer = setTimeout(() => void fitView({ padding: 0.2, maxZoom: 1.1 }), 80); return () => clearTimeout(timer) }, [fitView, nodes.length])
@@ -119,7 +121,7 @@ export default function Page() {
       {run?.graph.nodes.length ? <ReactFlowProvider><Canvas graph={run.graph} onNode={setSelected} onLink={setSelected} /></ReactFlowProvider> : <div className="topology-empty"><Empty description={run ? '尚无成功的拓扑观测，请查看节点状态' : '从一个管理地址开始发现，或导入已有 LLDP 输出'} /><p>每条链路都保留来源与观测时间。未确认的邻居以候选身份展示。</p></div>}
       {run && <div className="topology-map-caption">{run.graph.nodes.length} 个节点 · {run.graph.links.length} 条邻接记录 · L2/L3 拓扑（RFC 8345 + SIMAP）</div>}
     </section><aside className="topology-inspector"><h3>{selected ? '观测详情' : '阅读这张拓扑'}</h3>
-      {selected ? <><dl>{Object.entries(selected).filter(([key]) => !['tps', 'id', 'source_tp', 'target_tp', 'source', 'target'].includes(key)).map(([key, value]) => <React.Fragment key={key}><dt>{({ name: '名称', address: '管理地址', addresses: '通告地址', identity_status: '身份状态', freshness: '新鲜度', observed_at: '观测时间', evidence_id: '证据编号', members: '端口数', subnets: '三层网段', link_type: '链路类型', evidence: '依据' } as Record<string, string>)[key] || key}</dt><dd>{labels[String(value)] || (typeof value === 'object' ? JSON.stringify(value) : String(value))}</dd></React.Fragment>)}</dl>
+      {selected ? <><dl>{Object.entries(selected).filter(([key]) => !['tps', 'id', 'source_tp', 'target_tp', 'source', 'target'].includes(key)).map(([key, value]) => <React.Fragment key={key}><dt>{({ name: '名称', address: '管理地址', addresses: '通告地址', identity_status: '身份状态', freshness: '新鲜度', observed_at: '观测时间', evidence_id: '证据编号', members: '端口数', subnets: '三层网段', link_type: '链路类型', evidence: '依据', direction: '方向', ends: '两端端口', label: '端口' } as Record<string, string>)[key] || key}</dt><dd>{labels[String(value)] || (typeof value === 'object' ? JSON.stringify(value) : String(value))}</dd></React.Fragment>)}</dl>
         {'tps' in selected && <><h4>终结点 / 端口</h4>{selected.tps.map(tp => <div key={tp.id}>{tp.name}</div>)}</>}
         <Space direction="vertical" style={{ marginTop: 16 }}><Button disabled={!selected.evidence_id} onClick={() => void readEvidence(selected.evidence_id)}>查看原始证据</Button>{'address' in selected && selected.address && <Button onClick={() => setTerminal(selected.address)}>打开 SSH 终端</Button>}</Space>
       </> : <><p>拓扑只展示本次任务的观测结果。链路表示二层邻接，不代表一根实际线缆；共享网段表示同一介质上的多个端口，例如经过 Hub。</p><p>只被邻居通告、尚未采集的设备用虚线框显示。设备按自身报告的机箱 ID 识别，采集后与通告合并为同一节点。</p><p>点击节点或链路可查看观测时间与命令证据。</p></>}

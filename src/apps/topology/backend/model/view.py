@@ -47,10 +47,22 @@ def canvas(tree, evidence, collected, base):
             if node_id in collected:
                 item.update(collected[node_id], identity_status="collected")
         nodes.append(item)
+    by_id = {n["id"]: n for n in nodes}
+
+    def end(ref):
+        node = by_id[ref["node-ref"]]
+        port = next((tp["name"] for tp in node["tps"] if tp["id"] == ref["tp-ref"]), "")
+        host = node.get("address") or node["name"]
+        return {"node": node["name"], "address": host, "port": port}
+
     for link in l2.get(NT + "link", []):
         ends = link[ST + "tp"]
+        # SIMAP link-direction; every endpoint of a bidirectional link is shown.
+        direction = link.get(ST + "link-direction", "").rsplit("-", 1)[-1] or "unknown"
+        members = [end(ref) for ref in ends]
         common = {
             "freshness": "observed",
+            "direction": direction,
             "evidence": evidence.get(link["link-id"], []),
             "subnets": sorted(carried.get(link["link-id"], [])),
         }
@@ -63,6 +75,10 @@ def canvas(tree, evidence, collected, base):
                     "target": ends[1]["node-ref"],
                     "target_tp": ends[1]["tp-ref"],
                     "link_type": "p2p",
+                    "label": (" ⇄ " if direction == "bi" else " → ").join(
+                        m["port"] for m in members
+                    ),
+                    "ends": [f"{m['node']} {m['address']} {m['port']}".strip() for m in members],
                     **common,
                 }
             )
@@ -75,18 +91,21 @@ def canvas(tree, evidence, collected, base):
                 "tps": [],
                 "addresses": common["subnets"],
                 "members": len(ends),
+                "ends": [f"{m['node']} {m['address']} {m['port']}".strip() for m in members],
                 **common,
             }
         )
-        for index, end in enumerate(ends):
+        for index, (ref, member) in enumerate(zip(ends, members, strict=True)):
             links.append(
                 {
                     "id": f"{link['link-id']}#{index}",
-                    "source": end["node-ref"],
-                    "source_tp": end["tp-ref"],
+                    "source": ref["node-ref"],
+                    "source_tp": ref["tp-ref"],
                     "target": link["link-id"],
                     "target_tp": "",
                     "link_type": "mp2mp",
+                    "label": member["port"],
+                    "ends": [f"{member['node']} {member['address']} {member['port']}".strip()],
                     **common,
                 }
             )
