@@ -13,6 +13,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 
 from src.apps.materials.backend.documents import FILTERS, digest
+from src.platform.agent_runtime import timeline
 from src.platform.agent_runtime.base import AgentEvent, RunContext
 from src.platform.authorization.client import authority_session, authorize_worker
 
@@ -177,6 +178,17 @@ def step_output(actor_id, run_id, step_id):
         return tool_outputs.preview(reference)
     except (ValueError, KeyError) as exc:
         raise HTTPException(409, "执行结果原始快照不可用") from exc
+
+
+def thinking(actor_id, run_id):
+    """What the model said (and reasoned, in thinking mode) before each round of calls."""
+    with sessions() as session:
+        row = session.get(Turn, run_id)
+        if not row or row.owner_id != actor_id:
+            raise HTTPException(404, "运行不存在")
+        conversation_id = row.conversation_id
+    path = timeline.trace_for(actor_id, conversation_id, run_id)
+    return {"steps": timeline.thoughts(path) if path else []}
 
 
 def cancel(actor_id, run_id):

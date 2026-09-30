@@ -110,6 +110,11 @@ def step_output(run_id: str, step_id: str, actor=Depends(user)):
     return turns.step_output(actor.user_id, run_id, step_id)
 
 
+@router.get("/turns/{run_id}/thinking")
+def thinking(run_id: str, actor=Depends(user)):
+    return turns.thinking(actor.user_id, run_id)
+
+
 @router.get("/conversations/{conversation_id}/citations/{citation_id}")
 def citation(conversation_id: str, citation_id: str, actor=Depends(user)):
     for message in history.messages(actor.user_id, conversation_id):

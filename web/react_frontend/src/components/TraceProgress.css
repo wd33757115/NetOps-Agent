@@ -11,6 +11,12 @@
 .agent-progress-body ol { list-style: none; padding: 0; margin: 0; }
 .agent-progress-body p { margin: 0; color: #637185; }
 .agent-step { padding: 1px 0; }
+.agent-thought { margin: 10px 6px 2px; color: #465366; line-height: 1.65; }
+.agent-thought p { color: #465366; white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-thought p > span { display: inline-block; margin-right: 8px; padding: 0 6px; border-radius: 4px; background: #eef4fd; color: #1671e8; font-size: 12px; }
+.agent-thought details { margin-top: 4px; font-size: 12px; }
+.agent-thought summary { color: #637185; cursor: pointer; }
+.agent-thought pre { margin: 6px 0 0; padding: 8px 10px; max-height: 320px; overflow: auto; border-radius: 6px; background: #f6f8fa; color: #465366; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
 .agent-step-toggle { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; padding: 8px 6px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .agent-step-toggle:hover { background: #f6f8fa; }
 .agent-step-toggle:focus-visible { outline: 2px solid #4384d6; outline-offset: 2px; }

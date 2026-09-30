@@ -16,9 +16,32 @@ PREFIX = "mcp__netops__"
 CLIP = 240
 
 
-def find_trace(run_id, root=SESSIONS):
-    matches = sorted(Path(root).glob(f"**/runs/{key(run_id)}.jsonl"))
+def find_trace(run_id, root=None):
+    matches = sorted(Path(root or SESSIONS).glob(f"**/runs/{key(run_id)}.jsonl"))
     return matches[0] if matches else None
+
+
+def trace_for(actor_id, conversation_id, run_id, root=None):
+    """The run's trace inside its own conversation home (see session_home)."""
+    home = Path(root or SESSIONS) / key(json.dumps([actor_id, conversation_id]))
+    matches = sorted(home.glob(f"scopes/*/runs/{key(run_id)}.jsonl"))
+    return matches[0] if matches else None
+
+
+def thoughts(path):
+    """What the model said, and reasoned in thinking mode, before each round of calls.
+
+    Keyed by the call IDs that followed, which are the execution view's step IDs.
+    """
+    return [
+        {
+            "call_ids": [call["id"] for call in step["calls"]],
+            "said": step["said"].strip(),
+            "reasoning": step["reasoning"].strip(),
+        }
+        for step in timeline(path)["steps"]
+        if step["calls"] and (step["said"].strip() or step["reasoning"].strip())
+    ]
 
 
 def _clip(text, limit=CLIP):
@@ -191,6 +214,7 @@ def timeline(path):
                     step["reasoning"] += part.get("text", "")
                 elif part.get("type") == "tool-call":
                     call = {
+                        "id": part["id"],
                         "tool": part["name"].removeprefix(PREFIX),
                         "arguments": _json(part.get("arguments")),
                         "ok": None,

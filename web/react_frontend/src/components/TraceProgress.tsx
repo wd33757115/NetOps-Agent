@@ -108,11 +108,36 @@ function ExecutionStep({ step, runId, now }: { step: AgentStep; runId: string; n
   </li>
 }
 
+/** What the model said, and reasoned in thinking mode, before one round of calls. */
+interface Thought { call_ids: string[]; said: string; reasoning: string }
+
+function ThoughtNote({ thought }: { thought: Thought }) {
+  return <li className="agent-thought">
+    {thought.said && <p><span>思路</span>{thought.said}</p>}
+    {thought.reasoning && <details>
+      <summary>推理过程（{thought.reasoning.length} 字）</summary>
+      <pre>{thought.reasoning}</pre>
+    </details>}
+  </li>
+}
+
 export default function TraceProgress({ progress, onCancel }: { progress: AgentProgress; onCancel?: () => void }) {
   const running = isRunning(progress)
   const [expanded, setExpanded] = useState(running)
   const [now, setNow] = useState(Date.now())
+  const [thoughts, setThoughts] = useState<Record<string, Thought>>({})
   useEffect(() => { setExpanded(running) }, [progress.run_id, running])
+  useEffect(() => {
+    if (!expanded || !progress.run_id) return
+    let disposed = false
+    // Keyed by the first call of each round, so a note sits above the calls it led to.
+    void api.get<{ steps: Thought[] }>(`/apps/assistant/turns/${encodeURIComponent(progress.run_id)}/thinking`)
+      .then(({ data }) => {
+        if (!disposed) setThoughts(Object.fromEntries(data.steps.filter(step => step.call_ids.length).map(step => [step.call_ids[0], step])))
+      })
+      .catch(() => undefined) // Optional context: the calls themselves still show.
+    return () => { disposed = true }
+  }, [expanded, progress.run_id, progress.steps.length, progress.status])
   useEffect(() => {
     if (!running) return
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
@@ -130,7 +155,10 @@ export default function TraceProgress({ progress, onCancel }: { progress: AgentP
       {running && onCancel && <button className="agent-progress-stop" type="button" disabled={progress.status === 'cancel_requested'} onClick={onCancel}>停止</button>}
     </div>
     {expanded && <div className="agent-progress-body">
-      {progress.steps.length ? <ol>{progress.steps.map(step => <ExecutionStep key={`${progress.run_id}:${step.id}`} step={step} runId={progress.run_id} now={now} />)}</ol>
+      {progress.steps.length ? <ol>{progress.steps.map(step => <React.Fragment key={`${progress.run_id}:${step.id}`}>
+        {thoughts[step.id] && <ThoughtNote thought={thoughts[step.id]} />}
+        <ExecutionStep step={step} runId={progress.run_id} now={now} />
+      </React.Fragment>)}</ol>
         : <p>{running ? '准备就绪后会显示搜索、阅读与业务查询记录。' : '本轮没有工具调用记录。'}</p>}
     </div>}
   </section>
