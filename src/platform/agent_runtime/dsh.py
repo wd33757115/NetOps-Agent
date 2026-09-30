@@ -29,6 +29,9 @@ from .usage import Usage
 from .session_store import session_home, scope_key, key, native_logs
 
 ROOT = Path(__file__).resolve().parents[3]
+# Real characters per model request (the model window is 1M tokens). Thinking keeps
+# each round's reasoning in the history; 160k escaped characters stopped at round 9.
+MAX_CONTEXT_CHARACTERS = 400_000
 # Tools that log in to a device get the live timeout, not the 10 s query one.
 LIVE_TOOLS = frozenset({"device_access__run", "device_access__compare_config"})
 PROMPT = """你是 NetOps 数据中心网络助手。使用提供的工具按需搜索和阅读资料，也可查询已授权业务数据。
@@ -269,7 +272,7 @@ class Bridge:
             else:
                 messages.insert(0, {"role": "system", "content": guidance})
             body["messages"] = messages
-            if len(json.dumps(body)) > 160000:
+            if len(json.dumps(body, ensure_ascii=False)) > MAX_CONTEXT_CHARACTERS:
                 self.failure_code = "session_context_full"
                 raise ValueError("Session context budget exceeded")
             if self.rounds >= self.context.max_model_rounds:
@@ -424,27 +427,30 @@ class Bridge:
 
 
 DIAGNOSIS = """
-连通性故障的排查：先用 topology__locate 定位两端、topology__trace_path 计算去程和回程路径；
-对路径设备，先用 inspection__list_snapshots 按 host（管理地址）
-及故障前时段找巡检保存的未解析基线原文，可按 run_id 查询 inspection__list_runs
-确认来源和运行用途；有资产 ID 时也可按设备查询。基线命令包括配置、接口简表、
-三层接口、路由表、OSPF 邻居、ARP、MAC、VLAN、LLDP 邻居。
-调用 device_access__compare_config，提供 snapshot_id、管理地址和目的：
-工具在设备上原样执行该快照的命令，与基线逐行文本对比，只返回差异行
-（+ 现场新增，- 基线有而现场没有）。先对比路由表、接口简表、OSPF 邻居、
-ARP/MAC 等状态，再对比配置；不使用巡检预生成的变化记录。
-差异说明“哪里变了”，再用运行状态验证影响；历史基线不等于健康状态，
-差异不等于故障根因。无基线、截断、脱敏隐藏或读取失败时明确说明缺口，
-不能说没有变化或没有故障。只对比相关设备和命令，不启动新巡检。
-再用 device_access__run 登录路径上的设备取证，一台设备一次可带多条命令。
-自下而上逐层核查：接口状态与错包 → VLAN、MAC、ARP → 路由表、路由协议邻居、回程
-→ ACL/包过滤；去程回程都要看。
-网关能 ping 通直连终端，只说明本网段可达；如果本网段通、跨网段不通，
-而且网络侧和基线相比没有变化，优先怀疑终端的默认网关或掩码配置。
-路径在某台设备处中断（无路由、黑洞、下一跳未纳管）时，重点核查该设备及其上一跳。
-device_access__run 不执行配置导出；配置对比只通过上述受控工具，其余用针对性的 display/show 查看具体特性。
-回答末尾固定用四个小节列出结论：已证实（每条引用本次命令证据 [evidence-...]）、候选、已排除、
-待验证；某节没有内容时写“无”。未执行或失败的命令不能作为证据。"""
+网络故障诊断：连通、丢包、性能、路由协议、单个业务异常、配置变更都可能是问题。
+先弄清现象（谁到谁、什么业务、何时开始、影响范围），再按现象自己决定查什么、按什么顺序查。
+
+我们能提供的工具（参数见各工具说明）：
+- 拓扑：topology__locate 把 IP/MAC 定位到接入设备、端口和 VLAN；topology__trace_path
+  按最近一次发现的拓扑快照算去程和回程路径，快照可能过期，要与现场核对。
+- 基线：inspection__list_snapshots 按管理地址和时段找巡检保存的未解析原文（配置、接口简表、
+  三层接口、路由表、OSPF 邻居、ARP、MAC、VLAN、LLDP 邻居），inspection__list_runs 查来源；
+  device_access__compare_config 在设备上原样执行该快照的命令并逐行对比，只返回差异行
+  （+ 现场新增，- 基线有而现场没有）。老化时间、计数、Dead-Time 这类列本来就会变；
+  历史基线不等于健康，差异不等于根因。
+- 现场：device_access__run 登录本轮定位或路径结果中的设备，执行只读 display/show
+  或有限 ping/tracert，一台一次最多 5 条；不执行配置导出，配置只通过对比工具看差异。
+- 记录：inspection__list_events 查历史事件，空结果不等于正常。
+看不到的部分：终端（PC、服务器）自身的配置和状态、未纳管的设备。它们只能由现象推断，
+推断要写明依据。
+
+常用思路按现象选用，不必按固定顺序：自上而下、自下而上、分而治之、沿流量路径、
+与基线或正常对象对比差异。
+证据纪律：先取证再下结论；每个候选写出支持它和与它矛盾的证据；排除一个方向，必须有
+与它矛盾的证据（例如网关能 ping 通直连终端只说明本网段可达，排除不了终端的网关或掩码配置）。
+工具失败、截断、脱敏或未执行的命令都是缺口，既不能当作“没有问题”，也不能作为证据。
+回答末尾固定用四个小节列出结论：已证实（每条引用本次命令证据 [evidence-...]）、候选、
+已排除、待验证；某节没有内容时写“无”。"""
 
 
 def patch_file(home, port, *, active_diagnostics=False, durable=False):
