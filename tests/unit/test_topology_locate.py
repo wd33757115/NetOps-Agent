@@ -28,9 +28,9 @@ def test_pc_behind_an_access_port_is_confirmed_from_the_mac_table():
     assert location["mac"] == "00:50:79:66:68:01" and location["inferred"] is False
     assert location["ports"][0]["evidence_id"] == "obs-1"
     assert location["evidence"]
-    assert [(g["address"], g["interface"], g["gateway_ip"]) for g in result["gateways"]] == [
-        ("10.10.1.1", "Vlan-interface200", "192.168.1.1")
-    ]
+    assert [
+        (g["address"], g["interface"], g["interface_ip"]) for g in result["router_interfaces"]
+    ] == [("10.10.1.1", "Vlan-interface200", "192.168.1.1")]
 
 
 @pytest.mark.parametrize("query", ["00:50:79:66:68:01", "0050.7966.6801", "00-50-79-66-68-01"])
@@ -48,7 +48,7 @@ def test_management_pc_behind_the_hub_is_a_shared_segment():
         ("10.10.1.2", "GigabitEthernet1/0", "arp", None),
     ]
     assert result["locations"][0]["inferred"] is True
-    assert {g["gateway_ip"] for g in result["gateways"]} == {"10.10.1.1", "10.10.1.2"}
+    assert {g["interface_ip"] for g in result["router_interfaces"]} == {"10.10.1.1", "10.10.1.2"}
 
 
 def test_a_segment_reaching_an_uncollected_device_is_not_a_confirmed_location():
@@ -114,7 +114,7 @@ def test_the_uplink_is_excluded_and_the_edge_port_is_confirmed():
     result = locate(devices, BASE, "10.0.0.9")
     assert result["status"] == "confirmed"
     assert ports(result) == [("s", "GigabitEthernet1/0/2", "mac", "10")]
-    assert [g["interface"] for g in result["gateways"]] == ["Vlan-interface10"]
+    assert [g["interface"] for g in result["router_interfaces"]] == ["Vlan-interface10"]
 
 
 def test_one_ip_with_two_macs_is_reported_as_a_conflict():
@@ -149,8 +149,8 @@ def test_a_known_mac_without_a_port_is_not_found_but_keeps_its_arp_evidence():
 def test_an_unseen_address_still_names_its_gateway():
     result = locate(switched(), BASE, "10.0.0.77")
     assert result["status"] == "not_found" and result["locations"] == []
-    assert [g["gateway_ip"] for g in result["gateways"]] == ["10.0.0.1"]
-    assert locate(switched(), BASE, "172.16.0.1")["gateways"] == []
+    assert [g["interface_ip"] for g in result["router_interfaces"]] == ["10.0.0.1"]
+    assert locate(switched(), BASE, "172.16.0.1")["router_interfaces"] == []
 
 
 @pytest.mark.parametrize("query", ["", "10.0.0", "zz:zz:zz:zz:zz:zz", "switch-a"])

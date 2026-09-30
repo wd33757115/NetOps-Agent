@@ -1,4 +1,4 @@
-"""Endpoint location: where does an IP or MAC attach, and what is its gateway.
+"""Endpoint location: where does an IP or MAC attach, and which router serves its subnet.
 
 Reuses the builder's attachment decision: a host's L2 link in the built tree is its
 attachment. The link's other ends classify the answer:
@@ -20,6 +20,12 @@ import ipaddress
 
 from ..collectors.tiers.common import valid_mac
 from .builder import L2T, NT, ST, _Topology
+
+# A model once read the subnet's router interface as the host's own gateway and
+# ruled out a misconfigured host on that "fact". Say plainly what is not seen.
+HOST_SETTINGS_UNSEEN = (
+    "router_interfaces 是该网段在路由器上的三层接口；终端自己配置的网关、掩码看不到，不能当作已证实"
+)
 
 
 def _query(value):
@@ -57,7 +63,7 @@ class _Locator:
             item.update(self.observed[key])
         return item
 
-    def gateways(self, ip):
+    def router_interfaces(self, ip):
         found = []
         address = ipaddress.ip_address(ip)
         for key, facts in sorted(self.devices.items()):
@@ -68,7 +74,7 @@ class _Locator:
                         {
                             **self.device(self.topo.device_node(self.topo.chassis[key])),
                             "interface": rec["ifname"],
-                            "gateway_ip": rec["address"],
+                            "interface_ip": rec["address"],
                             "subnet": str(network),
                             "vrf": rec.get("vrf", "default"),
                         }
@@ -151,7 +157,8 @@ class _Locator:
 def locate(devices, base, query, observed=None):
     """devices: builder input keyed by collected address; observed: {address: evidence}.
 
-    Returns the gateways of an IP and one location per MAC seen for it (normally one;
+    Returns the router interfaces in an IP's subnet and one location per MAC seen for it
+    (normally one;
     several MACs for one IP are reported, never resolved by choosing one).
     """
     kind, value = _query(query)
@@ -160,14 +167,16 @@ def locate(devices, base, query, observed=None):
 
 def answer(locator, kind, value):
     """One query against an already built locator (path tracing asks twice)."""
-    result = {"query": value, "kind": kind, "gateways": [], "locations": []}
+    result = {"query": value, "kind": kind, "router_interfaces": [], "locations": []}
     own = locator.own(kind, value)
     if own:
         result["locations"].append(own)
         result["status"] = "device"
         return result
     if kind == "ip":
-        result["gateways"] = locator.gateways(value)
+        result["router_interfaces"] = locator.router_interfaces(value)
+        # The network side only; what the host itself has configured is not observed.
+        result["note"] = HOST_SETTINGS_UNSEEN
         rows = locator.arp(ip=value)
         macs = sorted({row["mac"] for row in rows})
     else:

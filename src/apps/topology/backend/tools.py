@@ -29,8 +29,9 @@ class Evidence(BaseModel):
 TOOLS = [
     Tool(
         "locate",
-        "终端定位：在本人各网络的当前快照中查 IP 或 MAC 接在哪台设备哪个端口、VLAN 和网关，"
-        "附依据与观测时间；只读，不登录设备，查不到即返回空，不代表终端不存在",
+        "终端定位：在本人各网络的当前快照中查 IP 或 MAC 接在哪台设备哪个端口、VLAN，"
+        "以及该网段在路由器上的三层接口（router_interfaces）；终端自己配置的网关、掩码看不到，"
+        "不能当作已证实；附依据与观测时间；只读，不登录设备，查不到即返回空，不代表终端不存在",
         Locate,
         lambda user, body: service.locate_current(user.user_id, body.query),
         evidence=True,

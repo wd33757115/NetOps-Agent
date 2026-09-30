@@ -120,7 +120,7 @@ it('locates an IP in the viewed snapshot and shows the answer', async () => {
     url.endsWith('/default-login') ? { username: 'admin', configured: true }
       : url.endsWith('/networks') ? state.networks
         : url.endsWith('/runs') ? [{ id: 'r1', status: 'completed', created_at: '2026-09-29T00:00:00Z', snapshot_id: 'snap-1' }]
-          : url.endsWith('/locate') ? { query: '192.168.1.2', kind: 'ip', status: 'confirmed', gateways: [], locations: [{ status: 'confirmed', mac: '00:50:79:66:68:01', ports: [{ node_id: 'd', name: 'vsr-1', address: '10.10.1.1', collected: true, port: 'GigabitEthernet3/0', tp_id: 't', basis: 'mac', vlan: '200' }] }] }
+          : url.endsWith('/locate') ? { query: '192.168.1.2', kind: 'ip', status: 'confirmed', router_interfaces: [], locations: [{ status: 'confirmed', mac: '00:50:79:66:68:01', ports: [{ node_id: 'd', name: 'vsr-1', address: '10.10.1.1', collected: true, port: 'GigabitEthernet3/0', tp_id: 't', basis: 'mac', vlan: '200' }] }] }
             : { ...run('none'), status: 'completed', snapshot_id: 'snap-1', targets: [] } }))
   render(<MemoryRouter><Page /></MemoryRouter>)
   const search = await screen.findByPlaceholderText('定位 IP 或 MAC')

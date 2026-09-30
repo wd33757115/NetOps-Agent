@@ -139,7 +139,7 @@ class _Tracer:
         if source["status"] == "device":
             starts = [(source["locations"][0]["device"]["address"], None)]
         else:
-            gateways = source["gateways"]
+            gateways = source["router_interfaces"]
             if any(
                 ipaddress.ip_address(dst) in ipaddress.ip_network(g["subnet"]) for g in gateways
             ):

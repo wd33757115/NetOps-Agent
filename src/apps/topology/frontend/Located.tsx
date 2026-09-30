@@ -3,9 +3,9 @@ import { Button, Space, Tag } from 'antd'
 
 interface Place { node_id: string; name: string; address?: string | null; collected: boolean; evidence_id?: string; observed_at?: string }
 interface Port extends Place { port: string; tp_id: string; basis: 'mac' | 'arp'; vlan?: string | null }
-interface Gateway extends Place { interface: string; gateway_ip: string; subnet: string; vrf: string }
+interface RouterInterface extends Place { interface: string; interface_ip: string; subnet: string; vrf: string }
 interface Location { status: string; mac?: string; ips?: string[]; host_node?: string; link_id?: string; ports?: Port[]; inferred?: boolean; evidence?: string[]; arp?: { device: string; ip: string; interface: string }[]; device?: Place; interface?: string }
-export interface LocateResult { query: string; kind: 'ip' | 'mac'; status: string; gateways: Gateway[]; locations: Location[] }
+export interface LocateResult { query: string; kind: 'ip' | 'mac'; status: string; router_interfaces: RouterInterface[]; locations: Location[] }
 
 export const statusLabels: Record<string, [string, string]> = {
   confirmed: ['已确认', 'green'],
@@ -37,8 +37,8 @@ export default function Located({ result, onEvidence, onClear }: { result: Locat
     <Space style={{ display: 'flex', justifyContent: 'space-between' }}><Tag color={color}>{label}</Tag><Button size="small" type="link" onClick={onClear}>清除</Button></Space>
     <dl>
       <dt>查询</dt><dd>{result.query}</dd>
-      {result.gateways.map(gateway => <React.Fragment key={gateway.node_id + gateway.interface}>
-        <dt>网关</dt><dd>{place(gateway)} {gateway.interface} {gateway.gateway_ip}（{gateway.subnet}）</dd>
+      {result.router_interfaces.map(gateway => <React.Fragment key={gateway.node_id + gateway.interface}>
+        <dt>网段接口</dt><dd>{place(gateway)} {gateway.interface} {gateway.interface_ip}（{gateway.subnet}）</dd>
       </React.Fragment>)}
     </dl>
     {result.locations.map((location, index) => <section key={location.mac || index}>
