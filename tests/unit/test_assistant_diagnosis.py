@@ -221,6 +221,9 @@ def test_official_mcp_reads_real_contract_and_returns_verified_business_citation
     assert events[-1].kind == "completed", [(e.kind, e.data) for e in events]
     reference = next(e.data for e in events if e.kind == "citation")
     assert reference["kind"] == "business" and reference["app_id"] == "inspection"
+    finished = next(e.data for e in events if e.kind == "tool_finished")
+    assert finished["evidence"]["id"] == reference["id"]
+    assert finished["output"] is None
     assert "NO-EXPOSURE" not in reference["excerpt"]
     with database() as session:
         assert "NO-EXPOSURE" in session.get(CommandSnapshot, "s0").raw_text

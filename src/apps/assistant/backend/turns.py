@@ -16,7 +16,7 @@ from src.apps.materials.backend.documents import FILTERS, digest
 from src.platform.agent_runtime.base import AgentEvent, RunContext
 from src.platform.authorization.client import authority_session, authorize_worker
 
-from . import history, progress
+from . import history, progress, tool_outputs
 from .diagnostic_workspace import DiagnosticWorkspace
 from .models import Turn
 from .repository import now, sessions
@@ -151,6 +151,33 @@ def latest(actor_id, conversation_id):
         return view(row) if row else None
 
 
+def step_output(actor_id, run_id, step_id):
+    with sessions() as session:
+        row = session.get(Turn, run_id)
+        if not row or row.owner_id != actor_id:
+            raise HTTPException(404, "运行不存在")
+        data = progress.snapshot(row, include_outputs=True)
+        step = next((step for step in data["steps"] if step["id"] == step_id), None)
+        if step is None:
+            raise HTTPException(404, "执行步骤不存在")
+        conversation_id, message_id = row.conversation_id, row.result_message_id
+    references = []
+    for message in history.messages(actor_id, conversation_id):
+        if message["id"] == message_id:
+            references = message["references"]
+            break
+    reference = tool_outputs.reference_for(step, data, references)
+    if reference is None:
+        if step.get("output"):
+            return step["output"]
+        raise HTTPException(404, "这条历史步骤未留存可核对的执行结果")
+    authorize_worker(actor_id, reference["app_id"])
+    try:
+        return tool_outputs.preview(reference)
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(409, "执行结果原始快照不可用") from exc
+
+
 def cancel(actor_id, run_id):
     with sessions() as session:
         row = session.get(Turn, run_id)
@@ -188,7 +215,7 @@ def finish(actor_id, run_id, status, text, references, count, code=None):
             return
         message_id = history.add(session, row.conversation_id, "assistant", text, references)
         row.status = status
-        data = progress.snapshot(row)
+        data = progress.snapshot(row, include_outputs=True)
         data["ended_at"] = progress.stamp()
         session.execute(
             update(Turn)

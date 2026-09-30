@@ -1,5 +1,6 @@
-from src.apps.assistant.backend import tool_trace
 import json
+
+from src.apps.assistant.backend import tool_trace
 
 
 def test_trace_bounds_and_redacts_arguments_without_copying_result_or_answer(tmp_path):
@@ -40,3 +41,28 @@ def test_result_preview_keeps_matches_and_lines_but_bounds_and_redacts(tmp_path)
     assert not output["truncated"]
     limited = tool_trace.result_preview(tmp_path, json.dumps({"text": "x" * 15000}))
     assert limited["truncated"] and len(limited["text"]) == 12000
+
+
+def test_diagnosis_operation_includes_endpoints_host_and_bounded_commands(tmp_path):
+    route = tool_trace.operation(
+        tmp_path,
+        "mcp__netops__topology__trace_path",
+        {
+            "src": "1.1.1.2",
+            "dst": "192.168.1.2",
+            "password": "PRIVATE",
+        },
+    )
+    assert '"src": "1.1.1.2"' in route and '"dst": "192.168.1.2"' in route
+    login = tool_trace.operation(
+        tmp_path,
+        "mcp__netops__device_access__run",
+        {
+            "host": "10.10.1.1",
+            "commands": ["display interface", "token=PRIVATE"],
+            "purpose": "检查接口",
+            "password": "PRIVATE",
+        },
+    )
+    assert "10.10.1.1" in login and "display interface" in login
+    assert "PRIVATE" not in route + login

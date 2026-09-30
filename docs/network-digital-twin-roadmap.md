@@ -1024,6 +1024,15 @@ P2-9 根据 Q5 取消，不引入 SNMP。P3 及后续仍在进入阶段时展开
 
 ## 14. 进度台账（执行者维护）
 
+### 2026-09-30 负责人追加：执行过程展开查看结果
+
+- 按本次明确的界面要求，将知识问答每条工具调用改为一行折叠记录，显示操作、状态和耗时；展开显示参数与实际结果。SSH 结果按设备及每条命令展示原始回显，CLI 表格保留列对齐，长输出可滚动；失败、未执行和截断信息原样展示。仅调整既有 `TraceProgress.tsx/.css`，未改页面布局或设备访问能力。
+- 结果接线：`tool_trace.py` 补齐定位/路径/设备工具的参数；DSH 回调按服务端证据引用关联结果，`tool_outputs.py` 与 `progress.py` 在既有轮次 JSON 中保存有界业务快照。公共历史及 SSE 不携带业务正文，只告知结果可读取；展开时通过 `/apps/assistant/turns/{run_id}/steps/{step_id}/output` 检查运行归属与源 App 当前权限后返回脱敏结果，无数据库迁移。
+- 历史兼容：只在工具名和取证时间窗唯一对应时恢复已有引用，不按答案引用排列顺序猜测。场景 1 的 4 次 SSH 和 1 次路径查询可恢复；2 次定位没有留存结果，明确显示缺失，不重跑设备命令。
+- 验证：后端 `pytest tests/unit/test_assistant_tool_trace.py tests/unit/test_assistant_tool_outputs.py tests/unit/test_assistant_progress.py tests/unit/test_assistant_evidence_access.py tests/unit/test_assistant_diagnosis.py tests/unit/test_dsh_runtime.py -q -p no:cacheprovider`：43 通过、1 跳过（Linux `/proc` 进程树测试在 Windows 跳过），含真实 DSH/MCP 回调、权限撤销、跨用户拒绝、SSE 不泄漏、失败/取消结果保留及历史歧义拒绝。前端 TraceProgress/ChatPage/EvidenceLinks 共 14 通过；相关 ESLint、App 后端 Ruff 和生产构建通过。
+- 部署：知识问答升至 0.8.1，以 `scripts/windows/start.ps1 -SkipLangfuse -UpgradeApps assistant -NoBrowser` 升级，全部启动与已启用 App 验证通过；其他应用版本不变。CLI 不折行样式调整后重新构建前端并单独 `app_packages verify assistant` 通过。浏览器实测原场景 1 记录展开，路由表、`Wrong parameter` 与接口状态回显均显示，横向滚动保留原始列；截图 `.runtime/trace-output-preview.jpg` 不提交。
+- 范围：仅知识问答结果展示及相应测试、部署版本和两份交接/台账文档；其他会话暂存的页面大小写修复和本地生成的 App 注册摘要保留、不提交。D-8 场景 2–7 仍待负责人注入。
+
 ### 2026-09-30 D-8 场景 1：旧快照诊断命中
 
 - 启动：按现有 `scripts/windows/start.ps1 -SkipLangfuse -NoBrowser` 启动，无代码变更，无需 `-ApplyDatabase` 或 `-UpgradeApps`。依赖、数据库/App 摘要、前端构建、API、Worker/Beat 和 9 个已启用 App 的部署核验全部通过；知识问答/SSH 终端/拓扑仍为 0.8.0/0.8.0/0.4.3。

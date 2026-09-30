@@ -23,6 +23,10 @@ BUSINESS_FIELDS = {
     "command",
     "since",
     "until",
+    "src",
+    "dst",
+    "host",
+    "commands",
 }
 
 
@@ -44,6 +48,9 @@ def operation(root, name, arguments):
     safe = {}
     for key in fields:
         value = arguments.get(key)
+        if key == "commands" and isinstance(value, list):
+            safe[key] = [clean(item) for item in value[:5] if isinstance(item, str)]
+            continue
         if value is None or not isinstance(value, (str, int, bool, float)):
             continue
         if key in {"path", "file_path"}:
@@ -79,7 +86,7 @@ def summary(name, data, success):
     return ""
 
 
-def result_preview(root, output):
+def result_preview(root, output, *, limit=12000):
     if not isinstance(output, str):
         return None
     # Native payloads are JSON. Preserve their line numbers and object structure,
@@ -95,7 +102,7 @@ def result_preview(root, output):
         if isinstance(value, list):
             return [scrub(item) for item in value]
         if isinstance(value, str):
-            for prefix in (str(root), str(root).replace("\\", "/")):
+            for prefix in (str(root), str(root).replace("\\", "/")) if root else ():
                 value = value.replace(prefix + "\\", "").replace(prefix + "/", "")
             value = re.sub(
                 r"(?i)((?:password|passwd|secret|token|authorization|api[_-]?key)\s*[:=]\s*)[^\s,;]+",
@@ -109,4 +116,7 @@ def result_preview(root, output):
         text = json.dumps(scrub(json.loads(output)), ensure_ascii=False, indent=2)
     except (ValueError, TypeError):
         text = scrub(output)
-    return {"text": text[:12000], "truncated": len(text) > 12000 or len(output) >= 64000}
+    return {
+        "text": text[:limit] if limit is not None else text,
+        "truncated": (limit is not None and len(text) > limit) or len(output) >= 64000,
+    }

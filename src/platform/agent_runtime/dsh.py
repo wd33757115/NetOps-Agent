@@ -22,7 +22,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse, StreamingResponse
 from starlette.routing import Route
 
-from src.apps.assistant.backend import answer_gate, tool_trace
+from src.apps.assistant.backend import answer_gate, tool_outputs, tool_trace
 
 from .base import AgentEvent
 from .usage import Usage
@@ -202,7 +202,16 @@ class Bridge:
                         "call_id": data["call_id"],
                         "success": success,
                         "summary": summary,
-                        "output": tool_trace.result_preview(self.catalog.root, data.get("output")) if data["name"] in NATIVE else None,
+                        "output": (
+                            tool_trace.result_preview(self.catalog.root, data.get("output"))
+                            if data["name"] in NATIVE else None
+                        ),
+                        "evidence": (
+                            tool_outputs.from_callback(
+                                data["name"], data.get("output"), self.catalog.business_evidence
+                            )
+                            if success and data["name"] not in NATIVE else None
+                        ),
                     },
                 )
             )

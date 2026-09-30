@@ -17,6 +17,9 @@ LABELS = {
     "mcp__netops__inspection__list_snapshots": "查找采集证据",
     "mcp__netops__inspection__read_snapshot": "阅读采集原文",
     "mcp__netops__rule_governance__read_generation": "查询规则治理记录",
+    "mcp__netops__topology__locate": "定位网络终端",
+    "mcp__netops__topology__trace_path": "计算网络路径",
+    "mcp__netops__device_access__run": "执行设备诊断命令",
 }
 STATUS = {
     "running": "正在准备资料与工具",
@@ -52,8 +55,10 @@ def stamp(value=None):
     return value.replace(tzinfo=value.tzinfo or timezone.utc).isoformat()
 
 
-def snapshot(row):
+def snapshot(row, *, include_outputs=False):
     data = deepcopy(row.progress_json or {"steps": [], "message": STATUS["running"]})
+    if not include_outputs:
+        data.pop("outputs", None)
     data.update(run_id=row.id, status=row.status, started_at=stamp(row.created_at))
     if row.status != "running":
         data["message"] = STATUS.get(row.status, "运行已结束")
@@ -68,7 +73,7 @@ def snapshot(row):
 
 
 def advance(row, event):
-    data = snapshot(row)
+    data = snapshot(row, include_outputs=True)
     if event.kind == "metrics":
         data["metrics"] = {
             key: event.data[key]
@@ -105,6 +110,7 @@ def advance(row, event):
                     "label": label,
                     "detail": str(event.data.get("detail") or "")[:200],
                     "operation": str(event.data.get("operation") or "")[:1800],
+                    "tool": str(event.data.get("tool") or "")[:128],
                     "status": "running",
                     "started_at": stamp(),
                 }
@@ -124,5 +130,9 @@ def advance(row, event):
                         "text": output["text"][:12000],
                         "truncated": bool(output.get("truncated")),
                     }
+                reference = event.data.get("evidence")
+                if isinstance(reference, dict) and reference.get("kind") == "business":
+                    data.setdefault("outputs", {})[step["id"]] = deepcopy(reference)
+                    step["has_output"] = True
     row.progress_json = data
-    return data
+    return snapshot(row)
