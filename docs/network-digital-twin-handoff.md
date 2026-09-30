@@ -1,8 +1,52 @@
-# 网络数字孪生开发交接：Claude → GPT
+# 网络数字孪生开发交接：GPT → Claude
 
 交接日期：2026-09-30，本文已追加 GPT 接手后的验收与支线记录。项目根目录：`C:\Users\wangd\PycharmProjects\PythonProject\netops-agent`，Windows + PowerShell（也可用 Git Bash），分支 `feat/network-twin`。Claude 原始交接时已推送到 `origin`，止于 `de6a28f`、路线图 v1.19；后续本地提交不代表已经推送。上一份交接（Codex → Claude，2026-09-28，止于 `ec81310`）的内容已并入本文；其第 6 节的工具与标准边界仍然有效，保留在本文第 7 节。
 
 **一句话现状：拓扑发现（SIMAP L2/L3）→ 终端定位 → 双向路径计算 → 知识问答自动登录路径设备取证诊断已打通。D-8 八个场景的首轮盲测已结束，根因命中 6/8，AI 未执行网络配置命令；场景 3 漏判，场景 4 用满预算后没有答案。达到原定数值及安全门槛，但结论质量问题尚未闭合，不能称每句话均有充分证据。负责人已追加授权 GPT 自行注入、测试和恢复实验故障。**
+
+## 最新交接：2026-09-30，原始基线配置对比已实现，待实机验证
+
+负责人因 token 将尽要求本次停止扩展、写好交接。**Claude 下一步先验收下面这项，不要继续旧的巡检变化列表方案，也不要先重跑 D-8 全故障集。** 下文既有记录保留，若描述“生产提示未改”，指此前 D-8 收尾修复阶段；本次配置比较已按确认范围修改 `DIAGNOSIS` 提示。
+
+### 负责人最新确认的方向
+
+负责人先要求把巡检基线用于故障分析，随后明确纠正：“巡检这个应用……有大量的无效的变化数据，应该诊断时找基线原始数据，再做一个配置对比工具，然后直接对比需要的部分”。对当前配置来源，负责人选择了 **“诊断时读取指定配置块”**；已告知这是现有 D-8 配置导出限制的受控只读例外，保持脱敏、白名单和审计。
+
+因此最终链路是：按管理地址和故障前时间找**原始配置快照** → 选择明确配置块 → 现场读取同范围 → 确定性文本差异 → AI 结合运行状态解释影响。不依赖 `NetworkChangeRecord` 或预生成差异，不启动新巡检，不新增 UI/迁移/YANG 字段。旧 `inspection__read_changes` 试作没有部署，已从源代码/工具注册撤回，只有本次自建文件移入忽略目录 `.runtime/abandoned-baseline-changes/`；不要恢复或提交它们。
+
+### 已完成的实现
+
+- `src/platform/device_access/config_sections.py`：纯函数范围验证、固定命令、同范围原始行提取、统一脱敏和有界对比，复用现有 `src/core/patrol/config_diff_bridge.py`（未修改旧巡检核心）。首版仅 Comware：`section=interface,target=GigabitEthernet3/0` 等完整接口名；`section=ospf,target=1` 等进程号。接口查询 `display current-configuration interface <完整接口名>`；OSPF 查询 `display current-configuration configuration ospf`，再严格提取指定进程。语法有 H3C 官方文档依据，**尚未在本实验设备上实测**。缺块、范围不唯一、未闭合、CLI 错误、截断不会报 unchanged；脱敏行不参加差异，不同占位符不会制造假变更；只有隐藏字段而可见部分相同时返回 unavailable。
+- `src/apps/inspection/backend/config_baseline.py` 与 `tools.py`：内部工具 `inspection__read_config_section`，`evidence=False`、只读，经 registry 正常 App 鉴权。核验 snapshot 原始文本 SHA-256、完整性、命令和设备身份；返回基线 ID/运行/时间/摘要/行段及质量。已有资产关联必须严格一致；无关联的离线快照可精确匹配其持久 `management_ip`，并明确说明只能证明历史地址对应，不能证明地址未被复用。不能从设备名称猜 IP。
+- `inspection/backend/diagnostics.py`：`list_snapshots` 新增可选 `host` 精确过滤并返回 `management_ip`；原设备/运行/时间分页仍保留。`read_snapshot` 补读也沿用统一脱敏。AI 找到快照后按 `run_id` 查询来源、用途和质量；历史基线不自动等于健康基线。
+- `src/apps/device_access/backend/config_compare.py` 与 `tools.py`：AI 工具 `device_access__compare_config(snapshot_id, host, section, target, purpose)`。先经 registry 授权读取有效基线，再用公共 SessionHandle 发送 **1 条服务器构造的固定命令**；凭据沿用默认/已保存会话，失败不自动重试，finally 关闭。结果 ≤24KB，保留两侧脱敏片段、时间、差异和会话/命令引用。没有硬性 inspection App 依赖，普通 SSH 终端可单独用。
+- `assistant/backend/diagnostic_workspace.py`：仅在有权限的基线提供方存在时开放比较工具；`platform`、`turn_id` 服务端填入，设备仍只能来自本轮定位/路径结果。每次比较计 1 条，与普通诊断共用 8 台/20 条预算。`dsh.py` 提示 AI 用原文和指定块，不用巡检变化列表，比较后还需运行状态证据。
+- `assistant/backend/evidence.py`、`workspace.py`、`api.py`、`turns.py`：复合比较证据固定要求 `device-access` 和 `inspection` 两个 App 当前权限；最终提交引用、引用回读、步骤展开均重新鉴权。沿用原有展开结果，没有新增界面。
+- `platform/device_access/governance.py`：接口/OSPF 可能携带的 authentication-mode、cipher、keychain 等敏感行在**平台审计和服务器会话日志持久化之前**脱敏。`device_access/backend/diagnosis.py` 同时窄修普通 run 的大小写/缩写配置导出绕过；普通 run 仍不能用 `display cur`、`show RUN` 等导出配置，比较是独立受控例外。
+
+### 验证及当前部署
+
+- 配置范围/基线与原诊断查询组：`venv/Scripts/python.exe -m pytest tests/unit/test_config_sections.py tests/unit/test_inspection_config_baseline.py tests/unit/test_assistant_diagnosis.py -q`，**56 passed**，只有 2 个既有 websockets 弃用提示。随后仅对新增文件做格式与等价函数写法整理，Ruff 通过。
+- 新服务、真实 SQLite 基线、真实 registry/SessionHandle、假 SSH、平台白名单/审计/日志及官方 DSH 闭环组：77 项通过，随后新增 2 项（含密文一致不造假差异、超大块）后对应新工具组 27 项通过；共覆盖 79 个不同用例，分组间重复不累加为测试总数。DSH 测试用 stub 模型和假 SSH，**不是实机/真实模型验收**。
+- 根会话最终相关查询/引用/展开/设备范围组：`venv/Scripts/python.exe -m pytest tests/unit/test_assistant_evidence_access.py tests/unit/test_assistant_tool_outputs.py tests/unit/test_device_access_app.py tests/unit/test_assistant_diagnosis.py tests/unit/test_assistant_progress.py -q -p no:cacheprovider`，**44 passed**。与前述组存在重叠，不相加。此前 30 项是中间检查，不另算。Ruff 对本项 21 个 Python 路径通过，其他线程 5 个暂存文件的 index/worktree 哈希核对未变。独立审查未发现未解决阻断项。
+- 升级命令已执行：`scripts/windows/start.ps1 -SkipLangfuse -UpgradeApps inspection,assistant,device-access,topology -NoBrowser`。目标版本 inspection **1.3.2**、assistant **0.8.2**、device-access **0.9.3**；topology 仍 **0.4.3**。命令退出 **0**，`verify.ps1` **9/9 App** 及 FastAPI/BFF/React/Worker 检查全部通过；项目已运行于 `http://localhost:3000/chat`。未修改设备配置。
+
+- 对应新服务组合的精确命令：`venv/Scripts/python.exe -m pytest tests/unit/test_device_access_config_compare.py tests/unit/test_device_access_config_compare_dsh.py tests/unit/test_ssh_governance.py tests/unit/test_device_access_sessions.py -q`（77 passed，34.46 秒）；新增 2 项后仅重跑 `venv/Scripts/python.exe -m pytest tests/unit/test_device_access_config_compare.py -q`（27 passed，21.13 秒）。79 个不同用例由服务 27 + DSH 2 + governance 20 + sessions 30 组成，非同一轮同时运行。
+- **代码已本地提交 `33ec796`**（`feat(diagnosis): compare scoped live config with raw baselines`），25 个本项代码/测试文件；此前 D-8 收尾修复是 `089c270`。本次交接与路线图另作文档提交，**均未推送**。没有执行 `.runtime/verify-config-scope.py`，也没有本次实机证明文件。其他线程暂存的 5 个页面以及环境生成注册文件保留。
+
+### Claude 从这里继续
+
+1. 先检查 `git status --short` 与上面的部署/提交状态，保留第 5 节的无关暂存页面、`generated.ts`/`generated.meta.json`；不恢复旧 read_changes。只有新问题需要改代码时才重跑对应测试；App 代码变更后必须重新部署。
+2. **尚未实机执行任何本次配置查询。** 已准备 `.runtime/verify-config-scope.py`，但未运行；`.runtime/config-scope-live-proof.json` 在交接准备时不存在。脚本对两台 VSR 各用公共 SessionHandle 读取 GE3/0 与 OSPF 1（共 4 次独立只读会话，正常初始化另计），关闭后直接下载已有 MinIO `.log` 验证，不调用可能补写日志的 read_log/sync_log。最后通过真实 registry 读现有离线快照 `192.168.2.30` 的 GE1/0/1，仅核验原文块，不连接该离线设备。脚本不含口令，只保存脱敏后的元数据/摘要。
+   ```powershell
+   . scripts/windows/_port_utils.ps1
+   Initialize-WindowsRuntimeEnvironment -ProjectRoot (Get-Location).Path
+   $env:PYTHONPATH = (Get-Location).Path
+   venv/Scripts/python.exe .runtime/verify-config-scope.py
+   ```
+   脚本用 `open('x')` 创建证明并逐次保存，若已有证明会拒绝再次启动；若中途失败或结果不明，先看已保存记录、stdout 和会话日志，只补核未完成部分，不删除证明后盲目重跑全部 SSH。脚本尚未执行，因此也可能存在验收脚本自身的小问题，应先审阅。
+3. 本机只读数据库核查：`NetworkDevice` **0 条**，`display current-configuration` 原始快照 **127 份**，全是无 inventory 关联的离线数据，但有明确 `management_ip`。两台实验 VSR 的 `10.10.1.1/2` 没有对应巡检基线。**不能造一份历史基线或用其他设备快照冒充。** 实机固定查询通过只能说明命令/日志可用，不等于“真实历史基线 → 当前 VSR → AI 根因”的整体验收。需要后续取得合法对应基线后再做这一端到端验证，当前完整对比仅隔离 fixture 已验证。
+4. 本次验收并未改变 D-8 首轮 **6/8**，不宣称推理缺陷解决。既有实验故障已于上一轮全部恢复；本轮未注入/改动设备配置。不要为了补齐证明擅自重跑全故障集或扩大厂商/配置范围。
 
 ## 1. 先读这些
 
@@ -54,6 +98,8 @@
 | `5810e4f`、`46a6c1d` | GPT 接手：场景 1 实机记录；知识问答执行过程展开查看参数与结果 |
 | `6899ded`、`a64428f`、`2701275` | 部署排空修复；全平台 SSH 白名单、批量执行与审计；CRT 风格服务器会话日志 |
 | `0e82ad3`、`3e95be3` | SSH 终端内编辑命令；恢复受控 Comware 远端 Tab 补全 |
+| `089c270` | D-8 预算收尾只允许提交校验后的答案；场景 4-R2 独立记录 |
+| `33ec796` | 原始基线与指定现场配置块对比，已部署；实机验收待 Claude 继续 |
 
 ## 4. 当前进行中：D-8 诊断闭环验收
 
@@ -84,7 +130,7 @@
 
 **下一步**：先解决 D-8 的预算内收尾和结论可靠性，保留首轮与补测各自成绩；不能把固定证据回放或补测成功覆盖原失败。这里只做现有卡的必要修复，尚不扩展快照自动刷新、VRF 或服务端结构化诊断校验。
 
-**负责人追加讨论，尚未实施**：把网络巡检加入诊断调用链。现有 DSH 已开放巡检的设备／运行／事件／命令目录／采集原文五个只读证据工具，R2 也实际查询了事件；需要先按资产 ID、时间及运行范围准确取证。巡检 App 的 `inspection__launch` 与 `inspection__read_batch` 已存在，但前者为任务启动操作、后者未标记为证据，当前诊断过滤器不开放。若接入新巡检执行，需要先确认设计：复用已发布检查项和冻结计划、限制当前诊断设备，处理异步任务及命令预算；不能直接开放全部写工具。巡检现有 SSH 受平台白名单和日志控制，但未走 D-8 的 L1/L2 与 20 条命令限制，不能视为等价权限。当前生产 `DIAGNOSIS` 提示未改，DSH `thinking` 仍为 `disabled`；开启推理或调整巡检链路均未在本轮执行。
+**负责人后续追加已实施（最新状态见文首交接）**：巡检接入方向最终确定为“基线原文 → 指定块现场读取 → 配置比较”，代码提交 `33ec796`，本机部署通过，实机比较尚待验收。原先设想直接读取变化列表已撤回。`inspection__launch` 仍不开放给诊断，不发起新巡检；`read_batch` 仍不是普通诊断证据工具。本次只改已确认的配置比较提示与工具，`thinking` 仍为 `disabled`，模型和既有轮次/时间上限没有改动。
 
 注意：Comware 默认不回 TTL 超时，`tracert` 中间跳显示 `* * *`，这是设备默认行为，不是故障；开启需要改配置，不要做。
 
@@ -136,7 +182,7 @@
 
 ## 5. 本机状态与注意事项
 
-- 已部署（本机）：知识问答 0.8.1、SSH 终端 0.9.2、拓扑 0.4.3、设备管理 1.0.4、巡检 1.3.1、规则治理 1.4.6。数据库在 D-5/D-6 前备份于 `backups/20260930-001850-before-d5-d6/`；S-1 前备份于 `backups/20260930-023847-before-ssh-governance/postgres.dump`（109079394 bytes）。
+- 已部署（本机）：知识问答 0.8.2、SSH 终端 0.9.3、拓扑 0.4.3、设备管理 1.0.4、巡检 1.3.2、规则治理 1.4.6。数据库在 D-5/D-6 前备份于 `backups/20260930-001850-before-d5-d6/`；S-1 前备份于 `backups/20260930-023847-before-ssh-governance/postgres.dump`（109079394 bytes）。
 - 本机平台里已配置：SSH 终端默认登录与两条会话 VSR-1/VSR-2；拓扑默认登录；两台 VSR 的主机密钥。“实验网络 lab”的当前快照为 `a07321f029a04c20b0bc600cf91c39ab`（本轮拓扑 0.4.3 发现，含路由表与当前终端 MAC），原快照保留。
 - 部署命令：`scripts\windows\start.ps1 -SkipLangfuse -UpgradeApps <app,...> -NoBrowser`。
   - **修改任何 App 的代码后，该 App 的摘要与已部署版本不一致，平台会把它判为不可用**（依赖它的 App 也会不可用），直到用 `-UpgradeApps` 重新部署。
