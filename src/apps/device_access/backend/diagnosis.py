@@ -31,6 +31,42 @@ NOT_RUN = {
     "L4": "不允许的命令（配置或危险操作），不执行",
     "config": "配置导出可能包含密文，不执行；请用针对性的 display/show 命令",
 }
+# How each platform writes a bounded probe with a source address.
+PROBE_EXAMPLE = {
+    "comware": "ping -a 源地址 -c 3 目标地址（选项写在目标地址之前）",
+    "vrp": "ping -a 源地址 -c 3 目标地址（选项写在目标地址之前）",
+    "ios": "ping 目标地址 source 源地址 repeat 3（选项写在目标地址之后）",
+    "nxos": "ping 目标地址 source 源地址 count 3（选项写在目标地址之后）",
+}
+# Refusals the model can correct are said plainly; "approval" was once reported
+# for a ping whose option was merely out of place, and the model gave up on it.
+REASONS = {
+    "unsupported_probe_option": (
+        "ping/tracert 选项不支持或位置不对，改写后可直接执行；写法：{example}"
+    ),
+    "unsupported_probe_target": "ping/tracert 的目标须是单个 IPv4 地址；写法：{example}",
+    "unsupported_probe_source": "源地址须是 IPv4 单播地址（不接受接口名）；写法：{example}",
+    "duplicate_or_missing_probe_option": "ping/tracert 选项重复或缺少取值；写法：{example}",
+    "probe_budget_exceeded_or_invalid": (
+        "次数、超时或包大小超出上限：次数不超过 5，超时不超过 2000 ms"
+    ),
+    "probe_filters_require_review": "探测命令不能加管道过滤，去掉过滤后可直接执行",
+    "unknown_command_requires_review": (
+        "不在只读命令库中，需要人工审批；可改用标准的 display/show 命令"
+    ),
+    "configuration_or_mutation": "配置或变更类命令，不执行",
+    "unsafe_pipe": "不允许的管道用法，去掉后重试",
+    "control_operator_or_redirection": "不允许的控制符或重定向",
+}
+
+
+def why_not_run(platform, text, level):
+    """Why a command was not sent, in words the model can act on."""
+    reason = classify(platform, text).reason
+    message = REASONS.get(reason)
+    if message:
+        return message.format(example=PROBE_EXAMPLE.get(platform, "见设备手册"))
+    return NOT_RUN.get(level, NOT_RUN["L4"]) + f"（{reason}）"
 
 
 def login_for(owner, host):
@@ -124,7 +160,8 @@ def run(owner, host, platform, commands, purpose, turn_id):
             }
             if result.policy_level not in {"L1", "L2"}:
                 item.update(
-                    status="not_executed", reason=NOT_RUN.get(result.policy_level, NOT_RUN["L4"])
+                    status="not_executed",
+                    reason=why_not_run(platform, text, result.policy_level),
                 )
             else:
                 item.update(

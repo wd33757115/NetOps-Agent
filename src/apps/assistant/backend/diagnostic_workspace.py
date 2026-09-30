@@ -92,7 +92,10 @@ class DiagnosticWorkspace(DocumentWorkspace):
             if platform is None:
                 raise PermissionError("该设备不在本轮路径计算或终端定位的结果中，不能登录")
             if self.commands + command_count > MAX_COMMANDS:
-                raise PermissionError("本轮诊断命令预算已用完")
+                raise PermissionError(
+                    f"本轮诊断命令预算已用完（每轮最多 {MAX_COMMANDS} 条），不能再登录设备；"
+                    "请基于已有证据作答，未取得的证据列入待验证"
+                )
             self.commands += command_count
         result = registry.invoke(
             name,

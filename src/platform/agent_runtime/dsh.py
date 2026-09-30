@@ -20,9 +20,12 @@ from mcp import types
 from mcp.server.fastmcp import FastMCP
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse, StreamingResponse
+from fastapi import HTTPException
+from pydantic import ValidationError
 from starlette.routing import Route
 
 from src.apps.assistant.backend import answer_gate, tool_outputs, tool_trace
+from src.platform.device_access.contracts import DeviceAccessError
 
 from .base import AgentEvent
 from .usage import Usage
@@ -34,6 +37,34 @@ ROOT = Path(__file__).resolve().parents[3]
 MAX_CONTEXT_CHARACTERS = 400_000
 # Tools that log in to a device get the live timeout, not the 10 s query one.
 LIVE_TOOLS = frozenset({"device_access__run", "device_access__compare_config"})
+UNAVAILABLE = "Business query unavailable; do not infer absence or health"
+
+
+def tool_failure(exc, seconds):
+    """Why a tool call failed, for errors whose text is ours; anything else stays opaque.
+
+    One sentence for every failure once hid an exhausted command budget: the model
+    took it for a syntax error and retried for three rounds.
+    """
+    if isinstance(exc, TimeoutError):
+        text = f"工具调用超时（{seconds:.0f} 秒），结果未知"
+    elif isinstance(exc, PermissionError):
+        text = f"被拒绝：{exc}"
+    elif isinstance(exc, ValidationError):
+        fields = "；".join(
+            f"{'.'.join(map(str, error['loc'])) or '参数'}：{error['msg']}"
+            for error in exc.errors()[:5]
+        )
+        text = f"参数不符合工具要求：{fields}"
+    elif isinstance(exc, HTTPException) and isinstance(exc.detail, str):
+        text = f"查询失败（{exc.status_code}）：{exc.detail}"
+    elif isinstance(exc, DeviceAccessError):
+        text = f"设备访问失败：{exc.failure_code}"
+    elif isinstance(exc, ValueError) and str(exc).startswith("Business evidence exceeds budget"):
+        text = "结果超过证据大小上限，请缩小查询范围或降低 limit"
+    else:
+        return UNAVAILABLE
+    return text + "；不要据此推断正常或故障"
 PROMPT = """你是 NetOps 数据中心网络助手。使用提供的工具按需搜索和阅读资料，也可查询已授权业务数据。
 CATALOG.md 是资料目录；glob 查找文件，grep 查找内容，read 按行读取。
 正文文件名使用修订标识和行号，不含产品名称；按主题找内容用 grep，按标题找路径可查 CATALOG.md。
@@ -388,6 +419,7 @@ class Bridge:
             await self.check()
             if name not in by_name:
                 raise PermissionError("Tool unavailable")
+            seconds = 0
             try:
                 if name == "submit_answer":
                     result = await asyncio.to_thread(self.catalog.submit_answer, arguments)
@@ -398,14 +430,12 @@ class Bridge:
                         self.catalog, "active_diagnostics", False
                     )
                     remaining = self.context.timeout_seconds - (time.monotonic() - self.started_at)
+                    seconds = max(0.001, min(75 if live else 10, remaining))
                     result = await asyncio.wait_for(
-                        asyncio.to_thread(self.catalog.invoke, name, arguments),
-                        max(0.001, min(75 if live else 10, remaining)),
+                        asyncio.to_thread(self.catalog.invoke, name, arguments), seconds
                     )
-            except Exception:
-                raise ValueError(
-                    "Business query unavailable; do not infer absence or health"
-                ) from None
+            except Exception as exc:
+                raise ValueError(tool_failure(exc, seconds)) from None
             await self.check()
             return [
                 types.TextContent(
