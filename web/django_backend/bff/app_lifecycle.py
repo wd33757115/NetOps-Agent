@@ -1,14 +1,17 @@
 """Serialized administrative lifecycle; access closes before external work begins."""
 
 from contextlib import contextmanager
+from dataclasses import replace
 from threading import RLock
+from zipfile import ZipFile
 
+import yaml
 from django.db import connection, transaction
 
 from src.platform.kernel.dependencies import check_dependencies
 from src.platform.kernel.migrations import migrate
 from src.platform.kernel.readiness import probe
-from src.platform.kernel.registry import discover, load_symbol
+from src.platform.kernel.registry import ROOT, discover, load_symbol
 from src.platform.kernel.releases import archive
 
 from .models import AppInstallation
@@ -93,6 +96,17 @@ def active_requests(record):
 
     count = 0
     manifest = discover()[record.app_id]
+    if manifest.digest != record.deployment_digest:
+        # Drain the release that is still running. The new source can change
+        # both its digest and queue/task ownership before deployment starts.
+        release = ROOT / ".runtime/app-package-releases" / record.app_id / (
+            record.deployment_digest + ".zip"
+        )
+        with ZipFile(release) as retained:
+            data = yaml.safe_load(retained.read("app.yaml"))
+        if not isinstance(data, dict) or data.get("id") != record.app_id:
+            raise ValueError("Retained deployment manifest does not match application")
+        manifest = replace(manifest, data=data, digest=record.deployment_digest)
     if manifest.data["backend"].get("legacy_queues"):
         # Legacy queue consumers must be upgraded too; their in-flight work can
         # otherwise outlive closing the new application queue.
