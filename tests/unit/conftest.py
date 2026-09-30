@@ -3,6 +3,7 @@
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from shutil import copyfile
+from threading import RLock
 
 import pytest
 from sqlalchemy import create_engine
@@ -40,6 +41,7 @@ def ssh_governance_database(request, tmp_path, monkeypatch):
         "test_device_access",
         "test_topology",
         "test_ssh_governance",
+        "test_ssh_session_logs",
     ) + LEGACY_SSH_TEST_MODULES
     if not request.node.path.name.startswith(modules):
         def unexpected_governance_database():
@@ -96,3 +98,50 @@ def ssh_governance_database(request, tmp_path, monkeypatch):
     else:
         yield sessions
     engine.dispose()
+
+
+@pytest.fixture(autouse=True)
+def ssh_log_storage(monkeypatch):
+    """Explicit fake persistence for all SSH tests; never contact real MinIO."""
+    from src.platform.device_access import session_logs
+
+    class Storage:
+        def __init__(self):
+            self.objects = {}
+            self.uploads = []
+            self.fail = False
+
+        def upload_file(self, key, data, content_type):
+            if self.fail:
+                return False
+            self.objects[key] = data
+            self.uploads.append(key)
+            return True
+
+        def download_file(self, key):
+            if self.fail:
+                raise RuntimeError("object storage offline")
+            return self.objects.get(key)
+
+    store = Storage()
+    lock = RLock()
+    monkeypatch.setattr(session_logs, "_storage", lambda: store)
+
+    def acquire(session, identifier):
+        # SQLite lacks advisory locks. Hold this deterministic test-only lock
+        # for the transaction, matching the production database lock lifetime.
+        from sqlalchemy import event
+
+        lock.acquire()
+        released = False
+
+        def release(target, transaction):
+            nonlocal released
+            if transaction.parent is None and not released:
+                released = True
+                lock.release()
+
+        event.listen(session, "after_transaction_end", release)
+
+    monkeypatch.setattr(session_logs, "_lock", acquire)
+    return store

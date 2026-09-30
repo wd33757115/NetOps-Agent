@@ -50,8 +50,11 @@ def pump(payload, incoming, outgoing, stop):
             task_id=operation_id,
             session_id=operation_id,
             secrets=(password,),
+            device_name=payload.get("device_name") or host,
         )
-        access = service.access(ref, host, port, username, password)
+        access = service.access(
+            ref, host, port, username, password, device_name=payload.get("device_name") or host
+        )
         context = AccessContext(
             owner,
             service.APP_ID,

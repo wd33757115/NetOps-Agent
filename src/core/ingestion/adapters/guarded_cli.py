@@ -121,9 +121,9 @@ def connect(operation, **kwargs):
     connection_type = type(
         "Governed" + device_type, (_GovernedNetmiko, ssh_dispatcher(device_type)), {}
     )
-    operation.event("opening", driver="netmiko")
     connection = None
     try:
+        operation.event("opening", driver="netmiko")
         connection = connection_type(operation=operation, **kwargs)
         connection._open()
         connection._finish_setup()

@@ -113,6 +113,11 @@ def run_pump(monkeypatch, *, failure=None, save=False):
     class Access:
         @contextlib.contextmanager
         def terminal(self, *args, **kwargs):
+            from src.platform.device_access.governance import current_operation
+
+            operation = current_operation()
+            assert operation.device_name == "核心交换机"
+            assert operation.session_id == "op"
             if failure:
                 raise DeviceAccessError(failure, "failure")
             yield Channel(), lambda: None
@@ -130,6 +135,7 @@ def run_pump(monkeypatch, *, failure=None, save=False):
         "operation_id": "op",
         "session_id": "s1",
         "host": "10.0.0.1",
+        "device_name": "核心交换机",
         "port": 22,
         "credential_ref": "ref",
         "save": save,

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Alert, AutoComplete, Button, Checkbox, ConfigProvider, Empty, Form, Input, InputNumber, Modal, Tabs, Tooltip, message } from 'antd'
-import { ArrowLeftOutlined, CodeOutlined, DeleteOutlined, EditOutlined, KeyOutlined, LockOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons'
+import { Alert, AutoComplete, Button, Checkbox, ConfigProvider, Empty, Form, Input, InputNumber, Modal, Table, Tabs, Tooltip, message } from 'antd'
+import { ArrowLeftOutlined, CodeOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, FileTextOutlined, KeyOutlined, LockOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons'
 import { api } from '@netops/config/api'
 import { useAuth } from '@netops/context/AuthContext'
 import { LiveTerminal } from '@netops/platform/terminal/DeviceTerminal'
@@ -16,10 +16,13 @@ interface BatchResult { session_id: string; name: string; host: string; status: 
 interface BatchRun { id: string; status: string; results: BatchResult[]; cancel_requested?: boolean; notice?: string }
 interface AuditItem { id: string; created_at: string; user_id: string; action: string; status: string; detail: Record<string, unknown> }
 interface AuditPage { items: AuditItem[]; next_cursor: string | null }
+interface SessionLog { id: string; filename: string; device_name: string; host: string; port: number; source_app: string; actor_id: string; started_at: string; updated_at: string; status: string }
+interface SessionLogPage { items: SessionLog[]; next_cursor: string | null }
+interface SessionLogDetail extends SessionLog { content: string }
 const endpoint = '/apps/device-access'
 const errorText = (error: unknown, fallback: string) => error instanceof Error && error.message ? error.message : fallback
 const activeBatch = (status?: string) => !!status && ['queued', 'pending', 'running', 'cancel_requested'].includes(status)
-const statuses: Record<string, string> = { queued: '排队中', pending: '待执行', running: '执行中', cancel_requested: '正在停止', completed: '已完成', success: '成功', succeeded: '成功', failed: '失败', cancelled: '已停止', rejected: '已拒绝', denied: '已拒绝', skipped: '已跳过', not_executed: '未执行', interrupted: '已中断', waiting_for_input: '已中断' }
+const statuses: Record<string, string> = { queued: '排队中', pending: '待执行', running: '执行中', active: '进行中', connecting: '连接中', connected: '已连接', closed: '已关闭', disconnected: '已断开', cancel_requested: '正在停止', completed: '已完成', success: '成功', succeeded: '成功', failed: '失败', cancelled: '已停止', rejected: '已拒绝', denied: '已拒绝', skipped: '已跳过', not_executed: '未执行', interrupted: '已中断', waiting_for_input: '已中断' }
 const statusLabel = (status: string) => statuses[status] || status
 const actions: Record<string, string> = {
   connecting: '连接设备', connected: '连接成功', connection_failed: '连接失败', disconnected: '连接断开',
@@ -31,6 +34,98 @@ const actions: Record<string, string> = {
 }
 const actionLabel = (action: string) => actions[action.replace(/^ssh\./, '')] || action
 const dateLabel = (value: string) => new Date(value).toLocaleString('zh-CN', { hour12: false })
+const sourceLabel = (source: string) => ({ 'device-access': 'SSH 终端', topology: '拓扑', assistant: '知识问答', inspection: '巡检', 'rule-governance': '规则治理', 'device-management': '设备管理' }[source] || source)
+
+function downloadFilename(disposition: string, fallback: string) {
+  const encoded = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(disposition)
+  if (encoded) {
+    try { return decodeURIComponent(encoded[1].trim().replace(/^"|"$/g, '')).replace(/[\\/]/g, '_') }
+    catch { return fallback }
+  }
+  return /filename\s*=\s*"([^"]+)"/i.exec(disposition)?.[1].replace(/[\\/]/g, '_') || fallback
+}
+
+function SessionLogPanel({ admin }: { admin: boolean }) {
+  const [host, setHost] = useState('')
+  const [query, setQuery] = useState('')
+  const [page, setPage] = useState<SessionLogPage>({ items: [], next_cursor: null })
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [selected, setSelected] = useState<SessionLog>()
+  const [detail, setDetail] = useState<SessionLogDetail>()
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [detailError, setDetailError] = useState('')
+  const [detailVersion, setDetailVersion] = useState(0)
+  const [downloading, setDownloading] = useState<string>()
+  const [downloadError, setDownloadError] = useState('')
+  const [managementOpen, setManagementOpen] = useState(false)
+  const generation = useRef({ value: 0 })
+  const read = useCallback(async (before?: string) => {
+    const current = ++generation.current.value
+    setLoading(true); setError('')
+    if (!before) setPage({ items: [], next_cursor: null })
+    try {
+      const { data } = await api.get<SessionLogPage>(`${endpoint}/session-logs`, { params: { ...(query ? { host: query } : {}), limit: 50, before: before || 0 } })
+      if (generation.current.value === current) setPage(previous => ({ items: before ? [...previous.items, ...data.items] : data.items, next_cursor: data.next_cursor }))
+    } catch (reason) { if (generation.current.value === current) setError(errorText(reason, '会话日志读取失败，请重试')) }
+    finally { if (generation.current.value === current) setLoading(false) }
+  }, [query])
+  useEffect(() => { const tracker = generation.current; void read(); return () => { tracker.value++ } }, [read])
+  const selectedId = selected?.id
+  useEffect(() => {
+    setDetail(undefined); setDetailError('')
+    if (!selectedId) return
+    let disposed = false
+    setDetailLoading(true)
+    void api.get<SessionLogDetail>(`${endpoint}/session-logs/${encodeURIComponent(selectedId)}`).then(({ data }) => {
+      if (!disposed) setDetail(data)
+    }).catch(reason => { if (!disposed) setDetailError(errorText(reason, '日志内容读取失败，请重试')) }).finally(() => { if (!disposed) setDetailLoading(false) })
+    return () => { disposed = true }
+  }, [selectedId, detailVersion])
+  const download = async (item: SessionLog) => {
+    if (downloading) return
+    setDownloading(item.id); setDownloadError('')
+    try {
+      const response = await api.get<Blob>(`${endpoint}/session-logs/${encodeURIComponent(item.id)}/download`, { responseType: 'blob' })
+      const url = URL.createObjectURL(response.data)
+      const link = document.createElement('a')
+      try {
+        link.href = url
+        link.download = downloadFilename(String(response.headers?.['content-disposition'] || ''), item.filename)
+        document.body.appendChild(link); link.click()
+      } finally { link.remove(); URL.revokeObjectURL(url) }
+    } catch (reason) { setDownloadError(`${item.filename}：${errorText(reason, '下载失败，请重试')}`) }
+    finally { setDownloading(undefined) }
+  }
+  return <section className="ssh-panel" aria-label="会话日志">
+    <div className="ssh-panel-heading"><div><h2>会话日志</h2><p>{admin ? '所有用户的连接记录，一次连接一个日志文件。' : '自己的连接记录，一次连接一个日志文件。'}</p></div><Button onClick={() => setManagementOpen(true)}>管理记录</Button></div>
+    <form className="ssh-audit-filters ssh-log-filters" onSubmit={event => { event.preventDefault(); const next = host.trim(); if (next === query) void read(); else setQuery(next) }}>
+      <Input aria-label="日志设备地址" placeholder="按设备地址筛选" value={host} onChange={event => setHost(event.target.value)} allowClear />
+      <Button htmlType="submit" loading={loading}>查询</Button><Button disabled={loading} onClick={() => void read()}>刷新</Button>
+    </form>
+    {error && <Alert type="error" showIcon message={error} action={<Button size="small" onClick={() => void read()}>重试</Button>} />}
+    {!selected && downloadError && <Alert type="error" showIcon message={downloadError} />}
+    <Table<SessionLog> className="ssh-log-table" rowKey="id" size="small" dataSource={page.items} loading={loading} pagination={false} tableLayout="fixed" locale={{ emptyText: '暂无会话日志' }} columns={[
+      { title: '日志文件', key: 'file', render: (_, item) => <div><button className="ssh-log-file" type="button" onClick={() => { setDownloadError(''); setSelected(item) }}><FileTextOutlined aria-hidden="true" /><span>{item.filename}</span></button><div className="ssh-log-meta">{item.host}{item.port !== 22 ? `:${item.port}` : ''} · {dateLabel(item.started_at)} · {sourceLabel(item.source_app)}{admin && <span> · 用户 {item.actor_id}</span>}</div></div> },
+      { title: '状态', dataIndex: 'status', key: 'status', width: 70, render: statusLabel },
+      { title: '下载', key: 'download', width: 56, render: (_, item) => <Tooltip title="下载日志"><Button type="text" size="small" icon={<DownloadOutlined />} aria-label={`下载 ${item.filename}`} disabled={!!downloading && downloading !== item.id} loading={downloading === item.id} onClick={() => void download(item)} /></Tooltip> },
+    ]} />
+    {page.next_cursor && <Button className="ssh-load-more" loading={loading} onClick={() => void read(page.next_cursor!)}>加载更多</Button>}
+    <Modal open={!!selected} title={selected?.filename || '会话日志'} width="min(1000px, calc(100vw - 32px))" onCancel={() => setSelected(undefined)} destroyOnClose footer={[
+      <Button key="close" onClick={() => setSelected(undefined)}>关闭</Button>,
+      <Button key="refresh" disabled={detailLoading} onClick={() => setDetailVersion(value => value + 1)}>刷新内容</Button>,
+      <Button key="download" type="primary" icon={<DownloadOutlined />} loading={downloading === selected?.id && !!selected} disabled={!!downloading && downloading !== selected?.id} onClick={() => { if (selected) void download(selected) }}>下载日志</Button>,
+    ]}>
+      {selected && <p className="ssh-modal-note">{selected.device_name || selected.host} · {selected.host}:{selected.port} · {dateLabel(selected.started_at)} · {sourceLabel(selected.source_app)}</p>}
+      {downloadError && <Alert type="error" showIcon message={downloadError} />}
+      {detailError && <Alert type="error" showIcon message={detailError} action={<Button size="small" onClick={() => setDetailVersion(value => value + 1)}>重试</Button>} />}
+      {detailLoading ? <p role="status" className="ssh-modal-note">正在读取日志…</p> : detail?.id === selectedId && <pre className="ssh-session-log" aria-label="日志内容">{detail?.content}</pre>}
+    </Modal>
+    <Modal open={managementOpen} title="管理记录" width="min(1000px, calc(100vw - 32px))" onCancel={() => setManagementOpen(false)} footer={<Button onClick={() => setManagementOpen(false)}>关闭</Button>} destroyOnClose>
+      {managementOpen && <AuditPanel admin={admin} />}
+    </Modal>
+  </section>
+}
 
 function CommandPolicyModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [policy, setPolicy] = useState<CommandPolicy>()
@@ -163,17 +258,17 @@ function AuditPanel({ admin }: { admin: boolean }) {
     if (!before) setPage({ items: [], next_cursor: null })
     const params = Object.fromEntries(Object.entries(query).filter(([, value]) => value.trim()))
     try {
-      const { data } = await api.get<AuditPage>(`${endpoint}/audit`, { params: { ...params, limit: 50, ...(before ? { before } : {}) } })
+      const { data } = await api.get<AuditPage>(`${endpoint}/audit`, { params: { ...params, management_only: true, limit: 50, ...(before ? { before } : {}) } })
       if (generation.current.value === current) setPage(previous => ({ items: before ? [...previous.items, ...data.items] : data.items, next_cursor: data.next_cursor }))
     } catch (reason) { if (generation.current.value === current) setError(errorText(reason, '操作记录读取失败')) }
     finally { if (generation.current.value === current) setLoading(false) }
   }, [query])
   useEffect(() => { const tracker = generation.current; void read(); return () => { tracker.value++ } }, [read])
-  return <section className="ssh-panel" aria-label="操作记录">
-    <div className="ssh-panel-heading"><div><h2>操作记录</h2><p>{admin ? '查看所有用户的 SSH 操作和执行结果。' : '查看自己的 SSH 操作和执行结果。'}</p></div></div>
+  return <section className="ssh-panel" aria-label="管理记录">
+    <div className="ssh-panel-heading"><div><p>{admin ? '查看所有用户的 SSH 管理操作。' : '查看自己的 SSH 管理操作。'}</p></div></div>
     <form className="ssh-audit-filters" onSubmit={event => { event.preventDefault(); setQuery({ ...filters }) }}>
       <Input aria-label="筛选设备地址" placeholder="设备地址" value={filters.host} onChange={event => setFilters(current => ({ ...current, host: event.target.value }))} />
-      <AutoComplete aria-label="筛选操作类型" placeholder="操作类型" allowClear value={filters.kind} options={Object.entries(actions).map(([value, label]) => ({ value, label }))} filterOption={(input, option) => `${option?.label} ${option?.value}`.toLowerCase().includes(input.toLowerCase())} onChange={value => setFilters(current => ({ ...current, kind: value }))} />
+      <AutoComplete aria-label="筛选操作类型" placeholder="操作类型" allowClear value={filters.kind} options={Object.entries(actions).filter(([value]) => /^(session_|default_|host_key_|policy_|batch_)/.test(value)).map(([value, label]) => ({ value, label }))} filterOption={(input, option) => `${option?.label} ${option?.value}`.toLowerCase().includes(input.toLowerCase())} onChange={value => setFilters(current => ({ ...current, kind: value }))} />
       <AutoComplete aria-label="筛选操作状态" placeholder="状态" allowClear value={filters.status} options={Object.entries(statuses).map(([value, label]) => ({ value, label }))} filterOption={(input, option) => `${option?.label} ${option?.value}`.toLowerCase().includes(input.toLowerCase())} onChange={value => setFilters(current => ({ ...current, status: value }))} />
       <Button htmlType="submit" loading={loading}>查询</Button><Button disabled={loading} onClick={() => void read()}>刷新</Button>
     </form>
@@ -318,7 +413,7 @@ export default function Page() {
               <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={sessions.length ? '双击会话开始' : '先新建一个会话'}>{!sessions.length && <Button type="primary" icon={<PlusOutlined aria-hidden="true" />} onClick={() => setEditing('new')}>新建会话</Button>}</Empty>
             </div> },
             { key: 'batch', label: '批量执行', children: <BatchPanel selected={checked.map(id => sessions.find(row => row.id === id)).filter((row): row is SavedSession => !!row)} /> },
-            { key: 'audit', label: '操作记录', children: <AuditPanel admin={admin} /> },
+            { key: 'audit', label: '操作记录', children: <SessionLogPanel key={`${user?.username}:${user?.role}`} admin={admin} /> },
           ]} />
         </main>
       </div>

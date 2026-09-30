@@ -178,6 +178,7 @@ def connect_cli_device(
         port=port,
         task_id=task_id,
         secrets=(password,),
+        device_name=device.get("device_name"),
     )
     return connect(
         operation,

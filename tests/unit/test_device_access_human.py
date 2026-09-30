@@ -10,7 +10,12 @@ from sqlalchemy.pool import StaticPool
 
 from src.apps.device_access.backend import api, batches, saved, service
 from src.apps.device_access.backend.models import Base
-from src.apps.device_access.backend.schemas import BatchCommands, CommandPolicy, SessionCreate
+from src.apps.device_access.backend.schemas import (
+    BatchCommands,
+    CommandPolicy,
+    SessionCreate,
+    SessionUpdate,
+)
 from src.auth.models import CurrentUser
 from src.infrastructure.db.models import AuditLogRecord, SSHPolicyRecord
 from src.platform.device_access import governance
@@ -165,10 +170,14 @@ def transport(monkeypatch, replies=None):
     class Access:
         @contextmanager
         def terminal(self, *args, **kwargs):
+            op = governance.current_operation()
+            op.event("connecting", mode="human")
             channel = Channel(replies)
+            channel.operation = op
             channels.append(channel)
             yield channel, lambda: None
             channel.closed = True
+            op.event("disconnected", mode="human")
 
     monkeypatch.setattr(service, "access", lambda *args, **kwargs: Access())
     return channels
@@ -184,10 +193,18 @@ def test_batch_is_sequential_and_deduplicated_with_exact_payload(world, monkeypa
     with pytest.raises(HTTPException) as conflict:
         batches.create("u", body(ids, ["display arp"]))
     assert conflict.value.status_code == 409
+    saved.update("u", ids[0], SessionUpdate(name="renamed after request"))
     channels = transport(monkeypatch)
     batches.run("u", view["id"], targets, request.commands)
     assert [c.sent for c in channels] == [[b"display version\n", b"display interface brief\n"]] * 2
-    assert batches.read("u", view["id"])["status"] == "completed"
+    completed = batches.read("u", view["id"])
+    assert completed["status"] == "completed"
+    assert [d["session_id"] for d in completed["results"]] == ids
+    assert [d["connection_session_id"] for d in completed["results"]] == [
+        c.operation.session_id for c in channels
+    ]
+    assert not set(ids) & {c.operation.session_id for c in channels}
+    assert channels[0].operation.device_name == "10.0.0.1"
     with pytest.raises(HTTPException):
         batches.read("other", view["id"])
 
@@ -201,6 +218,10 @@ def test_batch_device_error_stops_only_that_device(world, monkeypatch):
     assert [len(c.sent) for c in channels] == [1, 1]
     results = batches.read("u", view["id"])["results"]
     assert all(d["commands"][1]["status"] == "not_executed" for d in results)
+    events = governance.query_audit(kind="batch_device_finished")["items"]
+    assert {e["detail"]["session_id"] for e in events} == {
+        d["connection_session_id"] for d in results
+    }
 
 
 def test_cancel_before_worker_never_opens_connection(world, monkeypatch):
@@ -210,7 +231,46 @@ def test_cancel_before_worker_never_opens_connection(world, monkeypatch):
     batches.cancel("u", view["id"])
     batches.run("u", view["id"], targets, request.commands)
     assert channels == []
-    assert batches.read("u", view["id"])["status"] == "cancelled"
+    result = batches.read("u", view["id"])
+    assert result["status"] == "cancelled"
+    assert result["results"][0]["connection_session_id"] is None
+    assert all(
+        "session_id" not in event["detail"]
+        for event in governance.query_audit(kind="batch_device_finished")["items"]
+    )
+
+
+@pytest.mark.parametrize("connection_started", [False, True])
+def test_batch_login_failure_has_only_its_actual_connection_id(
+    world, monkeypatch, connection_started
+):
+    first = new_session()
+    second = saved.create("u", SessionCreate(name="missing login", host="10.0.0.2"))["id"]
+    request = body([first, second])
+    view, _, targets = batches.create("u", request)
+    seen = []
+
+    class Access:
+        @contextmanager
+        def terminal(self, *args, **kwargs):
+            op = governance.current_operation()
+            seen.append(op.session_id)
+            if connection_started:
+                op.event("connecting", mode="human")
+            raise DeviceAccessError("authentication_failed", "test login failure")
+            yield  # A failed context manager still exercises the caller's cleanup path.
+
+    monkeypatch.setattr(service, "access", lambda *args, **kwargs: Access())
+    batches.run("u", view["id"], targets, request.commands)
+    results = batches.read("u", view["id"])["results"]
+    expected_id = seen[0] if connection_started else None
+    assert [d["connection_session_id"] for d in results] == [expected_id, None]
+    events = {
+        event["detail"]["host"]: event["detail"]
+        for event in governance.query_audit(kind="batch_device_finished")["items"]
+    }
+    assert events["10.0.0.1"].get("session_id") == expected_id
+    assert "session_id" not in events["10.0.0.2"]
 
 
 def test_cancel_during_batch_preserves_sent_result_and_skips_remaining(world, monkeypatch):

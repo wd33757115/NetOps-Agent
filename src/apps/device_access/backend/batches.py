@@ -59,6 +59,7 @@ def create(owner, body):
     results = [
         {
             "session_id": sid,
+            "connection_session_id": None,
             "name": name,
             "host": host,
             "port": port,
@@ -164,6 +165,7 @@ def run(owner, batch_id, targets, commands):
         with invocation(service.APP_ID):
             for index, (sid, _name, host, port) in enumerate(targets):
                 device = results[index]
+                op = None
                 try:
                     last_check = 0
                     guard()
@@ -176,12 +178,15 @@ def run(owner, batch_id, targets, commands):
                         port,
                         task_id=batch_id,
                         secrets=(password,),
+                        device_name=_name,
                     )
                     for item in device["commands"]:
                         item["command"] = op.redact(item["command"])
                     device["status"] = "running"
                     _publish(owner, batch_id, results)
-                    access = service.access(sid, host, port, username, password)
+                    access = service.access(
+                        sid, host, port, username, password, device_name=_name
+                    )
                     context = AccessContext(
                         owner,
                         service.APP_ID,
@@ -195,6 +200,8 @@ def run(owner, batch_id, targets, commands):
                             lease,
                         ),
                     ):
+                        if op.connection_started:
+                            device["connection_session_id"] = op.session_id
                         last_lease = 0
 
                         def checkpoint():
@@ -243,6 +250,8 @@ def run(owner, batch_id, targets, commands):
                                 raise DeviceAccessError("output_limit", "批量执行输出超过总上限")
                     device["status"] = "succeeded"
                 except Exception as exc:
+                    if op is not None and op.connection_started:
+                        device["connection_session_id"] = op.session_id
                     code = getattr(exc, "failure_code", "connection_failed")
                     cancelled = code in {
                         "cancelled",
@@ -267,6 +276,10 @@ def run(owner, batch_id, targets, commands):
                             "host": host,
                             "failure_code": code,
                             "results": device["commands"],
+                            **(
+                                {"session_id": device["connection_session_id"]}
+                                if device.get("connection_session_id") else {}
+                            ),
                         },
                     )
                 _publish(owner, batch_id, results)

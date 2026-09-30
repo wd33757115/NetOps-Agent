@@ -1,6 +1,6 @@
 import React from 'react'
 import { MemoryRouter } from 'react-router-dom'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import Page from './Page'
 
@@ -16,14 +16,22 @@ const sessions = [
   { id: 's1', name: '核心交换机', host: '10.0.0.1', port: 22, username: null, uses_default: true },
   { id: 's2', name: '边界路由器', host: '10.0.0.2', port: 2222, username: 'ops', uses_default: false },
 ]
+const sessionLogs = [
+  { id: 'legacy:connection/1', filename: '核心交换机_20260930_110000.log', device_name: '核心交换机', host: '10.0.0.1', port: 22, source_app: 'device-access', actor_id: 'operator-1', started_at: '2026-09-30T11:00:00+08:00', updated_at: '2026-09-30T11:01:00+08:00', status: 'closed' },
+  { id: 'connection2', filename: '核心交换机_20260930_120000.log', device_name: '核心交换机', host: '10.0.0.1', port: 22, source_app: 'inspection', actor_id: 'operator-1', started_at: '2026-09-30T12:00:00+08:00', updated_at: '2026-09-30T12:01:00+08:00', status: 'failed' },
+]
+const logText = '<H3C>display interface brief\nInterface      State\nGE1/0          UP\n[输出已截断]\n'
 
 beforeEach(() => {
   vi.clearAllMocks()
   auth.user.role = 'operator'
-  api.get.mockImplementation((url: string) => Promise.resolve({ data: url.endsWith('/sessions') ? sessions : url.endsWith('/audit') ? { items: [], next_cursor: null } : { username: 'admin', configured: true } }))
+  api.get.mockImplementation((url: string) => Promise.resolve({ data: url.endsWith('/sessions') ? sessions : url.endsWith('/audit') || url.endsWith('/session-logs') ? { items: [], next_cursor: null } : { username: 'admin', configured: true } }))
   for (const method of [api.post, api.patch, api.put, api.delete]) method.mockResolvedValue({ data: {} })
 })
-afterEach(cleanup)
+afterEach(() => {
+  cleanup(); vi.unstubAllGlobals()
+  if (vi.isMockFunction(HTMLAnchorElement.prototype.click)) vi.mocked(HTMLAnchorElement.prototype.click).mockRestore()
+})
 
 const view = () => render(<MemoryRouter><Page /></MemoryRouter>)
 
@@ -153,24 +161,136 @@ it('can stop a running batch and retains its results when changing tabs', async 
   expect(screen.getByRole('button', { name: '开始执行' })).not.toBeDisabled()
 })
 
-it('loads, filters and paginates audit records with expandable details', async () => {
+it('opens management records separately with the management-only filter', async () => {
   const get = api.get.getMockImplementation()!
-  const record = { id: 'a1', created_at: '2026-09-30T01:00:00Z', user_id: '1', action: 'ssh.command_finished', status: 'succeeded', detail: { host: '10.0.0.1', command: 'display version', output: 'audit output\n  GE1/0    up' } }
+  const record = { id: 'a1', created_at: '2026-09-30T01:00:00Z', user_id: '1', action: 'ssh.session_updated', status: 'succeeded', detail: { host: '10.0.0.1', name: '核心交换机' } }
   api.get.mockImplementation((url: string, config?: { params?: { before?: string } }) => url.endsWith('/audit') ? Promise.resolve({ data: { items: [{ ...record, id: config?.params?.before ? 'a2' : 'a1' }], next_cursor: config?.params?.before ? null : '50' } }) : get(url))
   view()
   fireEvent.click(screen.getByRole('tab', { name: '操作记录' }))
-  expect(await screen.findByText('查看自己的 SSH 操作和执行结果。')).toBeInTheDocument()
-  const first = await screen.findByText('命令结束')
+  expect(api.get.mock.calls.filter(([url]) => url.endsWith('/audit'))).toHaveLength(0)
+  fireEvent.click(screen.getByRole('button', { name: '管理记录' }))
+  expect(await screen.findByText('查看自己的 SSH 管理操作。')).toBeInTheDocument()
+  const first = await screen.findByText('修改会话')
   fireEvent.click(first.closest('summary')!)
-  expect(screen.getByText(/audit output/)).toBeVisible()
-  expect(screen.getByText(/audit output/).tagName).toBe('PRE')
-  expect(screen.getByText(/audit output/).textContent).toBe('audit output\n  GE1/0    up')
   fireEvent.change(screen.getByLabelText('筛选设备地址'), { target: { value: '10.0.0.1' } })
-  fireEvent.change(screen.getByRole('combobox', { name: '筛选操作类型' }), { target: { value: 'command_finished' } })
+  fireEvent.change(screen.getByRole('combobox', { name: '筛选操作类型' }), { target: { value: 'session_updated' } })
   fireEvent.change(screen.getByRole('combobox', { name: '筛选操作状态' }), { target: { value: 'succeeded' } })
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /查\s*询/ }))
+  await waitFor(() => expect(api.get).toHaveBeenCalledWith('/apps/device-access/audit', { params: { host: '10.0.0.1', kind: 'session_updated', status: 'succeeded', management_only: true, limit: 50 } }))
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '加载更多' }))
+  await waitFor(() => expect(api.get).toHaveBeenCalledWith('/apps/device-access/audit', { params: { host: '10.0.0.1', kind: 'session_updated', status: 'succeeded', management_only: true, limit: 50, before: '50' } }))
+  await waitFor(() => expect(within(screen.getByLabelText('操作记录列表')).getAllByText('修改会话')).toHaveLength(2))
+})
+
+function mockSessionLogs(detail = logText) {
+  const get = api.get.getMockImplementation()!
+  api.get.mockImplementation((url: string) => {
+    if (url.endsWith('/session-logs')) return Promise.resolve({ data: { items: sessionLogs, next_cursor: null } })
+    const found = sessionLogs.find(item => url.endsWith(`/session-logs/${encodeURIComponent(item.id)}`))
+    return found ? Promise.resolve({ data: { ...found, content: detail } }) : get(url)
+  })
+}
+
+it.each(['operator', 'admin'])('lists one log file per connection and keeps the %s scope visible', async role => {
+  auth.user.role = role
+  mockSessionLogs()
+  view()
+  fireEvent.click(screen.getByRole('tab', { name: '操作记录' }))
+  const file = await screen.findByRole('button', { name: sessionLogs[0].filename })
+  expect(screen.getByRole('button', { name: sessionLogs[1].filename })).toBeInTheDocument()
+  expect(screen.getByRole('table').querySelectorAll('tbody tr[data-row-key]')).toHaveLength(2)
+  expect(screen.queryAllByText('· 用户 operator-1').length > 0).toBe(role === 'admin')
+  expect(screen.getAllByRole('columnheader')).toHaveLength(3)
+  expect(screen.getByText(role === 'admin' ? '所有用户的连接记录，一次连接一个日志文件。' : '自己的连接记录，一次连接一个日志文件。')).toBeInTheDocument()
+  fireEvent.click(file)
+  const preview = await screen.findByLabelText('日志内容')
+  expect(preview.tagName).toBe('PRE')
+  expect(preview.textContent).toBe(logText)
+  expect(api.get).toHaveBeenCalledWith('/apps/device-access/session-logs/legacy%3Aconnection%2F1')
+  expect(api.post).not.toHaveBeenCalled()
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /关\s*闭/ }))
+  fireEvent.click(screen.getByRole('button', { name: '管理记录' }))
+  expect(await screen.findByText(role === 'admin' ? '查看所有用户的 SSH 管理操作。' : '查看自己的 SSH 管理操作。')).toBeInTheDocument()
+  expect(api.get).toHaveBeenCalledWith('/apps/device-access/audit', { params: { management_only: true, limit: 50 } })
+})
+
+it('filters and paginates session files by the server address query', async () => {
+  const get = api.get.getMockImplementation()!
+  api.get.mockImplementation((url: string, config?: { params?: { before?: string | number } }) => url.endsWith('/session-logs') ? Promise.resolve({ data: { items: [sessionLogs[config?.params?.before ? 1 : 0]], next_cursor: config?.params?.before ? null : '50' } }) : get(url))
+  view()
+  fireEvent.click(screen.getByRole('tab', { name: '操作记录' }))
+  await screen.findByRole('button', { name: sessionLogs[0].filename })
+  fireEvent.change(screen.getByLabelText('日志设备地址'), { target: { value: '10.0.0.1' } })
   fireEvent.click(screen.getByRole('button', { name: /查\s*询/ }))
-  await waitFor(() => expect(api.get).toHaveBeenCalledWith('/apps/device-access/audit', { params: { host: '10.0.0.1', kind: 'command_finished', status: 'succeeded', limit: 50 } }))
-  fireEvent.click(screen.getByRole('button', { name: '加载更多' }))
-  await waitFor(() => expect(api.get).toHaveBeenCalledWith('/apps/device-access/audit', { params: { host: '10.0.0.1', kind: 'command_finished', status: 'succeeded', limit: 50, before: '50' } }))
-  await waitFor(() => expect(within(screen.getByLabelText('操作记录列表')).getAllByText('命令结束')).toHaveLength(2))
+  await waitFor(() => expect(api.get).toHaveBeenCalledWith('/apps/device-access/session-logs', { params: { host: '10.0.0.1', limit: 50, before: 0 } }))
+  fireEvent.click(await screen.findByRole('button', { name: '加载更多' }))
+  await waitFor(() => expect(api.get).toHaveBeenCalledWith('/apps/device-access/session-logs', { params: { host: '10.0.0.1', limit: 50, before: '50' } }))
+  expect(await screen.findByRole('button', { name: sessionLogs[1].filename })).toBeInTheDocument()
+})
+
+it('ignores a stale preview response after opening a different connection', async () => {
+  mockSessionLogs()
+  const get = api.get.getMockImplementation()!
+  let resolveFirst!: (value: unknown) => void
+  api.get.mockImplementation((url: string) => url.endsWith('/legacy%3Aconnection%2F1') ? new Promise(resolve => { resolveFirst = resolve }) : get(url))
+  view()
+  fireEvent.click(screen.getByRole('tab', { name: '操作记录' }))
+  fireEvent.click(await screen.findByRole('button', { name: sessionLogs[0].filename }))
+  expect(await screen.findByText('正在读取日志…')).toBeInTheDocument()
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /关\s*闭/ }))
+  fireEvent.click(screen.getByRole('button', { name: sessionLogs[1].filename }))
+  expect(await screen.findByLabelText('日志内容')).toHaveTextContent('display interface brief')
+  await act(async () => { resolveFirst({ data: { ...sessionLogs[0], content: 'wrong old connection' } }) })
+  expect(screen.getByLabelText('日志内容').textContent).toBe(logText)
+  expect(screen.queryByText('wrong old connection')).not.toBeInTheDocument()
+})
+
+it('lets the user retry a failed preview without executing device commands', async () => {
+  mockSessionLogs()
+  const get = api.get.getMockImplementation()!
+  let failed = false
+  api.get.mockImplementation((url: string) => {
+    if (url.endsWith('/legacy%3Aconnection%2F1') && !failed) { failed = true; return Promise.reject(new Error('读取日志失败')) }
+    return get(url)
+  })
+  view()
+  fireEvent.click(screen.getByRole('tab', { name: '操作记录' }))
+  fireEvent.click(await screen.findByRole('button', { name: sessionLogs[0].filename }))
+  expect(await screen.findByText('读取日志失败')).toBeInTheDocument()
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /重\s*试/ }))
+  expect(await screen.findByLabelText('日志内容')).toHaveTextContent('display interface brief')
+  expect(api.post).not.toHaveBeenCalled()
+})
+
+it('downloads UTF-8 log files through the authenticated client using encoded ids and filename*', async () => {
+  mockSessionLogs()
+  const get = api.get.getMockImplementation()!
+  const blob = new Blob([logText], { type: 'text/plain;charset=utf-8' })
+  const create = vi.fn(() => 'blob:session-log')
+  const revoke = vi.fn()
+  vi.stubGlobal('URL', class extends URL { static createObjectURL = create; static revokeObjectURL = revoke })
+  let downloaded: { href: string; name: string } | undefined
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function(this: HTMLAnchorElement) { downloaded = { href: this.href, name: this.download } })
+  api.get.mockImplementation((url: string) => url.endsWith('/download') ? Promise.resolve({ data: blob, headers: { 'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent('设备甲_连接时间.log')}` } }) : get(url))
+  view()
+  fireEvent.click(screen.getByRole('tab', { name: '操作记录' }))
+  fireEvent.click(await screen.findByRole('button', { name: `下载 ${sessionLogs[0].filename}` }))
+  await waitFor(() => expect(api.get).toHaveBeenCalledWith('/apps/device-access/session-logs/legacy%3Aconnection%2F1/download', { responseType: 'blob' }))
+  await waitFor(() => expect(downloaded).toEqual({ href: 'blob:session-log', name: '设备甲_连接时间.log' }))
+  expect(create).toHaveBeenCalledWith(blob)
+  expect(revoke).toHaveBeenCalledWith('blob:session-log')
+})
+
+it('keeps a failed authenticated download recoverable without linking around authorization', async () => {
+  mockSessionLogs()
+  const get = api.get.getMockImplementation()!
+  api.get.mockImplementation((url: string) => url.endsWith('/download') ? Promise.reject(new Error('没有权限读取日志')) : get(url))
+  view()
+  fireEvent.click(screen.getByRole('tab', { name: '操作记录' }))
+  const download = await screen.findByRole('button', { name: `下载 ${sessionLogs[0].filename}` })
+  fireEvent.click(download)
+  expect(await screen.findByText(`${sessionLogs[0].filename}：没有权限读取日志`)).toBeInTheDocument()
+  expect(download).not.toBeDisabled()
+  expect(screen.queryByRole('link', { name: sessionLogs[0].filename })).not.toBeInTheDocument()
+  expect(api.post).not.toHaveBeenCalled()
 })

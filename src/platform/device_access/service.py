@@ -116,6 +116,10 @@ class DeviceAccessService:
 
             try:
                 for attempt in range(max(1, profile.connection_attempts)):
+                    if attempt:
+                        operation = operation_for(
+                            context, target, profile, session_id=uuid.uuid4().hex
+                        )
                     guard()
                     try:
                         remaining = max(0.001, deadline - time.monotonic())
@@ -139,6 +143,10 @@ class DeviceAccessService:
                     except Exception as exc:
                         code = failure_code(exc)
                         operation.event("connection_failed", status="failed", failure_code=code)
+                        if connection is not None:
+                            connection.disconnect()
+                            connection = None
+                        operation.event("disconnected", mode="batch", attempt=attempt + 1)
                         # Never cycle credentials or retry trust/authorization errors.
                         if (
                             code not in {"connection_failed", "timeout"}
@@ -231,7 +239,8 @@ class DeviceAccessService:
                         connection.disconnect()
                     except Exception:
                         pass
-                operation.event("disconnected", mode="batch")
+                if connection is not None:
+                    operation.event("disconnected", mode="batch")
         failures = [result for result in results if result.failure_code]
         return BatchResult(
             execution_id=execution_id,

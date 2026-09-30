@@ -40,6 +40,12 @@ class HostKeyStore:
     @staticmethod
     def _audit(session, kind, host, port, *, actor=None, **detail):
         operation = current_operation()
+        if operation is not None:
+            detail.update(
+                session_id=operation.session_id,
+                target_ref=operation.target_ref,
+                device_name=operation.device_name,
+            )
         write_event(
             actor_id=actor or (operation.actor_id if operation else "system"),
             source_app=operation.source_app if operation else "device-access",

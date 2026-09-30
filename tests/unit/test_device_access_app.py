@@ -77,7 +77,7 @@ def world(monkeypatch):
     monkeypatch.setattr(
         service, "authorize_worker", lambda *args: SimpleNamespace(can_execute_skills=lambda: True)
     )
-    calls, opened, handles, sent = [], [], [], []
+    calls, opened, handles, sent, options = [], [], [], [], []
 
     class Handle:
         """Stand-in for the platform session: real command classification, no device."""
@@ -123,6 +123,7 @@ def world(monkeypatch):
 
     def access(ref, host, port, username, password, **kwargs):
         calls.append((ref, host, port, username, password))
+        options.append(kwargs)
         return Access()
 
     monkeypatch.setattr(service, "access", access)
@@ -130,6 +131,7 @@ def world(monkeypatch):
         store=store,
         redis=redis,
         calls=calls,
+        options=options,
         access=Access,
         sessions=sessions,
         opened=opened,
@@ -231,6 +233,21 @@ def test_diagnosis_logs_in_with_the_hosts_session_else_the_default(world):
     assert (ref, platform, purpose) == ("diagnosis:turn-1:10.0.0.2", "comware", "核对版本")
     assert budget.max_commands == 5 and budget.total_seconds <= 75
     assert all(handle.closed for handle in world.handles)
+    assert [option["device_name"] for option in world.options] == ["R1", "10.0.0.3"]
+
+
+def test_saved_session_access_passes_its_configured_name(world):
+    row = new_session(name="核心交换机", username="operator", password="session-secret")
+    service.session_access("u", row["id"])
+    assert world.options == [{"device_name": "核心交换机"}]
+
+
+def test_access_target_keeps_optional_display_name_without_connecting():
+    access = service.access("ref", "10.0.0.1", 22, "operator", "test", device_name="核心交换机")
+    target = access.target_resolver("ref")
+    assert (target.target_ref, target.host, target.display_name) == (
+        "ref", "10.0.0.1", "核心交换机"
+    )
 
 
 def test_diagnosis_runs_read_only_commands_and_never_sends_the_rest(world):
@@ -288,8 +305,10 @@ def test_terminal_ticket_is_one_time_and_bound_to_its_operation(world):
     with pytest.raises(DeviceAccessError):
         service.consume_ticket(first["ticket"], first["session_id"])
     second = service.ticket("u", Ticket(request_id="2", session_id=row["id"]))
+    saved.update("u", row["id"], SessionUpdate(name="renamed"))
     payload = service.consume_ticket(second["ticket"], second["session_id"])
     assert (payload["owner"], payload["host"], payload["credential_ref"]) == ("u", "10.0.0.1", None)
+    assert payload["device_name"] == "R1"
     assert service.terminal_login(payload) == ("operator", "session-secret")
     with pytest.raises(DeviceAccessError):
         service.consume_ticket(second["ticket"], second["session_id"])
@@ -307,6 +326,7 @@ def test_terminal_asks_for_a_login_and_uses_a_typed_one_once(world):
     )
     payload = service.consume_ticket(ticket["ticket"], ticket["session_id"])
     assert payload["credential_ref"] and payload["save"] is False
+    assert payload["device_name"] == "10.0.0.9"
     assert all(
         b"typed" not in value for value in world.redis.data.values() if isinstance(value, bytes)
     )

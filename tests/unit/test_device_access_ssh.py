@@ -474,3 +474,62 @@ def test_real_ssh_platform_detection_and_lldp_share_one_login(tmp_path, vendor):
                 "show lldp neighbors detail",
             ]
         )
+
+
+@pytest.mark.parametrize("driver_name", ["paramiko", "netmiko"])
+def test_driver_first_log_failure_prevents_connect_and_records_failure_and_close(
+    monkeypatch, driver_name
+):
+    from src.platform.device_access import governance, session_logs
+    from src.platform.device_access.drivers.netmiko_driver import NetmikoDriver
+    from src.platform.device_access.drivers.paramiko_driver import ParamikoDriver
+
+    class UnavailableStorage:
+        def upload_file(self, *args):
+            return False
+
+    def unexpected_connection(*args, **kwargs):
+        pytest.fail("SSH connection attempted after log persistence failed")
+
+    monkeypatch.setattr(session_logs, "_storage", UnavailableStorage)
+    monkeypatch.setattr(paramiko.SSHClient, "connect", unexpected_connection)
+    driver = ParamikoDriver() if driver_name == "paramiko" else NetmikoDriver("comware")
+    with pytest.raises(DeviceAccessError) as error:
+        driver.connect(
+            Target("switch", "192.0.2.1"),
+            ConnectionProfile("test", "operator", "test-secret", platform="comware"),
+        )
+    assert error.value.failure_code == "audit_unavailable"
+    events = governance.query_audit(actor_id="system")["items"]
+    assert {event["kind"] for event in events} == {
+        "connecting", "connection_failed", "disconnected"
+    }
+    assert len({event["detail"]["session_id"] for event in events}) == 1
+    assert session_logs.list_logs(actor_id="system")["items"][0]["status"] == "failed"
+
+
+def test_netmiko_setup_rechecks_policy_after_synchronous_log_save(monkeypatch):
+    from types import SimpleNamespace
+
+    from src.platform.device_access import governance
+    from src.platform.device_access.drivers.netmiko_driver import _Channel, _Guard
+
+    operation = governance.SSHOperation("operator", "test", "switch", "192.0.2.1")
+    operation.event("connecting")
+    original_event = operation.event
+
+    def event(kind, **detail):
+        result = original_event(kind, **detail)
+        if kind == "command_requested":
+            governance.save_policy([], "admin")
+        return result
+
+    monkeypatch.setattr(operation, "event", event)
+    guard = _Guard(ConnectionProfile("test", "operator", "test-secret"), operation)
+    guard.reset(30, frozenset({"screen-length disable"}), phase="setup")
+    sent = []
+    channel = _Channel(SimpleNamespace(sendall=sent.append), guard)
+    with pytest.raises(DeviceAccessError) as error:
+        channel.sendall(b"screen-length disable\n")
+    assert error.value.failure_code == "policy_denied"
+    assert sent == []

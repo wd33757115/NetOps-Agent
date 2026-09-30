@@ -173,8 +173,6 @@ class ParamikoDriver:
         )
         if password not in operation.secrets:
             operation.secrets += (password,)
-        if owns_operation:
-            operation.event("connecting", driver="paramiko")
         client = paramiko.SSHClient()
         expired = Event()
 
@@ -187,8 +185,10 @@ class ParamikoDriver:
         timer = Timer(profile.session_setup_timeout, expire)
         deadline = time.monotonic() + profile.session_setup_timeout
         timer.daemon = True
-        timer.start()
         try:
+            if owns_operation:
+                operation.event("connecting", driver="paramiko")
+            timer.start()
             if self.host_key_verifier is None:
                 client.load_system_host_keys()
                 if profile.known_hosts_file:
@@ -249,7 +249,8 @@ class ParamikoDriver:
             raise
         finally:
             timer.cancel()
-            timer.join(timeout=1)
+            if timer.ident is not None:
+                timer.join(timeout=1)
             if expired.is_set():
                 client.close()
                 raise DeviceAccessError("timeout", "SSH session setup exceeded its time budget")

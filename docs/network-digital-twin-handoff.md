@@ -97,9 +97,19 @@
 - 实机：两台 VSR 各执行 `display clock`、`display ip interface brief`，4 条均成功；批次 `30fe653e4efd44c08a06b536c05183a7` 留存 16 条审计。另在 VSR-1 单终端执行 `display clock` 成功后停止，审计完整。默认 `[".*"]` 未改，未改实验设备配置、未重跑 D-8。截图 `.runtime/ssh-batch-preview.png`、`.runtime/ssh-audit-preview.png` 不提交。
 - 审计页面曾多显示 8 小时，现于查询侧按既有数据库 `TimeZone` 解释无时区时间，不改写入方式、不迁移历史。网关重启后健康检查正常，浏览器确认时间从错误的 18:54 恢复 10:54，展开命令仍保留设备返回的 02:53:44 UTC。
 
+### 4.3 按连接自动保存 SSH 会话日志（2026-09-30 负责人追加确认，已完成部署与本地验收）
+
+- S-1 追加 CRT 风格的会话日志：平台复用 MinIO，在 `platform/ssh-session-logs` 前缀下按连接 ID 隔离目录，自动保存“设备名_北京时间（精确到微秒）.log”。新连接的日志逐事件持久化，写入失败即停止；重试使用新连接 ID，首条日志写入失败也正确收尾。终端、批量、诊断和既有在线调用都传递连接时的设备名快照；Netmiko 初始化先记录日志，再检查命令白名单。
+- 操作记录默认显示“日志文件／状态／下载”三列，一次连接一行；文件名下显示地址、连接时间、来源，管理员另见用户。点击预览连续纯文本命令与回显，下载经过现有认证；地址筛选、详情失败重试及切换文件的竞态保护已实现。管理事件保留在独立“管理记录”入口，普通用户仍只读本人、管理员可读全部。
+- 原平台审计不删，白名单不改，本次追加不新增数据表或迁移。历史只按连接恢复已留存内容，没有设备名快照时用 IP；不补执行 SSH，也不把恢复内容称作完整原始 PTY。日志沿用脱敏边界，保留实际缺失、失败或截断提示。
+- 验证：前端 18 项、App 日志 API 7 项通过；平台日志相关 86 项与拓扑识别 92 项是不同用例，合计 178 项通过；名称接线 73 项、drivers/legacy 61 项（含 4 项新增）通过。后两组与其他分组有重叠，不累加为独立总数。相关 Ruff、前端 ESLint、diff 检查通过，真实 MinIO 健康检查返回 200。
+- 已部署：`scripts/windows/start.ps1 -SkipLangfuse -UpgradeApps device-access,topology -NoBrowser` 退出 0，9 个应用及全套启动检查全部通过；`device-access 0.9.1` 已启用，拓扑仍为 0.4.3。
+- 本轮实机通过页面批量仅在 VSR-1、VSR-2 各执行一次 `display clock`，均成功。打开日志列表或预览前，只读脚本直接读取 MinIO 两个新对象，证实服务器已自动保存 `VSR-1_2026-09-30_11-31-16.065586.log`、`VSR-2_2026-09-30_11-31-18.535872.log`，各 483 bytes；该核验未调用 `read_log`／`sync_log`。随后页面列表与完整预览验证通过；浏览器实际点击下载成功，VSR-1 文件保存到 `C:/Users/wangd/Downloads/VSR-1_2026-09-30_11-31-16.065586.log`，483 bytes，SHA-256 为 `476c7e1f7b3b0590d37605d857d977d85b56dd19001078e0193c4cf27ce346ff`，与预览前 MinIO 原文件完全一致。未改设备配置或白名单。
+- 自动保存证明 `.runtime/ssh-session-files-proof.json`，页面截图 `.runtime/ssh-session-files-preview.png`、`.runtime/ssh-session-log-preview.png`，均留本地、不提交。
+
 ## 5. 本机状态与注意事项
 
-- 已部署（本机）：知识问答 0.8.1、SSH 终端 0.9.0、拓扑 0.4.3、设备管理 1.0.4、巡检 1.3.1、规则治理 1.4.6。数据库在 D-5/D-6 前备份于 `backups/20260930-001850-before-d5-d6/`；S-1 前备份于 `backups/20260930-023847-before-ssh-governance/postgres.dump`（109079394 bytes）。
+- 已部署（本机）：知识问答 0.8.1、SSH 终端 0.9.1、拓扑 0.4.3、设备管理 1.0.4、巡检 1.3.1、规则治理 1.4.6。数据库在 D-5/D-6 前备份于 `backups/20260930-001850-before-d5-d6/`；S-1 前备份于 `backups/20260930-023847-before-ssh-governance/postgres.dump`（109079394 bytes）。
 - 本机平台里已配置：SSH 终端默认登录与两条会话 VSR-1/VSR-2；拓扑默认登录；两台 VSR 的主机密钥；“实验网络 lab”的最新快照含路由表（拓扑 0.4.2 发现）。
 - 部署命令：`scripts\windows\start.ps1 -SkipLangfuse -UpgradeApps <app,...> -NoBrowser`。
   - **修改任何 App 的代码后，该 App 的摘要与已部署版本不一致，平台会把它判为不可用**（依赖它的 App 也会不可用），直到用 `-UpgradeApps` 重新部署。

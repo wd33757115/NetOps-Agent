@@ -80,6 +80,16 @@
 .ssh-audit-filters { display: flex; flex-wrap: wrap; gap: 8px; }
 .ssh-audit-filters > .ant-input, .ssh-audit-filters > .ant-select { flex: 1 1 130px; min-width: 100px; }
 .ssh-load-more { margin-top: 16px; }
+.ssh-log-filters { margin-bottom: 16px; }
+.ssh-log-filters > .ant-input-affix-wrapper { flex: 1; max-width: 360px; }
+.ssh-log-table .ant-table { font-size: 12px; }
+.ssh-log-table .ant-table-thead > tr > th { color: #697586; font-weight: 500; background: #f7f9fc; }
+.ssh-log-file { display: flex; align-items: flex-start; gap: 8px; max-width: 100%; padding: 6px 0; border: 0; background: transparent; color: #1671e8; cursor: pointer; text-align: left; font: inherit; }
+.ssh-log-file .anticon { flex: none; margin-top: 3px; }
+.ssh-log-file span:last-child { min-width: 0; overflow-wrap: anywhere; }
+.ssh-log-file:hover span:last-child { text-decoration: underline; }
+.ssh-log-meta { color: #697586; margin: 0 0 6px 20px; font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
+.ssh-session-log { margin: 12px 0 0; padding: 16px; min-height: 240px; max-height: 65vh; overflow: auto; border-radius: 8px; background: #17212c; color: #e5eaf0; font: 12px/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre; tab-size: 8; }
 .ssh-empty { margin: auto; max-width: 520px; text-align: center; padding: 40px 16px; }
 .ssh-eyebrow { font-size: 11px; color: #5d6c82; margin-bottom: 13px; letter-spacing: .7px; }
 .ssh-empty h1 { margin: 0; font-size: 31px; font-weight: 600; letter-spacing: -1px; line-height: 1.25; color: #202836; }

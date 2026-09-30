@@ -45,8 +45,9 @@ def login_for(owner, host):
         )
         chosen = rows[0] if rows else None
         session_id, port = (chosen.id, chosen.port) if chosen else (None, 22)
+        device_name = chosen.name if chosen else host
     username, password = saved.login(owner, session_id)
-    return port, username, password
+    return port, username, password, device_name
 
 
 def _dump(platform, normalized):
@@ -80,8 +81,8 @@ def run(owner, host, platform, commands, purpose, turn_id):
     guard = service._guard(owner, "账号不能执行诊断登录")
     try:
         guard()
-        port, username, password = login_for(owner, host)
-        access = service.access(ref, host, port, username, password)
+        port, username, password, device_name = login_for(owner, host)
+        access = service.access(ref, host, port, username, password, device_name=device_name)
         handle = access.open_session(
             AccessContext(
                 owner, service.APP_ID, (AccessGrant(ref, ref, action="device.session"),), turn_id

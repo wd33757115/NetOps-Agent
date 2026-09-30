@@ -188,7 +188,10 @@ def test_real_policy_and_audit_keep_actor_source_task_and_redact_output(
 
     assert ssh_governance_database is not None
     connection = connect_cli_device(
-        {"device_id": "sw-1", "ip": "127.0.0.1", "vendor": "h3c", "password": "test-secret"},
+        {
+            "device_id": "sw-1", "device_name": "核心交换机", "ip": "127.0.0.1",
+            "vendor": "h3c", "password": "test-secret",
+        },
         actor_id="operator-1",
         source_app="inspection",
         task_id="patrol-1",
@@ -210,6 +213,7 @@ def test_real_policy_and_audit_keep_actor_source_task_and_redact_output(
     }
     assert all(event["detail"]["source_app"] == "inspection" for event in events)
     assert all(event["detail"]["target_ref"] == "sw-1" for event in events)
+    assert all(event["detail"]["device_name"] == "核心交换机" for event in events)
     assert "test-secret" not in str(events)
     assert "display interface\n" not in wire[0]
 
@@ -222,6 +226,24 @@ def test_legacy_shared_database_sessions_are_isolated(ssh_governance_database, t
         assert business.get_bind().url.database == str(tmp_path / "ssh-governance.sqlite")
     with pytest.raises(pytest.fail.Exception, match="platform database"):
         postgres.engine.connect()
+
+
+def test_first_log_save_failure_never_opens_legacy_connection_and_records_close(wire, monkeypatch):
+    from src.platform.device_access import governance, session_logs
+
+    class UnavailableStorage:
+        def upload_file(self, *args):
+            return False
+
+    monkeypatch.setattr(session_logs, "_storage", UnavailableStorage)
+    operation = governance.SSHOperation("test", "legacy-cli", "sw", "127.0.0.1")
+    with pytest.raises(DeviceAccessError) as error:
+        guarded_cli.connect(operation, device_type="hp_comware", host="127.0.0.1")
+    assert error.value.failure_code == "audit_unavailable"
+    assert wire[0] == [] and wire[1] == []
+    events = governance.query_audit(session_id=operation.session_id)["items"]
+    assert {event["kind"] for event in events} == {"opening", "open_failed", "closed"}
+    assert session_logs.list_logs(actor_id="test")["items"][0]["status"] == "failed"
 
 
 def test_identity_probe_passes_explicit_operator_context(monkeypatch):

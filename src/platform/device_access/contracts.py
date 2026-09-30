@@ -35,6 +35,7 @@ class Target:
     device_id: str | None = None
     management_domain: str = "default"
     site: str = "__unassigned__"
+    display_name: str | None = None
 
 
 @dataclass(frozen=True)

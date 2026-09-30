@@ -90,6 +90,7 @@ class _Guard:
             if self.phase == "setup":
                 self.finish_setup()
                 self.setup_ticket = self.operation.before_command(command, phase="setup")
+                self.operation.check_command(command, phase="setup")
                 self.setup_offset = len(self.output())
             else:
                 self.operation.check_command(command)
@@ -306,8 +307,6 @@ class NetmikoDriver:
         )
         if password not in operation.secrets:
             operation.secrets += (password,)
-        if owns_operation:
-            operation.event("connecting", driver="netmiko")
         guard = _Guard(replace(profile, password=password, credential_ref=None), operation)
         guard.reset(profile.session_setup_timeout, PREPARATION[self.platform], phase="setup")
         client = _Client(guard)
@@ -320,8 +319,10 @@ class NetmikoDriver:
 
         timer = Timer(profile.session_setup_timeout, expire)
         timer.daemon = True
-        timer.start()
         try:
+            if owns_operation:
+                operation.event("connecting", driver="netmiko")
+            timer.start()
             with self._known_hosts(target, profile) as known_hosts:
                 base = ssh_dispatcher(DEVICE_TYPES[self.platform])
                 cls = type("ReadOnlyNetmiko", (_ReadOnlyMixin, base), {})
@@ -379,7 +380,8 @@ class NetmikoDriver:
             raise DeviceAccessError(code, "Netmiko connection failed") from None
         finally:
             timer.cancel()
-            timer.join(timeout=1)
+            if timer.ident is not None:
+                timer.join(timeout=1)
             if expired.is_set():
                 client.close()
                 raise DeviceAccessError("timeout", "Netmiko session setup budget exceeded")

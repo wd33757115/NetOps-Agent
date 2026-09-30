@@ -6,7 +6,7 @@ import paramiko
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
@@ -80,6 +80,25 @@ def test_discovery_records_a_first_seen_key_itself(store, keys):
     # A key waiting for the terminal user is also recorded by discovery.
     assert code(lambda: store.verify("10.0.0.2", 22, key)) == "host_key_unknown"
     assert store.verify("10.0.0.2", 22, key, auto_trust=True) is True
+
+
+def test_host_key_observation_uses_current_connection_but_admin_confirmation_does_not(store, keys):
+    from src.platform.device_access.governance import SSHOperation
+
+    key, _ = keys
+    operation = SSHOperation(
+        "operator", "device-access", "saved-id", "10.0.0.1", device_name="核心交换机"
+    )
+    with operation.activate():
+        assert code(lambda: store.verify("10.0.0.1", 22, key)) == "host_key_unknown"
+    store.accept("admin", "10.0.0.1", 22, fingerprint(key))
+    with store.sessions() as session:
+        rows = {row.action: row for row in session.scalars(select(AuditLogRecord))}
+        observed = rows["ssh.host_key_observed"]
+        assert observed.detail["session_id"] == operation.session_id
+        assert observed.detail["target_ref"] == "saved-id"
+        assert observed.detail["device_name"] == "核心交换机"
+        assert "session_id" not in rows["ssh.host_key_accepted"].detail
 
 
 @pytest.mark.parametrize("auto_trust", [False, True])

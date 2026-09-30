@@ -1,11 +1,13 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from urllib.parse import quote
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
 from sqlalchemy.exc import IntegrityError
 
 from src.auth.models import CurrentUser
 from src.platform.authorization.client import require_app
-from src.platform.device_access import governance
+from src.platform.device_access import governance, session_logs
 from src.platform.device_access.contracts import DeviceAccessError
 
 from . import batches, saved, service
@@ -35,7 +37,10 @@ class RedactedRoute(APIRoute):
             except RequestValidationError:
                 raise HTTPException(422, "参数无效，请检查地址、端口、用户名和密码") from None
             except DeviceAccessError as exc:
-                raise HTTPException(422, {"code": exc.failure_code, "message": str(exc)}) from None
+                status = 404 if exc.failure_code == "session_log_not_found" else 422
+                raise HTTPException(
+                    status, {"code": exc.failure_code, "message": str(exc)}
+                ) from None
             except IntegrityError:
                 raise HTTPException(409, "记录已变化，请刷新后重试") from None
 
@@ -134,6 +139,7 @@ def audit_records(
     status: str | None = None,
     limit: int = Query(50, ge=1, le=100),
     before: int = Query(0, ge=0),
+    management_only: bool = False,
     user: CurrentUser = Depends(actor),
 ):
     result = governance.query_audit(
@@ -143,6 +149,7 @@ def audit_records(
         status=status,
         limit=limit,
         offset=before,
+        management_only=management_only,
     )
     next_offset = before + len(result["items"])
     items = [
@@ -157,6 +164,50 @@ def audit_records(
         "items": items,
         "next_cursor": (str(next_offset) if next_offset < result["total"] else None),
     }
+
+
+@router.get("/session-logs")
+def list_session_logs(
+    host: str | None = None,
+    limit: int = Query(50, ge=1, le=100),
+    before: int = Query(0, ge=0),
+    user: CurrentUser = Depends(actor),
+):
+    result = session_logs.list_logs(
+        actor_id=None if user.is_admin() else user.user_id,
+        host=host,
+        limit=limit,
+        offset=before,
+    )
+    next_offset = before + len(result["items"])
+    return {
+        "items": result["items"],
+        "next_cursor": str(next_offset) if next_offset < result["total"] else None,
+    }
+
+
+@router.get("/session-logs/{session_id}")
+def read_session_log(session_id: str, user: CurrentUser = Depends(actor)):
+    return session_logs.read_log(
+        session_id, actor_id=None if user.is_admin() else user.user_id
+    )
+
+
+@router.get("/session-logs/{session_id}/download")
+def download_session_log(session_id: str, user: CurrentUser = Depends(actor)):
+    record = read_session_log(session_id, user)
+    filename = quote(record["filename"], safe="")
+    return Response(
+        record["content"],
+        media_type="text/plain",
+        headers={
+            "Content-Disposition": (
+                f"attachment; filename=\"ssh-session.log\"; filename*=UTF-8''{filename}"
+            ),
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @router.post("/batches", status_code=202)

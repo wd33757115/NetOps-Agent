@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 import regex
-from sqlalchemy import func, select
+from sqlalchemy import event, func, select
 from sqlalchemy.exc import SQLAlchemyError
 
 from src.infrastructure.db.models import AuditLogRecord, SSHPolicyRecord
@@ -96,6 +96,8 @@ def get_policy():
 
 
 def write_event(*, actor_id, source_app, kind, detail=None, status="success", session=None):
+    from .session_logs import is_connection_event, sync_log
+
     identifier = "audit-" + uuid4().hex
     payload = redact(dict(detail or {}))
     payload["source_app"] = str(source_app)[:128]
@@ -119,6 +121,34 @@ def write_event(*, actor_id, source_app, kind, detail=None, status="success", se
                 target.flush()
     except Exception:
         raise DeviceAccessError("audit_unavailable", "SSH 审计写入失败，操作已停止") from None
+    if is_connection_event(kind, payload):
+        session_id = payload["session_id"]
+        if session is None:
+            sync_log(session_id)
+        else:
+            # The caller's transaction stays authoritative; a projection failure
+            # after commit must not roll back or erase its durable audit rows.
+            pending = session.info.setdefault("ssh_log_sessions", set())
+            pending.add(session_id)
+            if not session.info.get("ssh_log_hooks"):
+                session.info["ssh_log_hooks"] = True
+
+                def committed(target):
+                    target.info["ssh_logs_committed"] = True
+
+                def rolled_back(target):
+                    target.info.pop("ssh_log_sessions", None)
+                    target.info.pop("ssh_logs_committed", None)
+
+                def ended(target, transaction):
+                    if transaction.parent is None and target.info.pop("ssh_logs_committed", False):
+                        identifiers = target.info.pop("ssh_log_sessions", set())
+                        for identifier in identifiers:
+                            sync_log(identifier)
+
+                event.listen(session, "after_commit", committed)
+                event.listen(session, "after_rollback", rolled_back)
+                event.listen(session, "after_transaction_end", ended)
     return identifier
 
 
@@ -164,9 +194,14 @@ def query_audit(
     status=None,
     limit=50,
     offset=0,
+    management_only=False,
 ):
     limit, offset = max(1, min(100, int(limit))), max(0, int(offset))
     conditions = [AuditLogRecord.resource_type == "ssh"]
+    if management_only:
+        from .session_logs import connection_condition
+
+        conditions.append(~connection_condition())
     if actor_id is not None:
         conditions.append(AuditLogRecord.user_id == str(actor_id))
     if kind:
@@ -227,11 +262,14 @@ class SSHOperation:
         task_id=None,
         secrets=(),
         session_id=None,
+        device_name=None,
     ):
         self.actor_id, self.source_app = str(actor_id), str(source_app)
         self.target_ref, self.host, self.port = str(target_ref), str(host), port
         self.task_id, self.session_id = task_id, session_id or uuid4().hex
         self.secrets = tuple(secret for secret in secrets if secret)
+        self.device_name = str(device_name or host)
+        self.connection_started = False
 
     @contextmanager
     def activate(self):
@@ -245,6 +283,8 @@ class SSHOperation:
         return redact(value, self.secrets)
 
     def event(self, kind, *, status="success", **detail):
+        if kind in {"connecting", "opening"}:
+            self.connection_started = True
         return write_event(
             actor_id=self.actor_id,
             source_app=self.source_app,
@@ -257,6 +297,7 @@ class SSHOperation:
                     "host": self.host,
                     "port": self.port,
                     "task_id": self.task_id,
+                    "device_name": self.device_name,
                     **detail,
                 }
             ),
@@ -367,7 +408,13 @@ class SSHOperation:
 
 def operation_for(context, target, profile, *, session_id=None):
     current = current_operation()
-    if current is not None and current.host == target.host and current.port == profile.port:
+    if (
+        current is not None
+        and current.host == target.host
+        and current.port == profile.port
+        and not current.connection_started
+        and (session_id is None or session_id == current.session_id)
+    ):
         return current
     return SSHOperation(
         context.actor_id,
@@ -378,4 +425,5 @@ def operation_for(context, target, profile, *, session_id=None):
         task_id=context.task_id,
         secrets=(profile.password,),
         session_id=session_id,
+        device_name=target.display_name,
     )

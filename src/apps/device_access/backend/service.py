@@ -35,7 +35,8 @@ def sessions():
 
 
 def access(
-    ref, host, port, username, password, *, driver_kind="paramiko", platform=None, auto_trust=False
+    ref, host, port, username, password, *, driver_kind="paramiko", platform=None,
+    auto_trust=False, device_name=None,
 ):
     """One device, one login. Host keys come from this App's store."""
     trust = HostKeyStore()
@@ -56,16 +57,16 @@ def access(
     profile = ConnectionProfile(
         ref, username, password, port=port, max_output_bytes=256 * 1024, platform=platform
     )
-    target = Target(ref, host, management_domain=DOMAIN)
+    target = Target(ref, host, management_domain=DOMAIN, display_name=device_name)
     return DeviceAccessService(
         target_resolver=lambda _: target, profile_resolver=lambda _: profile, driver=driver
     )
 
 
 def session_access(owner, session_id, **kwargs):
-    _, host, port = saved.target(owner, session_id)
+    name, host, port = saved.target(owner, session_id)
     username, password = saved.login(owner, session_id)
-    return access(session_id, host, port, username, password, **kwargs)
+    return access(session_id, host, port, username, password, device_name=name, **kwargs)
 
 
 def _owned_operation(session, owner, operation_id):
@@ -145,9 +146,10 @@ def _guard(owner, message):
 def ticket(owner, body):
     """A 30-second single-use ticket; secrets stay in the backend."""
     if body.session_id is not None:
-        _, host, port = saved.target(owner, body.session_id)
+        device_name, host, port = saved.target(owner, body.session_id)
     else:
         host, port = body.host, body.port
+        device_name = host
     ref = None
     if body.login is not None:
         username, password = body.login.username, body.login.password.get_secret_value()
@@ -163,6 +165,7 @@ def ticket(owner, body):
         "session_id": body.session_id,
         "host": host,
         "port": port,
+        "device_name": device_name,
         "credential_ref": ref,
         # Saved to the session only after this login succeeds.
         "save": body.save,
@@ -171,7 +174,9 @@ def ticket(owner, body):
     try:
         write_event(
             actor_id=owner, source_app=APP_ID, kind="terminal_requested",
-            detail={"host": host, "port": port, "session_id": operation_id},
+            detail={
+                "host": host, "port": port, "session_id": operation_id, "device_name": device_name
+            },
         )
         CredentialStore().client.set(TICKET_PREFIX + value, json.dumps(payload), ex=30)
     except Exception:
