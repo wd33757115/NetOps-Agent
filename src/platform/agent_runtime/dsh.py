@@ -70,6 +70,7 @@ CATALOG.md 只列已发布章节；正文里的书籍目录可能含尚未发布
 必须使用工具列表中的完整名称（包含 mcp__netops__ 前缀）；校验通过后由服务端发布草稿。
 """
 NATIVE = {"read", "glob", "grep"}
+SUBMIT_ANSWER = "mcp__netops__submit_answer"
 MAX_OUTPUT_TOKENS = 8192
 _slots = asyncio.Semaphore(2)
 
@@ -89,6 +90,7 @@ class Bridge:
         self.context, self.catalog, self.events = context, catalog, events
         self.token, self.closed = secrets.token_urlsafe(32), False
         self.calls, self.rounds = 0, 0
+        self.closing = False
         self.transport = transport
         self.allowed = set(NATIVE)
         self.started_at = time.monotonic()
@@ -156,6 +158,8 @@ class Bridge:
         try:
             await self.check()
             data = await request.json()
+            if self.closing and data["name"] != SUBMIT_ANSWER:
+                raise PermissionError("Run is reserved for answer submission")
             if data["name"] not in self.allowed or self.calls >= self.context.max_tool_calls:
                 raise PermissionError("Tool budget or scope exceeded")
             self.calls += 1
@@ -275,17 +279,24 @@ class Bridge:
             body["tools"] = [
                 t for t in body.get("tools", []) if t["function"]["name"] in self.allowed
             ]
-            if (
+            offered = {t["function"]["name"] for t in body["tools"]}
+            if not NATIVE <= offered:
+                raise ValueError("Official file tools are missing")
+            self.closing = self.closing or (
                 self.rounds >= self.context.max_model_rounds - 1
                 or self.calls >= self.context.max_tool_calls - 2
-            ):
+            )
+            if self.closing:
                 # Reserve the end of the same SDK run for a checked answer (or insufficiency).
+                if SUBMIT_ANSWER not in offered:
+                    raise ValueError("Answer submission tool is missing")
+                body["tools"] = [
+                    t for t in body["tools"] if t["function"]["name"] == SUBMIT_ANSWER
+                ]
                 body["tool_choice"] = {
                     "type": "function",
-                    "function": {"name": "mcp__netops__submit_answer"},
+                    "function": {"name": SUBMIT_ANSWER},
                 }
-            if not NATIVE <= {t["function"]["name"] for t in body["tools"]}:
-                raise ValueError("Official file tools are missing")
             body["max_tokens"] = min(body.get("max_tokens") or MAX_OUTPUT_TOKENS, MAX_OUTPUT_TOKENS)
             body["stream_options"] = {**body.get("stream_options", {}), "include_usage": True}
             self.events.put_nowait(
@@ -673,6 +684,9 @@ class DshRuntime:
             if bridge.catalog.validation_issue:
                 bridge.failure_code = bridge.catalog.validation_issue
                 raise ValueError("Draft was not corrected")
+            if bridge.closing and bridge.catalog.prepared_answer is None:
+                bridge.failure_code = "run_budget_exceeded"
+                raise ValueError("Finalization ended without a checked answer")
             try:
                 validation_started = time.monotonic()
                 try:

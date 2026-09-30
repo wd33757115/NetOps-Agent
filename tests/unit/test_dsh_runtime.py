@@ -622,6 +622,182 @@ def test_native_search_records_parameters_and_counts(workspace):
     assert not workspace.observed  # Search hits still cannot authorize citations.
 
 
+def tool_response(calls, identifier):
+    return response(
+        {
+            "tool_calls": [
+                {
+                    "index": index,
+                    "id": f"{identifier}-{index}",
+                    "type": "function",
+                    "function": {"name": name, "arguments": json.dumps(arguments)},
+                }
+                for index, (name, arguments) in enumerate(calls)
+            ]
+        },
+        "tool_calls",
+    )
+
+
+def test_finalization_denies_extra_read_and_ssh_but_accepts_checked_answer(workspace, monkeypatch):
+    requests, business_calls, reads = [], [], []
+    submit = "mcp__netops__submit_answer"
+    ssh = "mcp__netops__device_access__run"
+    monkeypatch.setattr(workspace, "definitions", lambda: [{
+        "name": "device_access__run", "description": "Isolated fake SSH tool",
+        "input_schema": {"type": "object", "properties": {}},
+    }])
+    monkeypatch.setattr(workspace, "invoke", lambda name, args: business_calls.append(name) or {})
+    record_read = workspace.record_read
+
+    def observed(value):
+        reads.append(value)
+        return record_read(value)
+
+    monkeypatch.setattr(workspace, "record_read", observed)
+
+    async def model(body):
+        requests.append(body)
+        round_number = len(requests)
+        filename = next(iter(workspace.files))
+        read = ("read", {"file_path": filename, "offset": 1, "limit": 2})
+        offered = {tool["function"]["name"] for tool in body["tools"]}
+        if round_number < 14:
+            assert {"read", "glob", "grep", ssh, submit} <= offered
+            # A normal multi-call turn must not be mistaken for finalization.
+            calls = [read, (ssh, {})] if round_number == 1 else [("glob", {"pattern": "*.txt"})]
+        else:
+            assert offered == {submit}
+            assert body["tool_choice"]["function"]["name"] == submit
+            line = 99 if round_number == 14 else 2
+            if round_number == 15:
+                assert "citation_unread" in json.dumps(body["messages"])
+            # Ignore the advertised tool set on purpose, including calls after submit.
+            calls = [read, (submit, {"answer": f"配置 RR。[{filename}:L{line}]", "status": "answered"}), (ssh, {})]
+        return tool_response(calls, f"round{round_number}")
+
+    async def run():
+        return [e async for e in DshRuntime(transport=model).start(
+            RunContext("finalize", "alice", "conv", timeout_seconds=35,
+                       max_model_rounds=15, max_tool_calls=30), [], workspace,
+        )]
+
+    events = asyncio.run(run())
+    assert events[-1].kind == "completed", [(e.kind, e.data) for e in events]
+    assert len(requests) == 15  # The checked answer needs no extra provider request.
+    assert business_calls == ["device_access__run"]
+    assert len(reads) == 1
+    assert "配置 RR。" in next(e.data["text"] for e in events if e.kind == "text_delta")
+    metrics = next(e.data for e in events if e.kind == "metrics")
+    assert metrics["model_rounds"] == 15 and metrics["tool_calls"] == 16
+    assert any(e.kind == "tool_finished" and not e.data["success"] for e in events)
+
+
+@pytest.mark.parametrize("outcome", ["keep_reading", "unsubmitted_text", "insufficient"])
+def test_finalization_cannot_publish_unchecked_output(workspace, outcome):
+    requests = []
+
+    async def model(body):
+        requests.append(body)
+        filename = next(iter(workspace.files))
+        if len(requests) == 1 or outcome == "keep_reading":
+            return tool_response([("read", {"file_path": filename, "offset": 1, "limit": 2})], len(requests))
+        if outcome == "insufficient":
+            return tool_response([("mcp__netops__submit_answer", {
+                "answer": "", "status": "insufficient_evidence",
+            })], len(requests))
+        return response({"content": f"未通过提交校验的答案。[{filename}:L2]"}, "stop")
+
+    async def run():
+        return [e async for e in DshRuntime(transport=model).start(
+            RunContext("no-draft", "alice", "conv", timeout_seconds=25,
+                       max_model_rounds=3), [], workspace,
+        )]
+
+    events = asyncio.run(run())
+    assert all({t["function"]["name"] for t in body["tools"]} == {"mcp__netops__submit_answer"}
+               for body in requests[1:])
+    assert len([e for e in events if e.kind == "tool_started" and e.data["tool"] == "read"]) == 1
+    if outcome == "insufficient":
+        assert events[-1].kind == "completed"
+        assert "现有证据不足" in next(e.data["text"] for e in events if e.kind == "text_delta")
+    else:
+        assert events[-1].kind == "failed"
+        assert events[-1].data["code"] == "run_budget_exceeded"
+        assert not any(e.kind == "text_delta" for e in events)
+    assert len(requests) == (3 if outcome == "keep_reading" else 2)
+
+
+@pytest.mark.parametrize("missing", ["read", "mcp__netops__submit_answer"])
+def test_finalization_requires_complete_original_tool_definitions(workspace, missing):
+    from types import SimpleNamespace
+    from src.platform.agent_runtime.dsh import Bridge, NATIVE, SUBMIT_ANSWER
+
+    async def run():
+        async def unexpected_provider(body):
+            pytest.fail("An incomplete tool set must never be sent to the provider")
+
+        bridge = Bridge(RunContext("missing-tool", "alice", "conv", max_model_rounds=1),
+                        workspace, asyncio.Queue(), transport=unexpected_provider)
+        bridge.allowed.add(SUBMIT_ANSWER)
+
+        async def request_json():
+            return {"messages": [], "tools": [
+                {"type": "function", "function": {"name": name}}
+                for name in (NATIVE | {SUBMIT_ANSWER}) - {missing}
+            ]}
+
+        reply = await bridge.model(SimpleNamespace(json=request_json))
+        assert reply.status_code == 503
+        assert bridge.failure_code == "model_unavailable"
+
+    asyncio.run(run())
+
+
+def test_tool_budget_closing_starts_at_next_model_request_and_stays_closed(workspace, tmp_path):
+    from types import SimpleNamespace
+    from src.platform.agent_runtime.dsh import Bridge, NATIVE, SUBMIT_ANSWER
+
+    workspace.prepare(tmp_path / "prepared")
+
+    async def run():
+        requests = []
+
+        async def model(body):
+            requests.append(body)
+            return response({"content": ""}, "stop")
+
+        bridge = Bridge(RunContext("tool-limit", "alice", "conv", max_tool_calls=5),
+                        workspace, asyncio.Queue(), transport=model)
+        bridge.allowed.add(SUBMIT_ANSWER)
+        bridge.calls = 2
+
+        def request(data):
+            async def request_json():
+                return json.loads(json.dumps(data))
+            return SimpleNamespace(json=request_json)
+
+        for number in (1, 2):
+            reply = await bridge.before(request({"name": "glob", "call_id": str(number),
+                                                  "arguments": {"pattern": "*.txt"}}))
+            assert reply.status_code == 200  # Crossing the reserve inside a turn is allowed.
+        assert bridge.calls == 4 and not bridge.closing
+        original = {"messages": [], "tools": [
+            {"type": "function", "function": {"name": name}} for name in NATIVE | {SUBMIT_ANSWER}
+        ]}
+        for _ in range(2):
+            reply = await bridge.model(request(original))
+            assert reply.status_code == 200
+            assert bridge.closing
+        assert len(requests) == 2
+        assert all({t["function"]["name"] for t in body["tools"]} == {SUBMIT_ANSWER}
+                   for body in requests)
+        denied = await bridge.before(request({"name": "read", "call_id": "late", "arguments": {}}))
+        assert denied.status_code == 403 and bridge.calls == 4
+
+    asyncio.run(run())
+
+
 def test_disconnect_after_started_reaps_pending_run(workspace):
     async def run():
         runtime = DshRuntime()
