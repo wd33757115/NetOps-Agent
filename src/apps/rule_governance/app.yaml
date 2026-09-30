@@ -1,7 +1,7 @@
 manifest_version: 1
 id: rule-governance
 name: 规则治理
-version: 1.4.6
+version: 1.4.7
 platform_api: '>=1.0,<2.0'
 icon: rules
 aliases:

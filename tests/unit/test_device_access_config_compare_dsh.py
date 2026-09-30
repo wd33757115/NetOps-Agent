@@ -69,7 +69,7 @@ def test_dsh_comparison_reads_sqlite_runs_audited_fixture_and_persists_citation(
         tools = {tool["function"]["name"]: tool["function"] for tool in body["tools"]}
         assert COMPARE in tools and SUBMIT in tools
         assert "mcp__netops__inspection__launch" not in tools
-        assert "mcp__netops__inspection__read_config_section" not in tools
+        assert "mcp__netops__inspection__read_baseline" not in tools
         properties = tools[COMPARE]["parameters"]["properties"]
         assert "platform" not in properties and "turn_id" not in properties
         assert "command" not in properties and "configuration" not in properties
@@ -79,8 +79,6 @@ def test_dsh_comparison_reads_sqlite_runs_audited_fixture_and_persists_citation(
                 {
                     "host": HOST,
                     "snapshot_id": "baseline-config",
-                    "section": "interface",
-                    "target": "GigabitEthernet3/0",
                     "purpose": "核对基线与现场接口配置",
                 },
                 "compare",

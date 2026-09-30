@@ -899,6 +899,10 @@ class CheckItemRunFinalizer:
             check_item_version_id=check_item_version_id,
         ):
             return False
+        if result_mode == "evidence_only":
+            # The raw output is the evidence; a command other check items parse
+            # may carry template_missing without affecting it.
+            return True
         allowed_statuses = (
             cls._PARSED_STATUSES
             if result_mode == "structured"

@@ -16,7 +16,7 @@ from .workspace import DocumentWorkspace
 
 RUN = "device_access__run"
 COMPARE = "device_access__compare_config"
-BASELINE = "inspection__read_config_section"
+BASELINE = "inspection__read_baseline"
 SCOPE_TOOLS = frozenset({"topology__trace_path", "topology__locate"})
 PLATFORMS = frozenset({"comware", "nxos", "ios", "vrp"})
 SERVER_FIELDS = ("platform", "turn_id")
@@ -78,7 +78,7 @@ class DiagnosticWorkspace(DocumentWorkspace):
             return result
         self.check()
         allowed = {"host", "commands", "purpose"} if name == RUN else {
-            "snapshot_id", "host", "section", "target", "purpose"
+            "snapshot_id", "host", "purpose"
         }
         if set(arguments) - allowed:
             raise PermissionError("Platform and turn are filled by the server")

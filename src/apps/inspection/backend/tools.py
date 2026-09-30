@@ -6,7 +6,7 @@ from src.core.patrol.batch_manifest import PatrolBatchManifestRepository
 from src.platform.inventory.api import DevicePatrolLaunchRequest
 from src.platform.tools.registry import Tool
 
-from .config_baseline import ReadConfigSection, read_config_section
+from .config_baseline import ReadBaseline, read_baseline
 from .diagnostics import TOOLS as DIAGNOSTIC_TOOLS
 from .launch import launch_patrol
 from .patrol_batch_service import build_patrol_batch_summary
@@ -26,8 +26,8 @@ def read_batch(user, body):
 
 TOOLS = [*DIAGNOSTIC_TOOLS,
     Tool(
-        "read_config_section", "内部读取经目标资产校验的基线配置片段",
-        ReadConfigSection, read_config_section,
+        "read_baseline", "内部读取经目标资产校验的未解析基线原文（已脱敏）",
+        ReadBaseline, read_baseline,
     ),
     Tool(
         "launch",

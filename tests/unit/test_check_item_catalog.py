@@ -109,8 +109,17 @@ def _catalog_with_family_scoped_shared_command():
 def test_production_catalog_is_check_item_centered_and_complete():
     catalog = load_catalog()
 
-    assert catalog.catalog_version == 13
+    assert catalog.catalog_version == 14
     assert {item.id for item in catalog.check_items} == {
+        # Unparsed state baselines for diagnosis (text comparison, no parser).
+        "interface.brief_text",
+        "interface.ip_brief_text",
+        "network.routing_table_text",
+        "network.ospf_peer_text",
+        "network.arp_text",
+        "network.mac_text",
+        "network.vlan_text",
+        "network.lldp_neighbor_text",
         "device.version",
         "device.inventory",
         "system.cpu_usage",
@@ -131,7 +140,7 @@ def test_production_catalog_is_check_item_centered_and_complete():
         "configuration.startup",
         "operations.critical_logs",
     }
-    assert len(catalog.check_items) == 19
+    assert len(catalog.check_items) == 27
     optical = catalog.check_item("interface.optical_power")
     assert optical is not None
     assert {
@@ -470,7 +479,7 @@ def test_catalog_bootstrap_is_idempotent_and_versions_are_immutable(tmp_path):
     first = repository.bootstrap(catalog)
     second = repository.bootstrap(catalog)
 
-    assert first["created_check_items"] == 19
+    assert first["created_check_items"] == 27
     assert first["created_implementations"] == len(catalog.implementations)
     assert first["created_links"] > len(catalog.implementations)
     assert second == {
@@ -479,7 +488,7 @@ def test_catalog_bootstrap_is_idempotent_and_versions_are_immutable(tmp_path):
         "created_links": 0,
     }
     active = repository.load_active()
-    assert len(active.check_items) == 19
+    assert len(active.check_items) == 27
     assert len(active.implementations) == len(catalog.implementations)
 
     changed_item = replace(catalog.check_items[0], digest="0" * 64)

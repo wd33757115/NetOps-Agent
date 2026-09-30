@@ -16,7 +16,7 @@ LABELS = {
     "mcp__netops__inspection__list_events": "查询网络事件",
     "mcp__netops__inspection__list_snapshots": "查找采集证据",
     "mcp__netops__inspection__read_snapshot": "阅读采集原文",
-    "mcp__netops__device_access__compare_config": "对比基线与现场配置块",
+    "mcp__netops__device_access__compare_config": "对比基线与现场输出",
     "mcp__netops__rule_governance__read_generation": "查询规则治理记录",
     "mcp__netops__topology__locate": "定位网络终端",
     "mcp__netops__topology__trace_path": "计算网络路径",

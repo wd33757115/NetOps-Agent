@@ -93,6 +93,21 @@ _ZH_CN_PRESENTATIONS = MappingProxyType(
             "关键运行日志变化",
             "比较脱敏后的关键日志窗口，不直接推断设备健康状态。",
         ),
+        **{
+            check_item_id: CheckItemPresentation(
+                name, "保存未解析的命令原文作为诊断基线，诊断时与现场逐行对比；不解析、不判断健康。"
+            )
+            for check_item_id, name in (
+                ("interface.brief_text", "接口简要状态原文"),
+                ("interface.ip_brief_text", "三层接口简要状态原文"),
+                ("network.routing_table_text", "路由表原文"),
+                ("network.ospf_peer_text", "OSPF 邻居原文"),
+                ("network.arp_text", "ARP 表原文"),
+                ("network.mac_text", "MAC 地址表原文"),
+                ("network.vlan_text", "VLAN 原文"),
+                ("network.lldp_neighbor_text", "LLDP 邻居原文"),
+            )
+        },
     }
 )
 

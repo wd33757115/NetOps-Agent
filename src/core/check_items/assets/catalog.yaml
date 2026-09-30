@@ -1,4 +1,4 @@
-catalog_version: 13
+catalog_version: 14
 defaults:
   check_item:
     freshness_policy:
@@ -4016,6 +4016,150 @@ check_items:
     model: non_exhaustive
     require_rule_evaluation: true
   status: active
+- id: interface.brief_text
+  version: 1
+  name: 接口简要状态原文
+  category: interface
+  description: 保存未解析的命令原文作为诊断基线，诊断时与现场输出逐行对比；不解析、不判断健康。
+  result_mode: evidence_only
+  assessment_mode: evidence
+  canonical_contract:
+    entity_type: device_command_output
+    identity_dimensions:
+    - device_id
+  report_projection: auto@1
+  applicability: {}
+  coverage_policy:
+    model: fixed
+    expected_count: 1
+    require_rule_evaluation: false
+  status: active
+- id: interface.ip_brief_text
+  version: 1
+  name: 三层接口简要状态原文
+  category: interface
+  description: 保存未解析的命令原文作为诊断基线，诊断时与现场输出逐行对比；不解析、不判断健康。
+  result_mode: evidence_only
+  assessment_mode: evidence
+  canonical_contract:
+    entity_type: device_command_output
+    identity_dimensions:
+    - device_id
+  report_projection: auto@1
+  applicability: {}
+  coverage_policy:
+    model: fixed
+    expected_count: 1
+    require_rule_evaluation: false
+  status: active
+- id: network.routing_table_text
+  version: 1
+  name: 路由表原文
+  category: network
+  description: 保存未解析的命令原文作为诊断基线，诊断时与现场输出逐行对比；不解析、不判断健康。
+  result_mode: evidence_only
+  assessment_mode: evidence
+  canonical_contract:
+    entity_type: device_command_output
+    identity_dimensions:
+    - device_id
+  report_projection: auto@1
+  applicability: {}
+  coverage_policy:
+    model: fixed
+    expected_count: 1
+    require_rule_evaluation: false
+  status: active
+- id: network.ospf_peer_text
+  version: 1
+  name: OSPF 邻居原文
+  category: network
+  description: 保存未解析的命令原文作为诊断基线，诊断时与现场输出逐行对比；不解析、不判断健康。
+  result_mode: evidence_only
+  assessment_mode: evidence
+  canonical_contract:
+    entity_type: device_command_output
+    identity_dimensions:
+    - device_id
+  report_projection: auto@1
+  applicability: {}
+  coverage_policy:
+    model: fixed
+    expected_count: 1
+    require_rule_evaluation: false
+  status: active
+- id: network.arp_text
+  version: 1
+  name: ARP 表原文
+  category: network
+  description: 保存未解析的命令原文作为诊断基线，诊断时与现场输出逐行对比；不解析、不判断健康。
+  result_mode: evidence_only
+  assessment_mode: evidence
+  canonical_contract:
+    entity_type: device_command_output
+    identity_dimensions:
+    - device_id
+  report_projection: auto@1
+  applicability: {}
+  coverage_policy:
+    model: fixed
+    expected_count: 1
+    require_rule_evaluation: false
+  status: active
+- id: network.mac_text
+  version: 1
+  name: MAC 地址表原文
+  category: network
+  description: 保存未解析的命令原文作为诊断基线，诊断时与现场输出逐行对比；不解析、不判断健康。
+  result_mode: evidence_only
+  assessment_mode: evidence
+  canonical_contract:
+    entity_type: device_command_output
+    identity_dimensions:
+    - device_id
+  report_projection: auto@1
+  applicability: {}
+  coverage_policy:
+    model: fixed
+    expected_count: 1
+    require_rule_evaluation: false
+  status: active
+- id: network.vlan_text
+  version: 1
+  name: VLAN 原文
+  category: network
+  description: 保存未解析的命令原文作为诊断基线，诊断时与现场输出逐行对比；不解析、不判断健康。
+  result_mode: evidence_only
+  assessment_mode: evidence
+  canonical_contract:
+    entity_type: device_command_output
+    identity_dimensions:
+    - device_id
+  report_projection: auto@1
+  applicability: {}
+  coverage_policy:
+    model: fixed
+    expected_count: 1
+    require_rule_evaluation: false
+  status: active
+- id: network.lldp_neighbor_text
+  version: 1
+  name: LLDP 邻居原文
+  category: network
+  description: 保存未解析的命令原文作为诊断基线，诊断时与现场输出逐行对比；不解析、不判断健康。
+  result_mode: evidence_only
+  assessment_mode: evidence
+  canonical_contract:
+    entity_type: device_command_output
+    identity_dimensions:
+    - device_id
+  report_projection: auto@1
+  applicability: {}
+  coverage_policy:
+    model: fixed
+    expected_count: 1
+    require_rule_evaluation: false
+  status: active
 implementations:
 - id: h3c-device-version
   version: 2
@@ -4314,3 +4458,123 @@ implementations:
   status: active
   digest: b8bfe04eee1c6b60991e170f9976d7c0c24ab0a2a309296a31f68536a7ab8085
   version_id: d2e58c5a-2be1-56f5-a15d-d34e16bbf95a
+- id: h3c-interface-brief-text
+  version: 1
+  name: H3C display interface brief raw text
+  check_item_ids:
+  - interface.brief_text
+  match:
+    vendor: H3C
+  commands:
+  - command: display interface brief
+    priority: 100
+  collector: cli
+  parser_requirement: evidence_only
+  template_scope: null
+  selection_priority: 100
+  status: active
+- id: h3c-ip-interface-brief-text
+  version: 1
+  name: H3C display ip interface brief raw text
+  check_item_ids:
+  - interface.ip_brief_text
+  match:
+    vendor: H3C
+  commands:
+  - command: display ip interface brief
+    priority: 100
+  collector: cli
+  parser_requirement: evidence_only
+  template_scope: null
+  selection_priority: 100
+  status: active
+- id: h3c-routing-table-text
+  version: 1
+  name: H3C display ip routing-table raw text
+  check_item_ids:
+  - network.routing_table_text
+  match:
+    vendor: H3C
+  commands:
+  - command: display ip routing-table
+    priority: 100
+  collector: cli
+  parser_requirement: evidence_only
+  template_scope: null
+  selection_priority: 100
+  status: active
+- id: h3c-ospf-peer-text
+  version: 1
+  name: H3C display ospf peer raw text
+  check_item_ids:
+  - network.ospf_peer_text
+  match:
+    vendor: H3C
+  commands:
+  - command: display ospf peer
+    priority: 100
+  collector: cli
+  parser_requirement: evidence_only
+  template_scope: null
+  selection_priority: 100
+  status: active
+- id: h3c-arp-text
+  version: 1
+  name: H3C display arp raw text
+  check_item_ids:
+  - network.arp_text
+  match:
+    vendor: H3C
+  commands:
+  - command: display arp
+    priority: 100
+  collector: cli
+  parser_requirement: evidence_only
+  template_scope: null
+  selection_priority: 100
+  status: active
+- id: h3c-mac-text
+  version: 1
+  name: H3C display mac-address raw text
+  check_item_ids:
+  - network.mac_text
+  match:
+    vendor: H3C
+  commands:
+  - command: display mac-address
+    priority: 100
+  collector: cli
+  parser_requirement: evidence_only
+  template_scope: null
+  selection_priority: 100
+  status: active
+- id: h3c-vlan-text
+  version: 1
+  name: H3C display vlan raw text
+  check_item_ids:
+  - network.vlan_text
+  match:
+    vendor: H3C
+  commands:
+  - command: display vlan
+    priority: 100
+  collector: cli
+  parser_requirement: evidence_only
+  template_scope: null
+  selection_priority: 100
+  status: active
+- id: h3c-lldp-neighbor-text
+  version: 1
+  name: H3C display lldp neighbor-information list raw text
+  check_item_ids:
+  - network.lldp_neighbor_text
+  match:
+    vendor: H3C
+  commands:
+  - command: display lldp neighbor-information list
+    priority: 100
+  collector: cli
+  parser_requirement: evidence_only
+  template_scope: null
+  selection_priority: 100
+  status: active

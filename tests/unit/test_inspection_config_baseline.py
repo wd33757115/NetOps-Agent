@@ -85,29 +85,22 @@ def database(tmp_path, monkeypatch):
 
 
 def read(**kwargs):
-    body = dict(
-        snapshot_id="snapshot",
-        host="192.0.2.10",
-        platform="comware",
-        section="interface",
-        target="GigabitEthernet3/0",
-    )
+    body = dict(snapshot_id="snapshot", host="192.0.2.10")
     body.update(kwargs)
-    return baseline.read_config_section(
-        SimpleNamespace(user_id="viewer"), baseline.ReadConfigSection(**body)
-    )
+    return baseline.read_baseline(SimpleNamespace(user_id="viewer"), baseline.ReadBaseline(**body))
 
 
-def test_reads_only_selected_raw_baseline_with_asset_time_hash_and_run_provenance(database):
+def test_reads_whole_raw_baseline_with_asset_time_hash_and_run_provenance(database):
     result = read()
-    assert result["fragment"]["complete"] and result["fragment"]["redacted"]
+    assert result["complete"] and not result["quality_gaps"]
+    assert " port access vlan 100" in result["text"] and "[敏感配置已隐藏]" in result["text"]
     assert result["baseline"]["device_id"] == "asset-1"
     assert result["baseline"]["run_mode"] == "offline"
     assert result["baseline"]["run_source"] == "upload"
     assert result["baseline"]["observed_at"] == NOW.isoformat()
     assert result["baseline"]["source_sha256"] == hashlib.sha256(TEXT.encode()).hexdigest()
     assert "TEST-SECRET" not in json.dumps(result)
-    assert result["fragment"]["start_line"] == 2
+    assert result["baseline"]["command"] == "display current-configuration"
 
 
 @pytest.mark.parametrize(
@@ -155,7 +148,7 @@ def test_offline_unlinked_snapshot_uses_only_explicit_historical_address(databas
         db.get(CommandSnapshot, "snapshot").inventory_device_id = None
         db.delete(db.get(NetworkDevice, "asset-1"))
     result = read()
-    assert result["fragment"]["complete"]
+    assert result["complete"]
     assert result["baseline"]["device_id"] == "old-display-name"
     assert result["baseline"]["identity_source"] == "snapshot_management_ip"
     assert "地址未复用" in result["baseline"]["identity_limitation"]
@@ -178,33 +171,19 @@ def test_snapshot_catalog_supports_exact_ip_and_raw_read_uses_shared_redaction(d
     assert "TEST-SECRET" not in raw["text"] and raw["redacted"]
 
 
-@pytest.mark.parametrize(
-    "change", ["hash", "partial", "truncated", "command", "paging", "error", "missing_block"]
-)
-def test_bad_baseline_never_returns_complete_fragment(database, change):
+@pytest.mark.parametrize("change", ["hash", "partial", "truncated"])
+def test_bad_baseline_is_never_complete(database, change):
     with database() as db:
         snapshot = db.get(CommandSnapshot, "snapshot")
         if change == "hash":
             snapshot.raw_text_hash = "bad"
         elif change == "partial":
             snapshot.snapshot_kind = "hash_only"
-        elif change == "truncated":
-            snapshot.output_status = "truncated"
-        elif change == "command":
-            snapshot.canonical_command = "display current-configuration | include interface"
         else:
-            text = {
-                "paging": TEXT + "\n---- More ----",
-                "error": TEXT + "\nWrong parameter found",
-                "missing_block": "#\nospf 1\n#",
-            }[change]
-            snapshot.raw_text, snapshot.raw_text_hash = (
-                text,
-                hashlib.sha256(text.encode()).hexdigest(),
-            )
+            snapshot.output_status = "truncated"
     result = read()
-    assert not result["fragment"]["complete"]
-    assert result["fragment"]["quality_gaps"]
+    assert not result["complete"]
+    assert result["quality_gaps"]
 
 
 def test_helper_performs_select_only_and_is_not_advertised_as_evidence(database):
@@ -221,6 +200,6 @@ def test_helper_performs_select_only_and_is_not_advertised_as_evidence(database)
         event.remove(engine, "before_cursor_execute", select_only)
     from src.apps.inspection.backend.tools import TOOLS
 
-    helper = next(tool for tool in TOOLS if tool.name == "read_config_section")
+    helper = next(tool for tool in TOOLS if tool.name == "read_baseline")
     assert not helper.evidence and not helper.mutates
     assert "read_changes" not in {tool.name for tool in TOOLS}

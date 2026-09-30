@@ -1050,7 +1050,28 @@ P2-9 根据 Q5 取消，不引入 SNMP。P3 及后续仍在进入阶段时展开
   - 形状无法识别的提示符不检查。
   - 只读边界靠设备账号角色或 TACACS。白名单弹窗已注明这些。
 
-### 2026-09-30 负责人追加：原始基线与现场指定配置块对比
+### 2026-09-30 负责人改定：巡检保存未解析基线 + 整段文本对比（已部署，实机无故障对比通过）
+
+- 负责人方向：不解析，直接文本对比；巡检保存一份未解析的基线原文，诊断时查询基线与现场做对比。本条取代下一条的“指定配置块”方案，后者的块提取（`config_sections.py`）已删除。
+- 基线（巡检，不写解析器）：
+  - 检查项目录新增 8 个 `evidence_only` 检查项：`interface.brief_text`、`interface.ip_brief_text`、`network.routing_table_text`、`network.ospf_peer_text`、`network.arp_text`、`network.mac_text`、`network.vlan_text`、`network.lldp_neighbor_text`。每项配一个 H3C 实现（一条命令），与原有 `configuration.running` 合计 9 条命令。
+  - 巡检只把原文存为 `CommandSnapshot`，不解析、不判断健康。目录版本升到 14，补了中文名。
+  - 按规则治理正常流程为 8 项新建运行包。目录变化使 3 个文本对比运行包失效（思科/H3C 运行配置、H3C 关键日志），已重新装配启用；运行包健康：失效 0，就绪 184，缺失 15（缺失项原本就缺，与本次无关）。
+  - 修复：检查项收尾对 `evidence_only` 不再看解析状态。ARP、MAC、接口简表、三层接口这 4 条命令另有结构化检查项认领，会被标 `template_missing`，但原文本身就是证据。
+  - 两台 VSR 登记到设备管理（分组 `netops-lab`，凭据引用 `env:NETOPS_LAB_PASSWORD`），绑定检查项档案 `lab-diagnosis-baseline`。保存基线的生产巡检 `patrol-batch-4eb730b9…` 四个阶段全部完成，18 份原文快照（9 条命令 × 2 台）。
+- 对比工具 `device_access__compare_config(snapshot_id, host, purpose)`：
+  - 经 `inspection__read_baseline`（内部）校验资产身份和 SHA-256，读取脱敏原文；在设备上原样执行该快照的命令一次（平台白名单与审计），再用 difflib 逐行对比。
+  - 只返回差异行，不回传整份输出。清洗规则：统一去掉 ANSI、NUL、回车、命令回显、结尾提示符和首行缩进。
+  - 空输出、CLI 报错和分页残留不参与对比；敏感行不参与对比，只报条数（`sensitive_lines_not_compared`）。
+  - 平台层不再引用 `src.core`，原先失败的边界测试转为通过。
+- 验证：
+  - 对比、基线读取、诊断工作区等相关测试 **107 passed**，文本对比 6 项、`evidence_only` 收尾 5 项通过。
+  - 检查项相关测试与干净 HEAD 同为 **34 项既有失败**（`test_check_item_assessment_runtime`），无新增。
+  - 部署 rule-governance 1.4.7、inspection 1.3.3、device-access 0.9.5、assistant 0.8.3，9/9 应用通过。
+- 实机（无注入故障，只读）：两台 VSR 各 9 条对比中，运行配置、接口简表、三层接口、路由表、LLDP、MAC、VLAN 均为 unchanged。ARP 因老化列变化和条目自然老化显示差异，这是纯文本对比的预期噪声。OSPF 邻居显示 DR/BDR 角色互换，是基线之后真实发生的重新选举。
+- 未做：注入故障后的对比与 AI 端到端诊断需负责人确认后再做；核验脚本 `.runtime/verify-baseline-compare.py`、`.runtime/lab-baseline-*.py` 留本地、不提交。
+
+### 2026-09-30 负责人追加：原始基线与现场指定配置块对比（已被上一条取代）
 
 - 负责人纠正接入方向后，以巡检保存的**原始配置快照**为基线，不使用 `NetworkChangeRecord` 或预生成的变化列表作为差异输入；随后明确选择“诊断时读取指定配置块”。此前试作的 `read_changes` 未部署，已撤出本次实现。
 - 链路：`inspection__list_snapshots(host, 时间范围)` 找同管理地址的原始快照，按 `run_id` 读巡检来源与用途；`device_access__compare_config(snapshot_id, host, section, target, purpose)` 通过巡检内部只读契约提取基线块，再经平台 SSH 读取当前块，复用现有配置对比工具计算可见文本差异。结果保留两期时间、快照/运行/命令/会话引用、摘要、行段和质量缺口，AI 再用运行状态验证影响。

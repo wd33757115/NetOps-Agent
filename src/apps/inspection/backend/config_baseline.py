@@ -1,21 +1,21 @@
-"""Authorized internal reading of one baseline snapshot's selected configuration block."""
+"""Authorized internal reading of one retained, unparsed baseline snapshot."""
 
 import hashlib
 from datetime import timezone
 from ipaddress import ip_address
 
 from fastapi import HTTPException
-from pydantic import Field, field_validator
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 
 from src.infrastructure.db.models import CommandSnapshot, NetworkDevice, PatrolRun
 from src.infrastructure.db.postgres import get_db_session
-from src.platform.device_access.config_sections import Scope, extract_section, redact_config
+from src.platform.device_access.text_compare import MAX_SOURCE_BYTES, redact_config
 
 from .diagnostics import iso
 
 
-class ReadConfigSection(Scope):
+class ReadBaseline(BaseModel):
     snapshot_id: str = Field(min_length=1, max_length=64)
     host: str = Field(min_length=1, max_length=64)
 
@@ -25,11 +25,8 @@ class ReadConfigSection(Scope):
         return str(ip_address(value))
 
 
-def read_config_section(user, body: ReadConfigSection):
+def read_baseline(user, body: ReadBaseline):
     """The registry supplies user after inspection App authorization; no collection."""
-    scope = Scope.model_validate(
-        {key: getattr(body, key) for key in ("platform", "section", "target")}
-    )
     with get_db_session() as db:
         snapshot = db.get(CommandSnapshot, body.snapshot_id)
         if snapshot is None:
@@ -66,26 +63,16 @@ def read_config_section(user, body: ReadConfigSection):
                 raise HTTPException(404, "基线快照不存在或不属于目标地址")
             device_id, identity_source = snapshot.device_id, "snapshot_management_ip"
         raw = snapshot.raw_text or ""
-        hash_valid = hashlib.sha256(raw.encode("utf-8")).hexdigest() == snapshot.raw_text_hash
-        # Parsing need not succeed for a text configuration comparison. Transport
-        # completeness, retained full text and independently checked block borders do.
-        complete = (
-            hash_valid and snapshot.snapshot_kind == "full" and snapshot.output_status == "data"
-        )
-        fragment = extract_section(
-            raw, scope, source_complete=complete, command=snapshot.canonical_command
-        )
-        if not hash_valid:
-            fragment["quality_gaps"].append("snapshot_hash_mismatch")
+        gaps = []
+        if hashlib.sha256(raw.encode("utf-8")).hexdigest() != snapshot.raw_text_hash:
+            gaps.append("snapshot_hash_mismatch")
         if snapshot.snapshot_kind != "full":
-            fragment["quality_gaps"].append("snapshot_not_full")
+            gaps.append("snapshot_not_full")
         if snapshot.output_status != "data":
-            fragment["quality_gaps"].append(
-                "snapshot_output_quality:" + str(snapshot.output_status)
-            )
+            gaps.append("snapshot_output_quality:" + str(snapshot.output_status))
+        if len(raw.encode("utf-8")) > MAX_SOURCE_BYTES:
+            gaps.append("snapshot_too_large")
         return {
-            "scope": scope.model_dump(),
-            "fragment": fragment,
             "baseline": {
                 "snapshot_id": snapshot.id,
                 "run_id": snapshot.run_id,
@@ -102,7 +89,6 @@ def read_config_section(user, body: ReadConfigSection):
                     else snapshot.observed_at.replace(tzinfo=timezone.utc)
                 ),
                 "source_sha256": snapshot.raw_text_hash,
-                "parse_status": snapshot.parse_status,
                 "output_status": snapshot.output_status,
                 "snapshot_kind": snapshot.snapshot_kind,
                 "run_mode": run.mode,
@@ -111,6 +97,10 @@ def read_config_section(user, body: ReadConfigSection):
                 "run_status": run.status,
                 "baseline_eligible": run.baseline_eligible,
             },
-            "meaning": "按指定 snapshot_id 读取原始基线中的同范围配置块；未重选基线。"
-            "基线可用不等于健康，离线或历史配置不代表当前状态，隐藏字段不参与比较。",
+            # Redacted before leaving the App; only diff lines reach the model.
+            "text": "" if "snapshot_too_large" in gaps else redact_config(raw),
+            "complete": not gaps,
+            "quality_gaps": gaps,
+            "meaning": "按指定 snapshot_id 读取未解析的基线原文；基线可用不等于健康，"
+            "离线或历史数据不代表当前状态。",
         }

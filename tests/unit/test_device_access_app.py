@@ -436,12 +436,16 @@ def test_diagnosis_budgets_commands_and_devices_per_turn(workspace):
 
 def test_config_comparison_uses_the_same_scope_and_command_budget(workspace):
     space = workspace.space
-    query = {"host": "10.0.0.1", "snapshot_id": "s1", "section": "interface",
-             "target": "GigabitEthernet3/0", "purpose": "核对接入接口"}
+    query = {"host": "10.0.0.1", "snapshot_id": "s1", "purpose": "核对接入接口"}
     with pytest.raises(PermissionError):
         space.invoke("device_access__compare_config", query)
     space.invoke("topology__trace_path", {})
-    for extra in ({"platform": "ios"}, {"turn_id": "another"}, {"commands": ["display version"]}):
+    for extra in (
+        {"platform": "ios"},
+        {"turn_id": "another"},
+        {"commands": ["display version"]},
+        {"command": "display version"},
+    ):
         with pytest.raises(PermissionError):
             space.invoke("device_access__compare_config", {**query, **extra})
     result = space.invoke("device_access__compare_config", query)
@@ -487,7 +491,7 @@ def test_comparison_requires_authorized_baseline_provider_and_hides_internal_fie
     def available(**kwargs):
         if not kwargs.get("names"):
             return []
-        return [definition] + ([{"name": "inspection__read_config_section"}]
+        return [definition] + ([{"name": "inspection__read_baseline"}]
                                if inspection_available else [])
 
     monkeypatch.setattr(registry, "available_tools", available)

@@ -185,7 +185,7 @@ def snapshots(body):
 
 
 def redact(text):
-    from src.platform.device_access.config_sections import redact_config
+    from src.platform.device_access.text_compare import redact_config
 
     return redact_config(text)
 

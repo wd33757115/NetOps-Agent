@@ -1,4 +1,4 @@
-"""Real scoped comparison, platform session, policy and audit against isolated fixtures."""
+"""Real text comparison, platform session, policy and audit against isolated fixtures."""
 
 import hashlib
 import json
@@ -22,7 +22,7 @@ from src.platform.kernel.registry import discover
 from src.platform.tools import registry
 
 HOST = "192.0.2.1"
-COMMAND = "display current-configuration interface GigabitEthernet3/0"
+COMMAND = "display current-configuration"
 BASELINE = "#\ninterface GigabitEthernet3/0\n port access vlan 100\n#\nreturn\n"
 CURRENT = "#\ninterface GigabitEthernet3/0\n port access vlan 200\n#\nreturn\n"
 
@@ -143,8 +143,6 @@ def config_lab(tmp_path, monkeypatch):
     state.body = config_compare.CompareConfig(
         host=HOST,
         platform="comware",
-        section="interface",
-        target="GigabitEthernet3/0",
         snapshot_id="baseline-config",
         purpose="核对接口配置",
         turn_id="diagnosis-config-test",
@@ -157,15 +155,14 @@ def compare(lab):
     return registry.invoke("device_access__compare_config", lab.body.model_dump(), actor_id="alice")
 
 
-def test_fixed_command_reads_real_baseline_and_audits_one_closed_session(
-    config_lab, ssh_log_storage
-):
+def test_baseline_command_runs_once_and_only_the_diff_returns(config_lab, ssh_log_storage):
     result = compare(config_lab)
     assert result["status"] == "changed"
     assert result["baseline"]["snapshot_id"] == "baseline-config"
     assert result["baseline"]["run_mode"] == "offline"
-    assert result["baseline"]["fragment"]["complete"]
-    assert " port access vlan 200" in result["current"]["fragment"]["text"]
+    assert "- port access vlan 100" in result["comparison"]["diff"]
+    assert "+ port access vlan 200" in result["comparison"]["diff"]
+    assert "return" not in result["comparison"]["diff"]  # outside the one-line context
     assert result["comparison"]["added_count"] == result["comparison"]["removed_count"] == 1
     assert config_lab.sent == [COMMAND] and config_lab.connects == config_lab.closes == 1
     assert result["current"]["policy_level"] == "L1"
@@ -179,7 +176,7 @@ def test_fixed_command_reads_real_baseline_and_audits_one_closed_session(
     assert len(json.dumps(result, ensure_ascii=False, sort_keys=True, indent=2).encode()) < 24000
 
 
-@pytest.mark.parametrize("invalid", ["foreign_host", "hash", "truncated", "missing_block"])
+@pytest.mark.parametrize("invalid", ["foreign_host", "hash", "truncated"])
 def test_invalid_baseline_never_resolves_or_opens_ssh(config_lab, monkeypatch, invalid):
     with config_lab.database() as db:
         snapshot = db.get(CommandSnapshot, "baseline-config")
@@ -187,11 +184,8 @@ def test_invalid_baseline_never_resolves_or_opens_ssh(config_lab, monkeypatch, i
             db.get(NetworkDevice, "vsr2").management_ip = "192.0.2.2"
         elif invalid == "hash":
             snapshot.raw_text_hash = "0" * 64
-        elif invalid == "truncated":
-            snapshot.output_status = "truncated"
         else:
-            snapshot.raw_text = "#\ninterface GigabitEthernet2/0\n#\n"
-            snapshot.raw_text_hash = hashlib.sha256(snapshot.raw_text.encode()).hexdigest()
+            snapshot.output_status = "truncated"
     monkeypatch.setattr(diagnosis, "login_for", lambda *args: pytest.fail("resolved SSH login"))
     if invalid == "foreign_host":
         with pytest.raises(HTTPException):
@@ -216,11 +210,12 @@ def test_inspection_grant_and_platform_whitelist_are_enforced(config_lab):
     assert governance.query_audit(kind="command_denied")["total"] == 1
 
 
-@pytest.mark.parametrize("output", ["", CURRENT.split("\n#\nreturn")[0], "% Unrecognized command"])
-def test_incomplete_live_section_never_reports_unchanged(config_lab, output):
+@pytest.mark.parametrize("output", ["", "\r\n<VSR2>", "% Unrecognized command found at '^'"])
+def test_empty_or_error_output_is_never_a_change(config_lab, output):
     config_lab.output = output
     result = compare(config_lab)
-    assert result["status"] == "unavailable" and not result["current"]["fragment"]["complete"]
+    assert result["status"] == "unavailable" and result["comparison"] is None
+    assert any(gap.startswith("live_") for gap in result["quality_gaps"])
     assert config_lab.connects == config_lab.closes == 1
 
 
@@ -261,21 +256,21 @@ def test_identical_hidden_credentials_never_claim_complete_equality(config_lab):
         snapshot.raw_text_hash = hashlib.sha256(text.encode()).hexdigest()
     config_lab.output = text
     result = compare(config_lab)
-    assert result["status"] == "unavailable"
+    assert result["status"] == "unchanged"
     assert result["comparison"]["added_count"] == result["comparison"]["removed_count"] == 0
+    assert result["comparison"]["hidden_lines"] == {"baseline": 1, "current": 1}
     assert "sensitive_lines_not_compared" in result["quality_gaps"]
     assert "hidden-config-key" not in json.dumps(result)
 
 
-def test_large_live_block_stays_bounded_and_unavailable(config_lab):
+def test_large_diff_stays_within_the_evidence_budget_and_says_so(config_lab):
     config_lab.output = (
         "#\ninterface GigabitEthernet3/0\n"
-        + "\n".join(f" description fixture-{index}-" + "x" * 100 for index in range(90))
+        + "\n".join(f" description fixture-{index}-" + "x" * 100 for index in range(300))
         + "\n#\n"
     )
     result = compare(config_lab)
-    assert result["status"] == "unavailable" and result["current"]["fragment"]["truncated"]
-    assert "section_excerpt_truncated" in result["quality_gaps"]
+    assert result["status"] == "changed" and result["comparison"]["diff_truncated"]
     assert len(json.dumps(result, ensure_ascii=False, sort_keys=True, indent=2).encode()) < 24000
     assert config_lab.connects == config_lab.closes == 1
 
