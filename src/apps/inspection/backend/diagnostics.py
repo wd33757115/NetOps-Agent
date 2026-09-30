@@ -1,10 +1,10 @@
 """Read-only diagnosis contract shared by HTTP and Agent; no Workflow joins or collection."""
 
-import re
 from datetime import datetime
+from ipaddress import ip_address
 
 from fastapi import APIRouter, HTTPException
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import or_, select
 
 from src.infrastructure.db.models import CommandSnapshot, NetworkEventRecord, PatrolRun
@@ -41,6 +41,15 @@ class Snapshot(BaseModel):
     snapshot_id: str = Field(min_length=1, max_length=64)
     offset: int = Field(0, ge=0, le=1000000)
     limit: int = Field(2000, ge=1, le=4000)
+
+
+class SnapshotScope(Scope):
+    host: str | None = Field(None, max_length=64)
+
+    @field_validator("host")
+    @classmethod
+    def literal_address(cls, value):
+        return str(ip_address(value)) if value is not None else None
 
 
 def iso(value):
@@ -146,6 +155,7 @@ def snapshots(body):
         "inventory_device_id",
         "device_id",
         "device_name",
+        "management_ip",
         "command",
         "observed_at",
         "parse_status",
@@ -163,6 +173,8 @@ def snapshots(body):
         )
     if body.run_id:
         statement = statement.where(CommandSnapshot.run_id == body.run_id)
+    if getattr(body, "host", None):
+        statement = statement.where(CommandSnapshot.management_ip == body.host)
     statement = window(statement, CommandSnapshot.observed_at, body)
     with get_db_session() as session:
         return page(
@@ -173,19 +185,9 @@ def snapshots(body):
 
 
 def redact(text):
-    # Network configuration can contain credentials. Redact the whole sensitive line
-    # before pagination so a secret cannot cross a page boundary.
-    text = re.sub(
-        r"(?s)-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----",
-        "[私钥已隐藏]",
-        text,
-    )
-    return re.sub(
-        r"(?im)^.*\b(?:password|passwd|secret|community|authentication-key|private-key|"
-        r"api[_-]?key|access[_-]?token|authorization)\b.*$",
-        "[敏感配置行已隐藏]",
-        text,
-    )
+    from src.platform.device_access.config_sections import redact_config
+
+    return redact_config(text)
 
 
 def read_snapshot(body):
@@ -236,8 +238,8 @@ CONTRACTS = [
     ),
     (
         "list_snapshots",
-        "查询设备/巡检的命令证据目录，取得 snapshot_id 后按需读取",
-        Scope,
+        "按资产设备、精确管理IP或巡检运行查询命令证据目录，取得 snapshot_id 后按需读取",
+        SnapshotScope,
         snapshots,
     ),
     (

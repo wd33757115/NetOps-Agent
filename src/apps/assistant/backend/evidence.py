@@ -10,6 +10,13 @@ from .repository import now
 MAX_EVIDENCE_BYTES = 24000
 
 
+def source_apps(reference):
+    """A live comparison embeds inspection data as well as device-access data."""
+    if reference.get("tool") == "device_access__compare_config":
+        return ("device-access", "inspection")
+    return (reference["app_id"],)
+
+
 def capture(tool, result):
     # Only registered evidence tools can reach this adapter. They own field allowlists,
     # pagination and redaction; refusing oversize results preserves valid structured data.

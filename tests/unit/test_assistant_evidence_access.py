@@ -36,3 +36,40 @@ def test_excerpt_requires_current_source_app_grant_and_is_not_leaked_by_history(
     with pytest.raises(HTTPException) as error:
         api.citation(conversation, reference["id"], SimpleNamespace(user_id="bob"))
     assert error.value.status_code == 404
+
+
+@pytest.mark.parametrize("revoked_app", ["inspection", "device-access"])
+def test_comparison_citation_requires_both_source_apps(database, monkeypatch, revoked_app):
+    conversation = history.create("alice")["id"]
+    run, _ = turns.begin("alice", conversation, turns.Question(request_id="compare", text="对比"))
+    reference = evidence.capture("device_access__compare_config", {"baseline": "protected-config"})
+    turns.finish("alice", run["id"], "completed", "配置对比", [reference], 5)
+
+    def authorize(actor, app):
+        if app == revoked_app:
+            raise HTTPException(403, "revoked")
+
+    monkeypatch.setattr(api, "authorize_worker", authorize)
+    with pytest.raises(HTTPException) as error:
+        api.citation(conversation, reference["id"], SimpleNamespace(user_id="alice"))
+    assert error.value.status_code == 403
+
+
+def test_comparison_final_answer_rechecks_both_source_apps(monkeypatch):
+    from src.apps.assistant.backend.workspace import DocumentWorkspace
+
+    reference = evidence.capture("device_access__compare_config", {"baseline": "protected-config"})
+    workspace = DocumentWorkspace("alice", reader=object(), check=lambda: None)
+    workspace.business_evidence[reference["id"]] = reference
+    checked = []
+
+    def authorize(actor, app):
+        checked.append(app)
+        if app == "inspection":
+            raise HTTPException(403, "revoked")
+
+    monkeypatch.setattr("src.apps.assistant.backend.workspace.authorize_worker", authorize)
+    with pytest.raises(HTTPException) as error:
+        workspace.references("配置变化 " + reference["citation"])
+    assert error.value.status_code == 403
+    assert checked == ["device-access", "inspection"]

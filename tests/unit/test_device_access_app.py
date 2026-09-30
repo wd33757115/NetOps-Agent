@@ -434,6 +434,25 @@ def test_diagnosis_budgets_commands_and_devices_per_turn(workspace):
     assert len(space.scope) == workspace.module.MAX_DEVICES
 
 
+def test_config_comparison_uses_the_same_scope_and_command_budget(workspace):
+    space = workspace.space
+    query = {"host": "10.0.0.1", "snapshot_id": "s1", "section": "interface",
+             "target": "GigabitEthernet3/0", "purpose": "核对接入接口"}
+    with pytest.raises(PermissionError):
+        space.invoke("device_access__compare_config", query)
+    space.invoke("topology__trace_path", {})
+    for extra in ({"platform": "ios"}, {"turn_id": "another"}, {"commands": ["display version"]}):
+        with pytest.raises(PermissionError):
+            space.invoke("device_access__compare_config", {**query, **extra})
+    result = space.invoke("device_access__compare_config", query)
+    assert result["citation"] and space.commands == 1
+    assert workspace.calls[-1][1]["turn_id"] == "turn-1"
+    assert workspace.calls[-1][1]["platform"] == "comware"
+    space.commands = workspace.module.MAX_COMMANDS
+    with pytest.raises(PermissionError):
+        space.invoke("device_access__compare_config", query)
+
+
 def test_the_model_never_sees_server_owned_run_fields(workspace, monkeypatch):
     from src.apps.device_access.backend.schemas import DiagnosisRun
     from src.platform.tools import registry
@@ -451,3 +470,30 @@ def test_the_model_never_sees_server_owned_run_fields(workspace, monkeypatch):
     [offered] = workspace.space.definitions()
     assert not {"platform", "turn_id"} & set(offered["input_schema"]["properties"])
     assert not {"platform", "turn_id"} & set(offered["input_schema"]["required"])
+
+
+@pytest.mark.parametrize("inspection_available", [True, False])
+def test_comparison_requires_authorized_baseline_provider_and_hides_internal_fields(
+    workspace, monkeypatch, inspection_available
+):
+    from src.apps.device_access.backend.config_compare import CompareConfig
+    from src.platform.tools import registry
+
+    definition = {
+        "name": "device_access__compare_config", "description": "compare",
+        "input_schema": CompareConfig.model_json_schema(), "mutates": True,
+    }
+
+    def available(**kwargs):
+        if not kwargs.get("names"):
+            return []
+        return [definition] + ([{"name": "inspection__read_config_section"}]
+                               if inspection_available else [])
+
+    monkeypatch.setattr(registry, "available_tools", available)
+    offered = workspace.space.definitions()
+    assert len(offered) == int(inspection_available)
+    if offered:
+        assert offered[0]["name"] == "device_access__compare_config"
+        assert not {"platform", "turn_id"} & set(offered[0]["input_schema"]["properties"])
+        assert not {"platform", "turn_id"} & set(offered[0]["input_schema"]["required"])

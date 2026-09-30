@@ -15,6 +15,8 @@ from . import evidence
 from .workspace import DocumentWorkspace
 
 RUN = "device_access__run"
+COMPARE = "device_access__compare_config"
+BASELINE = "inspection__read_config_section"
 SCOPE_TOOLS = frozenset({"topology__trace_path", "topology__locate"})
 PLATFORMS = frozenset({"comware", "nxos", "ios", "vrp"})
 SERVER_FIELDS = ("platform", "turn_id")
@@ -44,7 +46,10 @@ class DiagnosticWorkspace(DocumentWorkspace):
 
     def definitions(self):
         definitions = super().definitions()
-        extra = registry.available_tools(actor_id=self.actor_id, names={RUN})
+        available = registry.available_tools(actor_id=self.actor_id, names={RUN, COMPARE, BASELINE})
+        has_baseline = any(tool["name"] == BASELINE for tool in available)
+        extra = [tool for tool in available if tool["name"] == RUN
+                 or (tool["name"] == COMPARE and has_baseline)]
         for tool in extra:
             schema = tool["input_schema"]
             for field in SERVER_FIELDS:
@@ -66,26 +71,29 @@ class DiagnosticWorkspace(DocumentWorkspace):
                     self.scope.setdefault(device["address"], device["platform"])
 
     def invoke(self, name, arguments):
-        if name != RUN:
+        if name not in {RUN, COMPARE}:
             result = super().invoke(name, arguments)
             if name in SCOPE_TOOLS:
                 self.widen(result["data"])
             return result
         self.check()
-        if set(arguments) - {"host", "commands", "purpose"}:
+        allowed = {"host", "commands", "purpose"} if name == RUN else {
+            "snapshot_id", "host", "section", "target", "purpose"
+        }
+        if set(arguments) - allowed:
             raise PermissionError("Platform and turn are filled by the server")
         try:
             host = str(ipaddress.ip_address(str(arguments.get("host", "")).strip()))
         except ValueError:
             raise PermissionError("需要设备管理地址") from None
-        commands = arguments.get("commands") or []
+        command_count = len(arguments.get("commands") or []) if name == RUN else 1
         with self.lock:
             platform = self.scope.get(host)
             if platform is None:
                 raise PermissionError("该设备不在本轮路径计算或终端定位的结果中，不能登录")
-            if self.commands + len(commands) > MAX_COMMANDS:
+            if self.commands + command_count > MAX_COMMANDS:
                 raise PermissionError("本轮诊断命令预算已用完")
-            self.commands += len(commands)
+            self.commands += command_count
         result = registry.invoke(
             name,
             {**arguments, "host": host, "platform": platform, "turn_id": self.run_id},

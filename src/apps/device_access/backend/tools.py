@@ -3,7 +3,7 @@ from pydantic import BaseModel, ConfigDict
 
 from src.platform.tools.registry import Tool
 
-from . import diagnosis, saved, service
+from . import config_compare, diagnosis, saved, service
 from .schemas import DiagnosisRun, Read
 
 
@@ -17,6 +17,12 @@ def run(user, body):
     return diagnosis.run(
         user.user_id, body.host, body.platform, body.commands, body.purpose, body.turn_id
     )
+
+
+def compare_config(user, body):
+    if not user.can_execute_skills():
+        raise HTTPException(403, "当前账号不能登录设备比较配置")
+    return config_compare.compare(user.user_id, body)
 
 
 def tool_view(result):
@@ -34,6 +40,15 @@ def tool_view(result):
 
 
 TOOLS = [
+    Tool(
+        "compare_config",
+        "将指定基线原始快照与现场同一 Comware 接口或 OSPF 进程配置块比较；"
+        "先验证基线设备和完整性，再用固定只读命令采集一次，不接受任意命令或配置文本；"
+        "返回两侧脱敏片段、确定性差异和证据缺口，不自动重试",
+        config_compare.CompareConfig,
+        compare_config,
+        mutates=True,
+    ),
     Tool(
         "run",
         "登录本轮路径计算或终端定位结果中出现的设备，执行只读 display/show 或有限 ping/tracert，"

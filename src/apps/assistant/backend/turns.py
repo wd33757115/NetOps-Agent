@@ -16,7 +16,7 @@ from src.apps.materials.backend.documents import FILTERS, digest
 from src.platform.agent_runtime.base import AgentEvent, RunContext
 from src.platform.authorization.client import authority_session, authorize_worker
 
-from . import history, progress, tool_outputs
+from . import evidence, history, progress, tool_outputs
 from .diagnostic_workspace import DiagnosticWorkspace
 from .models import Turn
 from .repository import now, sessions
@@ -171,7 +171,8 @@ def step_output(actor_id, run_id, step_id):
         if step.get("output"):
             return step["output"]
         raise HTTPException(404, "这条历史步骤未留存可核对的执行结果")
-    authorize_worker(actor_id, reference["app_id"])
+    for app_id in evidence.source_apps(reference):
+        authorize_worker(actor_id, app_id)
     try:
         return tool_outputs.preview(reference)
     except (ValueError, KeyError) as exc:

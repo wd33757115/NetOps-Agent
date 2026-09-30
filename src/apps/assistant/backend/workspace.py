@@ -180,7 +180,8 @@ class DocumentWorkspace:
             if identifier not in self.business_evidence:
                 raise ValueError("Answer cites unread business evidence")
             reference = evidence.validate(self.business_evidence[identifier])
-            authorize_worker(self.actor_id, reference["app_id"])
+            for app_id in evidence.source_apps(reference):
+                authorize_worker(self.actor_id, app_id)
             if reference not in citations:
                 citations.append(reference)
         # Every evidence type actually used must have an accessible source attached.

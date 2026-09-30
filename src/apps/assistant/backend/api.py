@@ -117,7 +117,8 @@ def citation(conversation_id: str, citation_id: str, actor=Depends(user)):
             if reference.get("id") == citation_id:
                 try:
                     if reference.get("kind") == "business":
-                        authorize_worker(actor.user_id, reference["app_id"])
+                        for app_id in evidence.source_apps(reference):
+                            authorize_worker(actor.user_id, app_id)
                         return evidence.validate(reference)
                     library.LibraryReader().validate_citation(reference)
                 except ValueError as exc:

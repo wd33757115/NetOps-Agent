@@ -51,8 +51,12 @@ def login_for(owner, host):
 
 
 def _dump(platform, normalized):
+    tokens = normalized.casefold().split()
+    # Device CLIs accept unambiguous keyword prefixes and case variations. Do not
+    # let the generic command tool bypass the dedicated configuration-scope gate.
     return any(
-        normalized == prefix or normalized.startswith(prefix + " ")
+        len(tokens) >= len(prefix.split())
+        and all(expected.startswith(actual) for actual, expected in zip(tokens, prefix.split()))
         for prefix in CONFIG_DUMPS.get(platform, ())
     )
 

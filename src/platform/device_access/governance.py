@@ -30,7 +30,9 @@ _SECRET_KEY = re.compile(
     r"credential_ref|private_key|authorization|api[_-]?key)$"
 )
 _SECRET_LINE = re.compile(
-    r"(?im)^.*\b(?:password|passwd|secret|community|authentication-key|key-string)\s+[^\r\n]+"
+    r"(?im)^.*\b(?:password|passwd|secret|community|authentication(?:-mode|-key)?|"
+    r"key-string|keychain|key-chain|pre-shared-key|private-key|cipher|simple|"
+    r"api[_-]?key|access[_-]?token|authorization)\b[^\r\n]*"
 )
 
 
