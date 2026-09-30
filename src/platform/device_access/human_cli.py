@@ -1,14 +1,13 @@
-"""Complete-line human commands over a private SSH channel.
+"""Complete-line commands over a private SSH channel (batch execution).
 
-The browser never receives a writable transport. Prompt-changing network CLI
-commands are supported; interactive questions and paging stop the channel.
+Prompt-changing network CLI commands are supported; interactive questions and
+paging stop the channel. The human terminal uses terminal_gate instead.
 """
 
 import codecs
 import re
 import time
 
-from . import completion, governance
 from .contracts import DeviceAccessError
 from .errors import CommandExecutionError
 
@@ -37,136 +36,6 @@ class HumanCLI:
         self.usable = True
         self.prompt_pattern = _PROMPT
         self.last_prompt = None
-        self._completion_keys_checked = False
-        self._received_bytes = 0
-
-    def _received(self, size):
-        self._received_bytes += size
-
-    @property
-    def completion_platform(self):
-        return completion.platform(self.channel, self.last_prompt) if self.usable else None
-
-    def complete(self, command, *, request_id=None, tab_count=1, timeout=3):
-        """Edit, retrieve, and clear one Comware draft without submitting it."""
-        starting_bytes = self._received_bytes
-        sent, cleared, completed, requested = False, False, None, False
-        try:
-            self.operation.event(
-                "completion_requested",
-                command=command,
-                request_id=request_id,
-                tab_count=tab_count,
-                sent=False,
-            )
-            requested = True
-            if not self.usable:
-                raise DeviceAccessError("connection_closed", "终端连接不可继续使用")
-            if self.completion_platform != "comware":
-                raise DeviceAccessError("completion_unsupported", "当前设备不支持受控 Tab 补全")
-            completion.validate_draft(command)
-            if type(tab_count) is not int or not 1 <= tab_count <= 32:
-                raise DeviceAccessError("invalid_completion", "Tab 次数必须为 1–32")
-            self.guard()
-            if not self._completion_keys_checked:
-                on_output, self.on_output = self.on_output, lambda value: None
-                try:
-                    result = self.execute(completion.HOTKEY_COMMAND, timeout=15)
-                finally:
-                    self.on_output = on_output
-                if result["status"] != "succeeded" or not completion.reserved_editing_keys(
-                    result["output"]
-                ):
-                    raise DeviceAccessError(
-                        "completion_unsupported", "设备未确认固定清行按键，不能启用 Tab 补全"
-                    )
-                self._completion_keys_checked = True
-            # This is an editing operation, not prefix authorization. Execution
-            # still checks the final complete command against current fullmatch.
-            prompt = self.last_prompt
-            deadline = time.monotonic() + min(3, max(0.1, timeout))
-            self.channel.settimeout(2)
-            if not governance.get_policy()["patterns"]:
-                raise DeviceAccessError("policy_denied", "SSH 白名单为空，不能补全")
-            self.before_send()
-            sent = True
-            # Comware retains its candidate cursor across a cleared line.
-            # One user keypress means one physical Tab; tab_count is audit
-            # metadata, never a request to replay earlier presses.
-            self.channel.sendall(command.encode("ascii") + b"\t")
-            line = completion.read_edit(
-                self.channel, self.guard, deadline=deadline, on_received=self._received
-            )
-            if not line.startswith(prompt):
-                raise DeviceAccessError("completion_ambiguous", "补全提示符无法确认")
-            completed = line[len(prompt) :]
-            completion.validate_draft(completed, maximum=completion.MAX_LINE)
-            if not completed.casefold().startswith(command.casefold()):
-                raise DeviceAccessError("completion_ambiguous", "补全结果与输入不一致")
-            self.before_send()
-            self.channel.sendall(completion.CLEAR_AND_REDRAW)
-            empty = completion.read_edit(
-                self.channel, self.guard, deadline=deadline, on_received=self._received
-            )
-            if empty != prompt:
-                raise DeviceAccessError("completion_ambiguous", "设备输入行未清空，已停止连接")
-            cleared = True
-            self.operation.event(
-                "completion_finished",
-                status="succeeded",
-                command=command,
-                completed_command=completed,
-                cleared=True,
-                sent=True,
-                request_id=request_id,
-                tab_count=tab_count,
-            )
-            return {
-                "command": completed,
-                "changed": completed != command,
-                "received_bytes": self._received_bytes - starting_bytes,
-            }
-        except Exception as exc:
-            exc.received_bytes = self._received_bytes - starting_bytes
-            code = getattr(exc, "failure_code", "completion_failed")
-            if sent or not self.usable or getattr(exc, "failure_code", None) == "audit_unavailable":
-                self.usable = False
-                try:
-                    self.channel.close()
-                except Exception:
-                    pass
-            if requested:
-                try:
-                    self.operation.event(
-                        "completion_finished",
-                        status="denied"
-                        if not sent
-                        and code
-                        in {
-                            "invalid_completion",
-                            "completion_unsupported",
-                            "policy_denied",
-                            "not_authorized",
-                            "cancelled",
-                        }
-                        else "failed",
-                        command=command,
-                        completed_command=completed,
-                        cleared=cleared,
-                        sent=sent,
-                        request_id=request_id,
-                        tab_count=tab_count,
-                        failure_code=code,
-                    )
-                except Exception as audit_exc:
-                    audit_exc.received_bytes = self._received_bytes - starting_bytes
-                    self.usable = False
-                    try:
-                        self.channel.close()
-                    except Exception:
-                        pass
-                    raise
-            raise
 
     def _read(self, timeout):
         deadline = time.monotonic() + timeout
@@ -184,7 +53,6 @@ class HumanCLI:
                 )
             if self.channel.recv_ready():
                 raw = self.channel.recv(min(8192, self.max_bytes - size + 1))
-                self._received(len(raw))
                 if not raw:
                     raise CommandExecutionError("connection_closed", "设备连接已关闭", output)
                 size += len(raw)

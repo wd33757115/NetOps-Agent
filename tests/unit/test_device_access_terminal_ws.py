@@ -1,4 +1,3 @@
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -55,16 +54,16 @@ def test_ticket_first_frame_and_bidirectional_resize_unicode(monkeypatch):
         socket.send_json({"ticket": "one-use"})
         assert socket.receive_json()["type"] == "ready"
         socket.send_json({"type": "resize", "cols": 9999, "rows": 0})
-        socket.send_json({"type": "command", "command": "display version", "request_id": "cmd1"})
+        socket.send_json({"type": "input", "data": "dis\t"})
         assert socket.receive_json() == {"type": "output", "data": "设备终端\r\n<SW>"}
         assert socket.receive_json()["type"] == "closed"
     assert received == [
         {"type": "resize", "cols": 300, "rows": 5},
-        {"type": "command", "command": "display version", "request_id": "cmd1"},
+        {"type": "input", "data": "dis\t"},
     ]
 
 
-def test_old_raw_input_protocol_cannot_bypass_command_policy(monkeypatch):
+def test_whole_command_frames_are_not_a_side_door(monkeypatch):
     import time
 
     received = []
@@ -90,7 +89,7 @@ def test_old_raw_input_protocol_cannot_bypass_command_policy(monkeypatch):
         with client.websocket_connect("/ws/v1/terminals/test") as socket:
             socket.send_json({"ticket": "ticket"})
             assert socket.receive_json()["type"] == "ready"
-            socket.send_json({"type": "input", "data": "reboot\n"})
+            socket.send_json({"type": "command", "command": "reboot", "request_id": "r1"})
             assert socket.receive_json()["type"] == "closed"
     assert received == []
 
@@ -164,191 +163,68 @@ def test_failed_login_closes_with_a_reason_the_page_can_prompt_for(monkeypatch):
 
 def test_typed_login_is_saved_only_after_a_successful_login(monkeypatch):
     events, saved_logins, _ = run_pump(monkeypatch, save=True)
-    assert {"type": "ready", "completion": None} in events and events[-1]["reason"] is None
+    assert {"type": "ready"} in events and events[-1]["reason"] is None
     assert saved_logins == [("u", "s1", "ops", "typed")]
     _, saved_logins, _ = run_pump(monkeypatch, save=False)
     assert saved_logins == []
 
 
-def test_complete_frame_preserves_revision_without_becoming_a_command(monkeypatch):
-    received = []
-    monkeypatch.setattr(terminal.service, "consume_ticket", lambda *args: {})
-
-    def pump(payload, incoming, outgoing, stop):
-        outgoing.put({"type": "ready", "completion": "comware"})
-        received.append(incoming.get(timeout=3))
-        outgoing.put({"type": "closed", "reason": None})
-        stop.set()
-
-    monkeypatch.setattr(terminal, "pump", pump)
-    with (
-        TestClient(application()) as client,
-        client.websocket_connect("/ws/v1/terminals/test") as socket,
-    ):
-        socket.send_json({"ticket": "ticket"})
-        assert socket.receive_json()["completion"] == "comware"
-        socket.send_json(
-            {"type": "complete", "command": "dis", "request_id": "tab1", "revision": 2}
-        )
-        assert socket.receive_json()["type"] == "closed"
-    assert received == [
-        {"type": "complete", "command": "dis", "request_id": "tab1", "revision": 2, "tab_count": 1}
-    ]
-
-
-@pytest.mark.parametrize(
-    "field,value",
-    [
-        ("revision", None),
-        ("revision", True),
-        ("revision", -1),
-        ("revision", 2**31),
-        ("revision", "1"),
-        ("tab_count", True),
-        ("tab_count", 0),
-        ("tab_count", 33),
-        ("tab_count", "2"),
-    ],
-)
-def test_invalid_completion_metadata_never_reaches_transport(monkeypatch, field, value):
-    import time
-
-    received = []
-    monkeypatch.setattr(
-        terminal.service,
-        "consume_ticket",
-        lambda *args: {
-            "owner": "u",
-            "host": "10.0.0.1",
-            "operation_id": "test",
-        },
-    )
-
-    def pump(payload, incoming, outgoing, stop):
-        outgoing.put({"type": "ready"})
-        while not stop.is_set():
-            if not incoming.empty():
-                received.append(incoming.get_nowait())
-            time.sleep(0.01)
-
-    monkeypatch.setattr(terminal, "pump", pump)
-    with (
-        TestClient(application()) as client,
-        client.websocket_connect("/ws/v1/terminals/test") as socket,
-    ):
-        socket.send_json({"ticket": "ticket"})
-        socket.receive_json()
-        socket.send_json(
-            {
-                "type": "complete",
-                "command": "dis",
-                "request_id": "tab1",
-                "revision": 1,
-                field: value,
-            }
-        )
-        assert socket.receive_json()["type"] == "closed"
-    assert received == []
-
-
-def completion_pump(monkeypatch, requests, *, reject=False):
+def test_pump_passes_keys_through_and_checks_enter(monkeypatch, ssh_log_storage):
     import contextlib
     import queue
     import threading
     from types import SimpleNamespace
 
-    incoming, outgoing = queue.Queue(), queue.Queue()
-    for request in requests:
-        incoming.put(request)
-    completed, executed, summaries = [], [], []
+    from src.platform.device_access import governance, terminal_gate
+    from tests.unit.test_device_access_terminal_gate import Device
 
-    class Channel:
-        closed = False
+    monkeypatch.setattr(terminal_gate, "QUIET", 0.01)
+    governance.save_policy([r"display .*", "quit"], "admin")
+
+    class Channel(Device):
+        def recv_ready(self):
+            return bool(self.pending)
+
+        def recv(self, size):
+            return self.pending.pop(0).encode()
+
+        def exit_status_ready(self):
+            return "quit" in self.executed and not self.pending
 
         def settimeout(self, timeout):
             pass
 
-        def exit_status_ready(self):
-            return incoming.empty()
+    channel = Channel(outputs={"display clock": "10:00:00 UTC Wed 09/30/2026"})
 
     class Access:
         @contextlib.contextmanager
         def terminal(self, *args, **kwargs):
-            yield Channel(), lambda: None
+            governance.current_operation().event("connecting", mode="human")
+            yield channel, lambda: None
 
-    class CLI:
-        completion_platform = "comware"
-        usable = True
-
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def initialize(self):
-            pass
-
-        def complete(self, command, *, request_id, tab_count=1):
-            completed.append((command, request_id))
-            if reject:
-                raise DeviceAccessError("completion_unsupported", "补全不受支持")
-            return {"command": "display ", "changed": True, "received_bytes": 50}
-
-        def execute(self, command, *, command_id):
-            executed.append((command, command_id))
-            return {"status": "succeeded"}
-
-    monkeypatch.setattr(terminal, "HumanCLI", CLI)
     monkeypatch.setattr(
-        terminal, "authorize_worker", lambda *args: SimpleNamespace(can_execute_skills=lambda: True)
+        terminal, "authorize_worker", lambda *a: SimpleNamespace(can_execute_skills=lambda: True)
     )
-    monkeypatch.setattr(terminal.service, "terminal_login", lambda payload: ("ops", "test-secret"))
+    monkeypatch.setattr(terminal.service, "terminal_login", lambda payload: ("ops", "typed"))
     monkeypatch.setattr(terminal.service, "access", lambda *args, **kwargs: Access())
-    monkeypatch.setattr(terminal.service, "finish", lambda *args: summaries.append(args))
-    terminal.pump(
-        {"owner": "u", "operation_id": "op", "host": "192.0.2.1", "port": 22},
-        incoming,
-        outgoing,
-        threading.Event(),
+    monkeypatch.setattr(terminal.service, "finish", lambda *args: None)
+    incoming, outgoing = queue.Queue(), queue.Queue()
+    for data in ("reboot", "\r", "dis", "\t", "clock", "\r", "quit\r"):
+        incoming.put({"type": "input", "data": data})
+    payload = {"owner": "u", "operation_id": "op", "host": "10.0.0.1", "port": 22}
+    worker = threading.Thread(
+        target=terminal.pump, args=(payload, incoming, outgoing, threading.Event())
     )
+    worker.start()
+    worker.join(timeout=10)
+    assert not worker.is_alive()
+    assert channel.executed == ["", "display clock", "quit"]
     events = []
     while not outgoing.empty():
         events.append(outgoing.get())
-    return completed, executed, events, summaries
-
-
-def test_pump_completes_once_and_only_executes_a_separate_enter_command(monkeypatch):
-    tab = {"type": "complete", "command": "dis", "request_id": "tab1", "revision": 3}
-    command = {"type": "command", "command": "display clock", "request_id": "cmd1"}
-    completed, executed, events, summaries = completion_pump(monkeypatch, [tab, tab, command])
-    assert completed == [("dis", "tab1")]
-    assert executed == [("display clock", "cmd1")]
-    replies = [event for event in events if event["type"] == "completion_result"]
-    assert len(replies) == 2 and replies[0] == replies[1]
-    assert replies[0]["revision"] == 3 and replies[0]["command"] == "display "
-    assert summaries[0][2]["completion_output_bytes"] == 50
-    assert not any(event["type"] == "output" for event in events)
-
-
-def test_completion_request_id_cannot_be_reused_to_execute_a_command(monkeypatch):
-    completed, executed, events, _ = completion_pump(
-        monkeypatch,
-        [
-            {"type": "complete", "command": "dis", "request_id": "one", "revision": 3},
-            {"type": "command", "command": "dis", "request_id": "one"},
-        ],
-    )
-    assert len(completed) == 1 and executed == []
-    assert events[-1]["reason"] == "invalid_request"
-
-
-def test_rejected_completion_preserves_revision_and_allows_normal_commands(monkeypatch):
-    _, executed, events, _ = completion_pump(
-        monkeypatch,
-        [
-            {"type": "complete", "command": "dis", "request_id": "tab1", "revision": 4},
-            {"type": "command", "command": "display clock", "request_id": "cmd1"},
-        ],
-        reject=True,
-    )
-    reply = next(event for event in events if event["type"] == "completion_rejected")
-    assert reply["revision"] == 4 and reply["request_id"] == "tab1"
-    assert executed == [("display clock", "cmd1")]
+    assert events[-1]["reason"] is None
+    shown = "".join(event.get("data", "") for event in events)
+    assert "已拦截「reboot」" in shown
+    log = next(iter(ssh_log_storage.objects.values())).decode()
+    assert "命令: display clock" in log and "10:00:00 UTC Wed 09/30/2026" in log
+    assert "命令已拒绝" in log and "reboot" in log

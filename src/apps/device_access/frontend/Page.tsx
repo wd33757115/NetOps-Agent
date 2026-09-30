@@ -151,7 +151,7 @@ function CommandPolicyModal({ open, onClose }: { open: boolean; onClose: () => v
     finally { setSaving(false) }
   }
   return <Modal open={open} title="全局命令白名单" okText="保存" cancelText="取消" onCancel={onClose} onOk={() => void save()} confirmLoading={saving} okButtonProps={{ disabled: loading || !policy }} destroyOnClose>
-    <p className="ssh-modal-note">每行一个正则表达式，完整命令匹配任一规则即可执行。规则对终端、批量执行和应用调用统一生效，保存后立即使用。</p>
+    <p className="ssh-modal-note">每行一个正则表达式，完整命令匹配任一规则即可执行。规则对终端、批量执行和应用调用统一生效，保存后立即使用。终端在按回车时检查提示符后的整行，设备缩写（如 dis）也须被规则覆盖。白名单用于防误操作，只读边界请用设备账号角色或 TACACS 命令授权。</p>
     <p className="ssh-modal-note"><code>.*</code> 允许全部命令；清空后禁止所有命令。</p>
     {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 12 }} />}
     <Input.TextArea aria-label="命令白名单规则" value={patterns} onChange={event => setPatterns(event.target.value)} rows={8} disabled={loading || !policy} spellCheck={false} placeholder="例如 ^display .*$" />

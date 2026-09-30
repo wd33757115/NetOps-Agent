@@ -2,17 +2,14 @@ import React from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { HostKeyModal, LiveTerminal, LoginModal } from './DeviceTerminal'
-import { Terminal } from '@xterm/xterm'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
-const terminal = vi.hoisted(() => ({ onData: vi.fn((_callback: (data: string) => void) => ({ dispose: vi.fn() })), write: vi.fn((_text: string, done?: () => void) => done?.()) }))
+const terminal = vi.hoisted(() => ({ onData: vi.fn((_callback: (data: string) => void) => ({ dispose: vi.fn() })), write: vi.fn() }))
 vi.mock('../../config/api', () => ({ api }))
 vi.mock('@xterm/xterm', () => ({
   Terminal: vi.fn().mockImplementation(() => ({
     loadAddon: vi.fn(), open: vi.fn(), onData: terminal.onData, write: terminal.write, focus: vi.fn(), dispose: vi.fn(), cols: 80, rows: 24,
-    options: {}, scrollToBottom: vi.fn(), attachCustomKeyEventHandler: vi.fn(), hasSelection: () => false,
-    registerMarker: () => ({ line: 0, isDisposed: false, dispose: vi.fn() }),
-    buffer: { active: { cursorX: 7, cursorY: 0, baseY: 0, getLine: () => ({ isWrapped: false, translateToString: () => '<VSR-1>', getCell: () => ({ getChars: () => 'x', getWidth: () => 1 }) }) } },
+    attachCustomKeyEventHandler: vi.fn(), hasSelection: () => false,
   })),
 }))
 vi.mock('@xterm/addon-fit', () => ({ FitAddon: vi.fn().mockImplementation(() => ({ fit: vi.fn() })) }))
@@ -106,242 +103,50 @@ it('the login prompt requires both fields', async () => {
   expect(submit).not.toHaveBeenCalled()
 })
 
-const commandsSent = () => Socket.last.sent.map(value => JSON.parse(value)).filter(value => value.type === 'command')
-const completionsSent = () => Socket.last.sent.map(value => JSON.parse(value)).filter(value => value.type === 'complete')
+const inputsSent = () => Socket.last.sent.map(value => JSON.parse(value)).filter(value => value.type === 'input').map(value => value.data)
 const typeInTerminal = (value: string) => act(() => terminal.onData.mock.calls.at(-1)![0](value))
-const connectedTerminal = async (completion?: string | null) => {
+const connectedTerminal = async () => {
   render(<LiveTerminal target={{ session_id: 's1' }} />)
   await waitFor(() => expect(ticketBodies()).toHaveLength(1))
-  Socket.last.emit({ type: 'ready', completion })
-  return screen.getByLabelText('设备 SSH 终端')
+  Socket.last.emit({ type: 'ready' })
 }
 
-it('keeps terminal input local and sends only complete commands, one at a time', async () => {
+it('sends keys as typed so the device does its own Tab, ? and history', async () => {
   await connectedTerminal()
-  expect(Terminal).toHaveBeenCalledWith(expect.objectContaining({ cursorBlink: true }))
-  expect(screen.queryByLabelText('设备命令')).not.toBeInTheDocument()
-  expect(screen.queryByRole('button', { name: '执行' })).not.toBeInTheDocument()
-  typeInTerminal(' display version ')
-  expect(commandsSent()).toHaveLength(0)
-  typeInTerminal('\r')
-  expect(commandsSent()).toEqual([{ type: 'command', command: ' display version ', request_id: expect.any(String) }])
-  typeInTerminal('another command\r')
-  typeInTerminal('\r')
-  expect(commandsSent()).toHaveLength(1)
-  const { request_id } = commandsSent()[0]
-  Socket.last.emit({ type: 'command_sent', request_id })
-  Socket.last.emit({ type: 'output', data: 'Comware version\r\n' })
-  expect(terminal.write).toHaveBeenCalledWith('Comware version\r\n')
-  Socket.last.emit({ type: 'command_finished', request_id: 'another-command', status: 'succeeded' })
-  typeInTerminal('\r')
-  expect(commandsSent()).toHaveLength(1)
-  Socket.last.emit({ type: 'command_finished', request_id, status: 'succeeded' })
-  typeInTerminal('display clock')
-  typeInTerminal('\r')
-  expect(commandsSent()).toHaveLength(2)
-  expect(Socket.last.sent.map(value => JSON.parse(value)).some(value => value.type === 'input')).toBe(false)
+  for (const key of ['dis', '\t', '?', '\x1b[A', '\x7f', '\r']) typeInTerminal(key)
+  expect(inputsSent()).toEqual(['dis', '\t', '?', '\x1b[A', '\x7f', '\r'])
+  Socket.last.emit({ type: 'output', data: 'play ' })
+  expect(terminal.write).toHaveBeenCalledWith('play ')
 })
 
-it('shows a rejected command and keeps it editable for correction', async () => {
+it('refuses a multi-line paste but sends one pasted line with its Enter', async () => {
   await connectedTerminal()
-  typeInTerminal('system-view')
-  typeInTerminal('\r')
-  const { request_id } = commandsSent()[0]
-  Socket.last.emit({ type: 'command_sent', request_id })
-  Socket.last.emit({ type: 'command_rejected', request_id, message: '命令不符合全局白名单' })
-  expect(screen.getByText('命令不符合全局白名单')).toBeInTheDocument()
-  typeInTerminal('\x7f')
-  typeInTerminal('\r')
-  expect(commandsSent()[1].command).toBe('system-vie')
+  typeInTerminal('display version\rreboot\r')
+  expect(inputsSent()).toEqual([])
+  expect(screen.getByText('多行粘贴未发送：请逐条粘贴并回车')).toBeInTheDocument()
+  typeInTerminal('display version\r')
+  expect(inputsSent()).toEqual(['display version\r'])
 })
 
-it('rejects multiline paste and never forwards terminal control keys', async () => {
-  const input = await connectedTerminal()
-  const before = Socket.last.sent.length
-  fireEvent.paste(input, { clipboardData: { getData: () => 'display version\nsystem-view' } })
-  expect(screen.getByText(/一次.*一条|多行/)).toBeInTheDocument()
-  typeInTerminal('\x03')
-  typeInTerminal('\t')
-  typeInTerminal('display clock\rreboot\r')
-  expect(Socket.last.sent).toHaveLength(before)
-})
-
-it('browses in-memory command history and restores the unsent draft', async () => {
+it('keeps an oversized paste local without disconnecting', async () => {
   await connectedTerminal()
-  typeInTerminal('display version')
-  typeInTerminal('\r')
-  const { request_id } = commandsSent()[0]
-  Socket.last.emit({ type: 'command_sent', request_id })
-  Socket.last.emit({ type: 'command_finished', request_id, status: 'succeeded' })
-  typeInTerminal('display interface')
-  typeInTerminal('\x1b[A')
-  typeInTerminal('\x1b[B')
-  typeInTerminal('\r')
-  expect(commandsSent()[1].command).toBe('display interface')
+  typeInTerminal('中'.repeat(3000))
+  expect(inputsSent()).toEqual([])
+  expect(screen.getByText('粘贴内容过长，请分段粘贴')).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: '重新连接' })).not.toBeInTheDocument()
 })
 
-it('stops by cancelling the session without sending a remote control character', async () => {
+it('shows a notice from the server under the terminal', async () => {
+  await connectedTerminal()
+  Socket.last.emit({ type: 'notice', message: '多行粘贴未发送：请逐条粘贴并回车' })
+  expect(screen.getByText('多行粘贴未发送：请逐条粘贴并回车')).toBeInTheDocument()
+})
+
+it('stops by cancelling the session', async () => {
   await connectedTerminal()
   const socket = Socket.last
   fireEvent.click(screen.getByRole('button', { name: '停止会话' }))
   expect(JSON.parse(socket.sent[socket.sent.length - 1])).toEqual({ type: 'cancel' })
   expect(socket.close).toHaveBeenCalled()
-  typeInTerminal('display clock')
-  typeInTerminal('\r')
-  expect(commandsSent()).toHaveLength(0)
   expect(screen.getByRole('button', { name: '重新连接' })).toBeInTheDocument()
-})
-
-it('keeps an oversized UTF-8 frame local and lets the user correct it without disconnecting', async () => {
-  const host = await connectedTerminal()
-  fireEvent.paste(host, { clipboardData: { getData: () => '中'.repeat(3000) } })
-  typeInTerminal('\r')
-  expect(commandsSent()).toEqual([])
-  expect(screen.getByText('命令过长，请缩短后重试。')).toBeInTheDocument()
-  expect(Socket.last.close).not.toHaveBeenCalled()
-  typeInTerminal('\x03')
-  fireEvent.paste(host, { clipboardData: { getData: () => 'display clock' } })
-  expect(commandsSent()).toEqual([])
-  typeInTerminal('\r')
-  expect(commandsSent()[0].command).toBe('display clock')
-})
-
-it('sends a separate Comware completion request and only executes the completed draft after Enter', async () => {
-  const host = await connectedTerminal('comware')
-  typeInTerminal('dis')
-  typeInTerminal('\t')
-  expect(completionsSent()).toEqual([{ type: 'complete', command: 'dis', tab_count: 1, request_id: expect.any(String), revision: 1 }])
-  expect(screen.getByText('已连接 · 正在补全命令…')).toBeInTheDocument()
-  const request = completionsSent()[0]
-  typeInTerminal('ignored')
-  typeInTerminal('\r')
-  typeInTerminal('\t')
-  fireEvent.paste(host, { clipboardData: { getData: () => 'also ignored' } })
-  expect(completionsSent()).toHaveLength(1)
-  expect(commandsSent()).toEqual([])
-  Socket.last.emit({ type: 'completion_result', request_id: 'another-request', revision: request.revision, command: 'wrong' })
-  Socket.last.emit({ type: 'completion_result', request_id: request.request_id, revision: 0, command: 'wrong' })
-  typeInTerminal('\r')
-  expect(commandsSent()).toEqual([])
-  Socket.last.emit({ type: 'completion_result', request_id: request.request_id, revision: request.revision, command: 'display ' })
-  expect(terminal.write.mock.calls.at(-1)?.[0]).toContain('<VSR-1>display ')
-  expect(commandsSent()).toEqual([])
-  typeInTerminal('clo')
-  typeInTerminal('\t')
-  expect(completionsSent()[1]).toMatchObject({ command: 'display clo', revision: 2 })
-  const second = completionsSent()[1]
-  Socket.last.emit({ type: 'completion_result', request_id: second.request_id, revision: second.revision, command: 'display clock ' })
-  typeInTerminal('\r')
-  expect(commandsSent()).toEqual([{ type: 'command', command: 'display clock ', request_id: expect.any(String) }])
-  expect(Socket.last.sent.map(value => JSON.parse(value)).some(value => value.type === 'input')).toBe(false)
-})
-
-it('keeps unsupported devices and a cursor in the middle of the command local', async () => {
-  await connectedTerminal(null)
-  typeInTerminal('dis')
-  typeInTerminal('\t')
-  expect(screen.getByText('当前设备未支持远端 Tab 补全，请输入完整命令。')).toBeInTheDocument()
-  expect(completionsSent()).toEqual([])
-  typeInTerminal('\x1b[D')
-  typeInTerminal('\t')
-  expect(screen.getByText('请先将光标移到命令末尾再补全。')).toBeInTheDocument()
-  expect(completionsSent()).toEqual([])
-  typeInTerminal('\r')
-  expect(commandsSent()[0].command).toBe('dis')
-})
-
-it('restores an editable original draft after rejection or no available completion', async () => {
-  await connectedTerminal('comware')
-  typeInTerminal('dis')
-  typeInTerminal('\t')
-  let request = completionsSent()[0]
-  Socket.last.emit({ type: 'completion_rejected', request_id: request.request_id, revision: request.revision, message: '补全不可用' })
-  expect(screen.getByText('补全不可用')).toBeInTheDocument()
-  typeInTerminal('p')
-  typeInTerminal('\t')
-  request = completionsSent()[1]
-  expect(request.command).toBe('disp')
-  Socket.last.emit({ type: 'completion_result', request_id: request.request_id, revision: request.revision, command: 'disp', message: '没有可用补全' })
-  expect(screen.getByText('没有可用补全')).toBeInTheDocument()
-  typeInTerminal('lay clock')
-  typeInTerminal('\r')
-  expect(commandsSent()[0].command).toBe('display clock')
-})
-
-it('does not apply unsafe completion output to the terminal', async () => {
-  await connectedTerminal('comware')
-  typeInTerminal('dis')
-  typeInTerminal('\t')
-  const request = completionsSent()[0]
-  const invalid = 'display clock\r\nreboot\x1b[2J'
-  Socket.last.emit({ type: 'completion_result', request_id: request.request_id, revision: request.revision, command: invalid })
-  expect(terminal.write).not.toHaveBeenCalledWith(expect.stringContaining(invalid))
-  expect(screen.getByText('设备返回的补全内容无法使用，请继续手动输入。')).toBeInTheDocument()
-  typeInTerminal('\r')
-  expect(commandsSent()[0].command).toBe('dis')
-})
-
-it('ignores completion results after stop and from the previous connection after reconnect', async () => {
-  await connectedTerminal('comware')
-  typeInTerminal('dis')
-  typeInTerminal('\t')
-  const oldSocket = Socket.last
-  const request = completionsSent()[0]
-  fireEvent.click(screen.getByRole('button', { name: '停止会话' }))
-  const writesAfterStop = terminal.write.mock.calls.length
-  oldSocket.emit({ type: 'completion_result', request_id: request.request_id, revision: request.revision, command: 'stale' })
-  expect(terminal.write).toHaveBeenCalledTimes(writesAfterStop)
-  fireEvent.click(screen.getByRole('button', { name: '重新连接' }))
-  await waitFor(() => expect(ticketBodies()).toHaveLength(2))
-  Socket.last.emit({ type: 'ready', completion: 'comware' })
-  oldSocket.emit({ type: 'completion_result', request_id: request.request_id, revision: request.revision, command: 'stale' })
-  typeInTerminal('display clock')
-  typeInTerminal('\r')
-  expect(commandsSent()[0].command).toBe('display clock')
-})
-
-it('unfreezes the unchanged draft when sending a completion request fails', async () => {
-  await connectedTerminal('comware')
-  const send = vi.spyOn(Socket.last, 'send').mockImplementationOnce(() => { throw new Error('connection unavailable') })
-  typeInTerminal('dis')
-  typeInTerminal('\t')
-  expect(screen.getByText('补全请求未发送，请检查连接。')).toBeInTheDocument()
-  send.mockRestore()
-  typeInTerminal('play clock')
-  typeInTerminal('\r')
-  expect(commandsSent()[0].command).toBe('display clock')
-})
-
-it('cycles consecutive Tab requests with the original seed and resets after editing', async () => {
-  await connectedTerminal('comware')
-  typeInTerminal('display cl')
-  typeInTerminal('\t')
-  let request = completionsSent()[0]
-  expect(request).toMatchObject({ command: 'display cl', tab_count: 1 })
-  typeInTerminal('\t')
-  expect(completionsSent()).toHaveLength(1)
-  Socket.last.emit({ type: 'completion_result', request_id: request.request_id, revision: request.revision, command: 'display client-verify' })
-  typeInTerminal('\t')
-  request = completionsSent()[1]
-  expect(request).toMatchObject({ command: 'display cl', tab_count: 2 })
-  Socket.last.emit({ type: 'completion_result', request_id: request.request_id, revision: request.revision, command: 'display clock' })
-  typeInTerminal(' detail')
-  typeInTerminal('\t')
-  request = completionsSent()[2]
-  expect(request).toMatchObject({ command: 'display clock detail', tab_count: 1 })
-  expect(commandsSent()).toEqual([])
-})
-
-it('starts a new Tab cycle from the current draft after a rejected completion', async () => {
-  await connectedTerminal('comware')
-  typeInTerminal('display cl')
-  typeInTerminal('\t')
-  let request = completionsSent()[0]
-  Socket.last.emit({ type: 'completion_result', request_id: request.request_id, revision: request.revision, command: 'display client-verify' })
-  typeInTerminal('\t')
-  request = completionsSent()[1]
-  Socket.last.emit({ type: 'completion_rejected', request_id: request.request_id, revision: request.revision, message: '补全不可用' })
-  typeInTerminal('\t')
-  expect(completionsSent()[2]).toMatchObject({ command: 'display client-verify', tab_count: 1 })
-  expect(commandsSent()).toEqual([])
 })

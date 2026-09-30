@@ -1,6 +1,12 @@
-"""Ticket-authenticated, bounded human terminal. No batch session is reused."""
+"""Ticket-authenticated, bounded human terminal. No batch session is reused.
+
+Keystrokes go to the device as typed; the platform gate checks each command on
+Enter against the SSH whitelist and records it with its output.
+"""
 
 import asyncio
+import codecs
+import collections
 import contextlib
 import hashlib
 import json
@@ -14,7 +20,7 @@ from src.platform.authorization.client import authorize_worker
 from src.platform.device_access import AccessContext, AccessGrant
 from src.platform.device_access.contracts import DeviceAccessError
 from src.platform.device_access.governance import SSHOperation, write_event
-from src.platform.device_access.human_cli import HumanCLI
+from src.platform.device_access.terminal_gate import TerminalGate
 from src.platform.kernel.runtime import invocation
 
 from . import saved, service
@@ -25,9 +31,7 @@ def pump(payload, incoming, outgoing, stop):
     host, port, session_id = payload["host"], payload["port"], payload.get("session_id")
     started, last_input, last_check = time.monotonic(), time.monotonic(), 0
     output_bytes, input_bytes, digest = 0, 0, hashlib.sha256()
-    completion_output_bytes = 0
     operation = None
-    seen = {}
     status, reason = "completed", None
     ref = session_id or operation_id
     try:
@@ -70,133 +74,77 @@ def pump(payload, incoming, outgoing, stop):
             if payload.get("save") and session_id:
                 saved.save_login(owner, session_id, username, password)
 
-            def output(value):
-                nonlocal output_bytes
-                raw = value.encode()
-                output_bytes += len(raw)
-                digest.update(raw)
-                if output_bytes + completion_output_bytes > 4 * 1024 * 1024:
-                    raise DeviceAccessError("output_limit", "终端输出超过会话上限")
-                outgoing.put({"type": "output", "data": value}, timeout=2)
-
-            def guard():
+            def before_send():
+                # Every allowed command re-checks the grant and the account.
                 nonlocal last_check
                 if stop.is_set():
                     raise DeviceAccessError("cancelled", "终端已停止")
-                if time.monotonic() - last_check >= 0.5:
-                    lease()
-                    if not authorized():
-                        raise DeviceAccessError("cancelled", "终端已停止")
-                    last_check = time.monotonic()
-                if time.monotonic() - started > 900:
-                    raise DeviceAccessError("terminal_expired", "终端已达到会话时限")
+                lease()
+                authorized()
+                last_check = time.monotonic()
 
-            def before_send():
-                nonlocal last_check
-                last_check = 0
-                guard()
+            def show(text):
+                outgoing.put({"type": "output", "data": text}, timeout=2)
 
-            cli = HumanCLI(channel, operation, guard, on_output=output, before_send=before_send)
-            cli.initialize()
-            outgoing.put({"type": "ready", "completion": cli.completion_platform}, timeout=2)
-            while not stop.is_set():
-                current = time.monotonic()
-                if current - started > 900 or current - last_input > 120:
-                    raise DeviceAccessError("terminal_expired", "终端已达到会话或空闲时限")
-                if current - last_check > 5:
-                    lease()
-                    authorized()
-                    last_check = current
-                try:
-                    event = incoming.get_nowait()
-                except queue.Empty:
-                    event = None
-                if event:
-                    last_input = current
-                    channel.settimeout(2)
-                    if event["type"] in {"command", "complete"}:
-                        command, request_id = event["command"], event["request_id"]
-                        is_completion = event["type"] == "complete"
-                        command_hash = hashlib.sha256(
-                            json.dumps(event, sort_keys=True).encode()
-                        ).hexdigest()
-                        if request_id in seen:
-                            previous_hash, previous_event = seen[request_id]
-                            if previous_hash != command_hash:
-                                raise DeviceAccessError("invalid_request", "命令请求编号重复")
-                            outgoing.put(previous_event, timeout=2)
-                            continue
-                        input_bytes += len(command.encode())
-                        if input_bytes > 1024 * 1024:
-                            raise DeviceAccessError("input_limit", "终端输入超过会话上限")
-                        if not is_completion:
-                            outgoing.put(
-                                {"type": "command_sent", "request_id": request_id}, timeout=2
-                            )
+            gate = TerminalGate(channel, operation, show, before_send=before_send)
+            decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+            outgoing.put({"type": "ready"}, timeout=2)
+            held = collections.deque()  # input waits while Enter is being checked
+            try:
+                while not stop.is_set():
+                    current = time.monotonic()
+                    if current - started > 900 or current - last_input > 120:
+                        raise DeviceAccessError("terminal_expired", "终端已达到会话或空闲时限")
+                    if current - last_check > 5:
+                        lease()
+                        authorized()
+                        last_check = current
+                    while True:
                         try:
-                            if is_completion:
-                                result = cli.complete(
-                                    command,
-                                    request_id=request_id,
-                                    tab_count=event.get("tab_count", 1),
-                                )
-                                completion_output_bytes += result.get("received_bytes", 0)
-                                if output_bytes + completion_output_bytes > 4 * 1024 * 1024:
-                                    raise DeviceAccessError("output_limit", "终端输出超过会话上限")
-                                reply = {
-                                    "type": "completion_result",
-                                    "request_id": request_id,
-                                    "revision": event["revision"],
-                                    "command": result["command"],
-                                    "message": "" if result["changed"] else "没有可用补全",
-                                }
-                            else:
-                                result = cli.execute(command, command_id=request_id)
-                                reply = {
-                                    "type": "command_finished",
-                                    "request_id": request_id,
-                                    "status": result["status"],
-                                    "message": result.get("error"),
-                                }
-                        except DeviceAccessError as exc:
-                            if is_completion:
-                                completion_output_bytes += getattr(exc, "received_bytes", 0)
-                                if output_bytes + completion_output_bytes > 4 * 1024 * 1024:
-                                    raise DeviceAccessError(
-                                        "output_limit", "终端输出超过会话上限"
-                                    ) from None
-                            if not cli.usable or exc.failure_code in {
-                                "audit_unavailable",
-                                "output_limit",
-                            }:
-                                raise
-                            reply = {
-                                "type": "completion_rejected"
-                                if is_completion
-                                else "command_rejected",
-                                "request_id": request_id,
-                                "message": ("补全未完成：" if is_completion else "命令被拒绝：")
-                                + str(exc),
-                            }
-                            if is_completion:
-                                reply["revision"] = event["revision"]
-                        seen[request_id] = (command_hash, reply)
-                        outgoing.put(reply, timeout=2)
-                    else:
-                        timer = threading.Timer(3, channel.close)
-                        timer.daemon = True
-                        timer.start()
-                        try:
-                            channel.resize_pty(width=event["cols"], height=event["rows"])
-                            operation.event(
-                                "terminal_resized", cols=event["cols"], rows=event["rows"]
-                            )
-                        finally:
-                            timer.cancel()
-                if channel.closed or channel.exit_status_ready():
-                    break
-                else:
-                    stop.wait(0.02)
+                            held.append(incoming.get_nowait())
+                            last_input = current
+                        except queue.Empty:
+                            break
+                    if held and not gate.busy:
+                        event = held.popleft()
+                        channel.settimeout(2)
+                        if event["type"] == "input":
+                            input_bytes += len(event["data"].encode())
+                            if input_bytes > 1024 * 1024:
+                                raise DeviceAccessError("input_limit", "终端输入超过会话上限")
+                            notice = gate.typed(event["data"])
+                            if notice:
+                                outgoing.put({"type": "notice", "message": notice}, timeout=2)
+                        else:
+                            timer = threading.Timer(3, channel.close)
+                            timer.daemon = True
+                            timer.start()
+                            try:
+                                channel.resize_pty(width=event["cols"], height=event["rows"])
+                                gate.resize(event["cols"], event["rows"])
+                            finally:
+                                timer.cancel()
+                    if channel.recv_ready():
+                        raw = channel.recv(8192)
+                        if not raw:
+                            break
+                        output_bytes += len(raw)
+                        digest.update(raw)
+                        if output_bytes > 4 * 1024 * 1024:
+                            raise DeviceAccessError("output_limit", "终端输出超过会话上限")
+                        gate.received(decoder.decode(raw))
+                    elif channel.closed or channel.exit_status_ready():
+                        break
+                    elif not held or gate.busy:
+                        stop.wait(0.02)
+                    gate.tick()
+            except BaseException:
+                # Keep the original failure; the unfinished command is recorded if possible.
+                with contextlib.suppress(Exception):
+                    gate.close()
+                raise
+            else:
+                gate.close()
     except Exception as exc:
         status = "waiting_for_input"
         reason = exc.failure_code if isinstance(exc, DeviceAccessError) else "terminal_unavailable"
@@ -225,7 +173,6 @@ def pump(payload, incoming, outgoing, stop):
                     "failure_code": reason,
                     "input_bytes": input_bytes,
                     "output_bytes": output_bytes,
-                    "completion_output_bytes": completion_output_bytes,
                     "output_sha256": digest.hexdigest(),
                     "duration_seconds": round(time.monotonic() - started, 2),
                     "kind": "human_terminal_audit",
@@ -242,7 +189,7 @@ def pump(payload, incoming, outgoing, stop):
 async def connect(socket: WebSocket, session_id: str):
     await socket.accept()
     stop = threading.Event()
-    incoming, outgoing = queue.Queue(maxsize=32), queue.Queue(maxsize=32)
+    incoming, outgoing = queue.Queue(maxsize=256), queue.Queue(maxsize=256)
     worker = None
     try:
         raw = await asyncio.wait_for(socket.receive_text(), timeout=5)
@@ -260,35 +207,11 @@ async def connect(socket: WebSocket, session_id: str):
                     raise ValueError("Input frame too large")
                 event = json.loads(raw)
                 if (
-                    event.get("type") in {"command", "complete"}
-                    and isinstance(event.get("command"), str)
-                    and isinstance(event.get("request_id"), str)
-                    and 0 < len(event["request_id"]) <= 100
-                    and (
-                        event["type"] == "command"
-                        or (
-                            type(event.get("revision")) is int
-                            and 0 <= event["revision"] <= 2**31 - 1
-                            and type(event.get("tab_count", 1)) is int
-                            and 1 <= event.get("tab_count", 1) <= 32
-                        )
-                    )
+                    event.get("type") == "input"
+                    and isinstance(event.get("data"), str)
+                    and 0 < len(event["data"]) <= 4096
                 ):
-                    incoming.put_nowait(
-                        {
-                            "type": event["type"],
-                            "command": event["command"],
-                            "request_id": event["request_id"],
-                            **(
-                                {
-                                    "revision": event["revision"],
-                                    "tab_count": event.get("tab_count", 1),
-                                }
-                                if event["type"] == "complete"
-                                else {}
-                            ),
-                        }
-                    )
+                    incoming.put_nowait({"type": "input", "data": event["data"]})
                 elif event.get("type") == "cancel":
                     stop.set()
                     return

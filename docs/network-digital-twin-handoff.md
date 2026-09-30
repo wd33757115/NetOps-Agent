@@ -162,6 +162,8 @@
 - 本轮实机通过页面批量仅在 VSR-1、VSR-2 各执行一次 `display clock`，均成功。打开日志列表或预览前，只读脚本直接读取 MinIO 两个新对象，证实服务器已自动保存 `VSR-1_2026-09-30_11-31-16.065586.log`、`VSR-2_2026-09-30_11-31-18.535872.log`，各 483 bytes；该核验未调用 `read_log`／`sync_log`。随后页面列表与完整预览验证通过；浏览器实际点击下载成功，VSR-1 文件保存到 `C:/Users/wangd/Downloads/VSR-1_2026-09-30_11-31-16.065586.log`，483 bytes，SHA-256 为 `476c7e1f7b3b0590d37605d857d977d85b56dd19001078e0193c4cf27ce346ff`，与预览前 MinIO 原文件完全一致。未改设备配置或白名单。
 - 自动保存证明 `.runtime/ssh-session-files-proof.json`，页面截图 `.runtime/ssh-session-files-preview.png`、`.runtime/ssh-session-log-preview.png`，均留本地、不提交。
 
+> **2026-09-30 已被取代**：4.4 本地编辑与 4.5 远端 Tab 已删除，改为按键直通 + 回车拦截白名单（参照 JumpServer），见路线图第 14 节“终端按键直通 + 回车拦截白名单”。以下两节仅作历史记录。
+
 ### 4.4 终端内本地编辑命令（2026-09-30 负责人追加要求，已生效）
 
 - 共享前端 `DeviceTerminal.tsx` 改为直接在 xterm 内输入，去掉底部独立输入框、执行按钮和旧说明。新增 `LocalCommandLine` 仅处理本地编辑；Enter 仍发送完整 `command` 帧，沿用后端白名单和会话日志，不改变后端协议、App 版本或数据库。
