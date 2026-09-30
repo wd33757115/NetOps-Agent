@@ -1024,6 +1024,17 @@ P2-9 根据 Q5 取消，不引入 SNMP。P3 及后续仍在进入阶段时展开
 
 ## 14. 进度台账（执行者维护）
 
+### 2026-09-30 S-1：全平台 SSH 白名单、批量执行与操作记录
+
+- 负责人已确认本支线，范围见文末 S-1 设计卡。平台 `governance.py` 统一命令放行和审计；`human_cli.py` 负责人工完整命令执行与交互停止；原 Paramiko/Netmiko、设备管理、巡检、规则治理及既有在线调用接入公共检查。SSH 终端 App 增加白名单管理、顺序批量、操作记录 API 与页面。未重写拓扑模型、原巡检业务或解析逻辑，D-8 的 AI L1/L2 限制保留。
+- 数据：迁移 `0107_ssh_governance` 新增单例表 `netops_ssh_policy`，初值 `[".*"]`；审计复用平台 `netops_audit_logs`，记录用户、来源、目标、命令与脱敏结果，既有诊断会话审计保留。独立实验采样脚本不属于在线平台调用范围；口令不写入源码、测试、报告或提交。
+- 验证：公共 SSH 回归 **663 通过**；修补后相关 **72 通过**，与前批有重复，不能相加成独立总数。App/主机密钥/人工命令/终端最终分组 **56 通过**（包含此前 18 + 5）；治理分组 **20 通过**（含时间修复）；生命周期回归 **10 通过**。前端 `npm run test:unit -- src/platform/terminal/DeviceTerminal.test.tsx ../../src/apps/device_access/frontend/Page.test.tsx --silent`：**22 通过**，覆盖禁原始输入、逐条等待完成、拒绝恢复输入、取消、原始命令保留、管理员规则、空列表拒绝、批量顺序/停止、记录筛选分页与输出换行；改动前端文件 ESLint、diff 检查通过。各分组有重叠，不汇总为独立用例总数。
+- 旧在线调用链 9 文件最终隔离回归：**119 passed、1 skipped、7 deselected**。跳过 `test_inspection_online_tasks.py::test_actual_postgres_execution_lock_prevents_duplicate_worker`，SQLite 不能验证 PostgreSQL advisory lock，需独立 PostgreSQL fixture；新增共享数据库/治理隔离回归，业务与审计写临时 SQLite，原 PostgreSQL `engine.connect` 被阻断且未触发。排除的 7 项已在原始 HEAD 复现：`test_device_management_api.py` 的 `test_list_devices_separates_collection_from_missing_analysis_assets`、`test_preview_device_patrol_launch_preserves_missing_analysis_asset_diagnostics`；`test_device_patrol_runner.py` 的 `test_device_patrol_runner_fails_when_snapshot_persist_fails`、`test_device_patrol_runner_surfaces_partial_parser_health`、`test_device_patrol_runner_persists_successful_devices_from_partial_batch`、`test_device_patrol_runner_preserves_connection_failure_when_all_targets_fail`、`test_device_patrol_runner_can_replay_execution_plan_by_id`。这与旧交接所列另 7 项失败不同，未把它们算作通过。
+- 备份与部署：`backups/20260930-023847-before-ssh-governance/postgres.dump`，**109079394 bytes**；已部署 `device-access 0.9.0`、`device-management 1.0.4`、`inspection 1.3.1`、`rule-governance 1.4.6`，拓扑 0.4.3、知识问答 0.8.1。排空旧/新包摘要比较问题已修复并单独提交 `6899ded`。运行 `scripts/windows/start.ps1 -SkipLangfuse -UpgradeApps device-access,topology,device-management,inspection,rule-governance -NoBrowser` 退出 0，包含拓扑依赖一并升级；最终 `verify.ps1` 退出 0，**9/9 已启用 App 及 FastAPI/BFF/React/Worker 全部通过**。
+- 实机与界面验收：VSR-1、VSR-2 各执行 `display clock` 和 `display ip interface brief`，共 4 条成功；批次 `30fe653e4efd44c08a06b536c05183a7` 留存 16 条审计。VSR-1 单终端另执行 `display clock` 成功后停止，审计完整。默认 `[".*"]` 未改，未修改实验设备配置、未重跑 D-8。截图 `.runtime/ssh-batch-preview.png`、`.runtime/ssh-audit-preview.png` 保留在本地、不提交。
+- 审计时间：修正页面多显示 8 小时的问题，查询侧按既有 PostgreSQL `TimeZone` 解释无时区时间；不改写入方式、不迁移历史。20 项治理回归及真实 PostgreSQL 只读核对通过；网关重启后 health 为 healthy，浏览器刷新确认 18:54 恢复为 10:54，展开 `display clock` 保留设备原文 `02:53:44 UTC Wed 09/30/2026`。
+- 本机注意：早期旧测试隔离不完整，留下 3 条 `operator-1`／`127.0.0.1`／`patrol-1` 的回环测试审计（opening/open_failed/closed），没有连接实验设备，保留未删，不能据此判断实验设备故障。后续单测已隔离为临时 SQLite 并阻断本机 PostgreSQL；本项以实机批次及用户 `1` 记录为验收依据。其他会话已暂存页面和本机生成的 App 注册摘要继续保留、不提交。
+
 ### 2026-09-30 负责人追加：执行过程展开查看结果
 
 - 按本次明确的界面要求，将知识问答每条工具调用改为一行折叠记录，显示操作、状态和耗时；展开显示参数与实际结果。SSH 结果按设备及每条命令展示原始回显，CLI 表格保留列对齐，长输出可滚动；失败、未执行和截断信息原样展示。仅调整既有 `TraceProgress.tsx/.css`，未改页面布局或设备访问能力。
@@ -1459,6 +1470,17 @@ P1-1 实机补验与驱动修复（2026-09-28）：
 - 精简：删除旧的人工诊断模式（人工挑选 2 个会话、固定命令集的 `device_access__collect`、`/collect` 接口与 `diagnostic_sessions` 参数），它从无界面入口，已被本卡覆盖。
 - 不做：界面、L3 审批流程、快照刷新、VRF、诊断报告的服务端结构化校验。
 - 验收：路线图 11.0 迷你故障集 v0 共 8 个场景，根因命中 ≥ 6/8，审计中无任何配置类命令。场景 0（4.4.4.4 到 3.3.3.3 不通）是现有配置，不需注入；场景 1–7 由负责人在 GNS3 中逐个注入、测完恢复。
+
+### S-1 设计卡：全平台 SSH 白名单、批量执行与操作记录（2026-09-30 负责人确认，已完成部署与本地验收）
+
+目标：所有在线平台 SSH 调用共用管理员维护的命令白名单和操作记录；在 SSH 终端内提供完整命令输入、顺序批量执行与结果查看。本卡是负责人明确追加的支线，只覆盖下列内容，不改 D-5～D-8 设计卡、IETF 模型或解析语义。
+
+- 公共能力：策略与审计放在 `src/platform/device_access`，SSH 终端 App 提供维护和使用入口；设备管理、巡检、规则治理、拓扑、AI 诊断以及既有在线 SSH 调用共用，初始化/识别命令也检查。源码中的独立实验采样脚本不属于在线平台调用范围。
+- 白名单：全平台只有一份，由管理员维护正则列表；每条完整命令在发送前匹配任一规则。默认 `[".*"]`，空列表拒绝全部；版本校验避免并发覆盖，策略或审计不可用时停止。**AI 继续受 D-8 的 L1/L2、设备范围、预算和禁止配置导出限制**，不因为人工白名单放宽而获得配置权限。
+- 人工终端：浏览器本地编辑命令，按回车整行发送，输出区只读；本地历史只保存在当前会话。等待上一条命令结束后才能继续，不发送原始输入、远端 Tab 或任意控制字符；密码、分页、交互确认及超时会停止连接，不自动回答或重试。
+- 批量：从已保存会话选择最多 20 台，每台最多 50 条命令，按选择和命令顺序执行，整批最多 15 分钟；结果按设备/命令展开，支持停止。失败或运行中断不自动重试、重放；取消停止后续执行，**不能回滚已执行命令**。
+- 记录：白名单存 `netops_ssh_policy`；在线 SSH 的连接、命令、结果、拒绝、关闭、会话/登录资料维护、主机密钥确认和策略变更写入平台 `netops_audit_logs`，保留现有 D-8 会话审计。普通用户只读本人记录，管理员可读全部；记录按地址、动作、状态筛选，输出独立展示并保留列对齐。已知 secret 和敏感凭据内容在持久化/展示前脱敏，实验设备口令不写入文件。
+- 范围与验收：不新增按用户/设备/应用分组的策略层级、审批流程、自动回滚或定时批量。验证全局规则覆盖、空列表拒绝、无原始输入旁路、AI 只读边界、权限隔离、脱敏、批量顺序/停止，以及当前平台的迁移/应用升级；已完成与未完成项逐项记入第 14 节，部署未完成前不标成功。
 
 ## 参考
 

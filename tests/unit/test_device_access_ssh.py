@@ -389,8 +389,12 @@ class Channel:
 
 
 def session(chunks, **profile_options):
+    from src.platform.device_access.governance import SSHOperation
+
     profile = ConnectionProfile("manual", "operator", **profile_options)
-    result = CLISession(None, Channel(chunks), profile)
+    result = CLISession(None, Channel(chunks), profile, operation=SSHOperation(
+        "test", "test-driver", "fixture", "127.0.0.1",
+    ))
     result.prompt = "<SW1>"
     return result
 

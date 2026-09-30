@@ -460,6 +460,8 @@ class DevicePatrolRunRequest:
     attempt_number: int = 0
     worker_id: str | None = None
     owner_token: str | None = None
+    actor_id: str = "system"
+    source_app: str = "inspection"
 
 
 class DevicePatrolRunner:
@@ -506,6 +508,11 @@ class DevicePatrolRunner:
 
         settings = get_settings()
         logical_run_id = f"patrol-{request.task_id or uuid.uuid4()}"
+        collector = getattr(context.tool, "cli_collector", None)
+        if collector is not None:
+            collector.actor_id = request.actor_id
+            collector.source_app = request.source_app
+            collector.task_id = request.task_id or logical_run_id
         attempt_number = max(0, int(request.attempt_number or 0))
         snapshot_run_id = (
             logical_run_id if attempt_number == 0 else f"{logical_run_id}-attempt-{attempt_number}"

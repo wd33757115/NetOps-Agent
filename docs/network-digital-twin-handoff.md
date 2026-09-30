@@ -85,9 +85,21 @@
 
 知识问答已升至 0.8.1：每条执行记录默认一行收起，点击后展示真实参数与结果；SSH 输出按设备、命令逐条展示，保留表格列对齐。业务结果展开时才读取，并核对本轮归属和源 App 当前权限，公共进度/SSE 不直接携带业务正文。历史记录只恢复可唯一匹配的已留存证据：场景 1 的 4 次 SSH 与 1 次路径结果可看，2 次定位结果未留存，页面明确提示。未为展示重跑诊断或设备命令。测试、部署与浏览器验收详见路线图第 14 节“负责人追加：执行过程展开查看结果”；本次界面授权仅覆盖此项。
 
+### 4.2 全平台 SSH 白名单、批量执行与操作记录（2026-09-30 负责人确认，已完成部署与本地验收）
+
+负责人另行确认本支线，设计与台账见路线图 **S-1**。本次明确授权 SSH 终端相关界面及既有在线 SSH 调用接线；只在此范围内调整前文“暂不做 UI／原巡检不修改”的限制，不扩展 D-5～D-8，不改采集模型或解析语义。
+
+- 平台统一维护一份管理员正则白名单，完整命令匹配任一规则才发送；默认 `[".*"]`，空列表拒绝全部。规则覆盖终端、批量、诊断及既有在线平台 SSH 调用，含初始化/识别命令；**AI 仍叠加 D-8 的 L1/L2、设备范围和预算限制**，不因默认放行而获得配置权限。
+- 终端改为本地编辑完整单行命令，按回车发送；输出区只读，不转发原始按键、远端 Tab 或任意控制字符。设备要求密码、分页或交互确认时停止；命令失败不自动重试。批量按顺序执行，最多 20 个会话、每台 50 条命令，整批 15 分钟；支持停止，取消不能回滚已经执行的命令。
+- 白名单存平台 `netops_ssh_policy`（迁移 `0107_ssh_governance`）；所有在线 SSH 操作写入平台 `netops_audit_logs`，普通用户查看本人、管理员查看全部，命令和输出按已知 secret 及敏感内容脱敏，现有 D-8 会话审计保留。源码中的独立实验采样脚本不属于在线平台调用范围；实验设备口令仍不得写入任何文件。
+- 已部署：`device-access 0.9.0`、`device-management 1.0.4`、`inspection 1.3.1`、`rule-governance 1.4.6`；拓扑仍为 0.4.3，知识问答仍为 0.8.1。部署前备份：`backups/20260930-023847-before-ssh-governance/postgres.dump`，109079394 bytes。升级命令包含依赖拓扑：`scripts/windows/start.ps1 -SkipLangfuse -UpgradeApps device-access,topology,device-management,inspection,rule-governance -NoBrowser`，退出 0；最终 `verify.ps1` 退出 0，9/9 已启用 App 以及 FastAPI/BFF/React/Worker 全部通过。排空旧/新包摘要比较修复已单独提交 `6899ded`，生命周期回归 10 项通过。
+- 验证：公共 SSH 回归 663 项通过，修补后相关 72 项重跑通过（与前批部分重复，不相加）；App/主机密钥/人工命令/终端分组最终 56 项通过（包含此前 18 + 5）；治理分组 20 项通过（含审计时间修复）；前端 22 项通过，改动文件 ESLint 与 diff 检查通过。旧在线调用链最终隔离回归为 119 通过、1 跳过、7 排除；跳过项需要独立 PostgreSQL 验证 advisory lock，7 项为原始 HEAD 已复现的既有失败，详情见 S-1 台账。
+- 实机：两台 VSR 各执行 `display clock`、`display ip interface brief`，4 条均成功；批次 `30fe653e4efd44c08a06b536c05183a7` 留存 16 条审计。另在 VSR-1 单终端执行 `display clock` 成功后停止，审计完整。默认 `[".*"]` 未改，未改实验设备配置、未重跑 D-8。截图 `.runtime/ssh-batch-preview.png`、`.runtime/ssh-audit-preview.png` 不提交。
+- 审计页面曾多显示 8 小时，现于查询侧按既有数据库 `TimeZone` 解释无时区时间，不改写入方式、不迁移历史。网关重启后健康检查正常，浏览器确认时间从错误的 18:54 恢复 10:54，展开命令仍保留设备返回的 02:53:44 UTC。
+
 ## 5. 本机状态与注意事项
 
-- 已部署（本机）：知识问答 0.8.1、SSH 终端 0.8.0、拓扑 0.4.3，其余 App 未动。数据库在 D-5/D-6 前备份于 `backups/20260930-001850-before-d5-d6/`。
+- 已部署（本机）：知识问答 0.8.1、SSH 终端 0.9.0、拓扑 0.4.3、设备管理 1.0.4、巡检 1.3.1、规则治理 1.4.6。数据库在 D-5/D-6 前备份于 `backups/20260930-001850-before-d5-d6/`；S-1 前备份于 `backups/20260930-023847-before-ssh-governance/postgres.dump`（109079394 bytes）。
 - 本机平台里已配置：SSH 终端默认登录与两条会话 VSR-1/VSR-2；拓扑默认登录；两台 VSR 的主机密钥；“实验网络 lab”的最新快照含路由表（拓扑 0.4.2 发现）。
 - 部署命令：`scripts\windows\start.ps1 -SkipLangfuse -UpgradeApps <app,...> -NoBrowser`。
   - **修改任何 App 的代码后，该 App 的摘要与已部署版本不一致，平台会把它判为不可用**（依赖它的 App 也会不可用），直到用 `-UpgradeApps` 重新部署。
@@ -99,6 +111,8 @@
   - `web/react_frontend/src/apps/generated.ts`、`generated.meta.json`：按本机环境生成的 App 注册摘要，历来不提交。
 - `git stash` 里的 “P2-3 paused work…” 和 `backups/p2-3-paused-20260929/` 已经过时（P2-3 已在 `3ac3f0c` 提交），只作备份，删除前征得负责人同意。
 - 已知与本线无关的失败测试（在干净检出上同样失败）：`test_workflow_plugins.py` 3 项、`test_rule_asset_bundles.py`、`test_command_autopilot_integration.py`、`test_check_item_assessment_runtime.py`、`test_chat_intent_match.py` 各 1 项。`dsh.py`、`src/gateway/schemas.py` 有既有的 Ruff 行长/导入顺序问题，不要顺手整文件格式化。
+- S-1 旧调用链另有 7 项原始 HEAD 既有失败（设备管理 2 项、巡检 runner 5 项，名单见路线图 S-1 台账），与上一条旧交接的 7 项不是同一组。最终隔离回归为 119 通过、1 个 PostgreSQL advisory lock 用例跳过、7 项排除，不能称全套无失败。
+- 早期旧测试隔离不完整，在本机留下 3 条 `operator-1`／`127.0.0.1`／`patrol-1` 的回环测试审计（opening/open_failed/closed）。未连接实验设备，记录保留，不是实验设备故障；后续治理及旧调用边界单测已使用临时 SQLite 并阻断连接本机 PostgreSQL。本项以实机批次及用户 `1` 的记录为验收依据。
 - 本机 pip 配置的镜像是 http，会被拒绝；需要安装时用 `--index-url https://mirrors.aliyun.com/pypi/simple/`，不要改全局配置。
 
 ## 6. 常用验证

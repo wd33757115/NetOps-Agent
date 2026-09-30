@@ -15,7 +15,8 @@ from threading import Event, Timer
 
 from ..catalog import TERMINAL_PREPARATION
 from ..contracts import DeviceAccessError
-from ..errors import CommandExecutionError
+from ..errors import CommandExecutionError, failure_code
+from ..governance import SSHOperation, current_operation
 
 _ANSI = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))")
 
@@ -23,11 +24,13 @@ _ANSI = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))")
 class CLISession:
     """Private driver session. A timed-out stream must never be reused."""
 
-    def __init__(self, client, channel, profile):
+    def __init__(self, client, channel, profile, *, operation=None, owns_operation=False):
         self.client, self.channel, self.profile = client, channel, profile
         self.prompt = None
         self.usable = True
         self.initialization_commands = ()
+        self.operation = operation or current_operation()
+        self.owns_operation, self.phase = owns_operation, "command"
 
     def _read_to_prompt(self, timeout, *, initial=False):
         deadline = time.monotonic() + timeout
@@ -85,11 +88,21 @@ class CLISession:
         return self.prompt
 
     def send_command(self, command, read_timeout):
+        if self.operation is None:
+            raise DeviceAccessError("policy_unavailable", "SSH operation context is required")
+        return self.operation.execute(
+            command,
+            lambda: self._send_command(command, read_timeout),
+            phase=self.phase,
+        )
+
+    def _send_command(self, command, read_timeout):
         if not self.usable:
             raise CommandExecutionError("connection_closed", "SSH channel is no longer usable")
         deadline = time.monotonic() + read_timeout
         try:
             self.channel.settimeout(read_timeout)
+            self.operation.check_command(command, phase=self.phase)
             self.channel.sendall((command + "\n").encode(self.profile.encoding))
             output = self._read_to_prompt(max(0, deadline - time.monotonic()))
             lines = output.splitlines(keepends=True)
@@ -110,6 +123,8 @@ class CLISession:
             pass
         finally:
             self.client.close()
+            if self.owns_operation:
+                self.operation.event("disconnected", driver="paramiko")
 
 
 class ParamikoDriver:
@@ -146,6 +161,20 @@ class ParamikoDriver:
         password = profile.password or CredentialResolver().resolve_password(profile.credential_ref)
         if not password:
             raise DeviceAccessError("credential_unavailable", "device credential is unavailable")
+        operation = current_operation()
+        owns_operation = operation is None
+        operation = operation or SSHOperation(
+            "system",
+            "device-access-driver",
+            target.target_ref,
+            target.host,
+            profile.port,
+            secrets=(password,),
+        )
+        if password not in operation.secrets:
+            operation.secrets += (password,)
+        if owns_operation:
+            operation.event("connecting", driver="paramiko")
         client = paramiko.SSHClient()
         expired = Event()
 
@@ -184,9 +213,12 @@ class ParamikoDriver:
                 look_for_keys=False,
             )
             channel = client.invoke_shell(term="vt100", width=200, height=1000)
-            session = CLISession(client, channel, profile)
+            session = CLISession(
+                client, channel, profile, operation=operation, owns_operation=owns_operation
+            )
             if not interactive:
                 session.initialize()
+                session.phase = "setup"
                 for command in TERMINAL_PREPARATION.get(profile.platform, ()):
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
@@ -201,9 +233,19 @@ class ParamikoDriver:
                             "platform_unsupported", "terminal initialization rejected"
                         )
                     session.initialization_commands += (command,)
+                session.phase = "command"
+            if owns_operation:
+                operation.event("connected", driver="paramiko")
             return session
-        except Exception:
+        except Exception as exc:
             client.close()
+            if owns_operation:
+                try:
+                    operation.event(
+                        "connection_failed", status="failed", failure_code=failure_code(exc)
+                    )
+                finally:
+                    operation.event("disconnected", driver="paramiko")
             raise
         finally:
             timer.cancel()

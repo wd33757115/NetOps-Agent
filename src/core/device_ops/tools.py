@@ -79,9 +79,13 @@ class TaskResult(BaseModel):
 DBManager = DeviceInventoryManager
 
 
-def test_device_connectivity(device: dict[str, Any]) -> dict[str, Any]:
+def test_device_connectivity(
+    device: dict[str, Any], *, actor_id: str = "system", task_id: str | None = None
+) -> dict[str, Any]:
     """Open and close a real device session using the same path as patrol."""
-    return test_cli_connectivity(device)
+    return test_cli_connectivity(
+        device, actor_id=actor_id, source_app="device-management", task_id=task_id
+    )
 
 
 def _record_connection_health(
@@ -132,10 +136,14 @@ class ConfigBackupTool:
         db_manager: DeviceInventoryManager,
         *,
         cli_collector: CLICommandCollector | None = None,
+        actor_id: str = "system",
+        task_id: str | None = None,
     ):
         self.db_manager = db_manager
         self.policy_resolver = CollectionPolicyResolver()
-        self.cli_collector = cli_collector or CLICommandCollector()
+        self.cli_collector = cli_collector or CLICommandCollector(
+            actor_id=actor_id, source_app="device-backup", task_id=task_id
+        )
 
     async def backup_device(
         self,
@@ -228,10 +236,14 @@ class PatrolTool:
         *,
         cli_collector: CLICommandCollector | None = None,
         result_callback: Callable[[dict[str, Any]], dict[str, Any] | None] | None = None,
+        actor_id: str = "system",
+        task_id: str | None = None,
     ):
         self.db_manager = db_manager
         self.policy_resolver = CollectionPolicyResolver()
-        self.cli_collector = cli_collector or CLICommandCollector()
+        self.cli_collector = cli_collector or CLICommandCollector(
+            actor_id=actor_id, source_app="inspection", task_id=task_id
+        )
         self.result_callback = result_callback
         from src.common.config import get_settings
 

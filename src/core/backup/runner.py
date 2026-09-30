@@ -32,6 +32,8 @@ class DeviceBackupRunRequest:
     filter_params: dict[str, Any] | None = None
     ticket_id: str | None = None
     execution_plan: dict[str, Any] | None = None
+    actor_id: str = "system"
+    task_id: str | None = None
 
 
 class DeviceBackupRunner:
@@ -55,6 +57,11 @@ class DeviceBackupRunner:
             execution_plan_data=request.execution_plan,
             tools_loader=self._tools_loader,
         )
+        collector = getattr(context.tool, "cli_collector", None)
+        if collector is not None:
+            collector.actor_id = request.actor_id
+            collector.source_app = "device-backup"
+            collector.task_id = request.task_id
         result = run_plan_or_filter(
             context=context,
             plan_runner=context.tool.backup_by_plan,

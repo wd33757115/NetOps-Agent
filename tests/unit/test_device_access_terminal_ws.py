@@ -54,13 +54,38 @@ def test_ticket_first_frame_and_bidirectional_resize_unicode(monkeypatch):
         socket.send_json({"ticket": "one-use"})
         assert socket.receive_json()["type"] == "ready"
         socket.send_json({"type": "resize", "cols": 9999, "rows": 0})
-        socket.send_json({"type": "input", "data": "display version\n"})
+        socket.send_json({"type": "command", "command": "display version", "request_id": "cmd1"})
         assert socket.receive_json() == {"type": "output", "data": "设备终端\r\n<SW>"}
         assert socket.receive_json()["type"] == "closed"
     assert received == [
         {"type": "resize", "cols": 300, "rows": 5},
-        {"type": "input", "data": "display version\n"},
+        {"type": "command", "command": "display version", "request_id": "cmd1"},
     ]
+
+
+def test_old_raw_input_protocol_cannot_bypass_command_policy(monkeypatch):
+    import time
+
+    received = []
+    monkeypatch.setattr(terminal.service, "consume_ticket", lambda *args: {
+        "owner": "u", "host": "10.0.0.1", "operation_id": "test",
+    })
+
+    def pump(payload, incoming, outgoing, stop):
+        outgoing.put({"type": "ready"})
+        while not stop.is_set():
+            if not incoming.empty():
+                received.append(incoming.get_nowait())
+            time.sleep(0.01)
+
+    monkeypatch.setattr(terminal, "pump", pump)
+    with TestClient(application()) as client:
+        with client.websocket_connect("/ws/v1/terminals/test") as socket:
+            socket.send_json({"ticket": "ticket"})
+            assert socket.receive_json()["type"] == "ready"
+            socket.send_json({"type": "input", "data": "reboot\n"})
+            assert socket.receive_json()["type"] == "closed"
+    assert received == []
 
 
 def run_pump(monkeypatch, *, failure=None, save=False):
@@ -73,9 +98,14 @@ def run_pump(monkeypatch, *, failure=None, save=False):
 
     class Channel:
         closed = False
+        pending = True
 
         def recv_ready(self):
-            return False
+            return self.pending
+
+        def recv(self, size):
+            self.pending = False
+            return b"<R1>"
 
         def exit_status_ready(self):
             return True
@@ -121,7 +151,7 @@ def test_failed_login_closes_with_a_reason_the_page_can_prompt_for(monkeypatch):
 
 def test_typed_login_is_saved_only_after_a_successful_login(monkeypatch):
     events, saved_logins, _ = run_pump(monkeypatch, save=True)
-    assert events[0] == {"type": "ready"} and events[-1]["reason"] is None
+    assert {"type": "ready"} in events and events[-1]["reason"] is None
     assert saved_logins == [("u", "s1", "ops", "typed")]
     _, saved_logins, _ = run_pump(monkeypatch, save=False)
     assert saved_logins == []

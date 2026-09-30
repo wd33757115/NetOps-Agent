@@ -12,6 +12,7 @@ from .catalog import TERMINAL_PREPARATION
 from .command_policy import classify
 from .contracts import CommandResult, DeviceAccessError
 from .errors import failure_code
+from .governance import operation_for
 from .policy import validate_profile
 
 
@@ -75,6 +76,7 @@ class SessionHandle:
         self._commands, self._probes = 0, 0
         self._connection, self._lease, self._check_lease = None, None, None
         self._idle_timer, self._total_timer = None, None
+        self._operation = operation_for(context, target, profile, session_id=self.session_id)
 
     def _redact(self, text):
         text = str(text or "")
@@ -83,7 +85,7 @@ class SessionHandle:
             text = redact(text)
         if self._profile.password:
             text = text.replace(self._profile.password, "[redacted]")
-        return text
+        return self._operation.redact(text)
 
     def _emit(self, kind, **payload):
         event = dict(
@@ -119,6 +121,7 @@ class SessionHandle:
     def _open(self):
         try:
             self._guard()
+            self._operation.event("connecting", mode="diagnosis")
             self._emit(
                 "opening",
                 approved_setup_commands=list(TERMINAL_PREPARATION[self._platform]),
@@ -141,8 +144,10 @@ class SessionHandle:
                 prompt_timeout=min(self._profile.prompt_timeout, remaining),
                 session_setup_timeout=min(self._profile.session_setup_timeout, remaining),
             )
-            self._connection = self._service.driver.connect(self._target, profile)
+            with self._operation.activate():
+                self._connection = self._service.driver.connect(self._target, profile)
             self._guard()
+            self._operation.event("connected", mode="diagnosis")
             self._emit(
                 "opened",
                 prompt=self._redact(self._connection.find_prompt()),
@@ -161,7 +166,10 @@ class SessionHandle:
         except Exception as exc:
             code = failure_code(exc)
             try:
-                self.close(code)
+                try:
+                    self._operation.event("connection_failed", status="failed", failure_code=code)
+                finally:
+                    self.close(code)
             except Exception:
                 pass
             raise DeviceAccessError(code, "SSH session could not be opened") from None
@@ -214,13 +222,16 @@ class SessionHandle:
                 if self._lease is not None:
                     self._lease.__exit__(None, None, None)
             finally:
-                self._emit(
-                    "closed",
-                    close_reason=reason,
-                    failure_code=None if reason == "session_closed" else reason,
-                    commands=self._commands,
-                    probes=self._probes,
-                )
+                try:
+                    self._emit(
+                        "closed",
+                        close_reason=reason,
+                        failure_code=None if reason == "session_closed" else reason,
+                        commands=self._commands,
+                        probes=self._probes,
+                    )
+                finally:
+                    self._operation.event("disconnected", mode="diagnosis", reason=reason)
 
     def __enter__(self):
         self._guard()
@@ -272,6 +283,13 @@ class SessionHandle:
                 status = "pending_approval" if decision.level == "L3" else "denied"
                 code = "approval_required" if decision.level == "L3" else "policy_denied"
                 error = decision.reason
+                self._operation.event(
+                    "command_denied",
+                    status=status,
+                    command=command_text,
+                    policy_level=decision.level,
+                    failure_code=code,
+                )
             elif decision.level == "L2" and self._probes >= self._budget.max_probes:
                 status, code, error = "denied", "probe_budget_exceeded", "probe budget exhausted"
             else:
@@ -280,10 +298,13 @@ class SessionHandle:
                 started = now()
                 try:
                     output = self._redact(
-                        self._connection.send_command(
+                        self._operation.execute(
                             decision.normalized,
-                            read_timeout=min(
-                                read_timeout, max(0.001, self._deadline - time.monotonic())
+                            lambda: self._connection.send_command(
+                                decision.normalized,
+                                read_timeout=min(
+                                    read_timeout, max(0.001, self._deadline - time.monotonic())
+                                ),
                             ),
                         )
                     )

@@ -113,5 +113,4 @@ def diagnostic_admission(plan_id):
             if plan is None or plan.mode == "production":
                 raise HTTPException(403, "正式巡检必须使用已冻结的固定执行任务")
             batch_id = plan.patrol_batch_id
-        authorize_batch(batch_id)
-        yield
+        yield authorize_batch(batch_id)

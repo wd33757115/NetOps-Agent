@@ -14,6 +14,7 @@ from src.apps.device_access.backend import api
 from src.apps.device_access.backend.host_keys import HostKeyStore
 from src.apps.device_access.backend.models import Base
 from src.auth.models import CurrentUser
+from src.infrastructure.db.models import AuditLogRecord
 from src.platform.device_access.contracts import ConnectionProfile, DeviceAccessError, Target
 from src.platform.device_access.drivers.paramiko_driver import ParamikoDriver
 from src.platform.device_access.host_keys import (
@@ -31,6 +32,7 @@ def store():
         "sqlite://", poolclass=StaticPool, connect_args={"check_same_thread": False}
     )
     Base.metadata.create_all(engine)
+    AuditLogRecord.__table__.create(engine)
 
     @contextmanager
     def sessions():

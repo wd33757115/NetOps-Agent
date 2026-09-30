@@ -721,6 +721,8 @@ class ExecutePatrolCommand:
     worker_id: str | None = None
     owner_token: str | None = None
     defer_completion: bool = False
+    actor_id: str = "system"
+    source_app: str = "inspection"
 
 
 class ExecutePatrolHandler:
@@ -741,6 +743,8 @@ class ExecutePatrolHandler:
                 attempt_number=command.attempt_number,
                 worker_id=command.worker_id,
                 owner_token=command.owner_token,
+                actor_id=command.actor_id,
+                source_app=command.source_app,
             )
         )
         snapshot_run_id = result.get("snapshot_run_id")

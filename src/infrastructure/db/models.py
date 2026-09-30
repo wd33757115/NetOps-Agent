@@ -144,6 +144,18 @@ class AuditLogRecord(Base):
     )
 
 
+class SSHPolicyRecord(Base):
+    """One administrator-managed command policy, independent of every App."""
+
+    __tablename__ = "netops_ssh_policy"
+    id = Column(Integer, primary_key=True)
+    patterns = Column(JSON, nullable=False)
+    version = Column(Integer, nullable=False)
+    updated_by = Column(String(64), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+    __table_args__ = (CheckConstraint("id = 1", name="ck_netops_ssh_policy_singleton"),)
+
+
 class Message(Base):
     __tablename__ = "netops_messages"
 

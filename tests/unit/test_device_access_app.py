@@ -16,6 +16,7 @@ from src.apps.device_access.backend.schemas import (
     SessionUpdate,
     Ticket,
 )
+from src.infrastructure.db.models import AuditLogRecord
 from src.platform.device_access.command_policy import classify
 from src.platform.device_access.contracts import DeviceAccessError
 from src.platform.device_access.security import CredentialStore
@@ -61,6 +62,7 @@ def test_credentials_encrypted_scoped_expiring_and_revocable():
 def world(monkeypatch):
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
+    AuditLogRecord.__table__.create(engine)
 
     @contextmanager
     def sessions():

@@ -15,6 +15,7 @@ from src.platform.authorization.client import authorize_worker
 from src.platform.device_access import DeviceAccessService
 from src.platform.device_access.contracts import ConnectionProfile, DeviceAccessError, Target
 from src.platform.device_access.drivers.paramiko_driver import ParamikoDriver
+from src.platform.device_access.governance import write_event
 from src.platform.device_access.security import CredentialStore
 from src.platform.kernel.migrations import business_engine
 
@@ -82,7 +83,7 @@ def read(owner, operation_id):
             if row.created_at.tzinfo is None
             else row.created_at
         )
-        limit = 1080 if row.profile_id == "human-terminal" else 180
+        limit = 1080 if row.profile_id in {"human-terminal", "human-batch"} else 180
         if row.status == "running" and (now() - created).total_seconds() > limit:
             row.status, row.finished_at = "waiting_for_input", now()
             row.result = {
@@ -153,6 +154,8 @@ def ticket(owner, body):
         ref = CredentialStore().put(owner, DOMAIN, [host], username, password, ttl=60)
     operation_id, created = _begin(owner, body.request_id, body.session_id, host, "human-terminal")
     if not created:
+        if ref:
+            CredentialStore().revoke(ref)
         raise HTTPException(409, "该终端请求已经使用，请创建新请求")
     value = secrets.token_urlsafe(32)
     payload = {
@@ -166,6 +169,10 @@ def ticket(owner, body):
         "operation_id": operation_id,
     }
     try:
+        write_event(
+            actor_id=owner, source_app=APP_ID, kind="terminal_requested",
+            detail={"host": host, "port": port, "session_id": operation_id},
+        )
         CredentialStore().client.set(TICKET_PREFIX + value, json.dumps(payload), ex=30)
     except Exception:
         if ref:

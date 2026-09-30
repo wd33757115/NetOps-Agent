@@ -95,6 +95,8 @@ def discover_device_identity(
     *,
     connector: Callable[[dict[str, Any]], Any] = connect_cli_device,
     identity_resolver: DeviceIdentityResolver | None = None,
+    actor_id: str = "system",
+    task_id: str | None = None,
 ) -> IdentityDiscoveryResult:
     """Collect minimal CLI evidence and resolve vendor/model/family.
 
@@ -108,7 +110,10 @@ def discover_device_identity(
     prompt = None
     outputs: list[dict[str, Any]] = []
     try:
-        connection = connector(device)
+        connection = (
+            connector(device, actor_id=actor_id, source_app="device-management", task_id=task_id)
+            if connector is connect_cli_device else connector(device)
+        )
         find_prompt = getattr(connection, "find_prompt", None)
         if callable(find_prompt):
             prompt = str(find_prompt() or "")
@@ -168,7 +173,7 @@ def discover_device_identity(
             commands=commands,
             command_outputs=outputs,
             elapsed_seconds=round(time.perf_counter() - started, 3),
-            failure_code="connection_failed",
+            failure_code=getattr(exc, "failure_code", "connection_failed"),
             error=str(exc),
             device_type=device_type_for(device),
             prompt=prompt,

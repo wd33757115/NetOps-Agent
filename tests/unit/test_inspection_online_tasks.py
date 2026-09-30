@@ -1,6 +1,7 @@
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -37,7 +38,9 @@ def runtime(tmp_path, monkeypatch):
     monkeypatch.setattr(access, "require_running", lambda: None)
     monkeypatch.setattr(access, "authorize", lambda actor: None)
     monkeypatch.setattr(tasks, "app_execution_lock", lambda: nullcontext())
-    monkeypatch.setattr(tasks, "authorize_batch", lambda batch_id: None, raising=False)
+    monkeypatch.setattr(
+        tasks, "authorize_batch", lambda batch_id: SimpleNamespace(user_id="online-user"), raising=False
+    )
     monkeypatch.setattr(tasks, "authorize", lambda actor: None, raising=False)
     engine = create_engine(f"sqlite:///{tmp_path / 'online.db'}")
     for model in (Plan, Batch, Target, PatrolRun, WorkflowRun):
@@ -108,6 +111,8 @@ def runtime(tmp_path, monkeypatch):
     def collect(self, command):
         calls.append(("collection", command))
         assert command.defer_completion
+        assert command.actor_id == "online-user"
+        assert command.source_app == "inspection"
         with scope() as db:
             run = db.get(PatrolRun, RUN_ID)
             assert run.owner_token == command.owner_token
@@ -345,6 +350,10 @@ def test_direct_production_dispatches_only_frozen_ids_and_shadow_keeps_collectio
 
 def test_actual_postgres_execution_lock_prevents_duplicate_worker():
     from concurrent.futures import ThreadPoolExecutor
+
+    with ledger.get_db_session() as db:
+        if db.get_bind().dialect.name != "postgresql":
+            pytest.skip("PostgreSQL advisory locks require an isolated PostgreSQL fixture")
 
     task_id = f"test-online-{uuid.uuid4()}"
 

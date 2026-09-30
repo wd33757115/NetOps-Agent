@@ -12,6 +12,7 @@ from .admission import SSHAdmission
 from .contracts import BatchResult, CommandResult, DeviceAccessError
 from .drivers.paramiko_driver import ParamikoDriver
 from .errors import failure_code
+from .governance import operation_for
 from .policy import authorize, validate_profile
 
 
@@ -49,6 +50,7 @@ class DeviceAccessService:
         if target.target_ref != target_ref or profile.profile_id != profile_id:
             raise DeviceAccessError("not_authorized", "resolved reference mismatch")
         validate_profile(profile)
+        operation = operation_for(context, target, profile)
         with self.admission.hold(target, profile) as lease:
 
             def guard():
@@ -57,16 +59,31 @@ class DeviceAccessService:
                     raise DeviceAccessError("cancelled", "terminal was cancelled")
 
             guard()
+            connection = None
             try:
-                connection = self.driver.connect(target, profile, interactive=True)
+                operation.event("connecting", mode="human")
+                with operation.activate():
+                    connection = self.driver.connect(target, profile, interactive=True)
+                operation.event("connected", mode="human")
             except Exception as exc:
+                try:
+                    operation.event(
+                        "connection_failed", status="failed", failure_code=failure_code(exc)
+                    )
+                finally:
+                    if connection is not None:
+                        connection.disconnect()
+                    operation.event("disconnected", mode="human")
                 # Same classification as batch access, so callers can ask for a new login.
                 raise DeviceAccessError(failure_code(exc), self._safe_error(exc, profile)) from None
             try:
                 guard()
                 yield connection.channel, guard
             finally:
-                connection.disconnect()
+                try:
+                    connection.disconnect()
+                finally:
+                    operation.event("disconnected", mode="human")
 
     def execute_batch(
         self, context, request, *, on_result=None, should_continue=None, command_filter=None
@@ -81,6 +98,7 @@ class DeviceAccessService:
         ):
             raise DeviceAccessError("not_authorized", "resolved device access reference mismatch")
         validate_profile(profile)
+        operation = operation_for(context, target, profile)
         execution_id = uuid.uuid4().hex
         results = []
         prompt = None
@@ -101,20 +119,26 @@ class DeviceAccessService:
                     guard()
                     try:
                         remaining = max(0.001, deadline - time.monotonic())
-                        connection = self.driver.connect(
-                            target,
-                            replace(
-                                profile,
-                                conn_timeout=min(profile.conn_timeout, remaining),
-                                auth_timeout=min(profile.auth_timeout, remaining),
-                                banner_timeout=min(profile.banner_timeout, remaining),
-                                prompt_timeout=min(profile.prompt_timeout, remaining),
-                                session_setup_timeout=min(profile.session_setup_timeout, remaining),
-                            ),
-                        )
+                        operation.event("connecting", mode="batch", attempt=attempt + 1)
+                        with operation.activate():
+                            connection = self.driver.connect(
+                                target,
+                                replace(
+                                    profile,
+                                    conn_timeout=min(profile.conn_timeout, remaining),
+                                    auth_timeout=min(profile.auth_timeout, remaining),
+                                    banner_timeout=min(profile.banner_timeout, remaining),
+                                    prompt_timeout=min(profile.prompt_timeout, remaining),
+                                    session_setup_timeout=min(
+                                        profile.session_setup_timeout, remaining
+                                    ),
+                                ),
+                            )
+                        operation.event("connected", mode="batch", attempt=attempt + 1)
                         break
                     except Exception as exc:
                         code = failure_code(exc)
+                        operation.event("connection_failed", status="failed", failure_code=code)
                         # Never cycle credentials or retry trust/authorization errors.
                         if (
                             code not in {"connection_failed", "timeout"}
@@ -138,28 +162,46 @@ class DeviceAccessService:
                     if stopped is None:
                         try:
                             output = str(
-                                connection.send_command(
+                                operation.execute(
                                     command.text,
-                                    read_timeout=min(
-                                        command.read_timeout,
-                                        max(0.001, deadline - time.monotonic()),
+                                    lambda: connection.send_command(
+                                        command.text,
+                                        read_timeout=min(
+                                            command.read_timeout,
+                                            max(0.001, deadline - time.monotonic()),
+                                        ),
                                     ),
+                                    command_id=command.command_id,
                                 )
                                 or ""
                             )
+                            output = operation.redact(output)
                         except Exception as exc:
                             code = failure_code(exc)
                             if code == "connection_failed":
                                 code = "command_failed"
-                            error = self._safe_error(exc, profile)
-                            output = getattr(exc, "output", "")
+                            error = operation.redact(self._safe_error(exc, profile))
+                            output = operation.redact(getattr(exc, "output", ""))
                             if request.stop_on_error or code in {
+                                "policy_denied",
+                                "policy_unavailable",
+                                "policy_match_failed",
+                                "audit_unavailable",
+                                "invalid_command",
                                 "timeout",
                                 "connection_closed",
                                 "output_incomplete",
                                 "output_limit",
                             }:
                                 stopped = "previous_command_failed"
+                    else:
+                        operation.event(
+                            "command_not_executed",
+                            status="not_executed",
+                            command=command.text,
+                            command_id=command.command_id,
+                            failure_code=stopped,
+                        )
                     # A stale executor cannot publish output or send another command.
                     guard()
                     result = CommandResult(
@@ -189,6 +231,7 @@ class DeviceAccessService:
                         connection.disconnect()
                     except Exception:
                         pass
+                operation.event("disconnected", mode="batch")
         failures = [result for result in results if result.failure_code]
         return BatchResult(
             execution_id=execution_id,
@@ -197,7 +240,9 @@ class DeviceAccessService:
             execution_status=(
                 "partial"
                 if failures and len(failures) < len(results)
-                else "failed" if failures else "succeeded"
+                else "failed"
+                if failures
+                else "succeeded"
             ),
             failure_code=failures[0].failure_code if failures else None,
             error=failures[0].error if failures else None,

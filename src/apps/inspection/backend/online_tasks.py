@@ -91,7 +91,7 @@ def execute_online(self, patrol_batch_id, execution_plan_id):
 def run_online(execution, repository, *, worker_id=None):
     results, phase, error = {}, "collection", None
     try:
-        authorize_batch(execution["patrol_batch_id"])
+        actor = authorize_batch(execution["patrol_batch_id"])
         repository.checkpoint(execution, phase, results)
         if execution.get("replay"):
             from src.core.check_items.current_authority_replay import (
@@ -119,6 +119,8 @@ def run_online(execution, repository, *, worker_id=None):
                         worker_id=worker_id,
                         owner_token=execution["owner_token"],
                         defer_completion=True,
+                        actor_id=str(getattr(actor, "user_id", "system")),
+                        source_app="inspection",
                     )
                 ),
                 phase,

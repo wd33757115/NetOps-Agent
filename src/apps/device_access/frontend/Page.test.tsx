@@ -5,8 +5,9 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import Page from './Page'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), patch: vi.fn(), put: vi.fn(), delete: vi.fn() }))
+const auth = vi.hoisted(() => ({ user: { username: 'operator', role: 'operator' } }))
 vi.mock('@netops/config/api', () => ({ api }))
-vi.mock('@netops/context/AuthContext', () => ({ useAuth: () => ({ user: { username: 'operator', role: 'operator' } }) }))
+vi.mock('@netops/context/AuthContext', () => ({ useAuth: () => auth }))
 vi.mock('@netops/platform/terminal/DeviceTerminal', () => ({
   LiveTerminal: ({ target }: { target: { session_id: string } }) => <div>终端 {target.session_id}</div>,
 }))
@@ -18,7 +19,8 @@ const sessions = [
 
 beforeEach(() => {
   vi.clearAllMocks()
-  api.get.mockImplementation((url: string) => Promise.resolve({ data: url.endsWith('/sessions') ? sessions : { username: 'admin', configured: true } }))
+  auth.user.role = 'operator'
+  api.get.mockImplementation((url: string) => Promise.resolve({ data: url.endsWith('/sessions') ? sessions : url.endsWith('/audit') ? { items: [], next_cursor: null } : { username: 'admin', configured: true } }))
   for (const method of [api.post, api.patch, api.put, api.delete]) method.mockResolvedValue({ data: {} })
 })
 afterEach(cleanup)
@@ -77,4 +79,98 @@ it('saves the default username and password', async () => {
   fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'default-test-secret' } })
   fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /保\s*存/ }))
   await waitFor(() => expect(api.put).toHaveBeenCalledWith('/apps/device-access/default-login', { username: 'admin', password: 'default-test-secret' }))
+})
+
+it('keeps command policy maintenance unavailable to ordinary users', async () => {
+  view()
+  await screen.findByText('核心交换机')
+  expect(screen.queryByRole('button', { name: '命令白名单' })).not.toBeInTheDocument()
+})
+
+it('lets an admin replace the global whitelist, including an empty deny-all list', async () => {
+  auth.user.role = 'admin'
+  const get = api.get.getMockImplementation()!
+  api.get.mockImplementation((url: string) => url.endsWith('/command-policy') ? Promise.resolve({ data: { patterns: ['.*'], version: 1, updated_at: null, updated_by: null } }) : get(url))
+  view()
+  fireEvent.click(screen.getByRole('button', { name: '命令白名单' }))
+  const rules = await screen.findByLabelText('命令白名单规则')
+  await waitFor(() => expect(rules).toHaveValue('.*'))
+  fireEvent.change(rules, { target: { value: '^display .*$\n^ping .*$' } })
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /保\s*存/ }))
+  await waitFor(() => expect(api.put).toHaveBeenCalledWith('/apps/device-access/command-policy', { patterns: ['^display .*$', '^ping .*$'], version: 1 }))
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  fireEvent.click(screen.getByRole('button', { name: '命令白名单' }))
+  await waitFor(() => expect(screen.getByLabelText('命令白名单规则')).toHaveValue('.*'))
+  fireEvent.change(screen.getByLabelText('命令白名单规则'), { target: { value: '' } })
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /保\s*存/ }))
+  await waitFor(() => expect(api.put).toHaveBeenCalledWith('/apps/device-access/command-policy', { patterns: [], version: 1 }))
+})
+
+it('does not overwrite the policy when loading it fails', async () => {
+  auth.user.role = 'admin'
+  const get = api.get.getMockImplementation()!
+  api.get.mockImplementation((url: string) => url.endsWith('/command-policy') ? Promise.reject(new Error('读取失败')) : get(url))
+  view()
+  fireEvent.click(screen.getByRole('button', { name: '命令白名单' }))
+  expect(await screen.findByText('读取失败')).toBeInTheDocument()
+  expect(within(screen.getByRole('dialog')).getByRole('button', { name: /保\s*存/ })).toBeDisabled()
+  expect(api.put).not.toHaveBeenCalled()
+})
+
+it('executes selected sessions in selection order and expands command results', async () => {
+  api.post.mockResolvedValue({ data: { id: 'b1', status: 'completed', results: [{ session_id: 's2', name: '边界路由器', host: '10.0.0.2', status: 'succeeded', commands: [{ command: 'display version', status: 'succeeded', output: 'Comware test output' }] }] } })
+  view()
+  fireEvent.click(await screen.findByLabelText('选择 边界路由器'))
+  fireEvent.click(screen.getByLabelText('选择 核心交换机'))
+  fireEvent.click(screen.getByRole('tab', { name: '批量执行' }))
+  fireEvent.change(screen.getByLabelText('批量命令'), { target: { value: ' display version \n\ndisplay interface brief' } })
+  fireEvent.click(screen.getByRole('button', { name: '开始执行' }))
+  await waitFor(() => expect(api.post).toHaveBeenCalledWith('/apps/device-access/batches', { request_id: expect.any(String), session_ids: ['s2', 's1'], commands: [' display version ', 'display interface brief'] }))
+  const results = await screen.findByLabelText('批量执行结果')
+  fireEvent.click(within(results).getByText('边界路由器').closest('summary')!)
+  expect(within(results).getByText('Comware test output')).toBeVisible()
+})
+
+it('can stop a running batch and retains its results when changing tabs', async () => {
+  const get = api.get.getMockImplementation()!
+  api.get.mockImplementation((url: string) => url.endsWith('/batches/b1') ? Promise.resolve({ data: { id: 'b1', status: 'cancelled', results: [] } }) : get(url))
+  api.post.mockImplementation((url: string) => Promise.resolve({ data: { id: 'b1', status: 'running', results: [], cancel_requested: url.endsWith('/cancel') } }))
+  view()
+  fireEvent.click(await screen.findByLabelText('选择 核心交换机'))
+  fireEvent.click(screen.getByRole('tab', { name: '批量执行' }))
+  fireEvent.change(screen.getByLabelText('批量命令'), { target: { value: 'display version' } })
+  fireEvent.click(screen.getByRole('button', { name: '开始执行' }))
+  expect(await screen.findByRole('button', { name: '停止执行' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: '开始执行' })).toBeDisabled()
+  fireEvent.click(screen.getByRole('tab', { name: '终端' }))
+  fireEvent.click(screen.getByRole('tab', { name: '批量执行' }))
+  fireEvent.click(screen.getByRole('button', { name: '停止执行' }))
+  await waitFor(() => expect(api.post).toHaveBeenCalledWith('/apps/device-access/batches/b1/cancel'))
+  expect(await screen.findByText('正在停止')).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: '停止执行' })).toBeDisabled()
+  fireEvent.click(screen.getByRole('button', { name: '刷新结果' }))
+  expect(await screen.findByText('已停止')).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: '开始执行' })).not.toBeDisabled()
+})
+
+it('loads, filters and paginates audit records with expandable details', async () => {
+  const get = api.get.getMockImplementation()!
+  const record = { id: 'a1', created_at: '2026-09-30T01:00:00Z', user_id: '1', action: 'ssh.command_finished', status: 'succeeded', detail: { host: '10.0.0.1', command: 'display version', output: 'audit output\n  GE1/0    up' } }
+  api.get.mockImplementation((url: string, config?: { params?: { before?: string } }) => url.endsWith('/audit') ? Promise.resolve({ data: { items: [{ ...record, id: config?.params?.before ? 'a2' : 'a1' }], next_cursor: config?.params?.before ? null : '50' } }) : get(url))
+  view()
+  fireEvent.click(screen.getByRole('tab', { name: '操作记录' }))
+  expect(await screen.findByText('查看自己的 SSH 操作和执行结果。')).toBeInTheDocument()
+  const first = await screen.findByText('命令结束')
+  fireEvent.click(first.closest('summary')!)
+  expect(screen.getByText(/audit output/)).toBeVisible()
+  expect(screen.getByText(/audit output/).tagName).toBe('PRE')
+  expect(screen.getByText(/audit output/).textContent).toBe('audit output\n  GE1/0    up')
+  fireEvent.change(screen.getByLabelText('筛选设备地址'), { target: { value: '10.0.0.1' } })
+  fireEvent.change(screen.getByRole('combobox', { name: '筛选操作类型' }), { target: { value: 'command_finished' } })
+  fireEvent.change(screen.getByRole('combobox', { name: '筛选操作状态' }), { target: { value: 'succeeded' } })
+  fireEvent.click(screen.getByRole('button', { name: /查\s*询/ }))
+  await waitFor(() => expect(api.get).toHaveBeenCalledWith('/apps/device-access/audit', { params: { host: '10.0.0.1', kind: 'command_finished', status: 'succeeded', limit: 50 } }))
+  fireEvent.click(screen.getByRole('button', { name: '加载更多' }))
+  await waitFor(() => expect(api.get).toHaveBeenCalledWith('/apps/device-access/audit', { params: { host: '10.0.0.1', kind: 'command_finished', status: 'succeeded', limit: 50, before: '50' } }))
+  await waitFor(() => expect(within(screen.getByLabelText('操作记录列表')).getAllByText('命令结束')).toHaveLength(2))
 })

@@ -121,6 +121,7 @@ def execute_config_backup_task(
                 filter_params=filter_params,
                 ticket_id=ticket_id,
                 execution_plan=execution_plan,
+                task_id=getattr(self.request, "id", None),
             )
         )
         execution_time_ms = int((datetime.now() - execution_start).total_seconds() * 1000)
@@ -208,6 +209,8 @@ def execute_device_patrol_task(
                 attempt_number=int(redelivery.get("attempt_number") or 0),
                 worker_id=getattr(self.request, "hostname", None),
                 owner_token=str(redelivery.get("owner_token") or uuid.uuid4().hex),
+                actor_id=str(kwargs.get("ssh_actor_id") or "system"),
+                source_app=str(kwargs.get("ssh_source_app") or "inspection"),
             )
         )
         execution_time_ms = int((datetime.now() - execution_start).total_seconds() * 1000)

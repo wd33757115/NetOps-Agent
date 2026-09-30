@@ -2668,7 +2668,7 @@ def preview_device_plan(device_id: str, payload: DevicePlanPreviewRequest):
 
 
 @router.post("/{device_id}/connectivity-test")
-def test_device_connectivity_endpoint(device_id: str):
+def test_device_connectivity_endpoint(device_id: str, request: Request):
     repository = DeviceRepository()
     matches = repository.get_devices_by_filter(device_id=device_id, status=None)
     if not matches:
@@ -2692,7 +2692,7 @@ def test_device_connectivity_endpoint(device_id: str):
         }
     from src.core.device_ops.tools import test_device_connectivity
 
-    result = test_device_connectivity(device)
+    result = test_device_connectivity(device, actor_id=request.state.current_user.user_id)
     updated = repository.record_connection_health(
         device_id,
         status="connected" if result.get("success") else "failed",
@@ -2737,7 +2737,7 @@ def discover_device_identity_endpoint(device_id: str, request: Request):
             "connection_issues": issues,
         }
 
-    result = discover_device_identity(device)
+    result = discover_device_identity(device, actor_id=request.state.current_user.user_id)
     profile_registration_error = None
     metadata = {
         "device_type": result.device_type,

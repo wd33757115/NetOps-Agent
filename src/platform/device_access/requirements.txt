@@ -1,3 +1,4 @@
 # Optional new SSH capability. Existing inspection dependencies are unchanged.
 paramiko>=3.4,<5
 netmiko>=4.7,<5
+regex>=2024.11.6

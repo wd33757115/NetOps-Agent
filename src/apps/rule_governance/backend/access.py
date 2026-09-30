@@ -78,7 +78,9 @@ def capture_admission(fn):
         if "rule_governance_actor_id" not in plan:
             from src.apps.inspection.backend.access import diagnostic_admission
             plan_id = signature(fn).bind(*args, **kwargs).arguments.get("execution_plan_id")
-            with diagnostic_admission(plan_id):
+            with diagnostic_admission(plan_id) as actor:
+                kwargs["ssh_actor_id"] = str(getattr(actor, "user_id", "system"))
+                kwargs["ssh_source_app"] = "inspection"
                 return fn(*args, **kwargs)
         from src.infrastructure.db.models import RolloutStageExecutionRecord
         from src.infrastructure.db.postgres import get_db_session
@@ -89,7 +91,9 @@ def capture_admission(fn):
                 if stage is None or stage.status not in {"running", "capturing"}:
                     raise ValueError("规则灰度采集已结束或取消")
                 principal = (stage.selection_manifest_json or {}).get("execution_user_id")
-            authorize(principal)
+            actor = authorize(principal)
+            kwargs["ssh_actor_id"] = str(getattr(actor, "user_id", principal))
+            kwargs["ssh_source_app"] = APP_ID
             return fn(*args, **kwargs)
 
     return run

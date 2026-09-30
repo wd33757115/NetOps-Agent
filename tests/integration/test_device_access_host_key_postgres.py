@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from src.apps.device_access.backend.host_keys import HostKeyStore
 from src.apps.device_access.backend.models import HostKey
+from src.infrastructure.db.models import AuditLogRecord
 from src.platform.device_access.contracts import DeviceAccessError
 from src.platform.kernel.migrations import configuration
 from src.platform.kernel.registry import discover
@@ -28,6 +29,7 @@ def engine():
     assert parsed.drivername.startswith("postgresql")
     assert (parsed.database or "").startswith("netops_validation_")
     value = create_engine(url)
+    AuditLogRecord.__table__.create(value, checkfirst=True)
     with value.begin() as connection:
         manifest = discover()["device-access"]
         config, _ = configuration(manifest)

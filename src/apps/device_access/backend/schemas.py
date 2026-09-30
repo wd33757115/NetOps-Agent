@@ -119,3 +119,26 @@ class DiagnosisRun(Schema):
 
 class Read(Schema):
     operation_id: str
+
+
+class CommandPolicy(Schema):
+    patterns: list[str] = Field(max_length=100)
+    version: int | None = Field(default=None, ge=1)
+
+
+class BatchCommands(Schema):
+    request_id: str = Field(min_length=1, max_length=100)
+    session_ids: list[str] = Field(min_length=1, max_length=20)
+    commands: list[str] = Field(min_length=1, max_length=50)
+
+    @field_validator("commands")
+    @classmethod
+    def complete_lines(cls, values):
+        if any(
+            not text.strip()
+            or len(text) > 2048
+            or any(ord(char) < 32 or ord(char) == 127 for char in text)
+            for text in values
+        ):
+            raise ValueError("每条命令必须是非空完整单行，不含控制字符，最多 2048 字符")
+        return values

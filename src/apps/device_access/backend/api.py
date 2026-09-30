@@ -1,15 +1,25 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
 from sqlalchemy.exc import IntegrityError
 
 from src.auth.models import CurrentUser
 from src.platform.authorization.client import require_app
+from src.platform.device_access import governance
 from src.platform.device_access.contracts import DeviceAccessError
 
-from . import saved, service
+from . import batches, saved, service
 from .host_keys import HostKeyStore
-from .schemas import BatchLogin, HostKeyAccept, Login, SessionCreate, SessionUpdate, Ticket
+from .schemas import (
+    BatchCommands,
+    BatchLogin,
+    CommandPolicy,
+    HostKeyAccept,
+    Login,
+    SessionCreate,
+    SessionUpdate,
+    Ticket,
+)
 from .sessions import read_audit
 
 
@@ -100,3 +110,70 @@ def read(operation_id: str, user: CurrentUser = Depends(actor)):
 @router.get("/operations/{operation_id}/audit")
 def operation_audit(operation_id: str, user: CurrentUser = Depends(actor)):
     return read_audit(user.user_id, operation_id)
+
+
+@router.get("/command-policy")
+def command_policy(user: CurrentUser = Depends(actor)):
+    return governance.get_policy()
+
+
+@router.put("/command-policy")
+def save_command_policy(body: CommandPolicy, user: CurrentUser = Depends(operator)):
+    if not user.is_admin():
+        raise HTTPException(403, "只有管理员可以修改全局命令白名单")
+    try:
+        return governance.save_policy(body.patterns, user.user_id, expected_revision=body.version)
+    except ValueError:
+        raise HTTPException(422, "白名单规则无效：最多 100 条，每条 1–512 字符的有效正则") from None
+
+
+@router.get("/audit")
+def audit_records(
+    host: str | None = None,
+    kind: str | None = None,
+    status: str | None = None,
+    limit: int = Query(50, ge=1, le=100),
+    before: int = Query(0, ge=0),
+    user: CurrentUser = Depends(actor),
+):
+    result = governance.query_audit(
+        actor_id=None if user.is_admin() else user.user_id,
+        host=host,
+        kind=kind,
+        status=status,
+        limit=limit,
+        offset=before,
+    )
+    next_offset = before + len(result["items"])
+    items = [
+        {
+            **item,
+            "user_id": item.get("user_id", item.get("actor_id")),
+            "action": item.get("action", "ssh." + item.get("kind", "")),
+        }
+        for item in result["items"]
+    ]
+    return {
+        "items": items,
+        "next_cursor": (str(next_offset) if next_offset < result["total"] else None),
+    }
+
+
+@router.post("/batches", status_code=202)
+def start_batch(
+    body: BatchCommands, background: BackgroundTasks, user: CurrentUser = Depends(operator)
+):
+    result, created, targets = batches.create(user.user_id, body)
+    if created:
+        background.add_task(batches.run, user.user_id, result["id"], targets, body.commands)
+    return result
+
+
+@router.get("/batches/{batch_id}")
+def batch_result(batch_id: str, user: CurrentUser = Depends(actor)):
+    return batches.read(user.user_id, batch_id)
+
+
+@router.post("/batches/{batch_id}/cancel")
+def cancel_batch(batch_id: str, user: CurrentUser = Depends(operator)):
+    return batches.cancel(user.user_id, batch_id)

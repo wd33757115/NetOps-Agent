@@ -2,11 +2,13 @@ import React from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { HostKeyModal, LiveTerminal, LoginModal } from './DeviceTerminal'
+import { Terminal } from '@xterm/xterm'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
+const terminal = vi.hoisted(() => ({ onData: vi.fn(() => ({ dispose: vi.fn() })), write: vi.fn() }))
 vi.mock('../../config/api', () => ({ api }))
 vi.mock('@xterm/xterm', () => ({
-  Terminal: vi.fn().mockImplementation(() => ({ loadAddon: vi.fn(), open: vi.fn(), onData: () => ({ dispose: vi.fn() }), write: vi.fn(), focus: vi.fn(), dispose: vi.fn(), cols: 80, rows: 24 })),
+  Terminal: vi.fn().mockImplementation(() => ({ loadAddon: vi.fn(), open: vi.fn(), onData: terminal.onData, write: terminal.write, focus: vi.fn(), dispose: vi.fn(), cols: 80, rows: 24 })),
 }))
 vi.mock('@xterm/addon-fit', () => ({ FitAddon: vi.fn().mockImplementation(() => ({ fit: vi.fn() })) }))
 
@@ -21,7 +23,7 @@ class Socket {
   onclose?: () => void
   constructor() { Socket.last = this }
   send(value: string) { this.sent.push(value) }
-  close() {}
+  close = vi.fn()
   emit(payload: object) { act(() => this.onmessage?.({ data: JSON.stringify(payload) })) }
 }
 
@@ -97,4 +99,81 @@ it('the login prompt requires both fields', async () => {
   fireEvent.click(screen.getByRole('button', { name: /登\s*录/ }))
   expect(await screen.findByText('请输入密码')).toBeInTheDocument()
   expect(submit).not.toHaveBeenCalled()
+})
+
+const commandsSent = () => Socket.last.sent.map(value => JSON.parse(value)).filter(value => value.type === 'command')
+const connectedTerminal = async () => {
+  render(<LiveTerminal target={{ session_id: 's1' }} />)
+  await waitFor(() => expect(ticketBodies()).toHaveLength(1))
+  Socket.last.emit({ type: 'ready' })
+  return screen.getByLabelText('设备命令')
+}
+
+it('keeps terminal input local and sends only complete commands, one at a time', async () => {
+  const input = await connectedTerminal()
+  expect(Terminal).toHaveBeenCalledWith(expect.objectContaining({ disableStdin: true }))
+  expect(terminal.onData).not.toHaveBeenCalled()
+  fireEvent.change(input, { target: { value: ' display version ' } })
+  expect(commandsSent()).toHaveLength(0)
+  fireEvent.submit(input.closest('form')!)
+  expect(commandsSent()).toEqual([{ type: 'command', command: ' display version ', request_id: expect.any(String) }])
+  expect(input).toBeDisabled()
+  const { request_id } = commandsSent()[0]
+  Socket.last.emit({ type: 'command_sent', request_id })
+  expect(input).toHaveValue('')
+  expect(input).toBeDisabled()
+  Socket.last.emit({ type: 'output', data: 'Comware version\r\n' })
+  expect(terminal.write).toHaveBeenCalledWith('Comware version\r\n')
+  Socket.last.emit({ type: 'command_finished', request_id: 'another-command', status: 'succeeded' })
+  expect(input).toBeDisabled()
+  Socket.last.emit({ type: 'command_finished', request_id, status: 'succeeded' })
+  expect(input).not.toBeDisabled()
+  expect(Socket.last.sent.map(value => JSON.parse(value)).some(value => value.type === 'input')).toBe(false)
+})
+
+it('shows a rejected command and keeps it editable for correction', async () => {
+  const input = await connectedTerminal()
+  fireEvent.change(input, { target: { value: 'system-view' } })
+  fireEvent.submit(input.closest('form')!)
+  const { request_id } = commandsSent()[0]
+  Socket.last.emit({ type: 'command_sent', request_id })
+  Socket.last.emit({ type: 'command_rejected', request_id, message: '命令不符合全局白名单' })
+  expect(screen.getByText('命令不符合全局白名单')).toBeInTheDocument()
+  expect(input).not.toBeDisabled()
+  expect(input).toHaveValue('system-view')
+})
+
+it('rejects multiline paste and never forwards terminal control keys', async () => {
+  const input = await connectedTerminal()
+  const before = Socket.last.sent.length
+  fireEvent.paste(input, { clipboardData: { getData: () => 'display version\nsystem-view' } })
+  expect(screen.getByText('请一次输入一条完整命令，不支持控制字符或多行粘贴。')).toBeInTheDocument()
+  fireEvent.keyDown(input, { key: 'c', ctrlKey: true })
+  fireEvent.keyDown(input, { key: 'Tab' })
+  expect(Socket.last.sent).toHaveLength(before)
+})
+
+it('browses in-memory command history and restores the unsent draft', async () => {
+  const input = await connectedTerminal()
+  fireEvent.change(input, { target: { value: 'display version' } })
+  fireEvent.submit(input.closest('form')!)
+  const { request_id } = commandsSent()[0]
+  Socket.last.emit({ type: 'command_sent', request_id })
+  Socket.last.emit({ type: 'command_finished', request_id, status: 'succeeded' })
+  fireEvent.change(input, { target: { value: 'display interface' } })
+  fireEvent.keyDown(input, { key: 'ArrowUp' })
+  expect(input).toHaveValue('display version')
+  fireEvent.keyDown(input, { key: 'ArrowDown' })
+  expect(input).toHaveValue('display interface')
+  expect(commandsSent()).toHaveLength(1)
+})
+
+it('stops by cancelling the session without sending a remote control character', async () => {
+  const input = await connectedTerminal()
+  const socket = Socket.last
+  fireEvent.click(screen.getByRole('button', { name: '停止会话' }))
+  expect(JSON.parse(socket.sent[socket.sent.length - 1])).toEqual({ type: 'cancel' })
+  expect(socket.close).toHaveBeenCalled()
+  expect(input).toBeDisabled()
+  expect(screen.getByRole('button', { name: '重新连接' })).toBeInTheDocument()
 })

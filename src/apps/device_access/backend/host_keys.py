@@ -11,6 +11,7 @@ from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 
 from src.platform.device_access.contracts import DeviceAccessError
+from src.platform.device_access.governance import current_operation, write_event
 from src.platform.device_access.host_keys import fingerprint, known_hosts_line, parse_public_key
 
 from .models import DOMAIN, HostKey, now
@@ -36,6 +37,17 @@ class HostKeyStore:
 
         self.sessions = sessions or default_sessions
 
+    @staticmethod
+    def _audit(session, kind, host, port, *, actor=None, **detail):
+        operation = current_operation()
+        write_event(
+            actor_id=actor or (operation.actor_id if operation else "system"),
+            source_app=operation.source_app if operation else "device-access",
+            kind=kind,
+            detail={"host": host, "port": port, **detail},
+            session=session,
+        )
+
     def verify(self, host, port, key, *, auto_trust=False):
         host, observed = str(ipaddress.ip_address(host)), fingerprint(key)
         for attempt in range(2):
@@ -51,6 +63,14 @@ class HostKeyStore:
                         row.fingerprint_sha256 = observed
                         row.status = "trusted" if auto_trust else "pending"
                         row.revision = (row.revision or 0) + 1
+                        self._audit(
+                            session,
+                            "host_key_observed",
+                            host,
+                            port,
+                            fingerprint=observed,
+                            auto_trust=auto_trust,
+                        )
                         if not auto_trust:
                             code = "host_key_unknown"
                     elif row.fingerprint_sha256 != observed:
@@ -59,11 +79,20 @@ class HostKeyStore:
                             row.observed_public_key = key.get_base64()
                             row.observed_fingerprint, row.changed_at = observed, now()
                             row.revision += 1
+                            self._audit(
+                                session,
+                                "host_key_changed",
+                                host,
+                                port,
+                                previous_fingerprint=row.fingerprint_sha256,
+                                fingerprint=observed,
+                            )
                         code = "host_key_changed"
                     elif row.observed_fingerprint:
                         # The trusted key is back; forget the stale warning.
                         row.observed_key_type = row.observed_public_key = None
                         row.observed_fingerprint = None
+                        self._audit(session, "host_key_restored", host, port, fingerprint=observed)
                 # Committed before raising, so the user can confirm what was seen.
                 if code == "host_key_unknown":
                     raise DeviceAccessError(code, "首次连接此设备，请确认主机密钥指纹")
@@ -87,6 +116,7 @@ class HostKeyStore:
             row = session.get(
                 HostKey, (DOMAIN, str(ipaddress.ip_address(host)), port), with_for_update=True
             )
+            previous = row.fingerprint_sha256 if row is not None else None
             if row is not None and row.status == "pending" and row.fingerprint_sha256 == confirmed:
                 row.status = "trusted"
             elif row is not None and row.observed_fingerprint == confirmed:
@@ -98,6 +128,15 @@ class HostKeyStore:
                 raise HTTPException(409, "主机密钥已再次变化，请重新连接后确认")
             row.revision += 1
             row.verified_by, row.verified_at = str(actor), now()
+            self._audit(
+                session,
+                "host_key_accepted",
+                host,
+                port,
+                actor=actor,
+                previous_fingerprint=previous,
+                fingerprint=confirmed,
+            )
             return metadata(row)
 
     def known_hosts(self, host, port):

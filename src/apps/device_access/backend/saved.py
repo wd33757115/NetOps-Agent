@@ -6,6 +6,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 
 from src.platform.device_access.contracts import DeviceAccessError
+from src.platform.device_access.governance import write_event
 
 from .crypto import decrypt, encrypt
 from .models import DefaultLogin, SavedSession, now
@@ -36,6 +37,21 @@ def _owned(session, owner, session_id):
     return row
 
 
+def _audit(session, owner, kind, row=None, **detail):
+    if row is not None:
+        detail.update(
+            session_id=row.id,
+            host=row.host,
+            port=row.port,
+            name=row.name,
+            username=row.username,
+            uses_default=row.username is None,
+        )
+    write_event(
+        actor_id=owner, source_app="device-access", kind=kind, detail=detail, session=session
+    )
+
+
 def list_sessions(owner):
     with _sessions() as session:
         return [
@@ -62,6 +78,9 @@ def create(owner, body):
             updated_at=now(),
         )
         session.add(row)
+        _audit(
+            session, owner, "session_created", row, credentials_configured=body.password is not None
+        )
         return view(row)
 
 
@@ -84,12 +103,23 @@ def update(owner, session_id, body):
                 raise HTTPException(422, "请同时填写用户名")
             row.secret_ciphertext = encrypt(password)
         row.updated_at = now()
+        _audit(
+            session,
+            owner,
+            "session_updated",
+            row,
+            changed_fields=sorted(fields),
+            credentials_updated=bool(password),
+            credentials_cleared="username" in fields and not body.username,
+        )
         return view(row)
 
 
 def delete(owner, session_id):
     with _sessions() as session:
-        session.delete(_owned(session, owner, session_id))
+        row = _owned(session, owner, session_id)
+        _audit(session, owner, "session_deleted", row)
+        session.delete(row)
     return {"deleted": True}
 
 
@@ -105,6 +135,7 @@ def set_login(owner, body):
                 ciphertext,
                 now(),
             )
+            _audit(session, owner, "session_login_updated", row, credentials_updated=True)
         return [view(row) for row in rows]
 
 
@@ -123,6 +154,9 @@ def save_default(owner, body):
         row.username = body.username
         row.secret_ciphertext = encrypt(body.password.get_secret_value())
         row.updated_at = now()
+        _audit(
+            session, owner, "default_login_updated", username=row.username, credentials_updated=True
+        )
     return read_default(owner)
 
 
@@ -150,3 +184,4 @@ def save_login(owner, session_id, username, password):
     with _sessions() as session:
         row = _owned(session, owner, session_id)
         row.username, row.secret_ciphertext, row.updated_at = username, encrypt(password), now()
+        _audit(session, owner, "session_login_saved", row, credentials_updated=True)

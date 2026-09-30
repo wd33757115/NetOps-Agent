@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -578,7 +579,9 @@ def test_device_connectivity_test_blocks_preflight_issue(monkeypatch):
 
     monkeypatch.setattr(devices_api, "DeviceRepository", FakeRepository)
 
-    result = devices_api.test_device_connectivity_endpoint("device-1")
+    result = devices_api.test_device_connectivity_endpoint(
+        "device-1", SimpleNamespace(state=SimpleNamespace(current_user=SimpleNamespace(user_id="alice")))
+    )
 
     assert result["success"] is False
     assert result["failure_code"] == "collector_preflight_failed"
@@ -623,8 +626,9 @@ def test_device_connectivity_test_uses_collector_connection_path(monkeypatch):
                 "password": "secret",
             }
 
-    def fake_test_device_connectivity(device):
+    def fake_test_device_connectivity(device, *, actor_id):
         assert device["device_id"] == "device-1"
+        assert actor_id == "alice"
         return {
             "success": True,
             "failure_code": None,
@@ -640,7 +644,9 @@ def test_device_connectivity_test_uses_collector_connection_path(monkeypatch):
     monkeypatch.setattr(devices_api, "DeviceRepository", FakeRepository)
     monkeypatch.setattr(tools, "test_device_connectivity", fake_test_device_connectivity)
 
-    result = devices_api.test_device_connectivity_endpoint("device-1")
+    result = devices_api.test_device_connectivity_endpoint(
+        "device-1", SimpleNamespace(state=SimpleNamespace(current_user=SimpleNamespace(user_id="alice")))
+    )
 
     assert result["success"] is True
     assert result["prompt"] == "SW1#"

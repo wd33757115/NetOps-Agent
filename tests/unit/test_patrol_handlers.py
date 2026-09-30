@@ -314,11 +314,15 @@ def test_execute_patrol_handler_builds_runner_request_and_marks_completion(defer
             execution_plan_id="plan-1",
             owner_token="owner-1",
             defer_completion=defer_completion,
+            actor_id="operator-1",
+            source_app="inspection",
         )
     )
 
     assert result["snapshot_run_id"] == "patrol-task-1"
     assert requests[0].execution_plan_id == "plan-1"
+    assert requests[0].actor_id == "operator-1"
+    assert requests[0].source_app == "inspection"
     assert completions == ([] if defer_completion else [("patrol-task-1", {"owner_token": "owner-1"})])
 
 

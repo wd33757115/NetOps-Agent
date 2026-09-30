@@ -151,8 +151,13 @@ def connect_cli_device(
     device: dict[str, Any],
     *,
     credential_resolver: CredentialResolver | None = None,
+    actor_id: str = "system",
+    source_app: str = "legacy-cli",
+    task_id: str | None = None,
 ):
-    from netmiko import ConnectHandler
+    from src.platform.device_access.governance import SSHOperation
+
+    from .guarded_cli import connect
 
     resolver = credential_resolver or CredentialResolver()
     password = device.get("password") or resolver.resolve_password(device.get("credential_ref"))
@@ -164,12 +169,23 @@ def connect_cli_device(
     host = device.get("ip") or device.get("management_ip")
     if not host:
         raise ValueError("device management IP is required")
-    return ConnectHandler(
+    port = _safe_int(attributes.get("port"), 22)
+    operation = SSHOperation(
+        actor_id=str(actor_id or "system"),
+        source_app=source_app,
+        target_ref=str(device.get("device_id") or host),
+        host=str(host),
+        port=port,
+        task_id=task_id,
+        secrets=(password,),
+    )
+    return connect(
+        operation,
         device_type=device_type_for(device),
         host=host,
         username=device.get("username") or "admin",
         password=password,
-        port=_safe_int(attributes.get("port"), 22),
+        port=port,
         conn_timeout=_safe_float(attributes.get("conn_timeout"), 10.0),
         auth_timeout=_safe_float(attributes.get("auth_timeout"), 10.0),
         banner_timeout=_safe_float(attributes.get("banner_timeout"), 15.0),
@@ -185,6 +201,9 @@ def connect_cli_device_with_retries(
     device: dict[str, Any],
     *,
     connector: Callable[[dict[str, Any]], Any] = connect_cli_device,
+    actor_id: str = "system",
+    source_app: str = "legacy-cli",
+    task_id: str | None = None,
 ) -> Any:
     """Connect to a CLI device with a small retry window for virtual-lab SSH flaps."""
     attributes = dict(device.get("attributes") or {})
@@ -193,9 +212,16 @@ def connect_cli_device_with_retries(
     last_exc: Exception | None = None
     for attempt in range(1, attempts + 1):
         try:
+            if connector is connect_cli_device:
+                return connector(device, actor_id=actor_id, source_app=source_app, task_id=task_id)
             return connector(device)
         except Exception as exc:
             last_exc = exc
+            if getattr(exc, "failure_code", None) in {
+                "policy_denied", "audit_unavailable", "policy_unavailable", "invalid_request",
+                "policy_match_failed", "invalid_command",
+            }:
+                raise
             if attempt >= attempts:
                 break
             time.sleep(delay)
@@ -207,12 +233,17 @@ def test_cli_connectivity(
     device: dict[str, Any],
     *,
     connector: Callable[[dict[str, Any]], Any] = connect_cli_device,
+    actor_id: str = "system",
+    source_app: str = "device-management",
+    task_id: str | None = None,
 ) -> dict[str, Any]:
     """Open and close a real device session using the production CLI path."""
     started = time.perf_counter()
     connection = None
     try:
-        connection = connect_cli_device_with_retries(device, connector=connector)
+        connection = connect_cli_device_with_retries(
+            device, connector=connector, actor_id=actor_id, source_app=source_app, task_id=task_id
+        )
         prompt = ""
         find_prompt = getattr(connection, "find_prompt", None)
         if callable(find_prompt):
@@ -231,7 +262,7 @@ def test_cli_connectivity(
     except Exception as exc:
         return {
             "success": False,
-            "failure_code": "connection_failed",
+            "failure_code": getattr(exc, "failure_code", "connection_failed"),
             "device_name": device.get("device_name"),
             "ip": device.get("ip") or device.get("management_ip"),
             "device_type": device_type_for(device),
@@ -260,11 +291,15 @@ class CLICommandCollector(IngestionAdapter):
         connector: Callable[[dict[str, Any]], Any] = connect_cli_device,
         progress_callback: Callable[..., Any] | None = None,
         continuation_guard: Callable[[], Any] | None = None,
+        actor_id: str = "system",
+        source_app: str = "legacy-cli",
+        task_id: str | None = None,
     ) -> None:
         self.output_root = output_root
         self.connector = connector
         self.progress_callback = progress_callback
         self.continuation_guard = continuation_guard
+        self.actor_id, self.source_app, self.task_id = actor_id, source_app, task_id
 
     def collect(self, plan: CLICollectionPlan) -> IngestionResult:
         effective_device = device_with_plan_context(plan.device, plan.execution_plan)
@@ -303,6 +338,9 @@ class CLICommandCollector(IngestionAdapter):
         connection = connect_cli_device_with_retries(
             effective_device,
             connector=self.connector,
+            actor_id=self.actor_id,
+            source_app=self.source_app,
+            task_id=self.task_id,
         )
         collection_items = list(execution_plan.commands)
         commands = execution_plan.command_texts()
@@ -445,7 +483,9 @@ class CLICommandCollector(IngestionAdapter):
                     try:
                         output = connection.send_command(command, read_timeout=read_timeout)
                     except Exception as exc:
-                        failure = "timeout" if "timeout" in str(exc).lower() else "failed"
+                        failure = getattr(exc, "failure_code", None) or (
+                            "timeout" if "timeout" in str(exc).lower() else "failed"
+                        )
                         if binding_by_key:
                             logger.warning(
                                 "primary collection command execution failed",
@@ -476,7 +516,10 @@ class CLICommandCollector(IngestionAdapter):
                                 "selected_for_bindings": [],
                             }
                         )
-                        if check_item_mode:
+                        if check_item_mode and failure not in {
+                            "policy_denied", "audit_unavailable", "policy_unavailable",
+                            "invalid_request", "output_limit", "policy_match_failed", "invalid_command",
+                        }:
                             write_manifest("running")
                             continue
                         command_results.extend(

@@ -183,10 +183,12 @@ def test_device_patrol_runner_executes_explicit_plan_and_persists_snapshots():
     class FakePatrolTool:
         def __init__(self, db_manager):
             captured["db_manager"] = db_manager
+            self.cli_collector = SimpleNamespace()
 
         async def patrol_by_plan(self, execution_plan, save_baseline):
             captured["plan"] = execution_plan
             captured["save_baseline"] = save_baseline
+            captured["ssh_context"] = vars(self.cli_collector)
             return TaskResult(
                 success=True,
                 action=ActionType.PATROL,
@@ -238,6 +240,7 @@ def test_device_patrol_runner_executes_explicit_plan_and_persists_snapshots():
         DevicePatrolRunRequest(
             ticket_id="T-1",
             save_baseline=True,
+            actor_id="operator-1",
             task_id="celery-1",
             execution_plan_id="plan-1",
             execution_plan={
@@ -258,6 +261,9 @@ def test_device_patrol_runner_executes_explicit_plan_and_persists_snapshots():
     assert result["execution_plan_id"] == "plan-1"
     assert result["raw_outputs_archive"] is None
     assert captured["save_baseline"] is True
+    assert captured["ssh_context"] == {
+        "actor_id": "operator-1", "source_app": "inspection", "task_id": "celery-1"
+    }
     assert captured["plan"].device_id == "device-1"
     assert captured["plan"].command_texts() == ["show version"]
     assert captured["snapshot_kwargs"]["ticket_id"] == "T-1"

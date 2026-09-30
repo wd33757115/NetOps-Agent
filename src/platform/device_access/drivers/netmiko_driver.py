@@ -15,6 +15,7 @@ import paramiko
 from ..catalog import TERMINAL_PREPARATION
 from ..contracts import DeviceAccessError
 from ..errors import CommandExecutionError, failure_code
+from ..governance import SSHOperation, current_operation
 from ..policy import validate_profile
 
 DEVICE_TYPES = {"comware": "hp_comware", "nxos": "cisco_nxos", "ios": "cisco_ios", "vrp": "huawei"}
@@ -22,16 +23,30 @@ PREPARATION = {platform: frozenset(commands) for platform, commands in TERMINAL_
 
 
 class _Guard:
-    def __init__(self, profile):
+    def __init__(self, profile, operation=None):
         self.profile = profile
+        self.operation = operation or current_operation()
+        self.setup_ticket = None
+        self.setup_offset = 0
         self.reset(profile.session_setup_timeout, frozenset())
 
-    def reset(self, seconds, allowed):
+    def reset(self, seconds, allowed, *, phase="command"):
         self.deadline = time.monotonic() + seconds
         self.allowed = allowed
         self.raw = bytearray()
         self.writes = []
         self.input_required = False
+        self.phase = phase
+
+    def finish_setup(self, *, status="succeeded", failure_code=None):
+        if self.setup_ticket is not None:
+            ticket, self.setup_ticket = self.setup_ticket, None
+            self.operation.after_command(
+                ticket,
+                output=self.output()[self.setup_offset :],
+                status=status,
+                failure_code=failure_code,
+            )
 
     def check(self):
         if time.monotonic() >= self.deadline:
@@ -70,6 +85,14 @@ class _Guard:
         if command and command not in self.allowed:
             raise DeviceAccessError("policy_denied", "driver attempted an unapproved command")
         if command:
+            if self.operation is None:
+                raise DeviceAccessError("policy_unavailable", "SSH operation context is required")
+            if self.phase == "setup":
+                self.finish_setup()
+                self.setup_ticket = self.operation.before_command(command, phase="setup")
+                self.setup_offset = len(self.output())
+            else:
+                self.operation.check_command(command)
             self.writes.append(command)
 
 
@@ -141,15 +164,24 @@ class _ReadOnlyMixin:
 
 
 class NetmikoSession:
-    def __init__(self, connection, guard, prompt):
+    def __init__(self, connection, guard, prompt, *, owns_operation=False):
         self._connection, self._guard, self._prompt = connection, guard, prompt
         self._usable = True
         self.initialization_commands = tuple(guard.writes)
+        self.owns_operation = owns_operation
 
     def find_prompt(self):
         return self._prompt
 
     def send_command(self, command, read_timeout):
+        if self._guard.operation is None:
+            raise DeviceAccessError("policy_unavailable", "SSH operation context is required")
+        return self._guard.operation.execute(
+            command,
+            lambda: self._send_command(command, read_timeout),
+        )
+
+    def _send_command(self, command, read_timeout):
         if not self._usable:
             raise DeviceAccessError("connection_closed", "Netmiko session is no longer usable")
         if (
@@ -203,8 +235,13 @@ class NetmikoSession:
             timer.join(timeout=1)
 
     def disconnect(self):
+        was_usable = self._usable
         self._usable = False
-        self._connection.disconnect()
+        try:
+            self._connection.disconnect()
+        finally:
+            if self.owns_operation and was_usable:
+                self._guard.operation.event("disconnected", driver="netmiko")
 
 
 class NetmikoDriver:
@@ -257,8 +294,22 @@ class NetmikoDriver:
         password = profile.password or CredentialResolver().resolve_password(profile.credential_ref)
         if not password:
             raise DeviceAccessError("credential_unavailable", "device credential is unavailable")
-        guard = _Guard(replace(profile, password=password, credential_ref=None))
-        guard.reset(profile.session_setup_timeout, PREPARATION[self.platform])
+        operation = current_operation()
+        owns_operation = operation is None
+        operation = operation or SSHOperation(
+            "system",
+            "device-access-driver",
+            target.target_ref,
+            target.host,
+            profile.port,
+            secrets=(password,),
+        )
+        if password not in operation.secrets:
+            operation.secrets += (password,)
+        if owns_operation:
+            operation.event("connecting", driver="netmiko")
+        guard = _Guard(replace(profile, password=password, credential_ref=None), operation)
+        guard.reset(profile.session_setup_timeout, PREPARATION[self.platform], phase="setup")
         client = _Client(guard)
         connection = None
         expired = Event()
@@ -305,7 +356,10 @@ class NetmikoDriver:
                         "waiting_for_input", "device prompt needs human confirmation"
                     )
                 guard.check()
-                return NetmikoSession(connection, guard, prompt)
+                guard.finish_setup()
+                if owns_operation:
+                    operation.event("connected", driver="netmiko")
+                return NetmikoSession(connection, guard, prompt, owns_operation=owns_operation)
         except Exception as exc:
             if connection is not None:
                 connection.disconnect()
@@ -316,6 +370,12 @@ class NetmikoDriver:
                 and type(exc).__name__ in {"ReadTimeout", "NetmikoTimeoutException"}
             ):
                 code = "timeout"
+            guard.finish_setup(status="failed", failure_code=code)
+            if owns_operation:
+                try:
+                    operation.event("connection_failed", status="failed", failure_code=code)
+                finally:
+                    operation.event("disconnected", driver="netmiko")
             raise DeviceAccessError(code, "Netmiko connection failed") from None
         finally:
             timer.cancel()
