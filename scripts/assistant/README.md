@@ -1,5 +1,16 @@
 # 助手资料与 DSH 验证工具
 
+## 复盘一次运行：执行时间线（2026-10-01）
+
+每次诊断都会在 `.runtime/assistant-sessions/…/runs/` 下留一份运行轨迹。按运行编号把它整理成时间线：
+每一步模型说了什么、调用了哪个工具和参数、结果摘要、哪里出错。开思考时的推理默认折叠，
+加 `--reasoning` 显示全文。只读本地文件，不访问设备或模型。
+
+```powershell
+.\venv\Scripts\python.exe scripts/assistant/trace_timeline.py <运行编号>
+.\venv\Scripts\python.exe scripts/assistant/trace_timeline.py <运行编号> --reasoning
+```
+
 ## 当前回归与评测（2026-09-21）
 
 正式版本为 Assistant 0.4.1 / Inspection 1.1.0，执行器仍为 DSH 0.1.5rc1。
