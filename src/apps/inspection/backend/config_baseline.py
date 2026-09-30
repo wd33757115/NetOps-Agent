@@ -10,7 +10,8 @@ from sqlalchemy import select
 
 from src.infrastructure.db.models import CommandSnapshot, NetworkDevice, PatrolRun
 from src.infrastructure.db.postgres import get_db_session
-from src.platform.device_access.text_compare import MAX_SOURCE_BYTES, redact_config
+from src.platform.device_access.governance import redact
+from src.platform.device_access.text_compare import MAX_SOURCE_BYTES
 
 from .diagnostics import iso
 
@@ -82,7 +83,7 @@ def read_baseline(user, body: ReadBaseline):
                 if identity_source == "snapshot_management_ip"
                 else None,
                 "host": body.host,
-                "command": redact_config(snapshot.command),
+                "command": redact(snapshot.command),
                 "observed_at": iso(
                     snapshot.observed_at
                     if snapshot.observed_at.tzinfo
@@ -97,8 +98,9 @@ def read_baseline(user, body: ReadBaseline):
                 "run_status": run.status,
                 "baseline_eligible": run.baseline_eligible,
             },
-            # Redacted before leaving the App; only diff lines reach the model.
-            "text": "" if "snapshot_too_large" in gaps else redact_config(raw),
+            # The same platform SSH redaction the live read gets, so the two sides
+            # compare like for like; only diff lines reach the model.
+            "text": "" if "snapshot_too_large" in gaps else redact(raw),
             "complete": not gaps,
             "quality_gaps": gaps,
             "meaning": "按指定 snapshot_id 读取未解析的基线原文；基线可用不等于健康，"

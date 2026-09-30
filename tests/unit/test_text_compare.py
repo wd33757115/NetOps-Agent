@@ -1,12 +1,7 @@
 import json
 
 from src.platform.device_access.governance import redact
-from src.platform.device_access.text_compare import (
-    MAX_DIFF_LINES,
-    comparable_lines,
-    compare_text,
-    redact_config,
-)
+from src.platform.device_access.text_compare import MAX_DIFF_LINES, compare_text
 
 ROUTES = (
     "Destinations : 3        Routes : 3\r\r\n\r\r\n"
@@ -43,30 +38,29 @@ def test_removed_and_changed_routes_are_named_line_by_line():
     assert "-192.168.1.0/24     Direct  0   0           192.168.1.1     Vlan200" in result["diff"]
 
 
-def test_redaction_preserves_lines_and_hides_authentication_private_key_values():
-    text = (
-        "#\ninterface GigabitEthernet3/0\n ospf authentication-mode md5 1 cipher SECRET-A\n"
-        " password cipher SECRET-B\n -----BEGIN PRIVATE KEY-----\n SECRET-C\n"
-        " -----END PRIVATE KEY-----\n mtu 1500\n#"
+def test_every_line_is_compared_including_redacted_credential_lines():
+    # Both sides carry the platform SSH redaction before they reach the comparison.
+    before = "#\ninterface GigabitEthernet2/0\n ip address 2.2.2.2 255.255.255.0\n#\n"
+    after = before.replace(
+        " ip address 2.2.2.2 255.255.255.0\n",
+        " ip address 2.2.2.2 255.255.255.0\n"
+        " ospf authentication-mode md5 1 cipher EXAMPLE-SECRET\n",
     )
-    safe = redact_config(text)
-    assert "SECRET-" not in safe
-    assert len(safe.splitlines()) == len(text.splitlines())
-    lines, hidden = comparable_lines(text)
-    assert hidden == 5 and lines[-2:] == [" mtu 1500", "#"]
-
-
-def test_raw_baseline_and_pre_audit_redacted_live_do_not_invent_sensitive_changes():
-    text = (
-        "#\ninterface GigabitEthernet3/0\n"
-        " ospf authentication-mode md5 1 cipher EXAMPLE-SECRET\n mtu 1500\n#"
-    )
-    result = compare_text(text, redact(text))
-    assert result["status"] == "unchanged" and not result["diff"]
-    # Hidden lines are counted, never called equal.
-    assert result["hidden_lines"] == {"baseline": 1, "current": 1}
-    assert result["quality_gaps"] == ["sensitive_lines_not_compared"]
+    result = compare_text(redact(before), redact(after))
+    assert result["status"] == "changed" and result["added_count"] == 1
+    assert result["diff"][0].endswith("@@ interface GigabitEthernet2/0")
+    assert "+[redacted credential line]" in result["diff"]
     assert "EXAMPLE-SECRET" not in json.dumps(result)
+    assert set(result) == {
+        "status", "added_count", "removed_count", "baseline_lines", "current_lines",
+        "diff", "diff_truncated",
+    }
+
+
+def test_the_same_redacted_line_on_both_sides_is_unchanged():
+    text = "#\ninterface GigabitEthernet3/0\n ospf authentication-mode md5 1 cipher X\n mtu 1500\n#"
+    result = compare_text(redact(text), redact(text))
+    assert result["status"] == "unchanged" and result["baseline_lines"] == 5
 
 
 def test_an_indented_change_names_its_section_like_git():

@@ -16,11 +16,11 @@ from src.infrastructure.db.models import CommandSnapshot, Conversation, Message
 from src.platform.agent_runtime.base import RunContext
 from src.platform.agent_runtime.dsh import DshRuntime
 from src.platform.tools import registry
-from tests.unit.test_device_access_config_compare import COMMAND, HOST
-from tests.unit.test_device_access_config_compare import config_lab as config_lab
+from tests.unit.test_device_access_baseline_compare import COMMAND, HOST, ROUTES
+from tests.unit.test_device_access_baseline_compare import config_lab as config_lab
 from tests.unit.test_dsh_runtime import response
 
-COMPARE = "mcp__netops__device_access__compare_config"
+COMPARE = "mcp__netops__device_access__compare_baseline"
 SUBMIT = "mcp__netops__submit_answer"
 
 
@@ -71,16 +71,12 @@ def test_dsh_comparison_reads_sqlite_runs_audited_fixture_and_persists_citation(
         assert "mcp__netops__inspection__launch" not in tools
         assert "mcp__netops__inspection__read_baseline" not in tools
         properties = tools[COMPARE]["parameters"]["properties"]
-        assert "platform" not in properties and "turn_id" not in properties
+        assert not {"platform", "platforms", "turn_id"} & set(properties)
         assert "command" not in properties and "configuration" not in properties
         if len(requests) == 1:
             return tool_call(
                 COMPARE,
-                {
-                    "host": HOST,
-                    "snapshot_id": "baseline-config",
-                    "purpose": "核对基线与现场接口配置",
-                },
+                {"hosts": [HOST], "purpose": "核对基线与现场接口配置"},
                 "compare",
             )
         assert len(requests) == 2
@@ -111,14 +107,16 @@ def test_dsh_comparison_reads_sqlite_runs_audited_fixture_and_persists_citation(
     events = asyncio.run(start())
     assert events[-1].kind == "completed", [(event.kind, event.data) for event in events]
     assert len(requests) == 2 and workspace.commands == 1
-    assert config_lab.sent == [COMMAND] and config_lab.connects == config_lab.closes == 1
+    assert sorted(config_lab.sent) == sorted([COMMAND, ROUTES])
+    assert config_lab.connects == config_lab.closes == 1
     references = [event.data for event in events if event.kind == "citation"]
     assert len(references) == 1
     reference = evidence.validate(references[0])
-    assert reference["tool"] == "device_access__compare_config"
+    assert reference["tool"] == "device_access__compare_baseline"
     data = json.loads(reference["excerpt"])
-    assert data["status"] == "changed" and data["baseline"]["snapshot_id"] == "baseline-config"
-    assert data["current"]["evidence_ref"].startswith("device-access:audit:")
+    [config] = [row for row in data["devices"][0]["commands"] if row["command"] == COMMAND]
+    assert config["status"] == "changed" and config["baseline"]["snapshot_id"] == "baseline-config"
+    assert config["evidence_ref"].startswith("device-access:audit:")
     assert workspace.prepared_answer == (answer, references)
     turns.finish("alice", run["id"], "completed", answer, references, len(events))
 
@@ -133,7 +131,7 @@ def test_dsh_comparison_reads_sqlite_runs_audited_fixture_and_persists_citation(
     with pytest.raises(HTTPException) as denied:
         api.citation(conversation_id, reference["id"], actor)
     assert denied.value.status_code == 403
-    assert config_lab.sent == [COMMAND]
+    assert sorted(config_lab.sent) == sorted([COMMAND, ROUTES])
 
 
 def test_comparison_is_only_in_scoped_diagnosis_and_launch_stays_closed(config_lab, tmp_path):
@@ -143,11 +141,11 @@ def test_comparison_is_only_in_scoped_diagnosis_and_launch_stays_closed(config_l
         "alice", run_id="scope-test", reader=DocumentReader(source), check=lambda: None
     )
     definitions = {tool["name"]: tool for tool in workspace.definitions()}
-    assert definitions["device_access__compare_config"]["mutates"]
+    assert definitions["device_access__compare_baseline"]["mutates"]
     assert "inspection__launch" not in definitions
-    arguments = config_lab.body.model_dump(exclude={"platform", "turn_id"})
+    arguments = config_lab.body.model_dump(exclude={"platforms", "turn_id"})
     with pytest.raises(PermissionError):
-        workspace.invoke("device_access__compare_config", arguments)
+        workspace.invoke("device_access__compare_baseline", arguments)
     with pytest.raises(PermissionError):
         workspace.invoke("inspection__launch", {})
     with pytest.raises(PermissionError, match="read tools only"):

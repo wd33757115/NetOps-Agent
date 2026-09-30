@@ -15,11 +15,11 @@ from . import evidence
 from .workspace import DocumentWorkspace
 
 RUN = "device_access__run"
-COMPARE = "device_access__compare_config"
+COMPARE = "device_access__compare_baseline"
 BASELINE = "inspection__read_baseline"
 SCOPE_TOOLS = frozenset({"topology__trace_path", "topology__locate"})
 PLATFORMS = frozenset({"comware", "nxos", "ios", "vrp"})
-SERVER_FIELDS = ("platform", "turn_id")
+SERVER_FIELDS = ("platform", "platforms", "turn_id")
 MAX_DEVICES = 8
 MAX_COMMANDS = 20
 
@@ -58,7 +58,7 @@ class DiagnosticWorkspace(DocumentWorkspace):
                     schema["required"].remove(field)
             tool["description"] += (
                 f"。只能登录本轮 topology__trace_path 或 topology__locate 结果中出现的已采集设备，"
-                f"每轮最多 {MAX_DEVICES} 台、共 {MAX_COMMANDS} 条命令"
+                f"每轮最多 {MAX_DEVICES} 台、共 {MAX_COMMANDS} 条命令（基线对比每台设备计 1 条）"
             )
         return definitions + extra
 
@@ -77,30 +77,39 @@ class DiagnosticWorkspace(DocumentWorkspace):
                 self.widen(result["data"])
             return result
         self.check()
-        allowed = {"host", "commands", "purpose"} if name == RUN else {
-            "snapshot_id", "host", "purpose"
-        }
+        allowed = {"host", "commands", "purpose"} if name == RUN else {"hosts", "purpose"}
         if set(arguments) - allowed:
             raise PermissionError("Platform and turn are filled by the server")
+        requested = [arguments.get("host", "")] if name == RUN else arguments.get("hosts") or []
         try:
-            host = str(ipaddress.ip_address(str(arguments.get("host", "")).strip()))
+            hosts = [str(ipaddress.ip_address(str(host).strip())) for host in requested]
+            hosts = list(dict.fromkeys(hosts))
         except ValueError:
             raise PermissionError("需要设备管理地址") from None
-        command_count = len(arguments.get("commands") or []) if name == RUN else 1
+        if not hosts:
+            raise PermissionError("需要设备管理地址")
+        # A comparison runs the device's own fixed baseline commands: one per device.
+        command_count = len(arguments.get("commands") or []) if name == RUN else len(hosts)
         with self.lock:
-            platform = self.scope.get(host)
-            if platform is None:
-                raise PermissionError("该设备不在本轮路径计算或终端定位的结果中，不能登录")
+            outside = [host for host in hosts if host not in self.scope]
+            if outside:
+                raise PermissionError(
+                    f"{'、'.join(outside)} 不在本轮路径计算或终端定位的结果中，不能登录"
+                )
             if self.commands + command_count > MAX_COMMANDS:
                 raise PermissionError(
                     f"本轮诊断命令预算已用完（每轮最多 {MAX_COMMANDS} 条），不能再登录设备；"
                     "请基于已有证据作答，未取得的证据列入待验证"
                 )
             self.commands += command_count
+            platforms = {host: self.scope[host] for host in hosts}
+        server = (
+            {"host": hosts[0], "platform": platforms[hosts[0]]}
+            if name == RUN
+            else {"hosts": hosts, "platforms": platforms}
+        )
         result = registry.invoke(
-            name,
-            {**arguments, "host": host, "platform": platform, "turn_id": self.run_id},
-            actor_id=self.actor_id,
+            name, {**arguments, **server, "turn_id": self.run_id}, actor_id=self.actor_id
         )
         reference = evidence.capture(name, result)
         self.business_evidence[reference["id"]] = reference

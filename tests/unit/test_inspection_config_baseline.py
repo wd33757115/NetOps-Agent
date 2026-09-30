@@ -93,7 +93,9 @@ def read(**kwargs):
 def test_reads_whole_raw_baseline_with_asset_time_hash_and_run_provenance(database):
     result = read()
     assert result["complete"] and not result["quality_gaps"]
-    assert " port access vlan 100" in result["text"] and "[敏感配置已隐藏]" in result["text"]
+    # The same platform SSH redaction a live read gets, so both sides show the same marker.
+    assert " port access vlan 100" in result["text"]
+    assert "[redacted credential line]" in result["text"] and "TEST-SECRET" not in result["text"]
     assert result["baseline"]["device_id"] == "asset-1"
     assert result["baseline"]["run_mode"] == "offline"
     assert result["baseline"]["run_source"] == "upload"

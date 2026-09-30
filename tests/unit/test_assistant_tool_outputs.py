@@ -128,7 +128,7 @@ def test_business_preview_keeps_large_json_and_command_truncation_flags():
 def test_comparison_step_rechecks_inspection_permission(database, monkeypatch):
     conversation = history.create("alice")["id"]
     run, _ = turns.begin("alice", conversation, turns.Question(request_id="compare", text="对比"))
-    reference = evidence.capture("device_access__compare_config", {"baseline": "protected-config"})
+    reference = evidence.capture("device_access__compare_baseline", {"baseline": "protected-config"})
     with database() as session:
         session.get(Turn, run["id"]).progress_json = {
             "steps": [{"id": "compare", "evidence_id": reference["id"], "status": "completed"}],

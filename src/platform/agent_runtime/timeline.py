@@ -115,7 +115,20 @@ def _items(data):
     return f"{len(items)} 条" + (f"：{'、'.join(commands)}" if commands else "")
 
 
+def _baseline(data):
+    """Each device's summary line, then the diff lines of whatever changed."""
+    rows = list(data.get("summary", []))
+    for device in data.get("devices", []):
+        for item in device.get("commands", []):
+            changed = [line for line in item.get("diff", []) if line[:1] in "+-@"]
+            if changed:
+                rows.append(f"{device.get('host')} {item.get('command')}：")
+                rows += changed[:8] + (["…"] if len(changed) > 8 else [])
+    return "\n".join(rows)
+
+
 def _compare(data):
+    """The earlier single-snapshot comparison, for traces recorded before it was replaced."""
     comparison = data.get("comparison") or {}
     text = f"{data.get('command')}：{data.get('status')}"
     if comparison:
@@ -157,6 +170,7 @@ SUMMARIES = {
     "inspection__list_snapshots": _items,
     "inspection__list_events": _items,
     "inspection__list_runs": _items,
+    "device_access__compare_baseline": _baseline,
     "device_access__compare_config": _compare,
     "device_access__run": _run,
 }

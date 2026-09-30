@@ -12,7 +12,11 @@ MAX_EVIDENCE_BYTES = 24000
 
 def source_apps(reference):
     """A live comparison embeds inspection data as well as device-access data."""
-    if reference.get("tool") == "device_access__compare_config":
+    # compare_config is the earlier single-snapshot name, kept for recorded citations.
+    if reference.get("tool") in {
+        "device_access__compare_baseline",
+        "device_access__compare_config",
+    }:
         return ("device-access", "inspection")
     return (reference["app_id"],)
 

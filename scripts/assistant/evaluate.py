@@ -19,7 +19,7 @@ sys.path.insert(0, str(ROOT))
 from src.apps.materials.backend.documents import DocumentReader
 from src.apps.assistant.backend.workspace import DocumentWorkspace
 from src.platform.agent_runtime.base import RunContext
-from src.platform.agent_runtime.dsh import PROMPT, DshRuntime
+from src.platform.agent_runtime.dsh import DshRuntime, system_prompt
 
 
 def implementation_digest():
@@ -165,7 +165,7 @@ async def run(args, dataset):
     latencies = sorted(r["elapsed_seconds"] for r in results)
     summary = {
         "dataset_sha256": hashlib.sha256(args.dataset.read_bytes()).hexdigest(),
-        "prompt_sha256": hashlib.sha256(PROMPT.encode()).hexdigest(),
+        "prompt_sha256": hashlib.sha256(system_prompt().encode()).hexdigest(),
         "implementation_sha256": implementation_digest(),
         "sdk": version("deepseek-harness-sdk"),
         "model": get_settings().LLM_MODEL,

@@ -1,7 +1,7 @@
 import json
 
 from src.platform.agent_runtime.session_store import key
-from src.platform.agent_runtime.timeline import find_trace, render, timeline
+from src.platform.agent_runtime.timeline import find_trace, render, summarize, timeline
 
 QUESTION = "PC1(1.1.1.2) ping 不通 PC2(192.168.1.2)"
 ANSWER = "根因：PC2 默认网关配置错误"
@@ -141,3 +141,30 @@ def test_find_trace_by_run_id(tmp_path):
     path = write_trace(runs / f"{key('run-1')}.jsonl")
     assert find_trace("run-1", root=tmp_path) == path
     assert find_trace("missing", root=tmp_path) is None
+
+
+def test_a_baseline_comparison_reads_as_its_summary_then_what_changed():
+    hunk = "@@ -33,2 +33,3 @@ interface GigabitEthernet2/0"
+    result = {
+        "summary": ["10.10.1.1：对比 2 条基线命令，1 条有变化，1 条无变化"],
+        "devices": [
+            {
+                "host": "10.10.1.1",
+                "commands": [
+                    {
+                        "command": "display current-configuration",
+                        "status": "changed",
+                        "diff": [hunk, "+ ospf network-type p2p"],
+                    },
+                    {"command": "display arp", "status": "unchanged"},
+                ],
+            }
+        ],
+    }
+    text = summarize("device_access__compare_baseline", json.dumps({"data": result}))
+    assert text.splitlines() == [
+        result["summary"][0],
+        "10.10.1.1 display current-configuration：",
+        hunk,
+        "+ ospf network-type p2p",
+    ]

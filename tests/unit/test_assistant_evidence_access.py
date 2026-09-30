@@ -39,10 +39,14 @@ def test_excerpt_requires_current_source_app_grant_and_is_not_leaked_by_history(
 
 
 @pytest.mark.parametrize("revoked_app", ["inspection", "device-access"])
-def test_comparison_citation_requires_both_source_apps(database, monkeypatch, revoked_app):
+# compare_config is the earlier name; citations recorded under it stay protected.
+@pytest.mark.parametrize(
+    "tool", ["device_access__compare_baseline", "device_access__compare_config"]
+)
+def test_comparison_citation_requires_both_source_apps(database, monkeypatch, revoked_app, tool):
     conversation = history.create("alice")["id"]
     run, _ = turns.begin("alice", conversation, turns.Question(request_id="compare", text="对比"))
-    reference = evidence.capture("device_access__compare_config", {"baseline": "protected-config"})
+    reference = evidence.capture(tool, {"baseline": "protected-config"})
     turns.finish("alice", run["id"], "completed", "配置对比", [reference], 5)
 
     def authorize(actor, app):
@@ -58,7 +62,9 @@ def test_comparison_citation_requires_both_source_apps(database, monkeypatch, re
 def test_comparison_final_answer_rechecks_both_source_apps(monkeypatch):
     from src.apps.assistant.backend.workspace import DocumentWorkspace
 
-    reference = evidence.capture("device_access__compare_config", {"baseline": "protected-config"})
+    reference = evidence.capture(
+        "device_access__compare_baseline", {"baseline": "protected-config"}
+    )
     workspace = DocumentWorkspace("alice", reader=object(), check=lambda: None)
     workspace.business_evidence[reference["id"]] = reference
     checked = []

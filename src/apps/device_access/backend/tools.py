@@ -3,7 +3,7 @@ from pydantic import BaseModel, ConfigDict
 
 from src.platform.tools.registry import Tool
 
-from . import config_compare, diagnosis, saved, service
+from . import baseline_compare, diagnosis, saved, service
 from .schemas import DiagnosisRun, Read
 
 
@@ -19,10 +19,10 @@ def run(user, body):
     )
 
 
-def compare_config(user, body):
+def compare_baseline(user, body):
     if not user.can_execute_skills():
-        raise HTTPException(403, "当前账号不能登录设备比较配置")
-    return config_compare.compare(user.user_id, body)
+        raise HTTPException(403, "当前账号不能登录设备对比基线")
+    return baseline_compare.compare(user.user_id, body)
 
 
 def tool_view(result):
@@ -41,12 +41,13 @@ def tool_view(result):
 
 TOOLS = [
     Tool(
-        "compare_config",
-        "将巡检保存的一份未解析基线原文与现场同一条命令的输出逐行文本对比；"
-        "先验证基线设备和完整性，再在设备上原样执行该快照的命令一次，不接受任意命令；"
-        "只返回差异行和证据缺口，不回传整份输出，不自动重试",
-        config_compare.CompareConfig,
-        compare_config,
+        "compare_baseline",
+        "看设备和之前比变了什么：每台设备登录一次，把巡检为它保存的每条基线命令"
+        "（配置、接口、路由表、OSPF 邻居、ARP、MAC、VLAN、LLDP 等，以实际保存的为准）"
+        "在现场原样执行一次，与基线原文逐行对比；返回每台设备的汇总和每条命令的差异行，"
+        "不回传整份输出，不接受任意命令，不自动重试",
+        baseline_compare.CompareBaseline,
+        compare_baseline,
         mutates=True,
     ),
     Tool(

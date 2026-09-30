@@ -387,7 +387,7 @@ def workspace(monkeypatch):
                 device("10.0.0.3", collected=False),
                 device("10.0.0.4"),
             )
-        return {"host": arguments["host"], "login": "succeeded", "commands": []}
+        return {"host": arguments.get("host"), "login": "succeeded", "commands": []}
 
     monkeypatch.setattr(registry, "invoke", invoke)
     space = diagnostic_workspace.DiagnosticWorkspace(
@@ -434,27 +434,37 @@ def test_diagnosis_budgets_commands_and_devices_per_turn(workspace):
     assert len(space.scope) == workspace.module.MAX_DEVICES
 
 
-def test_config_comparison_uses_the_same_scope_and_command_budget(workspace):
+def test_baseline_comparison_uses_the_same_scope_and_command_budget(workspace):
     space = workspace.space
-    query = {"host": "10.0.0.1", "snapshot_id": "s1", "purpose": "核对接入接口"}
+    query = {"hosts": ["10.0.0.1", "10.0.0.4"], "purpose": "看路径上的设备变了什么"}
     with pytest.raises(PermissionError):
-        space.invoke("device_access__compare_config", query)
+        space.invoke("device_access__compare_baseline", query)
     space.invoke("topology__trace_path", {})
     for extra in (
+        {"platforms": {"10.0.0.1": "ios"}},
         {"platform": "ios"},
         {"turn_id": "another"},
+        {"host": "10.0.0.1"},
+        {"snapshot_id": "s1"},
         {"commands": ["display version"]},
-        {"command": "display version"},
     ):
         with pytest.raises(PermissionError):
-            space.invoke("device_access__compare_config", {**query, **extra})
-    result = space.invoke("device_access__compare_config", query)
-    assert result["citation"] and space.commands == 1
-    assert workspace.calls[-1][1]["turn_id"] == "turn-1"
-    assert workspace.calls[-1][1]["platform"] == "comware"
-    space.commands = workspace.module.MAX_COMMANDS
+            space.invoke("device_access__compare_baseline", {**query, **extra})
+    # Every device must be in this turn's topology answer; the error names the outsider.
+    outside = {**query, "hosts": ["10.0.0.1", "10.0.0.2"]}
+    with pytest.raises(PermissionError, match="10.0.0.2"):
+        space.invoke("device_access__compare_baseline", outside)
+    assert space.commands == 0
+    result = space.invoke("device_access__compare_baseline", query)
+    # One per device: the commands are the device's own fixed baselines.
+    assert result["citation"] and space.commands == 2
+    name, arguments = workspace.calls[-1]
+    assert arguments["turn_id"] == "turn-1"
+    assert arguments["platforms"] == {"10.0.0.1": "comware", "10.0.0.4": "comware"}
+    assert arguments["hosts"] == ["10.0.0.1", "10.0.0.4"]
+    space.commands = workspace.module.MAX_COMMANDS - 1
     with pytest.raises(PermissionError):
-        space.invoke("device_access__compare_config", query)
+        space.invoke("device_access__compare_baseline", query)
 
 
 def test_the_model_never_sees_server_owned_run_fields(workspace, monkeypatch):
@@ -480,12 +490,12 @@ def test_the_model_never_sees_server_owned_run_fields(workspace, monkeypatch):
 def test_comparison_requires_authorized_baseline_provider_and_hides_internal_fields(
     workspace, monkeypatch, inspection_available
 ):
-    from src.apps.device_access.backend.config_compare import CompareConfig
+    from src.apps.device_access.backend.baseline_compare import CompareBaseline
     from src.platform.tools import registry
 
     definition = {
-        "name": "device_access__compare_config", "description": "compare",
-        "input_schema": CompareConfig.model_json_schema(), "mutates": True,
+        "name": "device_access__compare_baseline", "description": "compare",
+        "input_schema": CompareBaseline.model_json_schema(), "mutates": True,
     }
 
     def available(**kwargs):
@@ -498,6 +508,8 @@ def test_comparison_requires_authorized_baseline_provider_and_hides_internal_fie
     offered = workspace.space.definitions()
     assert len(offered) == int(inspection_available)
     if offered:
-        assert offered[0]["name"] == "device_access__compare_config"
-        assert not {"platform", "turn_id"} & set(offered[0]["input_schema"]["properties"])
-        assert not {"platform", "turn_id"} & set(offered[0]["input_schema"]["required"])
+        assert offered[0]["name"] == "device_access__compare_baseline"
+        hidden = {"platform", "platforms", "turn_id"}
+        assert not hidden & set(offered[0]["input_schema"]["properties"])
+        assert not hidden & set(offered[0]["input_schema"]["required"])
+        assert set(offered[0]["input_schema"]["properties"]) == {"hosts", "purpose"}

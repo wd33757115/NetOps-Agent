@@ -447,6 +447,35 @@ def locate_current(owner, query):
         return found
 
 
+PATH_MEANING = (
+    "这是 {when} 那次拓扑发现采集的路由表算出的路径：当时流量经过哪些设备、从哪个接口进出、"
+    "按哪条路由转发。用它确定要查哪些设备；它是之前的路径，不是现场转发状态，"
+    "现场的路由、下一跳或出接口与它不同，说明之后发生了变化"
+)
+
+
+def _observed_times(value):
+    if isinstance(value, dict):
+        own = [value["observed_at"]] if isinstance(value.get("observed_at"), str) else []
+        return own + [t for item in value.values() for t in _observed_times(item)]
+    if isinstance(value, list):
+        return [t for item in value for t in _observed_times(item)]
+    return []
+
+
+def _as_history(result):
+    """Say when the path was true, in one time zone, so it is read as the earlier path."""
+    times = sorted(
+        datetime.fromisoformat(t).astimezone(timezone.utc).isoformat()
+        for t in set(_observed_times(result))
+    )
+    if not times:
+        when = "采集时间未知"
+    else:
+        when = (times[0] if len(times) == 1 else f"{times[0]} 至 {times[-1]}") + "（UTC）"
+    return {**result, "meaning": PATH_MEANING.format(when=when)}
+
+
 def trace(owner, snapshot_id, src, dst):
     """Forwarding paths src->dst and dst->src in one snapshot, ending at data gaps."""
     with sessions() as session:
@@ -454,7 +483,7 @@ def trace(owner, snapshot_id, src, dst):
         if not snap:
             raise HTTPException(404, "快照不存在")
         owned(session, Network, snap.network_id, owner)
-        return _analyse(session, snap, trace_in, src, dst)
+        return _as_history(_analyse(session, snap, trace_in, src, dst))
 
 
 def trace_current(owner, src, dst):
@@ -471,7 +500,7 @@ def trace_current(owner, src, dst):
             if snap and "simap" in snap.graph:
                 result = _analyse(session, snap, trace_in, src, dst)
                 if {result["forward"]["status"], result["reverse"]["status"]} != {"no_gateway"}:
-                    found.append(result)
+                    found.append(_as_history(result))
         return found
 
 
