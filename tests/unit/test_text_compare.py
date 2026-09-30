@@ -69,6 +69,22 @@ def test_raw_baseline_and_pre_audit_redacted_live_do_not_invent_sensitive_change
     assert "EXAMPLE-SECRET" not in json.dumps(result)
 
 
+def test_an_indented_change_names_its_section_like_git():
+    before = (
+        "#\ninterface GigabitEthernet1/0\n port link-mode route\n ip address 10.10.1.1 24\n#\n"
+        "interface GigabitEthernet2/0\n port link-mode route\n ip address 2.2.2.2 24\n#\n"
+    )
+    after = before.replace(
+        " port link-mode route\n ip address 2.2.2.2",
+        " port link-mode route\n shutdown\n ip address 2.2.2.2",
+    )
+    diff = compare_text(before, after)["diff"]
+    assert diff[0].endswith("@@ interface GigabitEthernet2/0")
+    assert "+ shutdown" in diff
+    routes = compare_text("a 1\nb 2\n", "a 1\nb 3\n")["diff"]
+    assert routes[0].endswith("@@")  # unindented output needs no section
+
+
 def test_large_diff_is_bounded_and_says_so():
     before = "\n".join(f"route {n}" for n in range(1000))
     result = compare_text(before, "")

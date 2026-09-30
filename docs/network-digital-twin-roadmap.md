@@ -1069,7 +1069,18 @@ P2-9 根据 Q5 取消，不引入 SNMP。P3 及后续仍在进入阶段时展开
   - 检查项相关测试与干净 HEAD 同为 **34 项既有失败**（`test_check_item_assessment_runtime`），无新增。
   - 部署 rule-governance 1.4.7、inspection 1.3.3、device-access 0.9.5、assistant 0.8.3，9/9 应用通过。
 - 实机（无注入故障，只读）：两台 VSR 各 9 条对比中，运行配置、接口简表、三层接口、路由表、LLDP、MAC、VLAN 均为 unchanged。ARP 因老化列变化和条目自然老化显示差异，这是纯文本对比的预期噪声。OSPF 邻居显示 DR/BDR 角色互换，是基线之后真实发生的重新选举。
-- 未做：注入故障后的对比与 AI 端到端诊断需负责人确认后再做；核验脚本 `.runtime/verify-baseline-compare.py`、`.runtime/lab-baseline-*.py` 留本地、不提交。
+- 故障注入（负责人确认，沿用 GPT 的审计注入通道 `d8-lab:*`，每次注入后恢复并验证）：
+  - 场景 7（VSR-1 静态 1.1.1.0/24 → NULL0），不经 AI 直接对比：VSR-1 路由表恰好 `-1.1.1.0/24 O_INTRA … GE2/0` / `+… Static 5 … NULL0`；配置新增 `ip route-static 1.1.1.0 24 NULL0 preference 5`；VSR-2 路由表无变化。
+  - 场景 1（VSR-1 GE2/0 shutdown），不经 AI 直接对比：VSR-1 接口简表 `UP UP` → `ADM DOWN`；三层接口 `*down`；路由表 18 → 14 条（含 1.1.1.0/24）；OSPF 邻居消失；配置新增 `shutdown`。VSR-2 路由表丢 4.4.4.4/32 与 192.168.1.0/24，OSPF 邻居消失。
+  - 两次恢复后路由、OSPF Full 与 PC1→PC2 ping 均恢复。证明 `.runtime/fault-compare-proof-case7.json`、`.runtime/fault-compare-proof.json`（场景 1）。
+- 对比输出的两处改进（均由实机暴露）：
+  - 缩进块的差异在 `@@` 行附上所属段落（同 git 的 hunk 上下文），如 `@@ -32,2 +32,3 @@ interface GigabitEthernet2/0` / `+ shutdown`。此前一行上下文只露出 IP 地址行，看不出是哪个接口。
+  - 基线与现场时间统一为 UTC，并给出 `baseline_age_seconds`。AI 曾把基线 `17:55+08:00` 与现场 `12:55 UTC` 说成“同一时刻”。device-access 升到 0.9.6。
+- AI 端到端（场景 1 注入中，一次提问、不重试，运行 `0155074b…`）：7 轮、15 次工具、41 秒、9 条 L1 命令，**根因命中**。答案以“配置相对基线唯一新增 `interface GigabitEthernet2/0` 下的 shutdown”为关键证据，配合双向路由与 OSPF 邻居消失；“谁、为何关闭”列为候选，未越界。上述时间误读出现在该次答案的“待验证”中，修正在其后，未再用 AI 复测。证据 `.runtime/d8-cmp-case1-ai-evidence.json`。
+- 已知限制：
+  - ARP 老化列、OSPF Dead-Time 列在纯文本对比中总会显示差异，由 AI 判断。
+  - 巡检运行级质量记为 partial、`baseline_eligible=false`：ARP、MAC、接口简表、三层接口这 4 条命令另有结构化检查项，缺解析模板会被标 `template_missing`。原文完整可用，但修运行级统计要改 `src/core/patrol`（约束禁改），暂不处理；AI 已如实报告此缺口。
+- 核验脚本 `.runtime/verify-baseline-compare.py`、`.runtime/verify-fault-compare.py`、`.runtime/verify-fault-ai.py`、`.runtime/lab-baseline-*.py` 留本地、不提交。
 
 ### 2026-09-30 负责人追加：原始基线与现场指定配置块对比（已被上一条取代）
 

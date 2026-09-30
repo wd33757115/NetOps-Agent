@@ -163,6 +163,10 @@ def test_baseline_command_runs_once_and_only_the_diff_returns(config_lab, ssh_lo
     assert "- port access vlan 100" in result["comparison"]["diff"]
     assert "+ port access vlan 200" in result["comparison"]["diff"]
     assert "return" not in result["comparison"]["diff"]  # outside the one-line context
+    # Both sides in UTC with the gap spelled out; mixed offsets were once misread.
+    assert result["baseline"]["observed_at"] == "2026-09-30T06:30:00+00:00"
+    assert result["observed_at"].endswith("+00:00")
+    assert isinstance(result["baseline_age_seconds"], int)
     assert result["comparison"]["added_count"] == result["comparison"]["removed_count"] == 1
     assert config_lab.sent == [COMMAND] and config_lab.connects == config_lab.closes == 1
     assert result["current"]["policy_level"] == "L1"

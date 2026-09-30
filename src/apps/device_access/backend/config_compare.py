@@ -8,6 +8,7 @@ output: a configuration dump stays inside this App, redacted.
 
 import hashlib
 import json
+from datetime import datetime, timezone
 from ipaddress import ip_address
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -59,6 +60,15 @@ def _bounded(view):
     return view
 
 
+def _utc(value):
+    """One time zone per answer: mixed offsets were once read as the same moment."""
+    try:
+        moment = value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
+        return moment.astimezone(timezone.utc).isoformat()
+    except (TypeError, ValueError):
+        return value
+
+
 def compare(owner, body: CompareConfig):
     baseline = registry.invoke(
         "inspection__read_baseline",
@@ -76,9 +86,12 @@ def compare(owner, body: CompareConfig):
     view = {
         "host": body.host,
         "command": command,
-        "observed_at": now().isoformat(),
+        "observed_at": _utc(now()),
         "status": "unavailable",
-        "baseline": baseline["baseline"],
+        "baseline": {
+            **baseline["baseline"],
+            "observed_at": _utc(baseline["baseline"]["observed_at"]),
+        },
         "current": None,
         "comparison": None,
         "quality_gaps": list(baseline["quality_gaps"]),
@@ -118,7 +131,14 @@ def compare(owner, body: CompareConfig):
             and result.output_complete
             and result.failure_code is None
         )
-        view["observed_at"] = result.finished_at
+        view["observed_at"] = _utc(result.finished_at)
+        # How long before this live read the baseline was taken, so order is explicit.
+        view["baseline_age_seconds"] = round(
+            (
+                datetime.fromisoformat(view["observed_at"])
+                - datetime.fromisoformat(view["baseline"]["observed_at"])
+            ).total_seconds()
+        )
         view["current"] = {
             "command": command,
             "policy_level": result.policy_level,
@@ -127,7 +147,7 @@ def compare(owner, body: CompareConfig):
             "session_id": result.execution_id,
             "command_id": result.command_id,
             "evidence_ref": result.evidence_ref,
-            "observed_at": result.finished_at,
+            "observed_at": _utc(result.finished_at),
             "output_complete": result.output_complete,
             "output_sha256": hashlib.sha256(result.output.encode()).hexdigest(),
         }

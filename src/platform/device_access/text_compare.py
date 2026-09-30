@@ -26,6 +26,7 @@ _UNUSABLE = re.compile(
     r"permission denied|authorization failed|insufficient privilege))|"
     r"--\s*more\s*--|---- More ----"
 )
+_HUNK = re.compile(r"^@@ -(\d+)(?:,\d+)? \+\d+(?:,\d+)? @@$")
 _MASK = "[敏感配置已隐藏]"
 MAX_SOURCE_BYTES = 4 * 1024 * 1024
 MAX_DIFF_LINES = 400
@@ -75,6 +76,28 @@ def unusable(text: str, command: str = "") -> str | None:
     return None
 
 
+def _with_sections(diff: list[str], old: list[str]) -> list[str]:
+    """Like git's hunk context: name the section an indented hunk belongs to."""
+    named = []
+    for index, line in enumerate(diff):
+        match = _HUNK.match(line)
+        body = diff[index + 1] if index + 1 < len(diff) else ""
+        if match and body[1:2].isspace():
+            start = int(match.group(1))
+            header = next(
+                (
+                    row
+                    for row in reversed(old[: max(start - 1, 0) + 1])
+                    if row and not row[0].isspace() and row.strip() != "#"
+                ),
+                None,
+            )
+            if header:
+                line = f"{line} {header}"
+        named.append(line)
+    return named
+
+
 def compare_text(before: str, after: str, *, command: str = "") -> dict:
     """Unified diff with one line of context; bounded, never silently empty."""
     (old, old_hidden), (new, new_hidden) = (
@@ -82,6 +105,7 @@ def compare_text(before: str, after: str, *, command: str = "") -> dict:
         comparable_lines(after, command),
     )
     diff = list(difflib.unified_diff(old, new, "baseline", "current", n=1, lineterm=""))[2:]
+    diff = _with_sections(diff, old)
     return {
         "status": "changed" if diff else "unchanged",
         "added_count": sum(line.startswith("+") for line in diff),
