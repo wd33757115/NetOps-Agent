@@ -1,166 +1,128 @@
-# 网络数字孪生开发交接：Codex → Claude
+# 网络数字孪生开发交接：Claude → GPT
 
-交接日期：2026-09-28。项目根目录：`C:\Users\wangd\PycharmProjects\PythonProject\netops-agent`，PowerShell，分支 `feat/network-twin`。本交接前的最后一个实现提交为 `ec81310`，路线图当前版本 v1.11。
+交接日期：2026-09-30。项目根目录：`C:\Users\wangd\PycharmProjects\PythonProject\netops-agent`，Windows + PowerShell（也可用 Git Bash），分支 `feat/network-twin`，已推送到 `origin`，最后提交 `de6a28f`，路线图 v1.19。上一份交接（Codex → Claude，2026-09-28，止于 `ec81310`）的内容已并入本文；其第 6 节的工具与标准边界仍然有效，保留在本文第 7 节。
 
-**当前在做 IETF 原生模型研读、组合与离线实例验证，没有恢复采集开发。已完成验证包与若干具体模型验收，不是完整数字孪生已实现。下一步首先处理虚拟拓扑节点→清单 NE→设备数据树的标准关联缺口，再推进尚未审查的协议模型。**
+**一句话现状：拓扑发现（SIMAP L2/L3）→ 终端定位 → 双向路径计算 → 知识问答自动登录路径设备取证诊断，这条链路已经打通并在两台实验 VSR 上实机验收。正在进行的是 D-8 诊断闭环的故障集验收：场景 0 已通过，场景 1–7 需要负责人在 GNS3 中逐个注入故障后再测。**
 
-## 1. 先读这些文件
+## 1. 先读这些
 
-1. [路线图](network-digital-twin-roadmap.md)：先读第 0 节最新规则，再读第 14 节 IETF 台账。第 13 节旧任务顺序已被“模型先行”覆盖，不能直接恢复 P2-3。
-2. [IETF 研读记录](network-digital-twin-ietf-study.md)：标准范围、草案状态、撤回的旧假设。
-3. [原生模型审计](network-digital-twin-model-audit.md)：SIMAP 36 项需求、原文问题、关联语义、后续验证记录。
-4. [验证包入口](../models/network-twin/README.md)、[关联核验](../models/network-twin/associations.md)。
-5. [挂载及运行状态验证](../models/network-twin/mount/README.md)、[路由语义验证](../models/network-twin/routing-semantics.md)。
+1. 本文。
+2. [路线图](network-digital-twin-roadmap.md)：
+   - 第 0 节开头 2026-09-29 的负责人原则（最高优先级）。
+   - 第 14 节台账中 D-1～D-8、P2-3 各行（每行有文件、命令、结果、未完成项）。
+   - 文末 D-5、D-6、D-7、D-8 四张设计卡：这是负责人逐条确认过的范围，**只做卡上列出的内容**。
+   - 第 11.0 节实验环境和迷你故障集 v0。
+3. [首版方案](device-access-topology-plan.md) 第 1、3、7 节：SSH 公共能力的分层（平台核心 + SSH 终端 App，拓扑和诊断是调用方）。
+4. 需要回看 IETF 模型研究时，再读 [IETF 研读记录](network-digital-twin-ietf-study.md)、[原生模型审计](network-digital-twin-model-audit.md)、[验证包入口](../models/network-twin/README.md)。
 
-这些文档包含分阶段的历史结论。较早的“挂载未验证”“SIMAP 未编译通过”等文字描述当时的工具/原文状态，应结合后续兼容包、libyang 验证看，不要删除历史失败证据，也不要忽略后续成果而重做一遍。
+## 2. 负责人的工作方式与硬约束（务必遵守）
 
-## 2. 用户已经确定的约束
+负责人对以下几点非常在意，违反过就会被严厉纠正：
 
-- **先完整理解 IETF 相关内容，再按原生完整模型建模；没有项目自定义模型。** 不按实验样本裁剪 Schema，不补项目实体、字段、关系、identity、augment、namespace，不利用 anydata 夹带自定义结构。研究用的文件清单、来源摘要、测试报告不是网络模型字段，不能灌入 YANG 实例。
-- 用户已明确采纳原称“8345bis”的补充工作。当前固定基线是 RFC 8345 + `draft-havel-nmop-simap-yang-03`，概念配套 `draft-ietf-nmop-simap-concept-13`。保留个人/工作组草案真实状态，不能因为尚非 RFC 而排除，也不随上游 HEAD 自动升级。
-- 用户授权过独立、可审查的 **SIMAP 语法兼容补丁**。只修已定位语法问题，保留原文、精确差异与前后摘要；没有授权任意补写草案 TODO、feature、默认值或语义。其他草案不能自动套用这个修补授权。
-- **原巡检现在不改，以后也不迁移。** `src/core/patrol`、`src/core/ingestion` 及原 Netmiko 实现不修改。独立公共设备访问能力、拓扑 App、人工终端和 DSH 调用方已经存在，后续在这些模块演进。只读复用边界见路线图第 0 节。
-- 拓扑发现由种子出发按 LLDP 扩散，初始不知道对端型号；识别后才选择平台能力。用户名/密码由人工提供，认证或连接失败需要人工确认或更新凭据。已实现的凭据库和受控 SSH 保留，不能为了模型研究改动访问策略。
-- 团队共同维护，管理域隔离结论已确定。后续 DSH 会调用公共 SSH 做网络故障根因分析。当前采集路线仍是 SSH，不能自行切换 SNMP。
-- **P2-3、P2-10 及后续采集扩展暂停。** 保留未完成代码，不提交成“验收完成”，不发布模型研究成果到运行应用。
-- 每完成一项更新路线图第 14 节：文件、实际命令/结果、未完成项。用户曾授权连续推进，不必逐项等确认；发现方案逻辑错误应按标准纠正并记录。未覆盖且影响模型或安全边界的决定，按第 0 节登记待决项，不靠自定义关系绕过去。
+- **简单即强大，简洁、可靠。这是开源产品。只做负责人要求的，不要自己加层级、字段、选项、权限机制或界面。** 曾因加了管理域、访问范围、凭据集、连接授权、按页面加侧栏等被要求全部删掉。
+- **先想清楚再动手**：较大的改动先给出简短设计（要素、分层、标准怎么建模），等负责人确认后再实现；确认后可以自主推进，不必逐步请示。真正需要负责人决定的（尤其安全边界）要停下来问，并给出推荐。
+- 顺序：**先建模 → 再用实验数据填充验证 → 最后补采集**；能力是从基础上“长出来”的，基础没做好不要跳到上层。
+- 标准基线：**RFC 8345 + SIMAP YANG -03**（负责人称 8345bis），用 SIMAP 双向链路、多点链路；**不增加项目自定义 YANG 字段**。分析结果（定位、路径）以接口 JSON 返回，不新造 YANG 模型。
+- **App 是可插拔包**：功能按归属放在各自 App 内，**不要把 App 的页面放进平台“系统管理”**（做过一次已回滚）。**SSH 是平台公共能力**：`src/platform/device_access` 是核心，`device-access` App（显示名“SSH 终端”）是终端入口，拓扑发现和 AI 诊断只是调用方，不要把 SSH 代码并入拓扑，也不要删掉终端。
+- 界面风格与防火墙策略 App 一致（`src/apps/firewall_policy/frontend/pages/FirewallPolicyPage.tsx/.css`：面包屑顶栏、圆角窗口、#1671e8、圆角 9、控件高 36）。**负责人当前说“先不做 UI”**，除非明确要求，不要改界面。
+- 原巡检 `src/core/patrol`、`src/core/ingestion` 及原 Netmiko 实现不修改。
+- **实验设备口令不得写入代码、文档、测试、提交或报告。** 负责人已给实验 VSR（10.10.1.1、10.10.1.2）永久的只读登录授权；口令已加密保存在本机平台的“SSH 终端默认登录”和“拓扑默认登录”里，程序化调用走平台，不要把口令写进脚本。本机开发平台账号见登录页提示（仅 localhost）。
+- 回答使用中文。
 
-本文件不复制账号口令。若后续获准进行实机验收，使用原凭据库/安全输入流程；当前下一步可以离线完成，不需设备登录。
+### Git 纪律
 
-## 3. 已完成到哪里
+- 不要 `git reset --hard`、`git clean`、`git add .`；**只提交本项文件，用 `git commit -F <消息文件> -- <路径...>`**（工作区可能同时有其他会话暂存的改动，见第 5 节）。
+- 提交前 `git diff --cached --check`（或对路径 `git diff --check`）必须通过；失败就停下修正，不要带病提交。
+- 修改前后对比时，可 `git worktree add ../netops-agent-verify HEAD` 在干净检出上跑同样的测试，用完删除。
+- 提交消息末尾保留 `Co-Authored-By` 之类署名按你自己的工具约定；推送前确认负责人同意（本分支此前已按负责人要求推送）。
 
-| 提交 | 内容 | 验证与范围 |
-|---|---|---|
-| `f9bd738`、`ac9aaab` | 原文审计及作者仓库核对 | 固定来源、36 项 SIMAP 需求；确认原文/作者源同类语法错误，不是文本提取造成 |
-| `30f2301` | IETF-1.1/1.2、IETF-2.1 验证包 | 41 个完整模块/子模块；独立 SIMAP 补丁；24 项模型/实例预期匹配；VSR 实例重建 7 文件一致 |
-| `90e3997` | IETF-1.3/1.4 配置挂载与关联续查 | libyang 5.8.6 的 8 项配置挂载验证；41 文件中仅 LNE/NI 的 4 个 mount-point；3 个历史候选审计 |
-| `c1e77b1` | IETF-1.5 状态挂载、部分观测 | 16 个生成文件；21 项预期匹配；完整合成状态树通过，两台 VSR 部分接口树原样解析但严格完整性不通过 |
-| `ec81310` | IETF-1.6 原生路由语义 | 39 项 IPv4/IPv6、配置/状态、下一跳用例；37 项 Yangson 结果，2 项异常改由 libyang 正负对照复核，独立检查共 4 项 |
+## 3. 已完成到哪里（2026-09-28 之后）
 
-“预期匹配”包含故意构造的负例和 Schema 接受但证据仍不足的用例，不能说所有实例都有效。所有近期提交均为模型研究、说明、脚本和离线实例，没有部署、数据库迁移或设备配置变更；没有推送这些提交。
+| 提交 | 内容 |
+|---|---|
+| `acb9893`～`192eaf1` | IETF 研究收尾：inventory-topology 虚拟 NE 追踪（Q-IETF-1 定为模型层不关联）、IEEE LLDP/Bridge 模型、ARP/VLAN/LLDP 映射、P2-11 实机补采核查、采集计划按模型缺口重排 |
+| `47957d7`～`62749ea` | D-1～D-4 拓扑发现：SIMAP L2/L3 构建器入 App（`model/builder.py`）、发现任务采集全部拓扑事实、快照/导出/画布、按域主机密钥（后被 D-5 简化）、`start.ps1 -ApplyDatabase/-UpgradeApps`、实机界面验收 |
+| `f346301`、`f551399` | 画布显示双向链路两端、按角色布局 |
+| `2796851`～`b892e8e` | 访问范围相关的来回修改（最终被 D-5 整体删除，不必再看） |
+| `c248cb8`、`5287e29` | **D-5**：SSH 终端改为 SecureCRT 式（已保存会话、默认登录、批量改密、标签页、登录失败弹窗）；拓扑只用默认/临时登录，节点登录失败弹窗输入；删除管理域、访问范围、凭据集、连接授权（云端 Claude 会话完成） |
+| `476918a`、`f34bfae` | **D-6** 终端定位（`model/locate.py`，`GET /snapshots/{id}/locate`，工具 `topology__locate`） |
+| `154c968` | D-5/D-6 实机验收中修的 3 个问题（平台终端未对 SSH 异常分类、窄屏会话列表、节点登录失败自动弹窗） |
+| `0c305dd` | 拓扑页统一为防火墙策略外观（布局保持原样，负责人否决了侧栏方案） |
+| `3ac3f0c`、`2b86259` | **P2-3 恢复并完成**（固定版本 NTC 模板层；修 VLAN 前言）；**D-7** 双向路径计算（`model/path.py`，`GET /snapshots/{id}/path`，工具 `topology__trace_path`），发现任务开始采集路由表；实机验收 |
+| `393b145` | 研究脚本的路由实例改用 App 路由解析器，RFC 8349 实例逐字节不变，26/26 |
+| `d652dc4`、`de6a28f` | **D-8** 诊断闭环（见下节）；场景 0 实机通过 |
 
-### 已采 VSR 实例
+## 4. 当前进行中：D-8 诊断闭环验收
 
-`models/network-twin/instances/manifest.json` 记录固定捕获批次及原始/清理后样本 SHA-256。由 `build_ietf_lab_instances.py` 离线生成：
+设计见路线图文末 D-8 设计卡。负责人选定方案 A：AI 可用保存的默认登录登录路径上的设备，只执行白名单只读命令，每步审计。
 
-- 2 个拓扑节点、4 个 TP、4 条有向 LLDP 邻接。邻接不证明物理线缆直连，不能据此捏造 Hub/不可管理交换机实体。
-- 2 个 `ne-virtual` 清单项，不能误填为物理 NE；序列号的组件归属尚未闭合。
-- 两台设备分别 18/19 条路由。RIB 名是投影标识，不是采集到的原生 YANG 名。未填出接口引用，不能宣称完整路径已建立。
-- 每台 6 条部分接口记录：类型、状态、IP/掩码。缺 `statistics/discontinuity-time`，文件名保留 `.partial.json`。
+实现要点（便于接手排查）：
 
-不能用采集时间、估算开机时间替代计数器中断时间；不虚构默认 VRF、OSPF 版本/进程/area。`O_INTRA` 仅映射已有 OSPF 基类，cost 不填到 route-preference；0.0.0.0/32 不改为默认路由，特殊地址不自动推导丢弃或本机接收动作。
+- `src/apps/device_access/backend/diagnosis.py`：按地址取该地址的已保存会话或默认登录，经平台受控会话（`src/platform/device_access/sessions.py`）执行；L1/L2 执行，L3/L4 不执行；配置导出命令不发送；一次调用一台设备 ≤5 条命令；输出每条截 3000 字节；工具 `device_access__run`。
+- `src/apps/assistant/backend/diagnostic_workspace.py`：每轮的登录范围来自本轮 `topology__trace_path`/`topology__locate` 结果中的已采集且平台已识别设备（≤8 台、≤20 条命令）；`platform`、`turn_id` 由服务端填，模型不可见。
+- `src/apps/assistant/backend/turns.py`：每轮启用诊断工作区；单轮 300 秒、30 次工具调用、15 轮（平台上限），租约 320 秒。
+- `src/platform/agent_runtime/dsh.py`：`DIAGNOSIS` 提示词（排查方法、结论四小节：已证实/候选/已排除/待验证）。
+- 审计：`app_device_access_session_audit`，`target_ref` 形如 `diagnosis:<轮次ID>:<设备地址>`。
 
-## 4. 工作区不是干净的：这些改动必须保留
+**下一步（直接可做）**：请负责人按路线图 11.0 表逐个注入场景 1–7（每次一个，测完恢复），每个场景：
 
-交接时未暂存的 12 个修改及 2 个未跟踪文件均为此前暂停的 P2-3 工作，不属于近期模型提交：
+1. 负责人注入后告知。
+2. 运行验收脚本（不先重新发现，检验快照过期时 AI 能否靠现场取证发现问题）：
+   ```bash
+   venv/Scripts/python.exe .runtime/d8-eval.py "PC1(1.1.1.2) ping 不通 PC2(192.168.1.2)，帮我诊断原因" > .runtime/d8-caseN.txt
+   ```
+   脚本用本机开发账号登录平台、提问、打印过程与回答，并从审计表列出本轮登录过的设备和每条命令的级别。`.runtime/` 被 Git 忽略，脚本不提交。
+3. 判定：根因是否命中（已证实或排名第一的候选为正确根因）；每条已证实是否有 `[evidence-…]`；审计里是否只有 L1/L2。若因快照过期没命中，再补测“先在拓扑重新发现，再诊断”，两次都记录。
+4. 在台账 D-8 行记录结果；8 个场景结束后按验收标准（≥6/8、无配置命令）给出结论并更新设计卡标题。
 
-```text
- M src/apps/topology/app.yaml
- M src/apps/topology/backend/collectors/collect.py
- M src/apps/topology/backend/collectors/parse.py
- M src/apps/topology/backend/collectors/profiles.py
- M src/apps/topology/backend/collectors/profiles/h3c-comware7.yaml
- M src/apps/topology/backend/collectors/tiers/README.md
- M src/apps/topology/requirements.lock
- M tests/unit/test_topology_facts.py
- M tests/unit/test_topology_generic_parsers.py
- M tests/unit/test_topology_profiles.py
- M web/react_frontend/src/apps/generated.meta.json
- M web/react_frontend/src/apps/generated.ts
-?? src/apps/topology/backend/collectors/tiers/template.py
-?? tests/unit/test_topology_templates.py
+注意：Comware 默认不回 TTL 超时，`tracert` 中间跳显示 `* * *`，这是设备默认行为，不是故障；开启需要改配置，不要做。
+
+验收完成后，下一张卡由负责人决定。路线图里的候选：快照增量刷新（P4-2）、P2-10 LLM 兜底与模板沉淀、多厂商、VRF。**先给设计、等确认。**
+
+## 5. 本机状态与注意事项
+
+- 已部署（本机）：知识问答 0.8.0、SSH 终端 0.8.0、拓扑 0.4.3，其余 App 未动。数据库在 D-5/D-6 前备份于 `backups/20260930-001810-before-d5-d6/`。
+- 本机平台里已配置：SSH 终端默认登录与两条会话 VSR-1/VSR-2；拓扑默认登录；两台 VSR 的主机密钥；“实验网络 lab”的最新快照含路由表（拓扑 0.4.2 发现）。
+- 部署命令：`scripts\windows\start.ps1 -SkipLangfuse -UpgradeApps <app,...> -NoBrowser`。
+  - **修改任何 App 的代码后，该 App 的摘要与已部署版本不一致，平台会把它判为不可用**（依赖它的 App 也会不可用），直到用 `-UpgradeApps` 重新部署。
+  - 只改平台代码（`src/platform`、`src/gateway`）时不用升级 App，但要重启服务（不带参数运行 `start.ps1`）。
+  - 如果服务全停（机器重启后常见），`-UpgradeApps` 会在“排空”步骤报 `ConnectError: drain incomplete`：先临时起一个网关让排空检查通过，再重跑。做法见台账 D-5 行；临时网关会被脚本在第 3 步自动停掉。
+  - Docker Desktop 需在运行；刚启动时 PostgreSQL 可能短暂连不上。
+- 工作区里有**不属于本线工作的改动**，不要提交也不要丢弃：
+  - `web/react_frontend/src/pages/{ChatPage,ChatPage.test,SkillsPage,StatusPage,StoragePage}.tsx` 已暂存：另一个会话在修 `components/Layout` 的大小写引用（Linux 上构建失败的既有问题），由它自己提交。
+  - `web/react_frontend/src/apps/generated.ts`、`generated.meta.json`：按本机环境生成的 App 注册摘要，历来不提交。
+- `git stash` 里的 “P2-3 paused work…” 和 `backups/p2-3-paused-20260929/` 已经过时（P2-3 已在 `3ac3f0c` 提交），只作备份，删除前征得负责人同意。
+- 已知与本线无关的失败测试（在干净检出上同样失败）：`test_workflow_plugins.py` 3 项、`test_rule_asset_bundles.py`、`test_command_autopilot_integration.py`、`test_check_item_assessment_runtime.py`、`test_chat_intent_match.py` 各 1 项。`dsh.py`、`src/gateway/schemas.py` 有既有的 Ruff 行长/导入顺序问题，不要顺手整文件格式化。
+- 本机 pip 配置的镜像是 http，会被拒绝；需要安装时用 `--index-url https://mirrors.aliyun.com/pypi/simple/`，不要改全局配置。
+
+## 6. 常用验证
+
+```bash
+# 拓扑 / SSH 终端 / DSH / 知识问答相关后端（约 3 分钟）
+venv/Scripts/python.exe -m pytest tests/unit -k "topology or device_access or dsh or assistant" -q -p no:cacheprovider
+# 前端（在 web/react_frontend 下）
+npx vitest run ../../src/apps/topology/frontend ../../src/apps/device_access/frontend src/platform/terminal
+npx eslint --no-eslintrc -c .eslintrc.cjs --resolve-plugins-relative-to . <文件>
+npx playwright test e2e/topology.spec.ts
+# 模型研究（研究环境，见下表）
+.runtime/yang-model-tools/Scripts/python.exe scripts/topology/build_ietf_lab_instances.py --check
+.runtime/yang-model-tools/Scripts/python.exe scripts/topology/validate_ietf_model_package.py
 ```
-
-不要 `git reset --hard`、`git clean` 或 `git add .`。新提交仅精确暂存本项文件。如果 Claude 继续使用同一个本机目录，以上代码和研究缓存都还在；仅克隆 Git 或切到另一台机器不会自动带上未提交内容、`.runtime/` 或 Docker 镜像，需要单独保留，不能把 Git 提交当作全部本地状态的备份。
-
-## 5. 运行环境和复现入口
-
-交接时已实际核实下列本机路径存在，Docker 镜像可读取：
 
 | 用途 | 路径/版本 |
 |---|---|
 | 应用 Python、Ruff | `venv/Scripts/python.exe` |
 | 独立模型研究 Python | `.runtime/yang-model-tools/Scripts/python.exe`，pyang 2.7.1、yangson 1.6.3；2026-09-30 加装 textfsm 2.1.0、ntc-templates 9.1.0（与拓扑 App 锁定一致，供实例构建调用 App 的路由模板层；本机 pip 镜像为 http，安装时显式用 `--index-url https://mirrors.aliyun.com/pypi/simple/`） |
-| 已构建模型包 | `.runtime/ietf-study/model-package/`，含 modules、manifest、topology/device-library |
-| 默认锁定源缓存 | `.runtime/ietf-study/reproducible-audit/sources/` |
-| 历史关联候选缓存 | `.runtime/ietf-study/mount-history/` |
-| libyang 源码归档 | `.runtime/ietf-study/mount-tool/libyang.tar.gz` |
-| 验证镜像 | `netops-ietf-mount-verify:5.8.6` |
-| 镜像 ID | `sha256:5db3d7d18f7ae37a5422516fd38a2bf7df8ace6ffc352867dca496d2b2c91afe` |
+| 已构建模型包 | `.runtime/ietf-study/model-package/` |
+| 锁定源缓存 | `.runtime/ietf-study/reproducible-audit/sources/` |
+| libyang 验证镜像 | `netops-ietf-mount-verify:5.8.6`（构建与来源锁在 `models/network-twin/mount/`） |
 
-研究环境与应用环境分开，不向应用 requirements 安装模型工具。Docker 构建与来源锁在 `models/network-twin/mount/`，重建方法见该目录 README。运行验证容器禁网、只读、无特权，仅挂入模型和测试输入；保留镜像以便继续复现，不是常驻微服务。
+## 7. 已踩过的工具和标准边界（沿用上一份交接）
 
-下列命令均在项目根目录执行。**这不是要求接手后无条件重跑全部测试**：先读报告，只有缓存缺失、环境变动或修改影响该项时再运行对应验证。
-
-```powershell
-# 模型包：默认离线；缓存不存在时用 --fetch 按固定锁下载。
-.runtime/yang-model-tools/Scripts/python.exe scripts/topology/build_ietf_model_package.py
-.runtime/yang-model-tools/Scripts/python.exe scripts/topology/build_ietf_lab_instances.py --check
-.runtime/yang-model-tools/Scripts/python.exe scripts/topology/validate_ietf_model_package.py
-
-# 配置挂载：12 文件一致、8 项预期匹配。
-.runtime/yang-model-tools/Scripts/python.exe scripts/topology/build_ietf_mount_cases.py --check
-.runtime/yang-model-tools/Scripts/python.exe scripts/topology/validate_ietf_mount.py --output .runtime/ietf-study/mount-regression.json
-
-# 状态/部分观测：16 文件一致、21 项预期匹配。
-.runtime/yang-model-tools/Scripts/python.exe scripts/topology/build_ietf_operational_cases.py --check
-.runtime/yang-model-tools/Scripts/python.exe scripts/topology/validate_ietf_mount.py --cases models/network-twin/mount/operational --output .runtime/ietf-study/operational-regression.json
-
-# 路由语义：39 项；脚本会调用 Docker 进行 4 项独立复核。
-.runtime/yang-model-tools/Scripts/python.exe scripts/topology/validate_ietf_routing_semantics.py --output .runtime/ietf-study/routing-replay.json
-
-# 关联声明与历史候选审计；缓存缺失时可加 --fetch。
-.runtime/yang-model-tools/Scripts/python.exe scripts/topology/audit_ietf_mount_associations.py
-```
-
-已提交的摘要、源锁和报告集中在 `docs/ietf-model-audit/`、`models/network-twin/reports/`。模型源码来自固定来源，SIMAP 原文和兼容工作副本分开。不要手改缓存源码或生成实例后绕过摘要检查。
-
-最后一次代码验证：配置挂载 8/8、状态 21/21、路由 39/39 预期匹配，路由报告离线重放字节一致；研究脚本 Ruff/格式检查、范围内 diff 检查和暂存区脚本/报告摘要检查通过。此前同轮已核对模型包 24 项及 VSR 7 文件重建。交接文档整理本身未重复运行这些模型测试，只核对 Git 状态、资料路径和已保存报告。
-
-## 6. 已踩过的工具和标准边界
-
-1. **SIMAP 原文不能编译不是未解决的提取问题。** 作者仓库也确认同类错误。已有精确兼容补丁，沿用锁定补丁；原文审计整体退出 1 是保存的事实，不必改成成功。
-2. **Yangson 不自动实现 Schema Mount。** 直接塞进 vrf-root 的子树会被拒绝；实际挂载已用 libyang 验证，不删掉路由子树假装通过。
-3. **libyang 3.12.2 会崩溃。** 报告 `mount-3.12.2-validation.json` 的 SIGSEGV 不算正确负例；使用锁定 5.8.6，不把崩溃修成标准语义。
-4. **5.8.6 严格模式与显式 `-t data` 不等价。** 严格验证不传 `-t`，使用 `--merge` 等兄弟模块全部解析完。显式 `-t data --merge` 会对部分 operational 语义缺失告警，退出 0 不代表完整性。`-t get` 是 parse-only，不解析完整引用；不能用 `-n` 跳过未知字段。
-5. **RFC 8342 §5.3 不是任意缺字段的豁免。** 特定 operational 情况可违反所列语义约束，但层级、标识符和类型不可违反。CLI 未采到不等于设备未使用，也不证明设备应声明 deviation。部分观测可保留，缺项诊断必须留存，不能编造值。
-6. **挂载回调文件与数据实例不同。** 5.8.6 的 `-x` 实际读取 XML；父/子库兼容 RFC 7895 与 8525。shared-schema 的 parent-reference 按当前 NI 过滤，只提供必要接口字段；inline 的库在 CLI 回调输入根部是工具约定。不要直接当生产服务协议设计。
-7. **字段名必须核对代码。** RFC 8529 用 `bind-ni-name`；路由配置多下一跳有 index/next-hop-address，状态列表无 index、用 address；active 是 `[null]`。双下一跳不自带负载权重，也不证明数据平面 ECMP。
-8. **Yangson 1.6.3 空 mandatory choice 有内部 TypeError。** 路由报告 accepted=null 保留异常；libyang 的 2 个负例与 2 个正对照才是此处语义证据，不可把异常算作模型拒绝。
-9. **LF 与文件摘要相关。** `.gitattributes` 明确将挂载生成 XML 固定为 LF。新增生成目录时注意对应规则；提交前可以核对暂存区实际 blob 与 manifest，不能只检查工作树。
-
-## 7. 下一步具体怎么接
-
-### 首要：虚拟 node → NE → 设备树关联
-
-先读 `models/network-twin/associations.md` 和 `reports/mount-associations.json`，不要重复已经完成的几轮宽泛搜索。
-
-已知事实：
-
-- inventory-software -04 有 `ne-virtual`；inventory-topology -11 当前物理映射具有物理语义，即使 Schema 接受虚拟 NE 也不能这样用于 VSR。
-- 已锁定的 41 文件里只有 RFC 8530 LNE root、RFC 8529 vrf-root/vsi-root/vv-root 共 4 个真实挂载声明。不能利用 LNE 给两台独立设备凭空制造容器。
-- inventory-topology 历史 -00 的 system-mount-point、-01 的 policies-target-point 是空锚点，未声明 RFC 8528 mount-point。不能用名称推断具备挂载能力，也不能为了绕过当前问题降级版本。
-- Peer-Mount -01 与本地 Schema Mount 机制不同，原文还存在独立语法错误。当前补丁授权不覆盖它。
-- 当前 external-relationship 的引用作用域与 request-builder 定义缺口仍在。工程文件名、相同 ID、显示用 interface-name 都不构成跨树已解析引用。
-
-建议接手后的第一个可验收小项：为**明确的新候选**建立“固定来源/版本 → 原生节点路径及文字语义 → 对虚拟 NE 的适用性 → 引用或挂载作用域 → 正例/错对象/目标缺失反例”的记录。若已有文档只给讨论示例、空容器或 TODO，应明确排除而非补代码。可以从历史草案附录的泛型 topology-inventory 引用讨论追踪后继定义，但该线索尚未完成可采用性核验，不是已经授权采用的新模块。
-
-本项验收必须回答：关联是什么标准节点定义、引用到哪里、如何区分设备与管理域、目标缺失是否允许、虚拟语义是否成立，以及 Schema/工具能否实际验证。没有闭合就保留缺口，不用项目 augment 解决。
-
-### 可独立推进：尚未审查的协议/层次模型
-
-关联没有立即可用定义时，继续路线图已经列出的 TE、路由协议、桥/LLDP 等模型范围审查，按目标场景建立“原生模块/依赖/feature/数据作用域/已有标准关联/未定义要求”的表，再逐项构造实例。不要一直为同一关联重复搜索，也不要突然回到 CLI 模板开发。
-
-RFC 8349 的 39 项只覆盖基础路由结构，不代表 OSPF/BGP/TE 完整核验，更不代表所有 IETF 相关内容已经理解。新增模块须固定来源、保留完整模块/子模块/import，不能从当前 H3C CLI 样本反推所需最小字段。
-
-### 之后才重排采集与应用接入
-
-先明确模型字段语义及缺证据清单，再决定采什么、如何绑定设备上下文及保留部分观测；恢复 P2-3/P2-10 前更新方案和台账。不能为了接口缺 statistics/discontinuity-time 修改 mandatory，也不应因此丢弃已有合法观测。
-
-模型研究尚未完成全网关联、完整设备状态、协议服务/NACM、ARP/MAC/VLAN/Hub 映射、转发路径计算和故障根因闭环。不要把近期离线验证包作为已发布网络数字孪生 App。
-
-## 8. 接手后的工作节奏
-
-先核对 `git status` 与本文件，保留 P2-3 变更。阅读规则和缺口后选择一个明确的小项，先核对标准再实现验证；对逻辑错误更新方案。完成时更新第 14 节并运行相关检查，精确暂存本项文件再提交。用户不要求每张卡停下来等待确认；也没有授权通过自定义模型替代未闭合的标准定义。
-
-本次交接后由 Claude 在同一工作区继续，Codex 不再启动新的模型或采集任务。
+1. SIMAP 原文不能编译是原文问题（作者仓库同类错误），沿用锁定的兼容补丁，不要改写原文或草案语义。
+2. Yangson 不自动实现 Schema Mount；挂载验证用 libyang 5.8.6（3.12.2 会崩溃，不算负例）。严格验证不传 `-t`，用 `--merge`；`-t get` 只是解析。
+3. RFC 8342 §5.3 不是缺字段的豁免；部分观测保留缺项诊断，不编造值（如计数器中断时间）。
+4. 核对真实字段名：RFC 8529 用 `bind-ni-name`；路由状态下一跳用 address、无 index；双下一跳不证明数据平面 ECMP。
+5. 生成文件的行尾会影响摘要：`.gitattributes` 固定了 LF 的目录，新增生成目录注意同步；Windows 下 Python `write_text` 会写 CRLF，脚本里用 `write_bytes` 或 `newline="\n"`。
+6. 路由表按设计走模板层（7.3），**不写通用正则解析路由**。模板固定 ntc-templates 9.1.0 与逐文件 SHA-256。
+7. 定位/路径只用快照观测，确定性计算，不让 LLM 猜；数据不足就以明确原因结束分支。
