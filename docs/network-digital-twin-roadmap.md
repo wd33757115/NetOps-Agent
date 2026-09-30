@@ -1081,6 +1081,15 @@ P2-9 根据 Q5 取消，不引入 SNMP。P3 及后续仍在进入阶段时展开
   - ARP 老化列、OSPF Dead-Time 列在纯文本对比中总会显示差异，由 AI 判断。
   - 巡检运行级质量记为 partial、`baseline_eligible=false`：ARP、MAC、接口简表、三层接口这 4 条命令另有结构化检查项，缺解析模板会被标 `template_missing`。原文完整可用，但修运行级统计要改 `src/core/patrol`（约束禁改），暂不处理；AI 已如实报告此缺口。
 - 核验脚本 `.runtime/verify-baseline-compare.py`、`.runtime/verify-fault-compare.py`、`.runtime/verify-fault-ai.py`、`.runtime/lab-baseline-*.py` 留本地、不提交。
+- 终端网关配错（负责人只要求测此类）：
+  - 第一次运行（`cmp-case3-ai`）：负责人在脚本运行中另行把 PC2 网关改为 192.168.1.200，实际是 PC1、PC2 **双故障**，不计为场景 3 成绩。
+  - 第二次运行（`cmp-pc2gw-ai`）：PC1 已恢复，仅 PC2 网关错误。
+  - 两次不经 AI 的网络侧对比都与预期一致：两台设备的接口、路由表、配置均 unchanged，终端 ARP/MAC 仍在，差异只有 ARP 老化值。
+  - 两次 AI 均**未命中**：都拿到了“网关能 ping 通直连终端、跨网段不通”的关键证据，却据此排除终端侧（“网关到 PC 通，PC 侧接入正常”），转而怀疑 ACL/转发面。第二次 11 轮、23 次工具、26.4 万 token。
+- 两次运行暴露的平台问题：
+  - `device_access__compare_config` 在 AI 运行时只有 10 秒超时（只有 `run` 是 75 秒），需登录的对比被截断，返回 “Business query unavailable”。已修复（`LIVE_TOOLS`），重启生效。
+  - 带源地址的 ping（`ping -a`）按策略属 L3 需审批，本轮未执行。它能直接区分“终端网关错误”与“中间转发问题”，是否放开待负责人决定。
+  - `inspection__list_snapshots` 的时间仍为 +08:00，AI 仍会与 UTC 现场时间混读。
 
 ### 2026-09-30 负责人追加：原始基线与现场指定配置块对比（已被上一条取代）
 

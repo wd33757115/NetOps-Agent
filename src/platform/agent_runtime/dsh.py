@@ -29,6 +29,8 @@ from .usage import Usage
 from .session_store import session_home, scope_key, key, native_logs
 
 ROOT = Path(__file__).resolve().parents[3]
+# Tools that log in to a device get the live timeout, not the 10 s query one.
+LIVE_TOOLS = frozenset({"device_access__run", "device_access__compare_config"})
 PROMPT = """你是 NetOps 数据中心网络助手。使用提供的工具按需搜索和阅读资料，也可查询已授权业务数据。
 CATALOG.md 是资料目录；glob 查找文件，grep 查找内容，read 按行读取。
 正文文件名使用修订标识和行号，不含产品名称；按主题找内容用 grep，按标题找路径可查 CATALOG.md。
@@ -388,7 +390,10 @@ class Bridge:
                     result = await asyncio.to_thread(self.catalog.submit_answer, arguments)
                     self.answer_feedback = result
                 else:
-                    live = name == "device_access__run" and getattr(self.catalog, "active_diagnostics", False)
+                    # Both log in to a device; the comparison was cut off at 10 s.
+                    live = name in LIVE_TOOLS and getattr(
+                        self.catalog, "active_diagnostics", False
+                    )
                     remaining = self.context.timeout_seconds - (time.monotonic() - self.started_at)
                     result = await asyncio.wait_for(
                         asyncio.to_thread(self.catalog.invoke, name, arguments),
