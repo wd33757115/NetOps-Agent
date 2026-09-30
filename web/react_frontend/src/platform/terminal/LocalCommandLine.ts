@@ -22,6 +22,7 @@ const cells = (text: string) => Array.from(text).reduce((width, character) => {
 
 export interface LocalCommandLineOptions {
   onSubmit: (command: string) => boolean
+  onComplete?: (command: string, tabCount: number) => void
   onNotice: (message: string) => void
 }
 
@@ -37,6 +38,8 @@ export class LocalCommandLine {
   private history: string[] = []
   private historyPosition = 0
   private historyDraft = ''
+  private completionRevision?: number
+  private completionCycle?: { seed: string; count: number }
 
   constructor(private terminal: Terminal, private options: LocalCommandLineOptions) {}
 
@@ -44,6 +47,8 @@ export class LocalCommandLine {
     if (this.disposed) return
     const revision = ++this.revision
     this.active = false
+    this.completionRevision = undefined
+    this.completionCycle = undefined
     // ready/finished can arrive before xterm has parsed the last output chunk.
     this.terminal.write('', () => {
       if (this.disposed || revision !== this.revision) return
@@ -63,7 +68,8 @@ export class LocalCommandLine {
   }
 
   handleData(data: string) {
-    if (!this.active || this.disposed) return
+    if (!this.active || this.disposed || this.completionRevision !== undefined) return
+    if (data !== '\t') this.completionCycle = undefined
     switch (data) {
       case '\r': {
         const command = this.draft.join('')
@@ -87,7 +93,17 @@ export class LocalCommandLine {
         break
       case '\x1b[3~': this.draft.splice(this.cursor, 1); break
       case '\x03': this.draft = []; this.cursor = 0; this.options.onNotice(''); break
-      case '\t': this.options.onNotice('暂不支持远端 Tab 补全，请输入完整命令。'); return
+      case '\t': {
+        if (this.cursor !== this.draft.length) { this.options.onNotice('请先将光标移到命令末尾再补全。'); return }
+        if (this.options.onComplete) {
+          const seed = this.completionCycle?.seed ?? this.draft.join('')
+          const count = (this.completionCycle?.count ?? 0) % 32 + 1
+          this.completionCycle = { seed, count }
+          this.options.onComplete(seed, count)
+          if (this.completionRevision === undefined) this.completionCycle = undefined
+        } else this.options.onNotice('当前设备未支持远端 Tab 补全，请输入完整命令。')
+        return
+      }
       default:
         this.insert(data)
         return
@@ -96,14 +112,42 @@ export class LocalCommandLine {
   }
 
   handlePaste(raw: string) {
-    if (!this.active || this.disposed) return
+    if (!this.active || this.disposed || this.completionRevision !== undefined) return
+    this.completionCycle = undefined
     this.insert(raw)
+  }
+
+  beginCompletion(revision: number) {
+    if (!this.active || this.disposed || this.completionRevision !== undefined) return false
+    this.completionRevision = revision
+    this.terminal.options.cursorBlink = false
+    return true
+  }
+
+  finishCompletion(revision: number, command?: string) {
+    if (this.disposed || this.completionRevision !== revision) return false
+    this.completionRevision = undefined
+    if (command !== undefined) {
+      if (CONTROL_CHARACTERS.test(command) || Array.from(command).length > MAX_COMMAND_LENGTH) {
+        this.completionCycle = undefined
+        this.options.onNotice('设备返回的补全内容无法使用，请继续手动输入。')
+      } else {
+        this.draft = characters(command)
+        this.cursor = this.draft.length
+      }
+    } else this.completionCycle = undefined
+    this.terminal.options.cursorBlink = true
+    this.render()
+    this.terminal.focus()
+    return true
   }
 
   /** Erases only the local draft; the device will provide the canonical command echo. */
   suspend() {
     if (this.disposed) return
     ++this.revision
+    this.completionRevision = undefined
+    this.completionCycle = undefined
     const wasActive = this.active
     this.active = false
     this.terminal.options.cursorBlink = false
@@ -125,6 +169,8 @@ export class LocalCommandLine {
     ++this.revision
     this.active = false
     this.disposed = true
+    this.completionRevision = undefined
+    this.completionCycle = undefined
     this.marker?.dispose()
     this.history = []
     this.draft = []

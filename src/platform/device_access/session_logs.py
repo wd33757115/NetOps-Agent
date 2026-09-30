@@ -27,6 +27,8 @@ CONNECTION_KINDS = (
             "command_finished",
             "command_denied",
             "command_not_executed",
+            "completion_requested",
+            "completion_finished",
             "terminal_requested",
             "terminal_resized",
             "terminal_input_rejected",
@@ -203,6 +205,8 @@ def _content(metadata, records):
         "terminal_closed": "终端结束",
         "command_denied": "命令已拒绝",
         "command_not_executed": "命令未执行",
+        "completion_requested": "请求 Tab 补全（未执行命令）",
+        "completion_finished": "Tab 补全结束（未执行命令）",
         "terminal_resized": "终端尺寸变化",
         "terminal_requested": "请求终端",
         "host_key_observed": "记录主机密钥",
@@ -242,6 +246,15 @@ def _content(metadata, records):
             lines.append(f"[{stamp}] {labels.get(kind, kind)}")
             if command:
                 lines.append(f"命令: {command}")
+            if kind == "completion_finished":
+                if detail.get("completed_command") is not None:
+                    lines.append(f"补全结果: {detail['completed_command']}")
+                if detail.get("cleared"):
+                    lines.append("远端草稿已清空")
+                elif detail.get("sent") is False:
+                    lines.append("未向设备发送补全草稿")
+                else:
+                    lines.append("远端草稿未确认清空")
         if detail.get("failure_code"):
             lines.append(f"原因: {detail['failure_code']}")
         lines.append("")

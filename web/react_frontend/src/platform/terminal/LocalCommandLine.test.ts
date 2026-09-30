@@ -2,7 +2,7 @@ import type { Terminal } from '@xterm/xterm'
 import { expect, it, vi } from 'vitest'
 import { LocalCommandLine } from './LocalCommandLine'
 
-function setup(prefix = '<VSR-1>') {
+function setup(prefix = '<VSR-1>', onComplete?: (command: string, tabCount: number) => void) {
   const callbacks: (() => void)[] = []
   const marker = { line: 0, isDisposed: false, dispose: vi.fn() }
   const terminal = {
@@ -18,7 +18,7 @@ function setup(prefix = '<VSR-1>') {
   const submitted: string[] = []
   const onNotice = vi.fn()
   const onSubmit = vi.fn((command: string) => { submitted.push(command); editor.suspend(); return true })
-  const editor = new LocalCommandLine(terminal as unknown as Terminal, { onSubmit, onNotice })
+  const editor = new LocalCommandLine(terminal as unknown as Terminal, { onSubmit, onComplete, onNotice })
   const flush = () => { while (callbacks.length) callbacks.shift()!() }
   const ready = (command = '') => { editor.activate(command); flush() }
   const displayed = () => terminal.write.mock.calls.at(-1)?.[0] || ''
@@ -79,7 +79,7 @@ it('keeps Tab and Ctrl+C local, with Ctrl+C clearing the draft', () => {
   const { editor, ready, submitted, onNotice, displayed } = setup()
   ready('display clock')
   editor.handleData('\t')
-  expect(onNotice).toHaveBeenLastCalledWith('暂不支持远端 Tab 补全，请输入完整命令。')
+  expect(onNotice).toHaveBeenLastCalledWith('当前设备未支持远端 Tab 补全，请输入完整命令。')
   editor.handleData('\x03')
   expect(displayed()).not.toContain('display clock')
   editor.handleData('\r')
@@ -189,6 +189,91 @@ it('clears wrapped local remnants from the prompt marker after shrinking the ter
   flush()
   expect(displayed().startsWith('\x1b[5;1H\x1b[J')).toBe(true)
   expect(displayed()).not.toContain('\n')
+})
+
+it('requests completion only at the end and freezes input without erasing its current display', () => {
+  const complete = vi.fn()
+  const { editor, ready, onNotice, displayed, submitted } = setup('<VSR-1>', complete)
+  ready('dis')
+  editor.handleData('\x1b[D')
+  editor.handleData('\t')
+  expect(complete).not.toHaveBeenCalled()
+  expect(onNotice).toHaveBeenLastCalledWith('请先将光标移到命令末尾再补全。')
+  editor.handleData('\x1b[F')
+  editor.handleData('\t')
+  expect(complete).toHaveBeenCalledWith('dis', 1)
+  const before = displayed()
+  expect(editor.beginCompletion(1)).toBe(true)
+  editor.handleData('ignored')
+  editor.handleData('\r')
+  editor.handleData('\t')
+  editor.handlePaste('also ignored')
+  expect(displayed()).toBe(before)
+  expect(submitted).toEqual([])
+  expect(complete).toHaveBeenCalledTimes(1)
+  expect(editor.finishCompletion(2, 'wrong')).toBe(false)
+  expect(editor.finishCompletion(1, 'display ')).toBe(true)
+  expect(displayed()).toContain('<VSR-1>display ')
+  editor.handleData('clock')
+  editor.handleData('\r')
+  expect(submitted).toEqual(['display clock'])
+})
+
+it('keeps rejected or unsafe completion local and never adds completion attempts to history', () => {
+  const { editor, ready, submitted, onNotice } = setup()
+  ready('display clock')
+  editor.handleData('\r')
+  ready('dis')
+  editor.beginCompletion(1)
+  editor.finishCompletion(1)
+  editor.handleData('p')
+  editor.beginCompletion(2)
+  editor.finishCompletion(2, 'display\rreboot')
+  expect(onNotice).toHaveBeenLastCalledWith('设备返回的补全内容无法使用，请继续手动输入。')
+  editor.handleData('\r')
+  expect(submitted.at(-1)).toBe('disp')
+  ready('dis')
+  editor.beginCompletion(3)
+  editor.finishCompletion(3, 'display interface')
+  editor.handleData('\x1b[A')
+  editor.handleData('\r')
+  expect(submitted.at(-1)).toBe('disp')
+})
+
+it('ignores late completion after stop and keeps completion frozen through resize', () => {
+  const { editor, ready, terminal, flush, submitted, displayed } = setup()
+  ready('dis')
+  editor.beginCompletion(1)
+  terminal.cols = 30
+  editor.resize()
+  flush()
+  editor.handleData('\r')
+  expect(submitted).toEqual([])
+  expect(displayed()).toContain('<VSR-1>dis')
+  editor.suspend()
+  expect(editor.finishCompletion(1, 'display clock')).toBe(false)
+  editor.handleData('\r')
+  expect(submitted).toEqual([])
+})
+
+it('bounds the Tab cycle at 32 and resets its seed after paste or a fresh activation', () => {
+  let revision = 0
+  const complete = vi.fn(() => { editor.beginCompletion(++revision) })
+  const { editor, ready } = setup('<VSR-1>', complete)
+  ready('display cl')
+  for (let count = 1; count <= 33; count++) {
+    editor.handleData('\t')
+    expect(complete).toHaveBeenLastCalledWith('display cl', (count - 1) % 32 + 1)
+    editor.finishCompletion(revision, 'display clock')
+  }
+  editor.handlePaste(' detail')
+  editor.handleData('\t')
+  expect(complete).toHaveBeenLastCalledWith('display clock detail', 1)
+  editor.finishCompletion(revision, 'display clock detail')
+  editor.suspend()
+  ready('show')
+  editor.handleData('\t')
+  expect(complete).toHaveBeenLastCalledWith('show', 1)
 })
 
 it('uses stable xterm APIs to retain one prompt across real resize, submit and remote echo', async () => {

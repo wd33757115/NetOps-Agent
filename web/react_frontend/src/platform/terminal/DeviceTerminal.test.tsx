@@ -107,11 +107,12 @@ it('the login prompt requires both fields', async () => {
 })
 
 const commandsSent = () => Socket.last.sent.map(value => JSON.parse(value)).filter(value => value.type === 'command')
+const completionsSent = () => Socket.last.sent.map(value => JSON.parse(value)).filter(value => value.type === 'complete')
 const typeInTerminal = (value: string) => act(() => terminal.onData.mock.calls.at(-1)![0](value))
-const connectedTerminal = async () => {
+const connectedTerminal = async (completion?: string | null) => {
   render(<LiveTerminal target={{ session_id: 's1' }} />)
   await waitFor(() => expect(ticketBodies()).toHaveLength(1))
-  Socket.last.emit({ type: 'ready' })
+  Socket.last.emit({ type: 'ready', completion })
   return screen.getByLabelText('设备 SSH 终端')
 }
 
@@ -203,4 +204,144 @@ it('keeps an oversized UTF-8 frame local and lets the user correct it without di
   expect(commandsSent()).toEqual([])
   typeInTerminal('\r')
   expect(commandsSent()[0].command).toBe('display clock')
+})
+
+it('sends a separate Comware completion request and only executes the completed draft after Enter', async () => {
+  const host = await connectedTerminal('comware')
+  typeInTerminal('dis')
+  typeInTerminal('\t')
+  expect(completionsSent()).toEqual([{ type: 'complete', command: 'dis', tab_count: 1, request_id: expect.any(String), revision: 1 }])
+  expect(screen.getByText('已连接 · 正在补全命令…')).toBeInTheDocument()
+  const request = completionsSent()[0]
+  typeInTerminal('ignored')
+  typeInTerminal('\r')
+  typeInTerminal('\t')
+  fireEvent.paste(host, { clipboardData: { getData: () => 'also ignored' } })
+  expect(completionsSent()).toHaveLength(1)
+  expect(commandsSent()).toEqual([])
+  Socket.last.emit({ type: 'completion_result', request_id: 'another-request', revision: request.revision, command: 'wrong' })
+  Socket.last.emit({ type: 'completion_result', request_id: request.request_id, revision: 0, command: 'wrong' })
+  typeInTerminal('\r')
+  expect(commandsSent()).toEqual([])
+  Socket.last.emit({ type: 'completion_result', request_id: request.request_id, revision: request.revision, command: 'display ' })
+  expect(terminal.write.mock.calls.at(-1)?.[0]).toContain('<VSR-1>display ')
+  expect(commandsSent()).toEqual([])
+  typeInTerminal('clo')
+  typeInTerminal('\t')
+  expect(completionsSent()[1]).toMatchObject({ command: 'display clo', revision: 2 })
+  const second = completionsSent()[1]
+  Socket.last.emit({ type: 'completion_result', request_id: second.request_id, revision: second.revision, command: 'display clock ' })
+  typeInTerminal('\r')
+  expect(commandsSent()).toEqual([{ type: 'command', command: 'display clock ', request_id: expect.any(String) }])
+  expect(Socket.last.sent.map(value => JSON.parse(value)).some(value => value.type === 'input')).toBe(false)
+})
+
+it('keeps unsupported devices and a cursor in the middle of the command local', async () => {
+  await connectedTerminal(null)
+  typeInTerminal('dis')
+  typeInTerminal('\t')
+  expect(screen.getByText('当前设备未支持远端 Tab 补全，请输入完整命令。')).toBeInTheDocument()
+  expect(completionsSent()).toEqual([])
+  typeInTerminal('\x1b[D')
+  typeInTerminal('\t')
+  expect(screen.getByText('请先将光标移到命令末尾再补全。')).toBeInTheDocument()
+  expect(completionsSent()).toEqual([])
+  typeInTerminal('\r')
+  expect(commandsSent()[0].command).toBe('dis')
+})
+
+it('restores an editable original draft after rejection or no available completion', async () => {
+  await connectedTerminal('comware')
+  typeInTerminal('dis')
+  typeInTerminal('\t')
+  let request = completionsSent()[0]
+  Socket.last.emit({ type: 'completion_rejected', request_id: request.request_id, revision: request.revision, message: '补全不可用' })
+  expect(screen.getByText('补全不可用')).toBeInTheDocument()
+  typeInTerminal('p')
+  typeInTerminal('\t')
+  request = completionsSent()[1]
+  expect(request.command).toBe('disp')
+  Socket.last.emit({ type: 'completion_result', request_id: request.request_id, revision: request.revision, command: 'disp', message: '没有可用补全' })
+  expect(screen.getByText('没有可用补全')).toBeInTheDocument()
+  typeInTerminal('lay clock')
+  typeInTerminal('\r')
+  expect(commandsSent()[0].command).toBe('display clock')
+})
+
+it('does not apply unsafe completion output to the terminal', async () => {
+  await connectedTerminal('comware')
+  typeInTerminal('dis')
+  typeInTerminal('\t')
+  const request = completionsSent()[0]
+  const invalid = 'display clock\r\nreboot\x1b[2J'
+  Socket.last.emit({ type: 'completion_result', request_id: request.request_id, revision: request.revision, command: invalid })
+  expect(terminal.write).not.toHaveBeenCalledWith(expect.stringContaining(invalid))
+  expect(screen.getByText('设备返回的补全内容无法使用，请继续手动输入。')).toBeInTheDocument()
+  typeInTerminal('\r')
+  expect(commandsSent()[0].command).toBe('dis')
+})
+
+it('ignores completion results after stop and from the previous connection after reconnect', async () => {
+  await connectedTerminal('comware')
+  typeInTerminal('dis')
+  typeInTerminal('\t')
+  const oldSocket = Socket.last
+  const request = completionsSent()[0]
+  fireEvent.click(screen.getByRole('button', { name: '停止会话' }))
+  const writesAfterStop = terminal.write.mock.calls.length
+  oldSocket.emit({ type: 'completion_result', request_id: request.request_id, revision: request.revision, command: 'stale' })
+  expect(terminal.write).toHaveBeenCalledTimes(writesAfterStop)
+  fireEvent.click(screen.getByRole('button', { name: '重新连接' }))
+  await waitFor(() => expect(ticketBodies()).toHaveLength(2))
+  Socket.last.emit({ type: 'ready', completion: 'comware' })
+  oldSocket.emit({ type: 'completion_result', request_id: request.request_id, revision: request.revision, command: 'stale' })
+  typeInTerminal('display clock')
+  typeInTerminal('\r')
+  expect(commandsSent()[0].command).toBe('display clock')
+})
+
+it('unfreezes the unchanged draft when sending a completion request fails', async () => {
+  await connectedTerminal('comware')
+  const send = vi.spyOn(Socket.last, 'send').mockImplementationOnce(() => { throw new Error('connection unavailable') })
+  typeInTerminal('dis')
+  typeInTerminal('\t')
+  expect(screen.getByText('补全请求未发送，请检查连接。')).toBeInTheDocument()
+  send.mockRestore()
+  typeInTerminal('play clock')
+  typeInTerminal('\r')
+  expect(commandsSent()[0].command).toBe('display clock')
+})
+
+it('cycles consecutive Tab requests with the original seed and resets after editing', async () => {
+  await connectedTerminal('comware')
+  typeInTerminal('display cl')
+  typeInTerminal('\t')
+  let request = completionsSent()[0]
+  expect(request).toMatchObject({ command: 'display cl', tab_count: 1 })
+  typeInTerminal('\t')
+  expect(completionsSent()).toHaveLength(1)
+  Socket.last.emit({ type: 'completion_result', request_id: request.request_id, revision: request.revision, command: 'display client-verify' })
+  typeInTerminal('\t')
+  request = completionsSent()[1]
+  expect(request).toMatchObject({ command: 'display cl', tab_count: 2 })
+  Socket.last.emit({ type: 'completion_result', request_id: request.request_id, revision: request.revision, command: 'display clock' })
+  typeInTerminal(' detail')
+  typeInTerminal('\t')
+  request = completionsSent()[2]
+  expect(request).toMatchObject({ command: 'display clock detail', tab_count: 1 })
+  expect(commandsSent()).toEqual([])
+})
+
+it('starts a new Tab cycle from the current draft after a rejected completion', async () => {
+  await connectedTerminal('comware')
+  typeInTerminal('display cl')
+  typeInTerminal('\t')
+  let request = completionsSent()[0]
+  Socket.last.emit({ type: 'completion_result', request_id: request.request_id, revision: request.revision, command: 'display client-verify' })
+  typeInTerminal('\t')
+  request = completionsSent()[1]
+  Socket.last.emit({ type: 'completion_rejected', request_id: request.request_id, revision: request.revision, message: '补全不可用' })
+  typeInTerminal('\t')
+  expect(completionsSent()[2]).toMatchObject({ command: 'display client-verify', tab_count: 1 })
+  expect(commandsSent()).toEqual([])
 })

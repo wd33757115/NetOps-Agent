@@ -20,6 +20,8 @@ const reasons: Record<string, string> = {
   terminal_expired: '已达到空闲 2 分钟或会话 15 分钟上限', connection_failed: '无法连接设备', timeout: '连接或命令等待超时',
   not_authorized: '当前账号不能使用 SSH 终端', terminal_unavailable: '终端服务不可用',
   cancelled: '已停止会话', interaction_required: '设备要求交互输入，请通过控制台处理', command_timeout: '命令超时，已停止会话',
+  completion_ambiguous: '补全响应无法确认，已停止会话', completion_timeout: '补全等待超时，已停止会话',
+  connection_closed: '设备连接已关闭', output_limit: '设备输出超过上限，已停止会话', audit_unavailable: '操作记录暂时无法保存，已停止会话',
 }
 
 export const readHostKey = (host: string, port: number) => api.get<HostKey>(`/apps/device-access/host-keys/${host}/${port}`).then(({ data }) => data)
@@ -58,6 +60,7 @@ export function LiveTerminal({ target, height = '65vh' }: { target: TerminalTarg
   const commandLine = useRef<LocalCommandLine>()
   const connection = useRef<WebSocket>()
   const pending = useRef<string>()
+  const pendingCompletion = useRef<{ requestId: string; revision: number }>()
   const submittedCommand = useRef('')
   const next = useRef<{ login?: Login; save?: boolean }>({})
   const [attempt, setAttempt] = useState(0)
@@ -65,6 +68,7 @@ export function LiveTerminal({ target, height = '65vh' }: { target: TerminalTarg
   const [closed, setClosed] = useState(false)
   const [connected, setConnected] = useState(false)
   const [executing, setExecuting] = useState(false)
+  const [completing, setCompleting] = useState(false)
   const [commandNotice, setCommandNotice] = useState('')
   const [asking, setAsking] = useState<string>()
   const [hostKey, setHostKey] = useState<HostKey>()
@@ -76,10 +80,12 @@ export function LiveTerminal({ target, height = '65vh' }: { target: TerminalTarg
     let disposed = false
     let ended = false
     let socket: WebSocket | undefined
+    let completionEnabled = false
+    let completionRevision = 0
     const { login, save } = next.current
     next.current = {}
-    connection.current = undefined; pending.current = undefined; submittedCommand.current = ''
-    setClosed(false); setConnected(false); setExecuting(false); setCommandNotice(''); setStatus('正在连接…')
+    connection.current = undefined; pending.current = undefined; pendingCompletion.current = undefined; submittedCommand.current = ''
+    setClosed(false); setConnected(false); setExecuting(false); setCompleting(false); setCommandNotice(''); setStatus('正在连接…')
     const terminal = new Terminal({ cursorBlink: true, fontSize: 14, scrollback: 3000, allowProposedApi: false, theme: { background: '#17212c', foreground: '#e5eaf0' } })
     const fit = new FitAddon()
     terminal.loadAddon(fit)
@@ -88,7 +94,7 @@ export function LiveTerminal({ target, height = '65vh' }: { target: TerminalTarg
     const editor = new LocalCommandLine(terminal, {
       onNotice: setCommandNotice,
       onSubmit: text => {
-        if (disposed || ended || pending.current || socket?.readyState !== WebSocket.OPEN || connection.current !== socket) return false
+        if (disposed || ended || pending.current || pendingCompletion.current || socket?.readyState !== WebSocket.OPEN || connection.current !== socket) return false
         const requestId = crypto.randomUUID()
         const frame = JSON.stringify({ type: 'command', command: text, request_id: requestId })
         if (new TextEncoder().encode(frame).length > 8192) { setCommandNotice('命令过长，请缩短后重试。'); return false }
@@ -103,6 +109,23 @@ export function LiveTerminal({ target, height = '65vh' }: { target: TerminalTarg
           return false
         }
       },
+      onComplete: (text, tabCount) => {
+        if (disposed || ended || pending.current || pendingCompletion.current || socket?.readyState !== WebSocket.OPEN || connection.current !== socket) return
+        if (!completionEnabled) { setCommandNotice('当前设备未支持远端 Tab 补全，请输入完整命令。'); return }
+        const requestId = crypto.randomUUID()
+        const revision = ++completionRevision
+        const frame = JSON.stringify({ type: 'complete', command: text, tab_count: tabCount, request_id: requestId, revision })
+        if (new TextEncoder().encode(frame).length > 8192) { setCommandNotice('命令过长，请缩短后重试。'); return }
+        if (!editor.beginCompletion(revision)) return
+        pendingCompletion.current = { requestId, revision }
+        setCompleting(true); setCommandNotice('')
+        try { socket.send(frame) }
+        catch {
+          pendingCompletion.current = undefined; setCompleting(false)
+          editor.finishCompletion(revision)
+          setCommandNotice('补全请求未发送，请检查连接。')
+        }
+      },
     })
     commandLine.current = editor
     const input = terminal.onData(data => editor.handleData(data))
@@ -114,8 +137,9 @@ export function LiveTerminal({ target, height = '65vh' }: { target: TerminalTarg
       if (disposed || ended) return
       ended = true
       pending.current = undefined
+      pendingCompletion.current = undefined
       editor.suspend()
-      setClosed(true); setConnected(false); setExecuting(false)
+      setClosed(true); setConnected(false); setExecuting(false); setCompleting(false)
       setStatus(reason ? `已断开 · ${reasons[reason] || reason}` : '已断开')
       if (reason && LOGIN_REASONS.includes(reason)) setAsking(reason)
       if (reason && HOST_KEY_REASONS.includes(reason) && where) void readHostKey(where.host, where.port).then(value => { if (!disposed) setHostKey(value) }).catch(() => undefined)
@@ -131,8 +155,15 @@ export function LiveTerminal({ target, height = '65vh' }: { target: TerminalTarg
       socket.onmessage = event => {
         const payload = JSON.parse(event.data)
         if (disposed || ended || connection.current !== socket) return
-        if (payload.type === 'ready') { setConnected(true); setStatus('已连接 · 空闲 2 分钟或会话 15 分钟后断开'); resize(); editor.activate(); terminal.focus() }
+        if (payload.type === 'ready') { completionEnabled = payload.completion === 'comware'; setConnected(true); setStatus('已连接 · 空闲 2 分钟或会话 15 分钟后断开'); resize(); editor.activate(); terminal.focus() }
         if (payload.type === 'output') terminal.write(payload.data)
+        const completion = pendingCompletion.current
+        if (completion && payload.request_id === completion.requestId && payload.revision === completion.revision && (payload.type === 'completion_result' || payload.type === 'completion_rejected')) {
+          pendingCompletion.current = undefined
+          setCompleting(false)
+          setCommandNotice(payload.message || (payload.type === 'completion_rejected' ? '补全请求被拒绝，请继续手动输入。' : ''))
+          editor.finishCompletion(completion.revision, payload.type === 'completion_result' && typeof payload.command === 'string' ? payload.command : undefined)
+        }
         if (pending.current && payload.request_id === pending.current) {
           if (payload.type === 'command_rejected' || payload.type === 'command_finished') {
             pending.current = undefined
@@ -147,7 +178,7 @@ export function LiveTerminal({ target, height = '65vh' }: { target: TerminalTarg
       socket.onerror = () => stop('connection_failed')
       socket.onclose = () => stop()
     }).catch(error => { if (!disposed) { setClosed(true); setStatus(error.message || '无法打开终端') } })
-    return () => { disposed = true; connection.current = undefined; commandLine.current = undefined; pending.current = undefined; submittedCommand.current = ''; observer.disconnect(); input.dispose(); editor.dispose(); socket?.close(); terminal.dispose() }
+    return () => { disposed = true; connection.current = undefined; commandLine.current = undefined; pending.current = undefined; pendingCompletion.current = undefined; submittedCommand.current = ''; observer.disconnect(); input.dispose(); editor.dispose(); socket?.close(); terminal.dispose() }
   }, [key, attempt])
 
   const stopSession = () => {
@@ -156,12 +187,13 @@ export function LiveTerminal({ target, height = '65vh' }: { target: TerminalTarg
     socket?.close()
     connection.current = undefined
     pending.current = undefined
+    pendingCompletion.current = undefined
     commandLine.current?.suspend()
-    setConnected(false); setExecuting(false); setClosed(true); setStatus('已断开 · 已停止会话')
+    setConnected(false); setExecuting(false); setCompleting(false); setClosed(true); setStatus('已断开 · 已停止会话')
   }
 
   return <div className="device-terminal" style={{ display: 'flex', flexDirection: 'column', height, minHeight: 240 }}>
-    <Alert type={closed ? 'warning' : 'info'} message={executing ? '已连接 · 正在执行命令…' : status} style={{ marginBottom: 12 }} action={closed ? <Button size="small" onClick={() => connect()}>重新连接</Button> : connected ? <Button size="small" onClick={stopSession}>停止会话</Button> : undefined} />
+    <Alert type={closed ? 'warning' : 'info'} message={executing ? '已连接 · 正在执行命令…' : completing ? '已连接 · 正在补全命令…' : status} style={{ marginBottom: 12 }} action={closed ? <Button size="small" onClick={() => connect()}>重新连接</Button> : connected ? <Button size="small" onClick={stopSession}>停止会话</Button> : undefined} />
     <div ref={host} aria-label="设备 SSH 终端" onPasteCapture={event => { event.preventDefault(); event.stopPropagation(); commandLine.current?.handlePaste(event.clipboardData.getData('text')) }} style={{ flex: 1, minHeight: 0, background: '#17212c', padding: 12, borderRadius: 8 }} />
     {commandNotice && <Alert type="warning" showIcon message={commandNotice} style={{ marginTop: 8 }} />}
     <LoginModal open={!!asking} title={asking === 'authentication_failed' ? '登录失败，请重新输入' : '输入用户名和密码'} allowSave={'session_id' in target}

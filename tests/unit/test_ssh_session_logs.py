@@ -48,6 +48,20 @@ def test_each_connection_persists_one_readable_log_with_name_and_redaction(ssh_l
     assert len(ssh_log_storage.objects) == 2
 
 
+def test_completion_events_share_the_session_file_without_claiming_execution(ssh_log_storage):
+    op = operation()
+    op.event("connecting")
+    op.event("completion_requested", command="dis", request_id="tab1")
+    op.event("completion_finished", command="dis", completed_command="display ",
+             cleared=True, request_id="tab1", status="succeeded")
+    log = session_logs.read_log(op.session_id, actor_id="alice")
+    assert len(ssh_log_storage.objects) == 1
+    assert "请求 Tab 补全（未执行命令）" in log["content"]
+    assert "补全结果: display " in log["content"] and "远端草稿已清空" in log["content"]
+    assert "执行结果: 成功" not in log["content"]
+    assert governance.query_audit(management_only=True)["total"] == 0
+
+
 def test_management_events_and_unused_ticket_are_not_connection_files(ssh_log_storage):
     for kind in (
         "session_created",

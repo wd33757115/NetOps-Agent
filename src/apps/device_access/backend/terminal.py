@@ -25,6 +25,7 @@ def pump(payload, incoming, outgoing, stop):
     host, port, session_id = payload["host"], payload["port"], payload.get("session_id")
     started, last_input, last_check = time.monotonic(), time.monotonic(), 0
     output_bytes, input_bytes, digest = 0, 0, hashlib.sha256()
+    completion_output_bytes = 0
     operation = None
     seen = {}
     status, reason = "completed", None
@@ -74,7 +75,7 @@ def pump(payload, incoming, outgoing, stop):
                 raw = value.encode()
                 output_bytes += len(raw)
                 digest.update(raw)
-                if output_bytes > 4 * 1024 * 1024:
+                if output_bytes + completion_output_bytes > 4 * 1024 * 1024:
                     raise DeviceAccessError("output_limit", "终端输出超过会话上限")
                 outgoing.put({"type": "output", "data": value}, timeout=2)
 
@@ -97,7 +98,7 @@ def pump(payload, incoming, outgoing, stop):
 
             cli = HumanCLI(channel, operation, guard, on_output=output, before_send=before_send)
             cli.initialize()
-            outgoing.put({"type": "ready"}, timeout=2)
+            outgoing.put({"type": "ready", "completion": cli.completion_platform}, timeout=2)
             while not stop.is_set():
                 current = time.monotonic()
                 if current - started > 900 or current - last_input > 120:
@@ -113,9 +114,12 @@ def pump(payload, incoming, outgoing, stop):
                 if event:
                     last_input = current
                     channel.settimeout(2)
-                    if event["type"] == "command":
+                    if event["type"] in {"command", "complete"}:
                         command, request_id = event["command"], event["request_id"]
-                        command_hash = hashlib.sha256(command.encode()).hexdigest()
+                        is_completion = event["type"] == "complete"
+                        command_hash = hashlib.sha256(
+                            json.dumps(event, sort_keys=True).encode()
+                        ).hexdigest()
                         if request_id in seen:
                             previous_hash, previous_event = seen[request_id]
                             if previous_hash != command_hash:
@@ -125,23 +129,57 @@ def pump(payload, incoming, outgoing, stop):
                         input_bytes += len(command.encode())
                         if input_bytes > 1024 * 1024:
                             raise DeviceAccessError("input_limit", "终端输入超过会话上限")
-                        outgoing.put({"type": "command_sent", "request_id": request_id}, timeout=2)
+                        if not is_completion:
+                            outgoing.put(
+                                {"type": "command_sent", "request_id": request_id}, timeout=2
+                            )
                         try:
-                            result = cli.execute(command, command_id=request_id)
-                            reply = {
-                                "type": "command_finished",
-                                "request_id": request_id,
-                                "status": result["status"],
-                                "message": result.get("error"),
-                            }
+                            if is_completion:
+                                result = cli.complete(
+                                    command,
+                                    request_id=request_id,
+                                    tab_count=event.get("tab_count", 1),
+                                )
+                                completion_output_bytes += result.get("received_bytes", 0)
+                                if output_bytes + completion_output_bytes > 4 * 1024 * 1024:
+                                    raise DeviceAccessError("output_limit", "终端输出超过会话上限")
+                                reply = {
+                                    "type": "completion_result",
+                                    "request_id": request_id,
+                                    "revision": event["revision"],
+                                    "command": result["command"],
+                                    "message": "" if result["changed"] else "没有可用补全",
+                                }
+                            else:
+                                result = cli.execute(command, command_id=request_id)
+                                reply = {
+                                    "type": "command_finished",
+                                    "request_id": request_id,
+                                    "status": result["status"],
+                                    "message": result.get("error"),
+                                }
                         except DeviceAccessError as exc:
-                            if not cli.usable or exc.failure_code == "audit_unavailable":
+                            if is_completion:
+                                completion_output_bytes += getattr(exc, "received_bytes", 0)
+                                if output_bytes + completion_output_bytes > 4 * 1024 * 1024:
+                                    raise DeviceAccessError(
+                                        "output_limit", "终端输出超过会话上限"
+                                    ) from None
+                            if not cli.usable or exc.failure_code in {
+                                "audit_unavailable",
+                                "output_limit",
+                            }:
                                 raise
                             reply = {
-                                "type": "command_rejected",
+                                "type": "completion_rejected"
+                                if is_completion
+                                else "command_rejected",
                                 "request_id": request_id,
-                                "message": "命令被拒绝：" + str(exc),
+                                "message": ("补全未完成：" if is_completion else "命令被拒绝：")
+                                + str(exc),
                             }
+                            if is_completion:
+                                reply["revision"] = event["revision"]
                         seen[request_id] = (command_hash, reply)
                         outgoing.put(reply, timeout=2)
                     else:
@@ -187,6 +225,7 @@ def pump(payload, incoming, outgoing, stop):
                     "failure_code": reason,
                     "input_bytes": input_bytes,
                     "output_bytes": output_bytes,
+                    "completion_output_bytes": completion_output_bytes,
                     "output_sha256": digest.hexdigest(),
                     "duration_seconds": round(time.monotonic() - started, 2),
                     "kind": "human_terminal_audit",
@@ -221,16 +260,33 @@ async def connect(socket: WebSocket, session_id: str):
                     raise ValueError("Input frame too large")
                 event = json.loads(raw)
                 if (
-                    event.get("type") == "command"
+                    event.get("type") in {"command", "complete"}
                     and isinstance(event.get("command"), str)
                     and isinstance(event.get("request_id"), str)
                     and 0 < len(event["request_id"]) <= 100
+                    and (
+                        event["type"] == "command"
+                        or (
+                            type(event.get("revision")) is int
+                            and 0 <= event["revision"] <= 2**31 - 1
+                            and type(event.get("tab_count", 1)) is int
+                            and 1 <= event.get("tab_count", 1) <= 32
+                        )
+                    )
                 ):
                     incoming.put_nowait(
                         {
-                            "type": "command",
+                            "type": event["type"],
                             "command": event["command"],
                             "request_id": event["request_id"],
+                            **(
+                                {
+                                    "revision": event["revision"],
+                                    "tab_count": event.get("tab_count", 1),
+                                }
+                                if event["type"] == "complete"
+                                else {}
+                            ),
                         }
                     )
                 elif event.get("type") == "cancel":

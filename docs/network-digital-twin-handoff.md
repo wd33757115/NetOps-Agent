@@ -90,7 +90,7 @@
 负责人另行确认本支线，设计与台账见路线图 **S-1**。本次明确授权 SSH 终端相关界面及既有在线 SSH 调用接线；只在此范围内调整前文“暂不做 UI／原巡检不修改”的限制，不扩展 D-5～D-8，不改采集模型或解析语义。
 
 - 平台统一维护一份管理员正则白名单，完整命令匹配任一规则才发送；默认 `[".*"]`，空列表拒绝全部。规则覆盖终端、批量、诊断及既有在线平台 SSH 调用，含初始化/识别命令；**AI 仍叠加 D-8 的 L1/L2、设备范围和预算限制**，不因默认放行而获得配置权限。
-- 终端内本地编辑完整单行命令，按回车发送；本地按键不直接转发设备，当前不支持远端 Tab 或任意控制字符透传。设备要求密码、分页或交互确认时停止；命令失败不自动重试。批量按顺序执行，最多 20 个会话、每台 50 条命令，整批 15 分钟；支持停止，取消不能回滚已经执行的命令。
+- 终端内本地编辑完整单行命令，按回车发送；本地按键不直接转发设备，不提供任意控制字符透传。受控远端 Tab 的后续追加见 4.5。设备要求密码、分页或交互确认时停止；命令失败不自动重试。批量按顺序执行，最多 20 个会话、每台 50 条命令，整批 15 分钟；支持停止，取消不能回滚已经执行的命令。
 - 白名单存平台 `netops_ssh_policy`（迁移 `0107_ssh_governance`）；所有在线 SSH 操作写入平台 `netops_audit_logs`，普通用户查看本人、管理员查看全部，命令和输出按已知 secret 及敏感内容脱敏，现有 D-8 会话审计保留。源码中的独立实验采样脚本不属于在线平台调用范围；实验设备口令仍不得写入任何文件。
 - 已部署：`device-access 0.9.0`、`device-management 1.0.4`、`inspection 1.3.1`、`rule-governance 1.4.6`；拓扑仍为 0.4.3，知识问答仍为 0.8.1。部署前备份：`backups/20260930-023847-before-ssh-governance/postgres.dump`，109079394 bytes。升级命令包含依赖拓扑：`scripts/windows/start.ps1 -SkipLangfuse -UpgradeApps device-access,topology,device-management,inspection,rule-governance -NoBrowser`，退出 0；最终 `verify.ps1` 退出 0，9/9 已启用 App 以及 FastAPI/BFF/React/Worker 全部通过。排空旧/新包摘要比较修复已单独提交 `6899ded`，生命周期回归 10 项通过。
 - 验证：公共 SSH 回归 663 项通过，修补后相关 72 项重跑通过（与前批部分重复，不相加）；App/主机密钥/人工命令/终端分组最终 56 项通过（包含此前 18 + 5）；治理分组 20 项通过（含审计时间修复）；前端 22 项通过，改动文件 ESLint 与 diff 检查通过。旧在线调用链最终隔离回归为 119 通过、1 跳过、7 排除；跳过项需要独立 PostgreSQL 验证 advisory lock，7 项为原始 HEAD 已复现的既有失败，详情见 S-1 台账。
@@ -107,17 +107,27 @@
 - 本轮实机通过页面批量仅在 VSR-1、VSR-2 各执行一次 `display clock`，均成功。打开日志列表或预览前，只读脚本直接读取 MinIO 两个新对象，证实服务器已自动保存 `VSR-1_2026-09-30_11-31-16.065586.log`、`VSR-2_2026-09-30_11-31-18.535872.log`，各 483 bytes；该核验未调用 `read_log`／`sync_log`。随后页面列表与完整预览验证通过；浏览器实际点击下载成功，VSR-1 文件保存到 `C:/Users/wangd/Downloads/VSR-1_2026-09-30_11-31-16.065586.log`，483 bytes，SHA-256 为 `476c7e1f7b3b0590d37605d857d977d85b56dd19001078e0193c4cf27ce346ff`，与预览前 MinIO 原文件完全一致。未改设备配置或白名单。
 - 自动保存证明 `.runtime/ssh-session-files-proof.json`，页面截图 `.runtime/ssh-session-files-preview.png`、`.runtime/ssh-session-log-preview.png`，均留本地、不提交。
 
-### 4.4 终端内本地编辑命令（2026-09-30 负责人追加要求，已生效；远端 Tab 待确认）
+### 4.4 终端内本地编辑命令（2026-09-30 负责人追加要求，已生效）
 
 - 共享前端 `DeviceTerminal.tsx` 改为直接在 xterm 内输入，去掉底部独立输入框、执行按钮和旧说明。新增 `LocalCommandLine` 仅处理本地编辑；Enter 仍发送完整 `command` 帧，沿用后端白名单和会话日志，不改变后端协议、App 版本或数据库。
 - 支持插入、左右、Home/End、退格/Delete、↑↓当前会话历史、Unicode 及长命令单行水平滚动。单行粘贴不会自动提交，多行或控制串粘贴拒绝；执行中禁止新提交，被拒绝后恢复草稿。远端回显前擦除本地草稿，避免命令重复显示。
 - 验证：组件 12 项、编辑辅助 13 项联合通过，共 25 项，包含真实 xterm 的缩宽和回显，以及 UTF-8 字节帧超长时不发送、可修正后再提交；4 个前端文件 ESLint 全部通过。生产构建通过（15.95 秒），刷新页面已生效，无需升级 App，SSH 终端仍为 0.9.1；最后仅追加测试，生产代码与实机验收版本一致。
 - 实机在 VSR-1 浏览器终端直输 `display clocx`，退格修正为 `display clock`，仅按一次 Enter，命令成功且回显仅出现一次；↑↓切换草稿及拒绝多行粘贴均已验证，随后停止连接。直接只读 MinIO 的 `VSR-1_2026-09-30_11-47-33.663235.log`（716 bytes），确认仅有 1 条 `display clock`、成功结果及连接结束，多行粘贴未产生额外执行记录。核验脚本 `.runtime/verify-inline-input.py`、截图 `.runtime/ssh-inline-input-preview.png` 留本地、不提交。
-- 负责人另问远端 Tab，已说明可实现，但涉及后端调整，按“先设计、确认后实施”约定仍待确认，**本轮未实现**。候选方案首批支持 Comware：Tab 获取补全后清空远端草稿，Enter 仍经白名单，补全过程记日志，清理失败则断开；这不是当前已具备的能力。
+- 本轮本地编辑未包含远端 Tab；负责人后续确认其独立设计后另行实施，进展见 4.5。
+
+### 4.5 Comware 受控远端 Tab（2026-09-30 负责人确认，已完成部署与本地验收）
+
+- 负责人已确认方案，平台、App 协议与共享前端接线已完成。首批仅对 Comware 7 开放，须同时匹配 SSH banner 与 CLI 提示符；首次补全通过原白名单和审计执行 `display hotkey | include (hotkeys|CTRL_[EXR])`，只接受系统保留的 Ctrl+E/X/R 清行与重绘定义，不使用可重绑快捷键或禁分页配置命令。
+- 光标在行末时，Tab 发送独立 `complete` 帧，包含请求 ID、草稿版本和 `tab_count`（默认 1，上限 32，仅作前端轮次与审计）。每个请求只向设备发送一次初始草稿加 Tab，连续请求沿用初始草稿，候选随设备自身状态推进；任何本地编辑重置前端轮次，不假定设备候选索引归零。补全期间冻结本地编辑，过期响应不应用。输入限受支持的单行 ASCII 前缀、最多 256 字符，返回最多 511 字符；不发送换行。完成后清行并核对空提示符，无法确认、超时或日志失败即停止连接。Enter 仍发送完整 `command`，重新检查当前白名单，补全结果不授予执行权限。
+- 请求、补全结果及前置校验拒绝沿用平台审计和服务器会话日志；协议去重区分命令与补全，同一请求 ID 改内容会终止连接。补全纳入既有会话时限、输入/输出预算，并另设草稿长度、响应大小与等待时限边界；单次草稿补全及清理共限 3 秒，首次快捷键查询单独限 15 秒。
+- 验证：最终 4 组后端联合 95 项通过（29.38 秒），前端 37 项通过，相关 ESLint、Ruff 和 14 个任务路径的 diff 检查通过；最新生产构建通过（8.40 秒）。这些是本轮分组结果，不与前文各轮回归累加。
+- 已部署 `device-access 0.9.2`，拓扑仍为 0.4.3：`scripts/windows/start.ps1 -SkipLangfuse -UpgradeApps device-access,topology -NoBrowser` 退出 0，9/9 应用检查通过。最终平台代码以 `scripts/windows/start.ps1 -SkipLangfuse -NoBrowser` 重新加载，数据库检查通过、无需再次升级 App；该命令退出 0，最终 9/9 应用及 React/BFF/FastAPI/Celery 全部通过。
+- 实机公共 `HumanCLI` 连续 3 个请求各发送一次 Tab，`display cl` 依次得到 `client-verify`、`clock`、`cloud-management`，执行 `display clock` 成功后仍可再补全。浏览器最终实测第一次 Tab 得到 `client-verify`，第二次得到 `clock`，按 Enter 成功返回 `04:22:25 UTC`，命令回显仅一次，随后停止连接。
+- 页面预览前直接只读 MinIO 的 `VSR-1_2026-09-30_12-21-42.776582.log`，1534 bytes，会话 `aa1aa0ddfbd146258a0c13648b288a27`；仅执行一次初始化只读快捷键查询和一次 `display clock`，两次补全请求/结果、远端已清空和连接结束均留存。`.runtime/verify-tab-completion.py` 断言通过，证明 `.runtime/ssh-tab-log-proof.json`，截图 `.runtime/ssh-tab-completion-preview.png`、`.runtime/ssh-tab-result-preview.png`，均留本地、不提交。本轮没有修改设备配置或白名单，实验设备口令未写入文件。
 
 ## 5. 本机状态与注意事项
 
-- 已部署（本机）：知识问答 0.8.1、SSH 终端 0.9.1、拓扑 0.4.3、设备管理 1.0.4、巡检 1.3.1、规则治理 1.4.6。数据库在 D-5/D-6 前备份于 `backups/20260930-001850-before-d5-d6/`；S-1 前备份于 `backups/20260930-023847-before-ssh-governance/postgres.dump`（109079394 bytes）。
+- 已部署（本机）：知识问答 0.8.1、SSH 终端 0.9.2、拓扑 0.4.3、设备管理 1.0.4、巡检 1.3.1、规则治理 1.4.6。数据库在 D-5/D-6 前备份于 `backups/20260930-001850-before-d5-d6/`；S-1 前备份于 `backups/20260930-023847-before-ssh-governance/postgres.dump`（109079394 bytes）。
 - 本机平台里已配置：SSH 终端默认登录与两条会话 VSR-1/VSR-2；拓扑默认登录；两台 VSR 的主机密钥；“实验网络 lab”的最新快照含路由表（拓扑 0.4.2 发现）。
 - 部署命令：`scripts\windows\start.ps1 -SkipLangfuse -UpgradeApps <app,...> -NoBrowser`。
   - **修改任何 App 的代码后，该 App 的摘要与已部署版本不一致，平台会把它判为不可用**（依赖它的 App 也会不可用），直到用 `-UpgradeApps` 重新部署。
