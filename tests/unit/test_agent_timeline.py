@@ -1,7 +1,15 @@
 import json
 
 from src.platform.agent_runtime.session_store import key
-from src.platform.agent_runtime.timeline import find_trace, render, summarize, timeline
+from src.platform.agent_runtime.timeline import (
+    find_trace,
+    render,
+    render_requests,
+    requests,
+    requests_path,
+    summarize,
+    timeline,
+)
 
 QUESTION = "PC1(1.1.1.2) ping 不通 PC2(192.168.1.2)"
 ANSWER = "根因：PC2 默认网关配置错误"
@@ -168,3 +176,37 @@ def test_a_baseline_comparison_reads_as_its_summary_then_what_changed():
         hunk,
         "+ ospf network-type p2p",
     ]
+
+
+def test_requests_show_each_round_once_then_only_what_changed(tmp_path):
+    tools = [{"type": "function", "function": {"name": "read", "description": "按行读取"}}]
+    first = [
+        {"role": "system", "content": "你是 NetOps 网络助手。\n尚未读取任何可引用证据。"},
+        {"role": "user", "content": QUESTION},
+    ]
+    second = [
+        {"role": "system", "content": "你是 NetOps 网络助手。\n[evidence-1]"},
+        first[1],
+        {"role": "assistant", "content": "", "tool_calls": [
+            {"function": {"name": "read", "arguments": "{}"}}
+        ]},
+        {"role": "tool", "content": "x" * 2000},
+    ]
+    trace = tmp_path / "runs" / "run.jsonl"
+    path = requests_path(trace)
+    path.parent.mkdir(parents=True)
+    rows = [
+        {"round": n, "at": "t", "seconds": 1.0, "finish_reason": "stop", "error": None,
+         "usage": {"prompt_tokens": 10, "completion_tokens": 2},
+         "request": {"model": "m", "max_tokens": 8192, "messages": messages, "tools": tools}}
+        for n, messages in ((1, first), (2, second))
+    ]
+    path.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), "utf-8")
+    text = render_requests(requests(trace))
+    assert text.count("你是 NetOps 网络助手。") == 1  # the full prompt once
+    assert "工具（1 个）：" in text and "  - read：按行读取" in text and "工具：同上一轮" in text
+    assert "  -尚未读取任何可引用证据。" in text and "  +[evidence-1]" in text
+    assert "消息：共 1 条，本轮新增 1 条" in text and "消息：共 3 条，本轮新增 2 条" in text
+    assert text.count(QUESTION) == 1
+    assert "  → 调用 read {}" in text and "（共 2000 字" in text
+    assert '"max_tokens": 8192' in text

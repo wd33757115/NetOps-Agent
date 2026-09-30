@@ -5,6 +5,7 @@ under the assistant session store). Pure reading: nothing here calls a device or
 a model. The same data can feed the chat page's execution view later.
 """
 
+import difflib
 import json
 from pathlib import Path
 
@@ -290,3 +291,87 @@ def render(run, *, reasoning=False):
     if run["answer"]:
         lines += ["答案：", run["answer"].strip()]
     return "\n".join(lines)
+
+
+def requests_path(trace):
+    """Next to the trace (not among traces): each round's request as the provider got it."""
+    return Path(trace).parent / "requests" / Path(trace).name
+
+
+def requests(trace):
+    path = requests_path(trace)
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+
+
+def _message(message, limit):
+    role = message.get("role", "?")
+    text = _text(message.get("content"))
+    if role == "tool" and len(text) > limit:
+        text = text[:limit] + f"…（共 {len(text)} 字，完整内容用 --request-json 查看）"
+    lines = [f"[{role}] {text}".rstrip()]
+    if message.get("reasoning_content"):
+        lines.append(f"  （推理 {len(message['reasoning_content'])} 字）")
+    for call in message.get("tool_calls") or []:
+        function = call.get("function") or {}
+        lines.append(f"  → 调用 {function.get('name')} {function.get('arguments')}")
+    return lines
+
+
+def render_requests(rows, *, limit=1500):
+    """What the model was sent, round by round: settings, tools, system prompt, messages.
+
+    Later rounds show only what changed; --request-json gives any round in full.
+    """
+    lines, previous = [], None
+    for row in rows:
+        request = row["request"]
+        usage = row.get("usage") or {}
+        messages = request.get("messages", [])
+        system = messages[0] if messages and messages[0].get("role") == "system" else None
+        history = messages[1:] if system else messages
+        tools = request.get("tools", [])
+        names = [tool["function"]["name"] for tool in tools]
+        settings = {k: v for k, v in request.items() if k not in {"messages", "tools"}}
+        lines += [
+            f"===== 第 {row['round']} 轮 · {row['at']} · 用时 {row['seconds']} 秒 · "
+            f"输入 {usage.get('prompt_tokens', '?')} token，输出 "
+            f"{usage.get('completion_tokens', '?')} token · 结束 {row.get('finish_reason')}"
+            + (f" · 错误 {row['error']}" if row.get("error") else ""),
+            f"参数：{json.dumps(settings, ensure_ascii=False)}",
+        ]
+        if previous is None or names != previous["names"]:
+            lines.append(f"工具（{len(names)} 个）：")
+            lines += [
+                f"  - {tool['function']['name']}：{tool['function'].get('description', '')}"
+                for tool in tools
+            ]
+        else:
+            lines.append("工具：同上一轮")
+        text = _text(system["content"]) if system else ""
+        if previous is None:
+            lines += [f"系统提示（{len(text)} 字）：", text]
+        elif text == previous["system"]:
+            lines.append("系统提示：同上一轮")
+        else:
+            lines.append("系统提示：与上一轮不同的行：")
+            lines += [
+                f"  {line}"
+                for line in difflib.unified_diff(
+                    previous["system"].splitlines(), text.splitlines(), lineterm="", n=0
+                )
+                if line[:1] in "+-" and not line.startswith(("+++", "---"))
+            ]
+        seen = previous["history"] if previous else []
+        if history[: len(seen)] == seen:
+            new = history[len(seen) :]
+            lines.append(f"消息：共 {len(history)} 条，本轮新增 {len(new)} 条")
+        else:
+            new = history
+            lines.append(f"消息：历史被改写，共 {len(history)} 条，全部列出")
+        for message in new:
+            lines += _message(message, limit)
+        lines.append("")
+        previous = {"names": names, "system": text, "history": history}
+    return "\n".join(lines) if lines else "本次运行没有模型请求记录（此功能上线前的运行没有记录）。"

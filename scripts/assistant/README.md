@@ -11,6 +11,21 @@
 .\venv\Scripts\python.exe scripts/assistant/trace_timeline.py <运行编号> --reasoning
 ```
 
+### 看每一轮真正发给模型的内容
+
+运行轨迹是 DSH 自己记的；平台转发层在每轮发出前还会改请求（系统提示末尾追加本轮读取记录、
+过滤工具、接近上限时强制提交答案、限制输出长度）。所以另存一份：每一轮**发给模型服务的原样请求**
+（参数、工具说明、系统提示、全部消息）和返回的 token 用量，放在 `runs/requests/` 下，与轨迹同名。
+
+```powershell
+# 逐轮查看：第 1 轮列出参数、全部工具说明和完整系统提示；之后每轮只列变化和新增消息
+.\venv\Scripts\python.exe scripts/assistant/trace_timeline.py <运行编号> --requests
+# 第 N 轮请求的原样 JSON
+.\venv\Scripts\python.exe scripts/assistant/trace_timeline.py <运行编号> --request-json 2
+```
+
+记录从 2026-10-01 开始，之前的运行没有。只存在本机，不含模型服务的密钥。
+
 ## 当前回归与评测（2026-09-21）
 
 正式版本为 Assistant 0.4.1 / Inspection 1.1.0，执行器仍为 DSH 0.1.5rc1。

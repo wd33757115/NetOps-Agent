@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
@@ -30,6 +31,7 @@ from src.platform.device_access.contracts import DeviceAccessError
 from .base import AgentEvent
 from .usage import Usage
 from .session_store import session_home, scope_key, key, native_logs
+from .timeline import requests_path
 
 ROOT = Path(__file__).resolve().parents[3]
 # Real characters per model request (the model window is 1M tokens). Thinking keeps
@@ -99,6 +101,26 @@ class Bridge:
         self.answer_feedback = None
         self.model_finish_reason = None
         self.sdk_finish_reason = None
+        # Durable runs keep each round's request as the provider received it.
+        self.request_log = None
+
+    def log_request(self, round_number, request, started, usage=None, error=None):
+        """The session log holds what DSH built; this is what left after our changes."""
+        if self.request_log is None:
+            return
+        row = {
+            "round": round_number,
+            "at": datetime.now(timezone.utc).isoformat(),
+            "seconds": round(time.monotonic() - started, 3),
+            "finish_reason": usage.finish_reason if usage else None,
+            "usage": usage.tokens if usage else None,
+            "error": error,
+            "request": request,
+        }
+        # A record that cannot be written must not cost the user the answer.
+        with contextlib.suppress(OSError):
+            with self.request_log.open("a", encoding="utf-8") as file:
+                file.write(json.dumps(row, ensure_ascii=False) + "\n")
 
     def measured(self, name, started):
         self.timings[name] = self.timings.get(name, 0) + (time.monotonic() - started) * 1000
@@ -117,7 +139,7 @@ class Bridge:
             "max_output_tokens": MAX_OUTPUT_TOKENS,
         }
 
-    async def observe_completion(self, chunks, started):
+    async def observe_completion(self, chunks, started, sent=None):
         usage = Usage()
         try:
             async for chunk in chunks:
@@ -139,6 +161,8 @@ class Bridge:
             self.model_finish_reason = usage.finish_reason
             for key, value in (usage.tokens or {}).items():
                 self.usage[key] = self.usage.get(key, 0) + value
+            if sent is not None:
+                self.log_request(*sent, started, usage)
 
     async def check(self):
         if self.closed:
@@ -303,7 +327,9 @@ class Bridge:
             )
             if self.transport is not None:
                 reply = await self.transport(body)
-                reply.body_iterator = self.observe_completion(reply.body_iterator, time.monotonic())
+                reply.body_iterator = self.observe_completion(
+                    reply.body_iterator, time.monotonic(), (self.rounds, body)
+                )
                 return reply
             from src.common.config import get_settings
 
@@ -312,6 +338,7 @@ class Bridge:
             if not endpoint.startswith("https://") or not settings.DEEPSEEK_API_KEY:
                 raise ValueError("Provider is not configured")
             model_started = time.monotonic()
+            sent = (self.rounds, body)
             response = await self.client.send(
                 self.client.build_request(
                     "POST",
@@ -324,13 +351,14 @@ class Bridge:
             try:
                 response.raise_for_status()
             except httpx.HTTPStatusError:
+                self.log_request(*sent, model_started, error=f"HTTP {response.status_code}")
                 await response.aclose()
                 raise
 
             async def chunks():
                 try:
                     async for chunk in self.observe_completion(
-                        response.aiter_bytes(), model_started
+                        response.aiter_bytes(), model_started, sent
                     ):
                         yield chunk
                 finally:
@@ -681,6 +709,8 @@ class DshRuntime:
             runs = runtime_home / "runs"
             runs.mkdir(exist_ok=True)
             trace_path = runs / (key(context.run_id) + ".jsonl")
+            bridge.request_log = requests_path(trace_path)
+            bridge.request_log.parent.mkdir(exist_ok=True)
             trace_path.with_suffix(".json").write_text(json.dumps({
                 "run_id": context.run_id, "conversation_id": context.session_id,
                 "session_id": session_id, "continued": continued,

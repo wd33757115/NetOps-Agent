@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 from src.apps.assistant.backend.workspace import DocumentWorkspace
 from src.apps.materials.backend.documents import DocumentReader
+from src.platform.agent_runtime import timeline
 from src.platform.agent_runtime.base import RunContext
 from src.platform.agent_runtime.dsh import DshRuntime
 from src.platform.agent_runtime.session_store import native_logs
@@ -52,6 +53,17 @@ def test_native_session_survives_two_sdk_processes(tmp_path, monkeypatch):
     traces = list((tmp_path / "sessions").glob("*/scopes/*/runs/*.jsonl"))
     assert len(traces) == 2
     assert all("session.event" in p.read_text(encoding="utf8") for p in traces)
+    # Beside each trace: the request exactly as the provider received it, which is
+    # not what DSH logged (the server appends read guidance and filters tools).
+    sent = sorted(
+        (row for trace in traces for row in timeline.requests(trace)),
+        key=lambda row: len(row["request"]["messages"]),
+    )
+    assert [row["request"] for row in sent] == requests
+    assert all(row["round"] == 1 and row["error"] is None for row in sent)
+    assert "服务端本轮读取记录" in sent[0]["request"]["messages"][0]["content"]
+    rendered = timeline.render_requests([sent[1]])
+    assert "===== 第 1 轮" in rendered and "What was my test color?" in rendered
 
 
 def test_session_isolation_lock_and_workspace_refresh(tmp_path):
