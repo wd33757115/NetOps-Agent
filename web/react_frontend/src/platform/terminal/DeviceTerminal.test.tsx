@@ -5,10 +5,15 @@ import { HostKeyModal, LiveTerminal, LoginModal } from './DeviceTerminal'
 import { Terminal } from '@xterm/xterm'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
-const terminal = vi.hoisted(() => ({ onData: vi.fn(() => ({ dispose: vi.fn() })), write: vi.fn() }))
+const terminal = vi.hoisted(() => ({ onData: vi.fn((_callback: (data: string) => void) => ({ dispose: vi.fn() })), write: vi.fn((_text: string, done?: () => void) => done?.()) }))
 vi.mock('../../config/api', () => ({ api }))
 vi.mock('@xterm/xterm', () => ({
-  Terminal: vi.fn().mockImplementation(() => ({ loadAddon: vi.fn(), open: vi.fn(), onData: terminal.onData, write: terminal.write, focus: vi.fn(), dispose: vi.fn(), cols: 80, rows: 24 })),
+  Terminal: vi.fn().mockImplementation(() => ({
+    loadAddon: vi.fn(), open: vi.fn(), onData: terminal.onData, write: terminal.write, focus: vi.fn(), dispose: vi.fn(), cols: 80, rows: 24,
+    options: {}, scrollToBottom: vi.fn(), attachCustomKeyEventHandler: vi.fn(), hasSelection: () => false,
+    registerMarker: () => ({ line: 0, isDisposed: false, dispose: vi.fn() }),
+    buffer: { active: { cursorX: 7, cursorY: 0, baseY: 0, getLine: () => ({ isWrapped: false, translateToString: () => '<VSR-1>', getCell: () => ({ getChars: () => 'x', getWidth: () => 1 }) }) } },
+  })),
 }))
 vi.mock('@xterm/addon-fit', () => ({ FitAddon: vi.fn().mockImplementation(() => ({ fit: vi.fn() })) }))
 
@@ -102,78 +107,100 @@ it('the login prompt requires both fields', async () => {
 })
 
 const commandsSent = () => Socket.last.sent.map(value => JSON.parse(value)).filter(value => value.type === 'command')
+const typeInTerminal = (value: string) => act(() => terminal.onData.mock.calls.at(-1)![0](value))
 const connectedTerminal = async () => {
   render(<LiveTerminal target={{ session_id: 's1' }} />)
   await waitFor(() => expect(ticketBodies()).toHaveLength(1))
   Socket.last.emit({ type: 'ready' })
-  return screen.getByLabelText('设备命令')
+  return screen.getByLabelText('设备 SSH 终端')
 }
 
 it('keeps terminal input local and sends only complete commands, one at a time', async () => {
-  const input = await connectedTerminal()
-  expect(Terminal).toHaveBeenCalledWith(expect.objectContaining({ disableStdin: true }))
-  expect(terminal.onData).not.toHaveBeenCalled()
-  fireEvent.change(input, { target: { value: ' display version ' } })
+  await connectedTerminal()
+  expect(Terminal).toHaveBeenCalledWith(expect.objectContaining({ cursorBlink: true }))
+  expect(screen.queryByLabelText('设备命令')).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: '执行' })).not.toBeInTheDocument()
+  typeInTerminal(' display version ')
   expect(commandsSent()).toHaveLength(0)
-  fireEvent.submit(input.closest('form')!)
+  typeInTerminal('\r')
   expect(commandsSent()).toEqual([{ type: 'command', command: ' display version ', request_id: expect.any(String) }])
-  expect(input).toBeDisabled()
+  typeInTerminal('another command\r')
+  typeInTerminal('\r')
+  expect(commandsSent()).toHaveLength(1)
   const { request_id } = commandsSent()[0]
   Socket.last.emit({ type: 'command_sent', request_id })
-  expect(input).toHaveValue('')
-  expect(input).toBeDisabled()
   Socket.last.emit({ type: 'output', data: 'Comware version\r\n' })
   expect(terminal.write).toHaveBeenCalledWith('Comware version\r\n')
   Socket.last.emit({ type: 'command_finished', request_id: 'another-command', status: 'succeeded' })
-  expect(input).toBeDisabled()
+  typeInTerminal('\r')
+  expect(commandsSent()).toHaveLength(1)
   Socket.last.emit({ type: 'command_finished', request_id, status: 'succeeded' })
-  expect(input).not.toBeDisabled()
+  typeInTerminal('display clock')
+  typeInTerminal('\r')
+  expect(commandsSent()).toHaveLength(2)
   expect(Socket.last.sent.map(value => JSON.parse(value)).some(value => value.type === 'input')).toBe(false)
 })
 
 it('shows a rejected command and keeps it editable for correction', async () => {
-  const input = await connectedTerminal()
-  fireEvent.change(input, { target: { value: 'system-view' } })
-  fireEvent.submit(input.closest('form')!)
+  await connectedTerminal()
+  typeInTerminal('system-view')
+  typeInTerminal('\r')
   const { request_id } = commandsSent()[0]
   Socket.last.emit({ type: 'command_sent', request_id })
   Socket.last.emit({ type: 'command_rejected', request_id, message: '命令不符合全局白名单' })
   expect(screen.getByText('命令不符合全局白名单')).toBeInTheDocument()
-  expect(input).not.toBeDisabled()
-  expect(input).toHaveValue('system-view')
+  typeInTerminal('\x7f')
+  typeInTerminal('\r')
+  expect(commandsSent()[1].command).toBe('system-vie')
 })
 
 it('rejects multiline paste and never forwards terminal control keys', async () => {
   const input = await connectedTerminal()
   const before = Socket.last.sent.length
   fireEvent.paste(input, { clipboardData: { getData: () => 'display version\nsystem-view' } })
-  expect(screen.getByText('请一次输入一条完整命令，不支持控制字符或多行粘贴。')).toBeInTheDocument()
-  fireEvent.keyDown(input, { key: 'c', ctrlKey: true })
-  fireEvent.keyDown(input, { key: 'Tab' })
+  expect(screen.getByText(/一次.*一条|多行/)).toBeInTheDocument()
+  typeInTerminal('\x03')
+  typeInTerminal('\t')
+  typeInTerminal('display clock\rreboot\r')
   expect(Socket.last.sent).toHaveLength(before)
 })
 
 it('browses in-memory command history and restores the unsent draft', async () => {
-  const input = await connectedTerminal()
-  fireEvent.change(input, { target: { value: 'display version' } })
-  fireEvent.submit(input.closest('form')!)
+  await connectedTerminal()
+  typeInTerminal('display version')
+  typeInTerminal('\r')
   const { request_id } = commandsSent()[0]
   Socket.last.emit({ type: 'command_sent', request_id })
   Socket.last.emit({ type: 'command_finished', request_id, status: 'succeeded' })
-  fireEvent.change(input, { target: { value: 'display interface' } })
-  fireEvent.keyDown(input, { key: 'ArrowUp' })
-  expect(input).toHaveValue('display version')
-  fireEvent.keyDown(input, { key: 'ArrowDown' })
-  expect(input).toHaveValue('display interface')
-  expect(commandsSent()).toHaveLength(1)
+  typeInTerminal('display interface')
+  typeInTerminal('\x1b[A')
+  typeInTerminal('\x1b[B')
+  typeInTerminal('\r')
+  expect(commandsSent()[1].command).toBe('display interface')
 })
 
 it('stops by cancelling the session without sending a remote control character', async () => {
-  const input = await connectedTerminal()
+  await connectedTerminal()
   const socket = Socket.last
   fireEvent.click(screen.getByRole('button', { name: '停止会话' }))
   expect(JSON.parse(socket.sent[socket.sent.length - 1])).toEqual({ type: 'cancel' })
   expect(socket.close).toHaveBeenCalled()
-  expect(input).toBeDisabled()
+  typeInTerminal('display clock')
+  typeInTerminal('\r')
+  expect(commandsSent()).toHaveLength(0)
   expect(screen.getByRole('button', { name: '重新连接' })).toBeInTheDocument()
+})
+
+it('keeps an oversized UTF-8 frame local and lets the user correct it without disconnecting', async () => {
+  const host = await connectedTerminal()
+  fireEvent.paste(host, { clipboardData: { getData: () => '中'.repeat(3000) } })
+  typeInTerminal('\r')
+  expect(commandsSent()).toEqual([])
+  expect(screen.getByText('命令过长，请缩短后重试。')).toBeInTheDocument()
+  expect(Socket.last.close).not.toHaveBeenCalled()
+  typeInTerminal('\x03')
+  fireEvent.paste(host, { clipboardData: { getData: () => 'display clock' } })
+  expect(commandsSent()).toEqual([])
+  typeInTerminal('\r')
+  expect(commandsSent()[0].command).toBe('display clock')
 })
