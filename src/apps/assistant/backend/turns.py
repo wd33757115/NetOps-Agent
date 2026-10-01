@@ -204,6 +204,21 @@ def cancel(actor_id, run_id):
     return read(actor_id, run_id)
 
 
+def earlier_evidence(rows):
+    """Business evidence earlier answers in this conversation showed, by ID.
+
+    A follow-up may cite it; such citations once voided whole answers. The source
+    Apps are still rechecked when it is cited.
+    """
+    return {
+        reference["id"]: reference
+        for row in rows
+        if row["role"] == "assistant"
+        for reference in row["references"]
+        if reference.get("kind") == "business" and reference.get("excerpt")
+    }
+
+
 def finish(actor_id, run_id, status, text, references, count, code=None):
     with sessions() as session:
         row = session.scalar(
@@ -298,6 +313,7 @@ async def _execute(actor_id, run, body, *, agent_runtime=None, on_event=None):
     task = asyncio.create_task(monitor())
     try:
         rows = await asyncio.to_thread(history.messages, actor_id, run["conversation_id"])
+        tools.earlier_evidence = earlier_evidence(rows)
         messages = []
         remaining = 16000
         for row in reversed(rows[-10:]):

@@ -9,12 +9,13 @@ output.
 import contextvars
 import json
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime
 from ipaddress import ip_address
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from src.platform.clock import beijing
 from src.platform.device_access import AccessContext, AccessGrant
 from src.platform.device_access.command_policy import classify
 from src.platform.device_access.contracts import DeviceAccessError
@@ -63,14 +64,6 @@ class CompareBaseline(BaseModel):
         return self
 
 
-def _utc(value):
-    """One time zone per answer: mixed offsets were once read as the same moment."""
-    try:
-        moment = value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
-        return moment.astimezone(timezone.utc).isoformat()
-    except (TypeError, ValueError):
-        return value
-
 
 def _size(view):
     return len(json.dumps(view, ensure_ascii=False, sort_keys=True, default=str, indent=2).encode())
@@ -118,7 +111,7 @@ def _compare(row, baseline_text, result):
     row["evidence_ref"] = result.evidence_ref
     row["baseline_age_seconds"] = round(
         (
-            datetime.fromisoformat(_utc(result.finished_at))
+            datetime.fromisoformat(beijing(result.finished_at))
             - datetime.fromisoformat(row["baseline"]["observed_at"])
         ).total_seconds()
     )
@@ -167,7 +160,7 @@ def _device(owner, host, platform, purpose, turn_id):
         if baseline is None:
             row["quality_gaps"].append("baseline_not_held_for_device")
             continue
-        row["baseline"]["observed_at"] = _utc(baseline["baseline"]["observed_at"])
+        row["baseline"]["observed_at"] = beijing(baseline["baseline"]["observed_at"])
         row["quality_gaps"] += baseline["quality_gaps"]
         if not baseline["complete"]:
             row["quality_gaps"].append("baseline_unavailable_no_live_read")
@@ -204,7 +197,7 @@ def _device(owner, host, platform, purpose, turn_id):
         for row, text in planned:
             result = handle.run(row["command"], read_timeout=30)
             device.setdefault("session_id", result.execution_id)
-            device["observed_at"] = _utc(result.finished_at)
+            device["observed_at"] = beijing(result.finished_at)
             _compare(row, text, result)
             if result.execution_status == "failed":
                 break
@@ -267,7 +260,7 @@ def compare(owner, body: CompareBaseline):
         {
             "observed_at": max(
                 (device["observed_at"] for device in devices if device.get("observed_at")),
-                default=_utc(now()),
+                default=beijing(now()),
             ),
             "summary": [_summary(device) for device in devices],
             "scope": SCOPE,

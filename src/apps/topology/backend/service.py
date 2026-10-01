@@ -13,6 +13,7 @@ from fastapi import HTTPException
 from sqlalchemy import delete, func, select, update
 
 from src.apps.device_access.backend.host_keys import HostKeyStore
+from src.platform.clock import beijing
 from src.platform.device_access import AccessContext, AccessGrant, BatchRequest, DeviceAccessService
 from src.platform.device_access.contracts import (
     ConnectionProfile,
@@ -465,14 +466,11 @@ def _observed_times(value):
 
 def _as_history(result):
     """Say when the path was true, in one time zone, so it is read as the earlier path."""
-    times = sorted(
-        datetime.fromisoformat(t).astimezone(timezone.utc).isoformat()
-        for t in set(_observed_times(result))
-    )
+    times = sorted(beijing(datetime.fromisoformat(t)) for t in set(_observed_times(result)))
     if not times:
         when = "采集时间未知"
     else:
-        when = (times[0] if len(times) == 1 else f"{times[0]} 至 {times[-1]}") + "（UTC）"
+        when = (times[0] if len(times) == 1 else f"{times[0]} 至 {times[-1]}") + "（北京时间）"
     return {**result, "meaning": PATH_MEANING.format(when=when)}
 
 

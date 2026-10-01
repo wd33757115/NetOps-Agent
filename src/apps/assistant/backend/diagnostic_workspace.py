@@ -9,6 +9,7 @@ this workspace adds that scope, the per-turn budgets and the evidence citation.
 import ipaddress
 from threading import Lock
 
+from src.platform.clock import in_beijing
 from src.platform.tools import registry
 
 from . import evidence
@@ -108,8 +109,10 @@ class DiagnosticWorkspace(DocumentWorkspace):
             if name == RUN
             else {"hosts": hosts, "platforms": platforms}
         )
-        result = registry.invoke(
-            name, {**arguments, **server, "turn_id": self.run_id}, actor_id=self.actor_id
+        result = in_beijing(
+            registry.invoke(
+                name, {**arguments, **server, "turn_id": self.run_id}, actor_id=self.actor_id
+            )
         )
         reference = evidence.capture(name, result)
         self.business_evidence[reference["id"]] = reference

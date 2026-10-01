@@ -708,9 +708,9 @@ def test_trace_answers_both_directions_from_a_snapshot(world):
         t["evidence_id"] for t in result["targets"] if t["address"] == "10.10.1.2"
     )
     assert found["symmetric"] is True
-    # The path is the one traffic took when the snapshot was collected, said in UTC.
+    # The path is the one traffic took when the snapshot was collected, in Beijing time.
     assert found["meaning"].startswith("这是 ") and "之前的路径" in found["meaning"]
-    assert "+00:00" in found["meaning"] and "+08:00" not in found["meaning"]
+    assert "（北京时间）" in found["meaning"] and "+00:00" not in found["meaning"]
     with pytest.raises(HTTPException) as bad:
         service.trace("user", result["snapshot_id"], "1.1.1.2", "224.0.0.5")
     assert bad.value.status_code == 422

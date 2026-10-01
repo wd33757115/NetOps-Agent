@@ -3,6 +3,7 @@
 import json
 
 from src.apps.materials.backend.documents import digest
+from src.platform.clock import beijing
 
 from .progress import LABELS
 from .repository import now
@@ -28,7 +29,7 @@ def capture(tool, result):
     if len(excerpt.encode("utf-8")) > MAX_EVIDENCE_BYTES:
         raise ValueError("Business evidence exceeds budget; narrow the query or lower limit")
     app_id = tool.split("__", 1)[0].replace("_", "-")
-    retrieved_at = now().isoformat()
+    retrieved_at = beijing(now())
     revision = digest(excerpt)
     identifier = "evidence-" + digest(tool + retrieved_at + revision)[:24]
     return {

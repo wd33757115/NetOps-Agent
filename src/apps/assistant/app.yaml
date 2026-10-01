@@ -1,7 +1,7 @@
 manifest_version: 1
 id: assistant
 name: 知识问答
-version: 0.8.6
+version: 0.8.7
 platform_api: '>=1.0,<2.0'
 icon: document
 dependencies:

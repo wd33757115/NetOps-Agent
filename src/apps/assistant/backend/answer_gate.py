@@ -39,7 +39,10 @@ REASONS = {
         "回答缺少原文引用；若正文不足，请选择资料不足。",
     ),
     "Business observations were not cited": ("citation_missing", "业务结论缺少本轮证据引用。"),
-    "Answer cites unread business evidence": ("citation_unread", "业务证据不属于本轮已读记录。"),
+    "Answer cites unread business evidence": (
+        "evidence_unknown",
+        "这些方括号不是本轮或本对话之前取得的证据编号，请改成工具返回的编号或删掉：",
+    ),
     "citation_mismatch": ("citation_changed", "引用修订或原文内容不一致，请重新读取。"),
 }
 
@@ -84,6 +87,9 @@ def submit(workspace, arguments):
     except ValueError as exc:
         code, message = reason(exc)
         workspace.validation_issue = code
+        if code == "evidence_unknown":
+            # Name each one: a vague refusal once cost two extra rounds over "[evidence-...]".
+            message += "、".join(workspace.unknown_evidence(arguments["answer"])[:12])
         return {
             "accepted": False,
             "code": code,

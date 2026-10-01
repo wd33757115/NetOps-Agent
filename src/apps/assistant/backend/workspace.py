@@ -7,6 +7,7 @@ from pathlib import Path
 from src.apps.materials.backend.documents import FILTERS, digest
 from src.apps.materials.backend.library import LibraryReader
 from src.platform.authorization.client import authorize_worker
+from src.platform.clock import in_beijing
 from src.platform.tools import registry
 
 from . import answer_gate, evidence, tool_trace
@@ -23,6 +24,8 @@ class DocumentWorkspace:
         self.files = {}
         self.observed = {}
         self.business_evidence = {}
+        # Evidence earlier answers in this conversation showed: citable, never required.
+        self.earlier_evidence = {}
         self.evidence_tools = set()
         self.root = None
         self.prepared_answer = None
@@ -92,7 +95,9 @@ class DocumentWorkspace:
         self.check()
         if name not in self.evidence_tools:
             raise PermissionError("Tool is outside this diagnosis contract")
-        result = registry.invoke(name, arguments, actor_id=self.actor_id, read_only=True)
+        result = in_beijing(
+            registry.invoke(name, arguments, actor_id=self.actor_id, read_only=True)
+        )
         reference = evidence.capture(name, result)
         self.business_evidence[reference["id"]] = reference
         return {
@@ -139,9 +144,20 @@ class DocumentWorkspace:
                 end = number
             markers.append(f"[{filename}:L{start}-L{end}]")
         markers.extend(f"[{identifier}]" for identifier in sorted(self.business_evidence))
+        earlier = [
+            f"[{identifier}]"
+            for identifier in sorted(self.earlier_evidence)
+            if identifier not in self.business_evidence
+        ]
         return (
             "服务端本轮读取记录（仅定位信息，不是原文）：\n"
             + ("\n".join(markers[:64]) if markers else "尚未读取任何可引用证据。")
+            + (
+                "\n本对话之前的回答取得的业务证据，也可引用（按它当时的采集时间表述）：\n"
+                + "\n".join(earlier[:64])
+                if earlier
+                else ""
+            )
             + "\n只能引用本轮已读范围内的必要行，行号包含边界；可取其中的子区间，不能跨过未读行。"
             "需要引用其他版本、文件或范围时请先调用read读取正文；不需要的比较或旁注可省略。"
             "CATALOG.md和grep搜索结果不能作为引用；历史回答中的引用也不代表本轮已读。"
@@ -175,11 +191,13 @@ class DocumentWorkspace:
             self.reader.validate_citation(citation)
             if citation not in citations:
                 citations.append(citation)
-        document_citations = len(citations)
+        document_citations, this_turn = len(citations), False
         for identifier in re.findall(r"\[(evidence-[^\]\n]*)\]", answer):
-            if identifier not in self.business_evidence:
+            found = self.business_evidence.get(identifier) or self.earlier_evidence.get(identifier)
+            if found is None:
                 raise ValueError("Answer cites unread business evidence")
-            reference = evidence.validate(self.business_evidence[identifier])
+            this_turn = this_turn or identifier in self.business_evidence
+            reference = evidence.validate(found)
             for app_id in evidence.source_apps(reference):
                 authorize_worker(self.actor_id, app_id)
             if reference not in citations:
@@ -187,6 +205,15 @@ class DocumentWorkspace:
         # Every evidence type actually used must have an accessible source attached.
         if self.observed and not document_citations:
             raise ValueError("Read sources were not cited")
-        if self.business_evidence and len(citations) == document_citations:
+        if self.business_evidence and not this_turn:
             raise ValueError("Business observations were not cited")
         return citations
+
+    def unknown_evidence(self, answer):
+        """Cited brackets that name no evidence of this turn or this conversation."""
+        known = self.business_evidence.keys() | self.earlier_evidence.keys()
+        return [
+            f"[{identifier}]"
+            for identifier in dict.fromkeys(re.findall(r"\[(evidence-[^\]\n]*)\]", answer))
+            if identifier not in known
+        ]

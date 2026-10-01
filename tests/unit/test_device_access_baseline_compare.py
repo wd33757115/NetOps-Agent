@@ -203,9 +203,9 @@ def test_every_baseline_command_runs_in_one_session_and_only_diffs_return(
         f"{HOST}：对比 2 条基线命令，1 条有变化（{COMMAND} +1 -1），1 条无变化"
     ]
     assert "没列出的设备" in result["scope"]
-    # Both sides in UTC with the gap spelled out; mixed offsets were once misread.
-    assert config["baseline"]["observed_at"] == "2026-09-30T06:30:00+00:00"
-    assert result["observed_at"].endswith("+00:00")
+    # Both sides in Beijing time with the gap spelled out; mixed offsets were once misread.
+    assert config["baseline"]["observed_at"] == "2026-09-30T14:30:00+08:00"
+    assert result["observed_at"].endswith("+08:00")
     assert isinstance(config["baseline_age_seconds"], int)
     assert config["evidence_ref"].startswith("device-access:audit:")
     assert sorted(config_lab.sent) == sorted([COMMAND, ROUTES])
