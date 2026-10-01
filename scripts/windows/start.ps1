@@ -13,8 +13,10 @@ param(
     [switch]$AllowNoDocker,
     [switch]$DevMode,
     [string[]]$EnableApps = @(),
-    # Changed Apps to redeploy: disable + drain on the running deployment, bootstrap apply, enable.
+    # Changed Apps to redeploy: disable + drain (running or stopped), bootstrap apply, enable.
     [string[]]$UpgradeApps = @(),
+    # How long draining waits for in-flight work before finishing anyway.
+    [ValidateRange(0, 3600)][int]$DrainGraceSeconds = 60,
     [switch]$CheckOnly,
     # Explicit administrative step: run bootstrap apply (Schema + package registration) first.
     [switch]$ApplyDatabase,
@@ -64,15 +66,14 @@ function Assert-PlatformDatabaseReady {
     $checkExitCode = $LASTEXITCODE
     $checkOutput | Out-File -LiteralPath $checkLog -Encoding utf8
     if ($checkExitCode -ne 0) {
+        # Only platform faults land here; App problems are reported, never fatal.
         $checkOutput | ForEach-Object { Write-Host $_ }
-        $text = ($checkOutput | Out-String)
-        if ($text -match 'disable/drain the deployed release') {
-            Write-ColorOutput '  An enabled App changed: rerun with -UpgradeApps APP_ID (disables and drains it on the running deployment, applies, then re-enables).' "Yellow"
-        } elseif ($text -match 'bootstrap apply') {
-            Write-ColorOutput '  Pending migrations or package registration: rerun with -ApplyDatabase; add -EnableApps for disabled Apps you want enabled.' "Yellow"
+        if (($checkOutput | Out-String) -match 'bootstrap apply') {
+            Write-ColorOutput '  Pending platform migrations: rerun with -ApplyDatabase.' "Yellow"
         }
-        throw "Database/App readiness check failed; existing app processes were left running. Resolve the cause above before retrying. Full log: $checkLog"
+        throw "Platform database readiness check failed; existing app processes were left running. Resolve the cause above before retrying. Full log: $checkLog"
     }
+    Show-AppIssues $checkOutput
 }
 
 function Get-AppState {
@@ -84,21 +85,47 @@ function Get-AppState {
 }
 
 function Invoke-AppDisableDrain {
-    # The documented redeploy path, run against the still-running deployment.
-    param([string]$AppId, [int]$TimeoutSeconds = 180)
-    & $venvPython web/django_backend/manage.py app_packages disable $AppId
+    # Like a Pod's termination: close admission, give in-flight work a grace period,
+    # then stop waiting. A stopped deployment has nothing in flight and drains at once.
+    # Returns $false (with a warning) when this App cannot be drained; the platform
+    # and the other Apps carry on either way.
+    param([string]$AppId, [int]$GraceSeconds = $DrainGraceSeconds)
+    & $venvPython web/django_backend/manage.py app_packages disable $AppId | Out-Host
     if ($LASTEXITCODE -ne 0) {
-        throw "Disable failed for $AppId; existing app processes were left running. Disable dependent Apps first or list them in -UpgradeApps."
+        Add-AppWarning "$AppId not upgraded: disable failed (disable dependent Apps first or list them in -UpgradeApps)"
+        return $false
     }
-    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $deadline = (Get-Date).AddSeconds($GraceSeconds)
     while (($state = Get-AppState -AppId $AppId) -ne 'disabled') {
         if ((Get-Date) -gt $deadline) {
-            throw "$AppId is still '$state' after $TimeoutSeconds s; existing app processes were left running. See manage.py app_packages status for the drain error."
+            Write-ColorOutput "  [WARN] $AppId grace period ($GraceSeconds s) expired; finishing the drain" "Yellow"
+            & $venvPython web/django_backend/manage.py app_packages drain $AppId --force | Out-Host
+            if ((Get-AppState -AppId $AppId) -ne 'disabled') {
+                Add-AppWarning "$AppId not upgraded: drain failed (see manage.py app_packages status)"
+                return $false
+            }
+            break
         }
-        Start-Sleep -Seconds 5
         & $venvPython web/django_backend/manage.py app_packages drain $AppId | Out-Null
+        if ((Get-AppState -AppId $AppId) -ne 'disabled') { Start-Sleep -Seconds 5 }
     }
     Write-ColorOutput "  [OK] $AppId disabled and drained" "Green"
+    return $true
+}
+
+$appWarnings = [System.Collections.Generic.List[string]]::new()
+function Add-AppWarning {
+    param([string]$Message)
+    if ($appWarnings.Contains($Message)) { return }
+    $appWarnings.Add($Message)
+    Write-ColorOutput "  [WARN] $Message" "Yellow"
+}
+
+function Show-AppIssues {
+    # Bootstrap reports App-level problems as "[APP] id unavailable: reason" lines.
+    param($Output)
+    $Output | ForEach-Object { "$_" } | Where-Object { $_ -match '^\[APP\] ' } |
+        ForEach-Object { Add-AppWarning ($_ -replace '^\[APP\] ', '') }
 }
 
 function Invoke-PlatformDatabaseApply {
@@ -121,6 +148,7 @@ function Invoke-PlatformDatabaseApply {
         throw "Database bootstrap apply failed; existing app processes were left running. Full log: $applyLog"
     }
     Write-ColorOutput '  [OK] Database bootstrap apply complete' "Green"
+    Show-AppIssues $applyOutput
 }
 
 function Wait-ProjectPythonCommand {
@@ -185,9 +213,11 @@ if (-not $env:NETOPS_APP_INTERNAL_SECRET -or $env:NETOPS_APP_INTERNAL_SECRET.Len
 }
 
 Write-ColorOutput 'Check App dependencies before stopping services (including DSH SDK/runtime)...' "Yellow"
-& $venvPython -m src.platform.kernel.cli check-dependencies
-if ($LASTEXITCODE -ne 0) {
-    throw "App dependencies are missing or mismatched. Run scripts\windows\install.ps1 -SkipDocker -SkipNpm, then retry."
+$dependencyReport = & $venvPython -m src.platform.kernel.cli check-dependencies
+$dependencyReport | ForEach-Object { Write-Host $_ }
+# An App with missing dependencies is not loaded; the platform and the rest start.
+$dependencyReport | Where-Object { $_ -match '^\[ERROR\] ' } | ForEach-Object {
+    Add-AppWarning (($_ -replace '^\[ERROR\] ', '') + ' (run scripts\windows\install.ps1 -SkipDocker -SkipNpm)')
 }
 if (-not (Get-Command npm -ErrorAction SilentlyContinue) -or
     -not (Test-Path -LiteralPath (Join-Path $ProjectRoot 'web\react_frontend\node_modules\vite\package.json'))) {
@@ -226,9 +256,12 @@ if ($dockerOk) {
 
 Write-ColorOutput "[Step 2/7] Check platform database and App readiness before stopping services..." "Yellow"
 # Dependants are listed after their dependencies, so disable in reverse order.
+$drained = @()
 for ($i = $UpgradeApps.Count - 1; $i -ge 0; $i--) {
-    Invoke-AppDisableDrain -AppId $UpgradeApps[$i]
+    if (Invoke-AppDisableDrain -AppId $UpgradeApps[$i]) { $drained += $UpgradeApps[$i] }
 }
+# Only drained Apps are upgraded and enabled; the rest stay as they are.
+$UpgradeApps = @($UpgradeApps | Where-Object { $drained -contains $_ })
 if ($ApplyDatabase -or $UpgradeApps.Count) {
     Invoke-PlatformDatabaseApply
 }
@@ -464,7 +497,7 @@ if (-not $DevMode) {
     $appProbe = @("--gateway-url", "http://127.0.0.1:$FastAPIPort", "--frontend-url", "http://localhost:$ReactPort", "--wait-seconds", "60")
     foreach ($appId in @(@($UpgradeApps) + @($EnableApps) | Select-Object -Unique)) {
         & $venvPython web/django_backend/manage.py app_packages enable $appId @appProbe
-        if ($LASTEXITCODE -ne 0) { throw "App enablement failed: $appId" }
+        if ($LASTEXITCODE -ne 0) { Add-AppWarning "$appId not enabled (see manage.py app_packages status)" }
     }
 } else {
     Write-ColorOutput '  [DEV] App deployment verification requires the default production preview.' "Yellow"
@@ -481,6 +514,11 @@ Write-ColorOutput "  Windows Environment Ready" "Green"
 Write-ColorOutput "============================================================" "Cyan"
 Write-ColorOutput "  React:   http://localhost:$ReactPort/chat  $(if ($reactOk) { '[OK]' } else { '[WAIT]' })" "Gray"
 Write-ColorOutput "  Django:  http://127.0.0.1:$DjangoPort/api/health/  $(if ($bffOk) { '[OK]' } else { '[WAIT]' })" "Gray"
+if ($appWarnings.Count) {
+    # The platform is up; these Apps stay closed until their problem is resolved.
+    Write-ColorOutput "  Apps not available:" "Yellow"
+    $appWarnings | ForEach-Object { Write-ColorOutput "    - $_" "Yellow" }
+}
 Write-ColorOutput "  FastAPI: http://127.0.0.1:$FastAPIPort/health  $(if ($apiOk) { '[OK]' } else { '[WAIT]' })" "Gray"
 Write-ColorOutput "  Materials: http://localhost:$ReactPort/apps/materials (publish shared sources; App grant required)" "Gray"
 Write-ColorOutput "  Assistant: http://localhost:$ReactPort/chat (DSH runs inside Gateway; App grant required)" "Gray"

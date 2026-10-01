@@ -90,8 +90,9 @@ def test_discovery_to_paginated_raw_evidence_preserves_quality_and_time(database
     second = service.snapshots(service.Scope(device_id="d1", limit=2, offset=2))
     assert second["next_offset"] is None and len(second["items"]) == 1
     read = service.read_snapshot(service.Snapshot(snapshot_id="s0"))
-    assert "DOWN" in read["text"] and "NO-EXPOSURE" not in read["text"]
-    assert read["parse_status"] == "parse_failed" and read["redacted"]
+    # Collected text is returned as collected (owner, 2026-10-02: no keyword masking).
+    assert "DOWN" in read["text"] and "password cipher NO-EXPOSURE" in read["text"]
+    assert read["parse_status"] == "parse_failed" and "redacted" not in read
     assert read["observed_at"].startswith("2026-01-01")
     assert service.snapshots(service.Scope(since="2026-09-01T00:00:00Z"))["items"] == []
     assert service.events(service.Scope(device_id="missing"))["items"] == []
@@ -146,10 +147,6 @@ def test_business_citations_are_observed_bounded_and_permission_checked(monkeypa
         evidence.validate(broken)
 
 
-def test_private_key_blocks_are_redacted():
-    value = "before\n-----BEGIN RSA PRIVATE KEY-----\nSECRET\n-----END RSA PRIVATE KEY-----\nafter"
-    assert "SECRET" not in service.redact(value)
-
 
 def test_official_mcp_reads_real_contract_and_returns_verified_business_citation(
     database, monkeypatch, tmp_path
@@ -197,7 +194,8 @@ def test_official_mcp_reads_real_contract_and_returns_verified_business_citation
                 "tool_calls",
             )
         content = json.dumps(body["messages"], ensure_ascii=False)
-        assert "NO-EXPOSURE" not in content
+        # The model reads the snapshot as collected (owner, 2026-10-02: no masking).
+        assert "password cipher NO-EXPOSURE" in content
         identifier = re.search(r"evidence-[0-9a-f]{24}", content).group()
         return response(
             {
@@ -224,6 +222,7 @@ def test_official_mcp_reads_real_contract_and_returns_verified_business_citation
     finished = next(e.data for e in events if e.kind == "tool_finished")
     assert finished["evidence"]["id"] == reference["id"]
     assert finished["output"] is None
-    assert "NO-EXPOSURE" not in reference["excerpt"]
+    # Stored, cited and read exactly as collected.
+    assert "password cipher NO-EXPOSURE" in reference["excerpt"]
     with database() as session:
         assert "NO-EXPOSURE" in session.get(CommandSnapshot, "s0").raw_text

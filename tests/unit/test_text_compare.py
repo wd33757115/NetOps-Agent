@@ -1,6 +1,3 @@
-import json
-
-from src.platform.device_access.governance import redact
 from src.platform.device_access.text_compare import MAX_DIFF_LINES, compare_text
 
 ROUTES = (
@@ -38,29 +35,24 @@ def test_removed_and_changed_routes_are_named_line_by_line():
     assert "-192.168.1.0/24     Direct  0   0           192.168.1.1     Vlan200" in result["diff"]
 
 
-def test_every_line_is_compared_including_redacted_credential_lines():
-    # Both sides carry the platform SSH redaction before they reach the comparison.
+def test_every_line_is_compared_as_collected():
+    # Nothing is masked: an authentication line and a changed key both show.
     before = "#\ninterface GigabitEthernet2/0\n ip address 2.2.2.2 255.255.255.0\n#\n"
     after = before.replace(
         " ip address 2.2.2.2 255.255.255.0\n",
         " ip address 2.2.2.2 255.255.255.0\n"
-        " ospf authentication-mode md5 1 cipher EXAMPLE-SECRET\n",
+        " ospf authentication-mode md5 1 cipher EXAMPLE-KEY\n",
     )
-    result = compare_text(redact(before), redact(after))
+    result = compare_text(before, after)
     assert result["status"] == "changed" and result["added_count"] == 1
     assert result["diff"][0].endswith("@@ interface GigabitEthernet2/0")
-    assert "+[redacted credential line]" in result["diff"]
-    assert "EXAMPLE-SECRET" not in json.dumps(result)
+    assert "+ ospf authentication-mode md5 1 cipher EXAMPLE-KEY" in result["diff"]
+    rekeyed = compare_text(after, after.replace("EXAMPLE-KEY", "OTHER-KEY"))
+    assert rekeyed["added_count"] == rekeyed["removed_count"] == 1
     assert set(result) == {
         "status", "added_count", "removed_count", "baseline_lines", "current_lines",
         "diff", "diff_truncated",
     }
-
-
-def test_the_same_redacted_line_on_both_sides_is_unchanged():
-    text = "#\ninterface GigabitEthernet3/0\n ospf authentication-mode md5 1 cipher X\n mtu 1500\n#"
-    result = compare_text(redact(text), redact(text))
-    assert result["status"] == "unchanged" and result["baseline_lines"] == 5
 
 
 def test_an_indented_change_names_its_section_like_git():

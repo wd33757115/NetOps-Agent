@@ -110,7 +110,10 @@ def test_ssh_audit_is_redacted_owner_filtered_and_bounded(ssh_governance_databas
     finished = next(item for item in rows["items"] if item["kind"] == "command_finished")
     assert finished["detail"]["output_truncated"]
     assert finished["detail"]["phase"] == "setup"
-    assert "fixture-private-password" not in json.dumps(rows) and "hidden" not in json.dumps(rows)
+    # The session's own credential stays out; device output is kept as collected
+    # (owner, 2026-10-02: no keyword masking).
+    assert "fixture-private-password" not in json.dumps(rows)
+    assert "password cipher hidden" in json.dumps(rows)
     connected = next(item for item in rows["items"] if item["kind"] == "connected")
     assert connected["detail"]["credential_changed"] is True
     assert governance.query_audit(actor_id="bob")["total"] == 0

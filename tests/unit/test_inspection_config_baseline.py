@@ -1,5 +1,4 @@
 import hashlib
-import json
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -93,15 +92,14 @@ def read(**kwargs):
 def test_reads_whole_raw_baseline_with_asset_time_hash_and_run_provenance(database):
     result = read()
     assert result["complete"] and not result["quality_gaps"]
-    # The same platform SSH redaction a live read gets, so both sides show the same marker.
+    # The stored original, as collected: nothing is masked.
     assert " port access vlan 100" in result["text"]
-    assert "[redacted credential line]" in result["text"] and "TEST-SECRET" not in result["text"]
+    assert " ospf authentication-mode md5 1 cipher TEST-SECRET" in result["text"]
     assert result["baseline"]["device_id"] == "asset-1"
     assert result["baseline"]["run_mode"] == "offline"
     assert result["baseline"]["run_source"] == "upload"
     assert result["baseline"]["observed_at"] == NOW.isoformat()
     assert result["baseline"]["source_sha256"] == hashlib.sha256(TEXT.encode()).hexdigest()
-    assert "TEST-SECRET" not in json.dumps(result)
     assert result["baseline"]["command"] == "display current-configuration"
 
 
@@ -170,7 +168,7 @@ def test_snapshot_catalog_supports_exact_ip_and_raw_read_uses_shared_redaction(d
     assert result["items"][0]["output_status"] == "data"
     assert not diagnostics.snapshots(diagnostics.SnapshotScope(host="192.0.2.1"))["items"]
     raw = diagnostics.read_snapshot(diagnostics.Snapshot(snapshot_id="snapshot"))
-    assert "TEST-SECRET" not in raw["text"] and raw["redacted"]
+    assert "cipher TEST-SECRET" in raw["text"] and "redacted" not in raw
 
 
 @pytest.mark.parametrize("change", ["hash", "partial", "truncated"])

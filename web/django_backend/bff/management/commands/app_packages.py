@@ -3,7 +3,7 @@ import time
 
 from django.core.management.base import BaseCommand, CommandError
 
-from bff.app_lifecycle import operate
+from bff.app_lifecycle import live_changes, operate
 from bff.models import AppInstallation
 from src.platform.kernel.registry import discover
 
@@ -36,6 +36,11 @@ class Command(BaseCommand):
             type=int,
             default=0,
             help="Retry startup deployment probes while Worker/Beat become ready",
+        )
+        parser.add_argument(
+            "--force",
+            action="store_true",
+            help="drain: the grace period has expired; stop waiting for in-flight work",
         )
 
     def handle(self, *args, **options):
@@ -101,6 +106,7 @@ class Command(BaseCommand):
                             app_id,
                             gateway_urls=options["gateway_url"],
                             frontend_url=options["frontend_url"],
+                            force=options["force"] and options["action"] == "drain",
                         )
                         break
                     except Exception:
@@ -112,6 +118,8 @@ class Command(BaseCommand):
                         self.stdout.write(f"Waiting for deployed application: {app_id}")
                         time.sleep(2)
                 self.stdout.write(f"{record.app_id} {record.installed_version} {record.state}")
+                if record.error:
+                    self.stdout.write(f"  {record.error}")
         except Exception as exc:
             raise CommandError(
                 str(exc) if isinstance(exc, ValueError) else type(exc).__name__
@@ -124,21 +132,16 @@ class Command(BaseCommand):
             raise CommandError("Unknown application")
         records = {r.app_id: r for r in AppInstallation.objects.all()}
         ids = [app_id] if app_id else list(manifests)
-        # Check every live package before performing any install/upgrade.
-        for key, row in records.items():
-            if row.state == "draining" or (
-                row.desired_enabled
-                and (
-                    key not in manifests
-                    or row.deployment_digest != manifests[key].digest
-                    or row.state != "enabled"
-                )
-            ):
-                raise CommandError(
-                    f"{key}: finish disable/drain with the deployed release before upgrading; "
-                    "startup preserves application enablement"
-                )
+        # A live package with changed code is upgraded only through disable/drain;
+        # it stays closed meanwhile and never holds back the others.
+        held = live_changes(records, manifests)
+        if app_id in held:
+            raise CommandError(f"{app_id}: {held[app_id]}")
+        for key, reason in held.items():
+            self.stdout.write(f"{key} skipped: {reason}")
         for key in ids:
+            if key in held:
+                continue
             row = records.get(key)
             if (
                 row
@@ -155,9 +158,10 @@ class Command(BaseCommand):
             try:
                 row = operate("upgrade" if row else "install", key)
             except Exception as exc:
-                raise CommandError(
-                    f"{key}: {exc}"
-                    if isinstance(exc, ValueError)
-                    else f"{key}: {type(exc).__name__}"
-                ) from exc
+                reason = str(exc) if isinstance(exc, ValueError) else type(exc).__name__
+                if app_id:
+                    raise CommandError(f"{key}: {reason}") from exc
+                # In the startup sweep one package failing stays that package's problem.
+                self.stdout.write(f"{key} failed: {reason}")
+                continue
             self.stdout.write(f"{key} {row.installed_version} {row.state}")

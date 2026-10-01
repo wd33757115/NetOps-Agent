@@ -184,18 +184,12 @@ def snapshots(body):
         )
 
 
-def redact(text):
-    from src.platform.device_access.governance import redact
-
-    return redact(text)
-
-
 def read_snapshot(body):
     with get_db_session() as session:
         row = session.get(CommandSnapshot, body.snapshot_id)
         if row is None:
             raise HTTPException(404, "采集证据不存在")
-        text = redact(row.raw_text or "")
+        text = row.raw_text or ""
         if body.offset > len(text):
             raise HTTPException(422, "分页位置超出证据范围")
         end = min(len(text), body.offset + body.limit)
@@ -212,8 +206,7 @@ def read_snapshot(body):
             "end_offset": end,
             "text": text[body.offset : end],
             "next_offset": end if end < len(text) else None,
-            "redacted": text != (row.raw_text or ""),
-            "meaning": "observed_at 那一刻采集的历史原文（已脱敏），不是设备现在的配置或状态；"
+            "meaning": "observed_at 那一刻采集的历史原文，不是设备现在的配置或状态；"
             "现在是否已变化要与现场对比；缺失或解析失败不能当作正常",
         }
 
@@ -245,7 +238,7 @@ CONTRACTS = [
     ),
     (
         "read_snapshot",
-        "按 snapshot_id 分页读取采集当时的历史原文（已脱敏）、来源摘要、采集时间和解析质量；"
+        "按 snapshot_id 分页读取采集当时的历史原文、来源摘要、采集时间和解析质量；"
         "不是设备现在的状态",
         Snapshot,
         read_snapshot,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import logging
 import os
 import re
 from copy import deepcopy
@@ -15,6 +16,7 @@ import yaml
 from packaging.specifiers import SpecifierSet
 from packaging.version import Version
 
+_log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[3]
 APPS_ROOT = ROOT / "src/apps"
 PLATFORM_VERSION = "1.0.0"
@@ -219,21 +221,38 @@ def mount_apps(app):
 
     from src.platform.authorization.client import require_app
 
-    manifests = discover()
     from .runtime import mount_readiness
 
-    mount_readiness(app, manifests)
-    for manifest in manifests.values():
+    mounted = {}
+    for manifest in discover().values():
+        try:
+            router = load_symbol(manifest.data["backend"]["router"])
+        except Exception:
+            # One application that cannot load stays unavailable (its deployment
+            # probe fails); the gateway and every other application still start.
+            _log.exception("Application %s not mounted", manifest.id)
+            continue
         app.include_router(
-            load_symbol(manifest.data["backend"]["router"]),
+            router,
             prefix=f"/api/apps/{manifest.id}",
             dependencies=[Depends(require_app(manifest.id))],
         )
+        mounted[manifest.id] = manifest
+    # Readiness reports only what this process actually serves.
+    mount_readiness(app, mounted)
 
 
 def task_configuration():
+    from .dependencies import check_dependencies
+
     modules, routes, schedules = [], {}, {}
     for manifest in discover().values():
+        try:
+            check_dependencies(manifest)
+        except Exception:
+            # Its tasks would fail to import and take the worker down with them.
+            _log.exception("Application %s tasks not loaded", manifest.id)
+            continue
         backend = manifest.data["backend"]
         modules.extend(backend.get("task_modules", []))
         for name in backend.get("task_names", []):

@@ -117,3 +117,46 @@ def test_package_resources_are_local():
     assert REGISTRY_PATH.is_relative_to(APPS_ROOT / "official_documents")
     assert get_skill_base_path().is_relative_to(APPS_ROOT / "official_documents")
     assert catalog()["templates"]
+
+
+def test_one_application_that_cannot_load_never_stops_the_gateway(monkeypatch):
+    """Platform and application readiness are separate: a broken package stays
+    unavailable (not mounted, not reported as loaded) while the others serve."""
+    from src.platform.kernel import registry
+    from src.platform.kernel.runtime import token
+
+    real = registry.load_symbol
+
+    def load(reference):
+        if reference.startswith("src.apps.topology."):
+            raise ImportError("broken package")
+        return real(reference)
+
+    monkeypatch.setattr(registry, "load_symbol", load)
+    monkeypatch.setenv("NETOPS_APP_INTERNAL_SECRET", "x" * 32)
+    app = FastAPI()
+    mount_apps(app)
+    paths = {route.path for route in app.routes}
+    assert not any(path.startswith("/api/apps/topology/") for path in paths)
+    assert any(path.startswith("/api/apps/official-documents/") for path in paths)
+    readiness = TestClient(app).get(
+        "/_internal/app-packages", headers={"Authorization": "Bearer " + token()}
+    ).json()
+    assert "topology" not in readiness["apps"] and "official-documents" in readiness["apps"]
+
+
+def test_workers_skip_an_application_whose_dependencies_are_missing(monkeypatch):
+    from src.platform.kernel import dependencies
+
+    real = dependencies.check_dependencies
+
+    def check(manifest, **kwargs):
+        if manifest.id == "official-documents":
+            raise ImportError("missing distribution")
+        return real(manifest, **kwargs)
+
+    monkeypatch.setattr(dependencies, "check_dependencies", check)
+    modules, routes, schedules = task_configuration()
+    assert "src.apps.official_documents.backend.tasks" not in modules
+    assert "execute_document_operation" not in routes
+    assert modules  # the other applications' tasks still load

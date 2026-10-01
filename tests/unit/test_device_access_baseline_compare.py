@@ -285,10 +285,12 @@ def test_empty_or_error_output_is_never_a_change(config_lab, output):
 
 
 @pytest.mark.parametrize("failed", [False, True])
-def test_credentials_are_hidden_before_all_audits_logs_and_return(
+def test_device_output_stays_raw_and_only_the_login_secret_is_hidden(
     config_lab, ssh_log_storage, failed
 ):
-    sensitive = " ospf authentication-mode hmac-sha-256 1 cipher hidden-config-key"
+    # Owner, 2026-10-02: collected data is never masked by keyword. Only the
+    # credential the platform logged in with stays out of records.
+    sensitive = " ospf authentication-mode hmac-sha-256 1 cipher config-key"
     config_lab.output = CURRENT.replace(" port access vlan 200", sensitive)
     config_lab.fail_command = failed
     result = compare(config_lab)
@@ -297,23 +299,24 @@ def test_credentials_are_hidden_before_all_audits_logs_and_return(
     platform = governance.query_audit()["items"]
     stored = b"".join(ssh_log_storage.objects.values()).decode("utf-8")
     for serialized in (json.dumps(result), json.dumps(local), json.dumps(platform), stored):
-        assert "hidden-config-key" not in serialized
-    assert "[redacted credential line]" in stored
+        assert "fixture-login" not in serialized
+    assert "cipher config-key" in stored
     assert config_lab.connects == config_lab.closes == 1
     if failed:
         assert rows(result)[COMMAND]["status"] == "unavailable"
+    else:
+        assert "+" + sensitive in rows(result)[COMMAND]["diff"]
 
 
-def test_a_credential_line_change_is_compared_not_hidden(config_lab):
-    """Every line takes part: an added authentication line shows where it was added."""
+def test_an_authentication_line_change_shows_as_written(config_lab):
     config_lab.output = BASELINE.replace(
         " port access vlan 100",
-        " port access vlan 100\n ospf authentication-mode md5 1 cipher hidden-config-key",
+        " port access vlan 100\n ospf authentication-mode md5 1 cipher config-key",
     )
     config = rows(compare(config_lab))[COMMAND]
     assert config["status"] == "changed" and config["added"] == 1 and config["removed"] == 0
     assert config["diff"][0].endswith("@@ interface GigabitEthernet3/0")
-    assert "+[redacted credential line]" in config["diff"]
+    assert "+ ospf authentication-mode md5 1 cipher config-key" in config["diff"]
     assert "quality_gaps" not in config or not config["quality_gaps"]
 
 

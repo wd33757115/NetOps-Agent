@@ -1,10 +1,8 @@
 """Line-by-line text comparison of a retained baseline and a live read; no parsing.
 
 Both sides are cleaned the same way (escapes, carriage returns, trailing blanks,
-the command echo and the closing prompt) and every remaining line is compared.
-Both already carry the platform's SSH redaction, applied when they were read from
-the device, so a credential line shows as the same marker on both sides and an
-added or removed one still shows up as a change.
+the command echo and the closing prompt) and every remaining line is compared,
+as collected: nothing is masked on either side.
 """
 
 import difflib

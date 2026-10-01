@@ -41,17 +41,14 @@ def django_setup():
         raise ValueError("Platform bootstrap requires PostgreSQL")
 
 
-def validate_live_packages(manifests):
+def held_packages(manifests):
+    """Live applications that cannot run as they are; they stay closed, never block."""
     from django.db import connection
+    from bff.app_lifecycle import live_changes
     from bff.models import AppInstallation
     if AppInstallation._meta.db_table not in connection.introspection.table_names():
-        return
-    for record in AppInstallation.objects.all():
-        manifest = manifests.get(record.app_id)
-        if record.state == "draining" or (record.desired_enabled and (
-            manifest is None or record.deployment_digest != manifest.digest or record.state != "enabled"
-        )):
-            raise ValueError(f"{record.app_id}: disable/drain the deployed release before bootstrap")
+        return {}
+    return live_changes({r.app_id: r for r in AppInstallation.objects.all()}, manifests)
 
 
 def seed_once(engine, owner, version, callback, *, check=False):
@@ -93,8 +90,11 @@ def run(action, *, adopt_existing=False):
     if os.getenv("NETOPS_PACKAGE_DATABASE_URL"):
         raise ValueError("Unified bootstrap uses POSTGRES_*; remove NETOPS_PACKAGE_DATABASE_URL")
     check = action == "check"
+    # Platform readiness and application readiness are separate: a platform fault
+    # stops startup; an application fault keeps only that application closed.
+    issues = {}
+
     def execute():
-        validate_live_packages(manifests)
         if check:
             require_database_schema_current()
         else:
@@ -115,28 +115,51 @@ def run(action, *, adopt_existing=False):
             call_command("migrate", interactive=False, verbosity=0)
         from bff.app_lifecycle import lifecycle_lock
         with lifecycle_lock():
-            validate_live_packages(manifests)
+            # A live package with changed code keeps its deployed schema until it
+            # is drained and upgraded; its new revisions must not run under it.
+            issues.update(held_packages(manifests))
             for manifest in manifests.values():
-                # Schema ownership stays with the package; only the platform
-                # executes its declared revision chain, in dependency order.
-                head = migrate(manifest, engine=engine, check=check)
-                print(f"[OK] schema {manifest.id}: {head or 'platform services'}", flush=True)
+                if manifest.id in issues:
+                    continue
+                try:
+                    # Schema ownership stays with the package; only the platform
+                    # executes its declared revision chain, in dependency order.
+                    head = migrate(manifest, engine=engine, check=check)
+                    print(f"[OK] schema {manifest.id}: {head or 'platform services'}", flush=True)
+                except Exception as exc:
+                    issues[manifest.id] = f"{type(exc).__name__}: {exc}"
             seed_once(engine, "platform.skills", "1", seed_platform, check=check)
             for manifest in manifests.values():
                 database = manifest.data.get("database", {})
-                if database.get("bootstrap"):
+                if manifest.id in issues or not database.get("bootstrap"):
+                    continue
+                try:
                     seed_once(engine, manifest.id, database["bootstrap_version"],
-                              lambda m=manifest: load_symbol(m.data["database"]["bootstrap"])(), check=check)
+                              lambda m=manifest: load_symbol(m.data["database"]["bootstrap"])(),
+                              check=check)
+                except Exception as exc:
+                    issues[manifest.id] = f"{type(exc).__name__}: {exc}"
         if not check:
             # Package registration is administrative initialization, not startup.
-            call_command("app_packages", "prepare", verbosity=0)
+            # It skips held packages and reports per-package failures itself.
+            from io import StringIO
+            report = StringIO()
+            call_command("app_packages", "prepare", verbosity=0, stdout=report)
+            for line in report.getvalue().splitlines():
+                print(line, flush=True)
+                app_id, _, rest = line.partition(" ")
+                if rest.startswith(("failed: ", "skipped: ")):
+                    issues.setdefault(app_id, rest.split(": ", 1)[1])
         else:
             from bff.models import AppInstallation
             records = {r.app_id: r for r in AppInstallation.objects.all()}
             for manifest in manifests.values():
                 record = records.get(manifest.id)
-                if not record or record.deployment_digest != manifest.digest or record.state not in {"installed", "disabled", "enabled"}:
-                    raise ValueError(f"{manifest.id}: package registration pending; run bootstrap apply")
+                if manifest.id not in issues and (
+                    not record or record.deployment_digest != manifest.digest
+                    or record.state not in {"installed", "disabled", "enabled"}
+                ):
+                    issues[manifest.id] = "package registration pending; run bootstrap apply"
     try:
         if check:
             execute()
@@ -144,6 +167,8 @@ def run(action, *, adopt_existing=False):
             with bootstrap_lock(engine):
                 execute()
         print(f"[OK] Platform database {action} complete", flush=True)
+        for app_id, reason in issues.items():
+            print(f"[APP] {app_id} unavailable: {reason}", flush=True)
     finally:
         connection.close()
 

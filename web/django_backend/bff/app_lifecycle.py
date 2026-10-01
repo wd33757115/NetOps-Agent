@@ -81,12 +81,56 @@ def dependents(manifests, app_id):
     ]
 
 
+def live_changes(records, manifests):
+    """Live packages that cannot run as they are, by app ID with the reason.
+
+    Each needs disable/drain and an upgrade. Meanwhile it stays closed (admission
+    answers 503) while the platform and every other application keep running.
+    """
+    held = {}
+    for key, row in records.items():
+        if row.state == "draining":
+            held[key] = f"draining; finish with start.ps1 -UpgradeApps {key}"
+        elif row.desired_enabled and (
+            key not in manifests
+            or row.deployment_digest != manifests[key].digest
+            or row.state != "enabled"
+        ):
+            held[key] = f"code changed since deployment; upgrade with start.ps1 -UpgradeApps {key}"
+    return held
+
+
 def pending(manifest):
     hook = manifest.data.get("lifecycle", {}).get("pending")
     value = load_symbol(hook)() if hook else 0
     if type(value) is not int or value < 0:
         raise ValueError("pending hook must return a nonnegative integer")
     return value
+
+
+def stopped(record):
+    """No process of the deployed release answers, so nothing of it is in flight.
+
+    Like a terminated Pod, a stopped deployment has no requests or tasks to wait
+    for; draining it once failed on a refused connection and blocked every upgrade.
+    A process that answers, even with an error or after a timeout, is running.
+    """
+    import httpx
+
+    for base in record.readiness.get("gateways", []):
+        try:
+            httpx.get(base.rstrip("/") + "/_internal/app-packages", timeout=5)
+        except httpx.ConnectError:
+            continue
+        except httpx.HTTPError:
+            return False
+        return False
+    if record.readiness.get("workers"):
+        from src.core.celery_tasks.celery_app import celery
+
+        if celery.control.ping(timeout=2):
+            return False
+    return True
 
 
 def active_requests(record):
@@ -137,7 +181,7 @@ def active_requests(record):
     return count
 
 
-def operate(action, app_id, *, gateway_urls=None, frontend_url=None):
+def operate(action, app_id, *, gateway_urls=None, frontend_url=None, force=False):
     with lifecycle_lock():
         manifests = discover()
         if app_id not in manifests:
@@ -228,15 +272,24 @@ def operate(action, app_id, *, gateway_urls=None, frontend_url=None):
             record.save()
             try:
                 # Admission is already closed. Let requests admitted before that
-                # boundary finish committing, then settle durable work.
-                if active_requests(record):
+                # boundary finish committing, then settle durable work. As with a
+                # Pod's grace period: once it has expired (force), or nothing of the
+                # release runs any more, stop waiting. Durable records stay in the
+                # database for the next release to resume or reconcile.
+                finished = force or stopped(record)
+                if not finished and active_requests(record):
                     return record
                 hook = manifest.data.get("lifecycle", {}).get("drain")
                 if hook:
                     load_symbol(hook)()
-                if pending(manifest) == 0:
+                left = pending(manifest)
+                if left == 0 or finished:
                     record.state = "disabled"
-                record.error = ""
+                record.error = (
+                    f"{left} durable work item(s) left for the next release"
+                    if left and finished
+                    else ""
+                )
             except Exception as exc:
                 record.error = type(exc).__name__ + ": drain incomplete; retain package code"
                 record.save()

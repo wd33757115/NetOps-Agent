@@ -100,7 +100,12 @@ sys.exit(0 if celery_workers_available() else 1)
             --gateway-url "http://localhost:$FastAPIPort" --frontend-url "http://localhost:$ReactPort" --wait-seconds 60
         $appExit = $LASTEXITCODE
         Pop-Location
-        Assert-Ok "Enabled App deployment verification" ($appExit -eq 0)
+        # An App that fails verification is that App's problem, not the platform's.
+        if ($appExit -eq 0) {
+            Write-ColorOutput "  [OK] Enabled App deployment verification" "Green"
+        } else {
+            Write-ColorOutput "  [WARN] Some enabled Apps failed deployment verification (see above); the platform is up" "Yellow"
+        }
     }
 } else {
     Assert-Ok "Celery Worker ping" $false "venv not found"

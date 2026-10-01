@@ -57,17 +57,41 @@ class AppStartupTests(TestCase):
         operation.assert_called_once_with("upgrade", "disabled")
         self.assertFalse(row.desired_enabled)
 
-    def test_changed_active_package_blocks_before_any_install(self):
+    def test_changed_active_package_is_held_and_others_still_install(self):
+        # Platform and application readiness are separate: one changed live
+        # package stays closed until it is upgraded; it blocks nobody.
         self.record("enabled", "enabled", "old")
-        with patch(COMMAND + ".operate") as operation:
-            with self.assertRaisesMessage(CommandError, "disable/drain"):
-                self.command("prepare")
-        operation.assert_not_called()
+        self.record("disabled", "disabled")
+        output = StringIO()
+        installed = SimpleNamespace(app_id="new", installed_version="1.0.0", state="installed")
+        with patch(COMMAND + ".operate", return_value=installed) as operation:
+            call_command("app_packages", "prepare", stdout=output)
+        operation.assert_called_once_with("install", "new")
+        self.assertIn("enabled skipped: code changed since deployment", output.getvalue())
+        self.assertEqual(AppInstallation.objects.get(pk="enabled").deployment_digest, "old")
 
     def test_draining_package_is_not_reset_by_startup(self):
         self.record("disabled", "draining")
-        with self.assertRaisesMessage(CommandError, "disable/drain"):
-            self.command("prepare")
+        output = StringIO()
+        with patch(COMMAND + ".operate", return_value=SimpleNamespace(
+            app_id="x", installed_version="1.0.0", state="installed"
+        )):
+            call_command("app_packages", "prepare", stdout=output)
+        self.assertIn("disabled skipped: draining", output.getvalue())
+        self.assertEqual(AppInstallation.objects.get(pk="disabled").state, "draining")
+        with self.assertRaisesMessage(CommandError, "draining"):
+            self.command("prepare", app_id="disabled")
+
+    def test_one_failing_package_does_not_stop_the_startup_sweep(self):
+        output = StringIO()
+        with patch(COMMAND + ".operate", side_effect=[
+            ValueError("broken package"),
+            SimpleNamespace(app_id="disabled", installed_version="1.0.0", state="installed"),
+            SimpleNamespace(app_id="enabled", installed_version="1.0.0", state="installed"),
+        ]):
+            call_command("app_packages", "prepare", stdout=output)
+        self.assertIn("new failed: broken package", output.getvalue())
+        self.assertIn("enabled 1.0.0 installed", output.getvalue())
 
     def test_verify_checks_enabled_only_and_retries_starting_worker(self):
         self.record("disabled", "disabled")

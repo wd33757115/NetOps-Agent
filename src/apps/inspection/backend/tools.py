@@ -26,7 +26,7 @@ def read_batch(user, body):
 
 TOOLS = [*DIAGNOSTIC_TOOLS,
     Tool(
-        "read_baseline", "内部读取经目标资产校验的未解析基线原文（已脱敏）",
+        "read_baseline", "内部读取经目标资产校验的未解析基线原文",
         ReadBaseline, read_baseline,
     ),
     Tool(

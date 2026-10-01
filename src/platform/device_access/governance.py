@@ -29,14 +29,15 @@ _SECRET_KEY = re.compile(
     r"(?i)^(?:password|passwd|secret|secret_ciphertext|token|access_token|refresh_token|"
     r"credential_ref|private_key|authorization|api[_-]?key)$"
 )
-_SECRET_LINE = re.compile(
-    r"(?im)^.*\b(?:password|passwd|secret|community|authentication(?:-mode|-key)?|"
-    r"key-string|keychain|key-chain|pre-shared-key|private-key|cipher|simple|"
-    r"api[_-]?key|access[_-]?token|authorization)\b[^\r\n]*"
-)
-
-
 def redact(value, secrets=()):
+    """Hide only the platform's own credentials: fields named as secrets and the
+    literal secrets a session logged in with.
+
+    Device output is never rewritten by keyword. Masking every line that mentioned
+    password/cipher/authentication altered collected raw data before it was stored
+    (owner's decision, 2026-10-02: collection stays raw). Control characters are
+    still dropped: PostgreSQL cannot store NUL, which Comware sends before a prompt.
+    """
     if isinstance(value, dict):
         return {
             str(key): "[redacted]" if _SECRET_KEY.search(str(key)) else redact(item, secrets)
@@ -49,17 +50,6 @@ def redact(value, secrets=()):
     for secret in secrets:
         if secret:
             value = value.replace(secret, "[redacted]")
-    value = re.sub(
-        r"(?s)-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----",
-        "[redacted private key]",
-        value,
-    )
-    value = _SECRET_LINE.sub("[redacted credential line]", value)
-    value = re.sub(
-        r"(?i)((?:token|authorization|api[_-]?key)\s*[:=]\s*)[^\s,;]+",
-        r"\1[redacted]",
-        value,
-    )
     return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\u202a-\u202e\u2066-\u2069]", "", value)
 
 

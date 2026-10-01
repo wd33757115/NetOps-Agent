@@ -72,13 +72,41 @@ class LifecycleTests(TestCase):
 
     def test_drain_does_not_finish_while_work_is_active(self):
         operate("install", "delivery-probe")
-        with patch("bff.app_lifecycle.pending", return_value=1):
+        with (
+            patch("bff.app_lifecycle.stopped", return_value=False),
+            patch("bff.app_lifecycle.pending", return_value=1),
+        ):
             record = operate("disable", "delivery-probe")
         self.assertEqual(record.state, "draining")
         self.assertFalse(record.desired_enabled)
         with self.assertRaises(ValueError):
             operate("enable", "delivery-probe")
-        self.assertEqual(operate("drain", "delivery-probe").state, "disabled")
+        with patch("bff.app_lifecycle.stopped", return_value=False):
+            self.assertEqual(operate("drain", "delivery-probe").state, "disabled")
+
+    def test_grace_period_or_a_stopped_deployment_ends_the_wait(self):
+        # Like a Pod: once the grace period expires, or nothing of the release
+        # runs any more, durable work stays recorded for the next release.
+        operate("install", "delivery-probe")
+        with (
+            patch("bff.app_lifecycle.stopped", return_value=False),
+            patch("bff.app_lifecycle.active_requests", return_value=3),
+            patch("bff.app_lifecycle.pending", return_value=2),
+        ):
+            self.assertEqual(operate("disable", "delivery-probe").state, "draining")
+            record = operate("drain", "delivery-probe", force=True)
+        self.assertEqual(record.state, "disabled")
+        self.assertIn("2 durable work item(s) left", record.error)
+        record.state, record.error = "draining", ""
+        record.save()
+        with (
+            patch("bff.app_lifecycle.stopped", return_value=True),
+            patch("bff.app_lifecycle.active_requests", side_effect=AssertionError("asked")),
+            patch("bff.app_lifecycle.pending", return_value=1),
+        ):
+            record = operate("drain", "delivery-probe")
+        self.assertEqual(record.state, "disabled")
+        self.assertIn("1 durable work item(s) left", record.error)
 
     def test_old_sync_enable_cannot_bypass_probe(self):
         from django.core.management import call_command
@@ -196,3 +224,37 @@ class DeployedReleaseDrainTests(SimpleTestCase):
         with self.assertRaises(FileNotFoundError):
             active_requests(self.record)
         self.celery.control.broadcast.assert_not_called()
+
+
+class StoppedDeploymentTests(SimpleTestCase):
+    def record(self, workers=()):
+        return SimpleNamespace(
+            readiness={"gateways": ["http://127.0.0.1:8000"], "workers": list(workers)}
+        )
+
+    def test_a_refused_gateway_is_stopped_and_an_answering_one_is_running(self):
+        import httpx
+
+        from .app_lifecycle import stopped
+
+        with patch("httpx.get", side_effect=httpx.ConnectError("refused")):
+            self.assertTrue(stopped(self.record()))
+        with patch("httpx.get", return_value=SimpleNamespace(status_code=401)):
+            self.assertFalse(stopped(self.record()))
+        # A gateway that hangs may still be serving: not stopped.
+        with patch("httpx.get", side_effect=httpx.ReadTimeout("slow")):
+            self.assertFalse(stopped(self.record()))
+
+    def test_a_worker_that_answers_ping_is_running(self):
+        import httpx
+
+        from .app_lifecycle import stopped
+
+        with (
+            patch("httpx.get", side_effect=httpx.ConnectError("refused")),
+            patch("src.core.celery_tasks.celery_app.celery") as celery,
+        ):
+            celery.control.ping.return_value = [{"worker": {"ok": "pong"}}]
+            self.assertFalse(stopped(self.record(workers=["worker"])))
+            celery.control.ping.return_value = []
+            self.assertTrue(stopped(self.record(workers=["worker"])))
