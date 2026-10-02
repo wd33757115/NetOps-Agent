@@ -238,3 +238,24 @@ def test_branches_beyond_the_limit_are_reported_as_truncated(monkeypatch):
     forward = trace(network(), BASE, "172.16.1.10", "172.16.4.20")["forward"]
     assert len(forward["paths"]) == 1
     assert forward["truncated"] is True and forward["status"] == "partial"
+
+
+def test_an_address_only_next_hop_resolves_through_the_rib_or_is_a_gap():
+    # RFC 8349: a next hop may be an address without an outgoing interface (iBGP's
+    # loopback next hops). R1 resolves 172.16.4.1 through its own /24 route over both
+    # equal-cost uplinks instead of jumping to R4, which owns that address; R2 and R3
+    # carry no route for the prefix. An address with no route at all is unresolved.
+    devices = network()
+    r1 = devices["10.0.0.1"]["routes"]
+    r1.append(route("172.16.6.0/24", ("172.16.4.1", None), protocol="BGP", preference=255))
+    r1.append(route("172.16.5.0/24", ("10.9.9.9", None), protocol="BGP", preference=255))
+    resolved = trace(devices, BASE, "172.16.1.10", "172.16.6.20")
+    assert ends(resolved) == [
+        (["10.0.0.1", "10.0.0.2"], "no_route"),
+        (["10.0.0.1", "10.0.0.3"], "no_route"),
+    ]
+    first = resolved["forward"]["paths"][0]["hops"][0]
+    assert first["route"]["next_hop"] == "172.16.4.1"
+    assert first["resolved_via"][0]["prefix"] == "172.16.4.0/24"
+    gap = trace(devices, BASE, "172.16.1.10", "172.16.5.20")["gaps"][0]
+    assert (gap["status"], gap["next_hop"]) == ("unresolved_next_hop", "10.9.9.9")

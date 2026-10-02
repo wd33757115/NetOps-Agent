@@ -222,3 +222,18 @@ def test_vrrp_block_without_a_virtual_address_is_rejected():
     outcome = parse(IDENTITY["comware"], "vrrp", odd)
     assert outcome.status == "failed"
     assert any(w.endswith("vrrp_block_without_virtual_address") for w in outcome.warnings)
+
+
+def test_recursive_bgp_next_hop_goes_through_the_core(devices):
+    # DIST1's default and internet routes are iBGP via BR1's loopback 10.255.0.1 with no
+    # interface (RFC 8349 simple next hop); OSPF resolves it over both cores.
+    forward = trace(devices, BASE, "172.16.10.11", "198.51.100.10")["forward"]
+    sequences = {
+        tuple(h["device"]["name"].split(".")[0] for h in path["hops"]) for path in forward["paths"]
+    }
+    assert sequences == {("DIST1", "CORE1", "BR1"), ("DIST1", "CORE2", "BR1")}
+    for path in forward["paths"]:
+        assert path["end"] == {"status": "unmanaged_next_hop", "next_hop": "100.64.1.1"}
+        first = path["hops"][0]
+        assert first["route"]["next_hop"] == "10.255.0.1"
+        assert [r["prefix"] for r in first["resolved_via"]] == ["10.255.0.1/32"]

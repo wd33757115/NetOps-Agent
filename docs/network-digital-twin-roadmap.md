@@ -1024,6 +1024,11 @@ P2-9 根据 Q5 取消，不引入 SNMP。P3 及后续仍在进入阶段时展开
 
 ## 14. 进度台账（执行者维护）
 
+### 2026-10-03 IETF 顺序第 2 项：递归下一跳按 RFC 8349
+
+- RFC 8349 的简单下一跳可以只有地址（ietf-routing 注明递归下一跳留给扩展）。路径计算不再直接跳到下一跳地址的属主：地址在本机直连网段内即为邻居；否则在同一 RIB 中再查（最多 4 层），每层查找作为 `resolved_via` 证据；查不到而路由给了出接口时按“经该接口直达”（地址与出接口同时给出）；两者皆无为新缺口 `unresolved_next_hop`。
+- 园区网 PC1→INET-PC 由原来的 DIST1→BR1 变为 DIST1→CORE1/CORE2（OSPF 等价）→BR1→ISP；BR2→PC1 展开 4 条等价路径。新增园区网与合成网络测试各 1 项。
+
 ### 2026-10-03 IETF 顺序第 1 项：VRRP 按 RFC 8347
 
 - 新能力 `vrrp`（Comware `display vrrp verbose`、IOS `show vrrp`）进入 topology 采集模式与观测事实；`generic_vrrp` 记录按 ietf-vrrp 的 vrrp-instance：`ifname`、`vrid`、`state`（initialize/backup/master）、运行 `priority`、`virtual_addresses`、`last_adv_source`（主设备地址）。缺 VRID/状态/虚拟地址的块拒绝；Comware 未配置为“VRRP4 is not configured.”，IOS 未配置时无输出，均为已确认的空。

@@ -8,6 +8,7 @@ Where the data ends, a branch ends with a reason instead of a guess:
 - ``blackhole``: the matched route points at a NULL interface;
 - ``no_route``: nothing in the table covers the destination;
 - ``unmanaged_next_hop``: the next hop is not an address of any collected device;
+- ``unresolved_next_hop``: a next-hop address with no route to it in the device's RIB;
 - ``routes_missing``: this device's routing table was not collected;
 - ``loop``: the walk came back to a device it already passed.
 
@@ -26,6 +27,7 @@ from .locate import _Locator, answer
 
 MAX_PATHS = 8
 MAX_HOPS = 32
+MAX_RECURSION = 4  # next-hop lookups before a next hop counts as unresolved
 # The host's own gateway setting is not observed; the VRRP master is the inferred gateway.
 VRRP_FIRST_HOP = (
     "终端自己配置的网关看不到；该网段有 VRRP，按采集时的主设备（state=master）作为第一跳"
@@ -70,6 +72,50 @@ class _Tracer:
             if best is None or rank < best[0]:
                 best = (rank, route)
         return best and best[1]
+
+    def connected(self, key, vrf, ip):
+        """The device's own interface whose subnet holds this address, if any."""
+        address = ipaddress.ip_address(ip)
+        for rec in self.devices[key].get("ip", []):
+            network = ipaddress.ip_interface(f"{rec['address']}/{rec['prefix_len']}").network
+            if rec.get("vrf", "default") == vrf and network.prefixlen < network.max_prefixlen:
+                if address in network:
+                    return rec["ifname"]
+        return None
+
+    def resolve(self, key, vrf, ip, depth=0):
+        """Directly connected next hops behind a next-hop address: [(ip, out, chain)].
+
+        RFC 8349 lets a next hop be an address without an outgoing interface (BGP
+        next hops are often a peer's loopback). An address on one of the device's own
+        subnets is the neighbour itself; any other is looked up again in the same
+        RIB until it is, and each lookup is kept as evidence (chain).
+        """
+        out = self.connected(key, vrf, ip)
+        if out:
+            return [(ip, out, [])]
+        route = self.lookup(key, vrf, ip) if depth < MAX_RECURSION else None
+        if route is None:
+            return []
+        resolved = []
+        for hop in route["next_hops"]:
+            hop_ip, hop_out = hop.get("ip"), hop.get("ifname")
+            link = {
+                "for": ip,
+                "prefix": route["prefix"],
+                "protocol": route.get("protocol"),
+                "next_hop": hop_ip,
+                "out_interface": hop_out,
+            }
+            owner = self.topo.owner.get((vrf, hop_ip)) if hop_ip else None
+            if hop_out and (
+                not hop_ip or hop_ip in {"0.0.0.0", "::"} or (owner and owner[0] == key)
+            ):
+                resolved.append((ip, hop_out, [link]))  # the address is on that interface
+            elif hop_ip:
+                for found in self.resolve(key, vrf, hop_ip, depth + 1):
+                    resolved.append((found[0], found[1], [link, *found[2]]))
+        return resolved
 
     def redundancy(self, gateways):
         """VRRP members on the subnet's router interfaces holding a virtual address in it."""
@@ -145,16 +191,33 @@ class _Tracer:
                 owner = self.topo.owner.get((next_vrf, ip))
                 if out.upper().startswith("NULL"):
                     end(here, "blackhole")
-                elif out.lower().startswith("inloop"):
+                    continue
+                if out.lower().startswith("inloop"):
                     end(here, "delivered", to="device", interface=out)
-                elif not ip or ip in {"0.0.0.0", "::"} or (owner and owner[0] == key):
+                    continue
+                if not ip or ip in {"0.0.0.0", "::"} or (owner and owner[0] == key):
                     # A connected route: the device's own address on the egress interface.
                     end(here, "delivered", to="subnet", interface=out)
-                elif owner is None:
-                    end(here, "unmanaged_next_hop", next_hop=ip)
-                else:
-                    current["link_id"] = self.link_between(key, out, *owner)
-                    step(owner[0], next_vrf, owner[1], here, visited | {(key, vrf)})
+                    continue
+                resolved = self.resolve(key, next_vrf, ip)
+                if not resolved and out:
+                    # Address and outgoing interface both given (RFC 8349 simple next hop)
+                    # and no route to the address: it is reached on that interface.
+                    resolved = [(ip, out, [])]
+                if not resolved:
+                    end(here, "unresolved_next_hop", next_hop=ip)
+                base = current
+                for neighbour_ip, neighbour_out, chain in resolved:
+                    current = {**base, "out_interface": neighbour_out}
+                    if chain:
+                        current["resolved_via"] = chain
+                    here = [*trail, current]
+                    neighbour = self.topo.owner.get((next_vrf, neighbour_ip))
+                    if neighbour is None:
+                        end(here, "unmanaged_next_hop", next_hop=neighbour_ip)
+                        continue
+                    current["link_id"] = self.link_between(key, neighbour_out, *neighbour)
+                    step(neighbour[0], next_vrf, neighbour[1], here, visited | {(key, vrf)})
 
         step(start, "default", first_in, [], frozenset())
         return paths, truncated
