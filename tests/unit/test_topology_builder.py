@@ -186,3 +186,43 @@ def test_missing_capability_degrades_without_failing(missing):
     facts.pop(missing)
     tree, _ = build_topology({"10.10.1.2": facts}, BASE)
     assert networks(tree)["l2"]["node"]
+
+
+def lag_switch(lldp_on_members):
+    """A switch whose Port-channel1 (Ethernet1/0-1) learned a host MAC."""
+    lldp = [
+        {
+            "local_if": port,
+            "remote_chassis_id": "00:00:00:00:00:09",
+            "remote_port_id": port,
+            "remote_port_subtype": "Interface name",
+            "remote_sysname": "peer",
+            "remote_mgmt_addresses": [],
+        }
+        for port in ("Ethernet1/0", "Ethernet1/1")
+        if lldp_on_members
+    ]
+    return {
+        "platform": "ios",
+        "lldp_local": {"chassis_id": "00:00:00:00:00:01", "hostname": "sw"},
+        "lldp": lldp,
+        "lag": [
+            {
+                "ifname": "Port-channel1",
+                "members": ["Ethernet1/0", "Ethernet1/1"],
+                "bundled": ["Ethernet1/0", "Ethernet1/1"],
+            }
+        ],
+        "mac": [{"mac": "00:00:00:00:00:77", "port": "Port-channel1", "vlan_or_bd": "10"}],
+        "arp": [{"ip": "10.0.0.77", "mac": "00:00:00:00:00:77", "ifname": "Vlan10"}],
+        "ip": [{"ifname": "Vlan10", "address": "10.0.0.1", "prefix_len": 24, "vrf": "default"}],
+    }
+
+
+def test_lag_members_decide_whether_an_aggregate_faces_a_peer():
+    # RFC 8944 member-link-tp: no LLDP on the members (a server bundle), so the host
+    # behind Port-channel1 attaches there; with LLDP on them it is only behind the peer.
+    edge = links(networks(build_topology({"sw": lag_switch(False)}, BASE)[0])["l2"])
+    assert frozenset({"00-00-00-00-00-01 Port-channel1", "nic:00-00-00-00-00-77"}) in edge
+    uplink = links(networks(build_topology({"sw": lag_switch(True)}, BASE)[0])["l2"])
+    assert not [ends for ends in uplink if "nic:00-00-00-00-00-77" in ends]

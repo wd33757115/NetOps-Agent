@@ -39,6 +39,7 @@ FACTS = {
         "ip": "ip_interfaces",
         "arp": "arp",
         "mac": "mac",
+        "lag": "lag",
         "vrrp": "vrrp",
         "routes": "routes",
     },
@@ -48,6 +49,7 @@ FACTS = {
         "ip": "ip_interface",
         "arp": "arp",
         "mac": "mac",
+        "lag": "lag",
         "vrrp": "vrrp",
         "routes": "routes",
     },
@@ -56,10 +58,12 @@ BASE = "urn:test:campus:"
 
 
 def parsed(device):
+    """Routers rejected the aggregation command, so it was not imported for them."""
     platform = EXPECTED["devices"][device]["platform"]
     return {
         cap: parse(IDENTITY[platform], cap, (FIXTURES / device / f"{name}.txt").read_text("utf-8"))
         for cap, name in FACTS[platform].items()
+        if (FIXTURES / device / f"{name}.txt").exists()
     }
 
 
@@ -237,3 +241,26 @@ def test_recursive_bgp_next_hop_goes_through_the_core(devices):
         first = path["hops"][0]
         assert first["route"]["next_hop"] == "10.255.0.1"
         assert [r["prefix"] for r in first["resolved_via"]] == ["10.255.0.1/32"]
+
+
+def test_aggregate_is_an_rfc8944_lag_of_its_members(l2):
+    nodes = {n.get(L2T + "l2-node-attributes", {}).get("name"): n for n in l2[0]["node"]}
+    for switch in ("DIST1.lab.local", "DIST2.lab.local"):
+        tps = {
+            tp[L2T + "l2-termination-point-attributes"]["interface-name"]: tp
+            for tp in nodes[switch][NT + "termination-point"]
+        }
+        attrs = tps["Port-channel1"][L2T + "l2-termination-point-attributes"]
+        assert attrs["lag"] is True
+        assert attrs["member-link-tp"] == [tps[m]["tp-id"] for m in ("Ethernet1/0", "Ethernet1/1")]
+
+
+def test_nodes_carry_rfc8944_management_attributes(l2):
+    # The address it was collected by plus what its neighbours' LLDP advertises: the
+    # evidence that made the IOS core one node; the chassis MAC is the bridge base MAC.
+    nodes = {n.get(L2T + "l2-node-attributes", {}).get("name"): n for n in l2[0]["node"]}
+    core1 = nodes["CORE1.lab.local"][L2T + "l2-node-attributes"]
+    assert core1["management-mac"] == "aa:bb:cc:00:02:00"
+    assert {"10.10.1.13", "10.0.13.2", "10.0.35.1"} <= set(core1["management-address"])
+    br1 = nodes["BR1"][L2T + "l2-node-attributes"]
+    assert "10.10.1.11" in br1["management-address"] and br1["management-mac"]

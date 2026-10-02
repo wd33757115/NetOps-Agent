@@ -30,6 +30,7 @@ MODE_CAPABILITIES = {
         "ip",
         "arp",
         "mac",
+        "lag",
         "vrrp",
         "routes",
     ),

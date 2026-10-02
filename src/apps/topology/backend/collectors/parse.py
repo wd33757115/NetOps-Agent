@@ -11,6 +11,7 @@ from .tiers import (
     generic_arp,
     generic_ifbrief,
     generic_ipif,
+    generic_lag,
     generic_lldp,
     generic_lldp_local,
     generic_mac,
@@ -28,6 +29,7 @@ PARSERS = {
     "ip": generic_ipif.parse,
     "version": generic_version.parse,
     "vrrp": generic_vrrp.parse,
+    "lag": generic_lag.parse,
 }
 EMPTY = {
     "lldp": r"No (?:LLDP )?neighbors?(?: found)?\.?",

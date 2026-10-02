@@ -52,7 +52,7 @@ from .repository import owned, sessions
 
 APP_ID = "topology"
 ACTIVE = ("queued", "running", "waiting_for_input")
-TOPOLOGY_FACTS = ("lldp_local", "lldp", "interfaces", "ip", "arp", "mac", "vrrp", "routes")
+TOPOLOGY_FACTS = ("lldp_local", "lldp", "interfaces", "ip", "arp", "mac", "lag", "vrrp", "routes")
 NODE_BUDGET_SECONDS = 240
 # A lease outlives the node budget, so a live collection is never reclaimed mid-way.
 LEASE_SECONDS = NODE_BUDGET_SECONDS + 60

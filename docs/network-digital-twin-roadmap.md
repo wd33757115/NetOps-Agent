@@ -1024,6 +1024,12 @@ P2-9 根据 Q5 取消，不引入 SNMP。P3 及后续仍在进入阶段时展开
 
 ## 14. 进度台账（执行者维护）
 
+### 2026-10-03 IETF 顺序第 3、4 项：聚合与节点管理属性按 RFC 8944
+
+- 聚合：`lag` 能力进入 topology 模式与观测事实（IOS `show etherchannel summary` 按表解析，含折行成员与“channel-groups in use”条数；无聚合的交换机为已确认的空；Comware 现有真机回显只有“No link aggregation group exists.”，非空格式待取得真机样本再写，届时解析失败会如实报出）。记录为聚合口、全部成员与已捆绑成员。建模按 RFC 8944 在聚合口 TP 上写 `lag: true` 与 `member-link-tp`；“聚合口朝向邻居”改由成员口是否有 LLDP 推出（取代“凡聚合口皆弱”的经验规则；未采到成员关系的设备仍按保守规则）；只有弱证据的 MAC 若出现在聚合口，按其各成员链路计，不同成员链路不算同一网段。
+- 节点：RFC 8944 `management-address` 取采集地址加邻居 LLDP 通告的管理地址，`management-mac` 取 MAC 类型的 LLDP 机箱 ID；IOS 设备由哪些通告地址认定，在模型中可见。
+- 测试：园区网 25 项、拓扑相关 478 项（含 YANG 校验，yangson 置于 `.runtime/p0-2/yang-deps`）通过；新增合成用例：成员口无 LLDP 的聚合（服务器捆绑）后的终端挂在聚合口，有 LLDP 时不挂。拓扑 App 0.4.12。
+
 ### 2026-10-03 IETF 顺序第 2 项：递归下一跳按 RFC 8349
 
 - RFC 8349 的简单下一跳可以只有地址（ietf-routing 注明递归下一跳留给扩展）。路径计算不再直接跳到下一跳地址的属主：地址在本机直连网段内即为邻居；否则在同一 RIB 中再查（最多 4 层），每层查找作为 `resolved_via` 证据；查不到而路由给了出接口时按“经该接口直达”（地址与出接口同时给出）；两者皆无为新缺口 `unresolved_next_hop`。

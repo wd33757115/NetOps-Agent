@@ -19,7 +19,7 @@ capabilities:
   arp: {command: show ip arp, parser: generic_arp}
   mac: {command: show mac address-table, parser: generic_mac}
   vlan: {command: show vlan brief, parser: null}
-  lag: {command: show etherchannel summary, parser: null}
+  lag: {command: show etherchannel summary, parser: generic_lag}
   routes: {command: show ip route, timeout: 300, parser: template_routes}
   vrfs: {command: show vrf, parser: null}
   vrrp: {command: show vrrp, parser: generic_vrrp}

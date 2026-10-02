@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
+import re
 from urllib.parse import quote
 
 from ..collectors.ifname import normalize_ifname
@@ -44,6 +45,17 @@ def _components(pairs):
     return {member: find(member) for member in parent}
 
 
+_MAC = re.compile(r"[0-9a-f]{2}(?::[0-9a-f]{2}){5}")
+
+
+def _is_ip(value):
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return True
+
+
 def _uri(value):
     return quote(str(value), safe="-._~:")
 
@@ -70,6 +82,7 @@ class _Topology:
         self.advertised_identity()
         self.by_chassis = {c: k for k, c in self.chassis.items()}
         self.l2_nodes = {}
+        self.management = {}  # chassis -> addresses it is managed or advertised by
         self.host_ips = {}
 
     def advertised_identity(self):
@@ -138,23 +151,35 @@ class _Topology:
         shared segment (a hub); otherwise placing it would join separate links.
         Virtual router MACs are gateways, not hosts.
         """
-        found, hosts = [], {}
+        found, hosts, bundles = [], {}, {}
         managed_macs = {c for c in self.chassis.values() if not c.startswith("target:")}
         for key, facts in self.devices.items():
             me = self.chassis[key]
+            for rec in facts.get("lag", []):
+                bundles[("port", me, rec["ifname"])] = [("port", me, m) for m in rec["members"]]
             platform = facts.get("platform", "")
             lldp_ports = {rec["local_if"] for rec in facts.get("lldp", [])}
-            # An aggregate's LLDP is reported on its members; what it learns is behind a peer.
-            lldp_ports |= {
-                rec["port"]
-                for rec in facts.get("mac", [])
-                if normalize_ifname(rec["port"], platform).kind == "lag"
-            }
+            # LLDP runs on an aggregate's members (RFC 8944 member-link-tp): what the
+            # aggregate learns is behind that peer. Without membership facts every
+            # aggregate is taken to face a peer rather than join separate links.
+            if "lag" in facts:
+                lldp_ports |= {
+                    rec["ifname"]
+                    for rec in facts["lag"]
+                    if any(member in lldp_ports for member in rec["members"])
+                }
+            else:
+                lldp_ports |= {
+                    rec["port"]
+                    for rec in facts.get("mac", [])
+                    if normalize_ifname(rec["port"], platform).kind == "lag"
+                }
             advertised = {}
             for rec in facts.get("lldp", []):
                 local, peer = rec["local_if"], rec["remote_chassis_id"]
                 port = self.remote_port(peer, rec["remote_port_id"], rec.get("remote_port_subtype"))
                 self.l2_node(peer, rec.get("remote_sysname"))
+                self.management.setdefault(peer, set()).update(rec.get("remote_mgmt_addresses", []))
                 for address in rec.get("remote_mgmt_addresses", []):
                     advertised[(local, address)] = ("port", peer, port)
                 found.append(
@@ -198,7 +223,13 @@ class _Topology:
                 continue  # a collected or advertised device's own interface, or a gateway
             members = seen["strong"]
             if not members and mac in self.host_ips:
-                if len({segment.get(member, member) for member, _ in seen["weak"]}) == 1:
+                # An aggregate sighting lies on each member's link, separate cables.
+                places = {
+                    segment.get(port, port)
+                    for member, _ in seen["weak"]
+                    for port in bundles.get(member, [member])
+                }
+                if len(places) == 1:
                     members = seen["weak"]
             for member, why in members:
                 found.append((member, ("nic", mac), why))
@@ -232,6 +263,35 @@ class _Topology:
                 attrs["encapsulation-type"] = L2T + "ethernet"
             tps.append({"tp-id": tp_id, L2T + "l2-termination-point-attributes": attrs})
 
+    def management_attributes(self):
+        """RFC 8944 l2-node-attributes: management-address is the address a device was
+        collected by plus those LLDP advertises for it; management-mac is an LLDP chassis
+        ID of the MAC subtype (the bridge base MAC)."""
+        for key, chassis in self.chassis.items():
+            if _is_ip(key):
+                self.management.setdefault(chassis, set()).add(key)
+        for chassis in {*self.chassis.values(), *self.management}:
+            node = self.l2_nodes.get(self.device_node(chassis))
+            if node is None:
+                continue
+            attrs = node.setdefault(L2T + "l2-node-attributes", {})
+            addresses = sorted(a for a in self.management.get(chassis, ()) if _is_ip(a))
+            if addresses:
+                attrs["management-address"] = addresses
+            if _MAC.fullmatch(chassis):
+                attrs["management-mac"] = chassis
+
+    def l2_lag(self, chassis, ifname, members):
+        """RFC 8944: the aggregate's TP is a lag whose member-link-tp are its member ports."""
+        for member in members:
+            self.l2_port(chassis, member)
+        self.l2_port(chassis, ifname)
+        tp_id = self.port_tp(ifname)
+        tp = next(t for t in self.l2_node(chassis)[NT + "termination-point"] if t["tp-id"] == tp_id)
+        attrs = tp[L2T + "l2-termination-point-attributes"]
+        attrs["lag"] = True
+        attrs["member-link-tp"] = [self.port_tp(member) for member in members]
+
     def platform_of(self, chassis):
         key = self.by_chassis.get(chassis)
         return self.devices[key].get("platform", "") if key else ""
@@ -244,6 +304,8 @@ class _Topology:
             for rec in facts.get("interfaces", []):
                 if rec.get("type") in L2_PORT_TYPES:
                     self.l2_port(me, rec["ifname"])
+            for rec in facts.get("lag", []):
+                self.l2_lag(me, rec["ifname"], rec["members"])
         segments = []
         for a, b, why in self.observations():
             for member in (a, b):
@@ -276,6 +338,7 @@ class _Topology:
             evidence[link_id] = sorted(why)
             for m in members:
                 link_of[m] = link_id
+        self.management_attributes()
         l2_nodes = dict(sorted(self.l2_nodes.items()))
         self.navigation(self.l2_net, l2_nodes, l2_links)
         networks = [self.network(self.l2_net, L2T + "l2-topology", l2_nodes, l2_links)]
