@@ -93,39 +93,39 @@ def parse(profile, outputs, complete=True):
 
 
 def rfc8345(graph):
-    """RFC 7951 JSON using the RFC 8345 base modules; no unregistered augments."""
+    """RFC 7951 JSON for a pre-SIMAP snapshot using only the RFC 8345 base modules.
+
+    Its stored IDs are bare hashes, but RFC 8345 types every ID as inet:uri, so the export
+    places them under the urn:netops:topology:<network>: prefix the SIMAP builder uses.
+    The stored snapshot is left as it is.
+    """
+    base = f"urn:netops:topology:{graph['network_id']}:"
+    node, tp, link = base + "node:", base + "tp:", base + "link:"
     return {
         "ietf-network:networks": {
             "network": [
                 {
-                    "network-id": graph["network_id"],
+                    "network-id": base + "lldp",
                     "network-types": graph.get("network_types", {}),
-                    "supporting-network": graph.get("supporting_networks", []),
                     "node": [
                         {
-                            "node-id": n["id"],
-                            "supporting-node": n.get("supporting_nodes", []),
+                            "node-id": node + n["id"],
                             "ietf-network-topology:termination-point": [
-                                {
-                                    "tp-id": tp["id"],
-                                    "supporting-termination-point": tp.get("supporting_tps", []),
-                                }
-                                for tp in n["tps"]
+                                {"tp-id": tp + t["id"]} for t in n["tps"]
                             ],
                         }
                         for n in graph["nodes"]
                     ],
                     "ietf-network-topology:link": [
                         {
-                            "link-id": edge["id"],
-                            "supporting-link": edge.get("supporting_links", []),
+                            "link-id": link + edge["id"],
                             "source": {
-                                "source-node": edge["source"],
-                                "source-tp": edge["source_tp"],
+                                "source-node": node + edge["source"],
+                                "source-tp": tp + edge["source_tp"],
                             },
                             "destination": {
-                                "dest-node": edge["target"],
-                                "dest-tp": edge["target_tp"],
+                                "dest-node": node + edge["target"],
+                                "dest-tp": tp + edge["target_tp"],
                             },
                         }
                         for edge in graph["links"]

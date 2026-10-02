@@ -126,4 +126,15 @@ def test_pre_simap_snapshot_export_still_validates():
             }
         ],
     }
-    model().from_raw(rfc8345(legacy)).validate()
+    exported = rfc8345(legacy)
+    model().from_raw(exported).validate()
+    (network,) = exported["ietf-network:networks"]["network"]
+    assert network["network-id"] == "urn:netops:topology:lab-network:lldp"
+    tps = {
+        (node["node-id"], tp["tp-id"])
+        for node in network["node"]
+        for tp in node["ietf-network-topology:termination-point"]
+    }
+    (link,) = network["ietf-network-topology:link"]
+    assert (link["source"]["source-node"], link["source"]["source-tp"]) in tps
+    assert (link["destination"]["dest-node"], link["destination"]["dest-tp"]) in tps
