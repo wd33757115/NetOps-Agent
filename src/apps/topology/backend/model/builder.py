@@ -276,34 +276,38 @@ class _Topology:
             evidence[link_id] = sorted(why)
             for m in members:
                 link_of[m] = link_id
-        l3_nodes, l3_links = self.layer3(link_of, evidence)
         l2_nodes = dict(sorted(self.l2_nodes.items()))
-        for net, nodes, links in (
-            (self.l2_net, l2_nodes, l2_links),
-            (self.l3_net, l3_nodes, l3_links),
-        ):
-            self.navigation(net, nodes, links)
-        return {
-            "ietf-network:networks": {
-                "network": [
-                    self.network(self.l2_net, L2T + "l2-topology", l2_nodes, l2_links),
-                    self.network(
-                        self.l3_net,
-                        L3T + "l3-unicast-topology",
-                        l3_nodes,
-                        l3_links,
-                        {"supporting-network": [{"network-ref": self.l2_net}]},
-                    ),
-                ]
-            }
-        }, evidence
+        self.navigation(self.l2_net, l2_nodes, l2_links)
+        networks = [self.network(self.l2_net, L2T + "l2-topology", l2_nodes, l2_links)]
+        layers = self.layer3(link_of, evidence)
+        for vrf in ["default", *sorted(v for v in layers if v != "default")]:
+            nodes, links = layers.get(vrf, ({}, []))
+            network_id = self.l3_network(vrf)
+            self.navigation(network_id, nodes, links)
+            extra = {"supporting-network": [{"network-ref": self.l2_net}]}
+            if vrf != "default":
+                extra[L3T + "l3-topology-attributes"] = {"name": vrf}
+            networks.append(
+                self.network(network_id, L3T + "l3-unicast-topology", nodes, links, extra)
+            )
+        return {"ietf-network:networks": {"network": networks}}, evidence
+
+    def l3_network(self, vrf):
+        return self.l3_net if vrf == "default" else f"{self.l3_net}:{_uri(vrf)}"
 
     def layer3(self, link_of, evidence):
-        nodes, subnets = {}, {}
+        """One L3 network per VRF, each supported by the L2 network: {vrf: (nodes, links)}.
+
+        A VRF is its own entry in the network list (RFC 8345 §3 Figure 3, RFC 9375 §4.2),
+        so its routing state correlates to its own topology (SIMAP REQ-CONTROL-PLANE).
+        Every collected device is a node of the default network; of a VRF's network only
+        where it has addresses in that VRF.
+        """
+        nodes, subnets = {"default": {}}, {}
         for key, facts in sorted(self.devices.items()):
             me = self.chassis[key]
             platform = facts.get("platform", "")
-            tps, prefixes = [], []
+            tps, prefixes = {"default": []}, {"default": []}
             for rec in sorted(facts.get("ip", []), key=lambda r: r["ifname"]):
                 vrf = rec.get("vrf", "default")
                 address = ipaddress.ip_interface(f"{rec['address']}/{rec['prefix_len']}")
@@ -330,28 +334,36 @@ class _Topology:
                         {"network-ref": self.l2_net, "node-ref": n, "tp-ref": t}
                         for n, t in sorted(self.ref(c) for c in carriers)
                     ]
-                tps.append(tp)
-                prefixes.append({"prefix": str(address.network)})
+                tps.setdefault(vrf, []).append(tp)
+                prefixes.setdefault(vrf, []).append({"prefix": str(address.network)})
                 if address.network.prefixlen < address.max_prefixlen:
                     subnets.setdefault((vrf, address.network), []).append(
                         ((self.device_node(me), self.port_tp(rec["ifname"])), carriers)
                     )
             node_id = self.device_node(me)
-            nodes[node_id] = {
-                "node-id": node_id,
-                "supporting-node": [{"network-ref": self.l2_net, "node-ref": node_id}],
-                L3T + "l3-node-attributes": {"prefix": prefixes},
-                NT + "termination-point": tps,
-            }
+            for vrf in tps:
+                nodes.setdefault(vrf, {})[node_id] = {
+                    "node-id": node_id,
+                    "supporting-node": [{"network-ref": self.l2_net, "node-ref": node_id}],
+                    L3T + "l3-node-attributes": {"prefix": prefixes[vrf]},
+                    NT + "termination-point": tps[vrf],
+                }
         for mac, addresses in sorted(self.host_ips.items()):
             nic = ("nic", mac)
             if nic not in link_of:
                 continue  # no L2 attachment evidence for this host
             node_id = self.host_node(mac)
-            tps = []
             for vrf, ip in sorted(addresses):
                 tp_id = self.base + "ip:" + ip
-                tps.append(
+                node = nodes.setdefault(vrf, {}).setdefault(
+                    node_id,
+                    {
+                        "node-id": node_id,
+                        "supporting-node": [{"network-ref": self.l2_net, "node-ref": node_id}],
+                        NT + "termination-point": [],
+                    },
+                )
+                node[NT + "termination-point"].append(
                     {
                         "tp-id": tp_id,
                         L3T + "l3-termination-point-attributes": {"ip-address": [ip]},
@@ -367,27 +379,23 @@ class _Topology:
                 for (net_vrf, network), members in subnets.items():
                     if net_vrf == vrf and ipaddress.ip_address(ip) in network:
                         members.append(((node_id, tp_id), {nic}))
-            nodes[node_id] = {
-                "node-id": node_id,
-                "supporting-node": [{"network-ref": self.l2_net, "node-ref": node_id}],
-                NT + "termination-point": tps,
-            }
-        links = []
+        links = {}
         for (vrf, network), members in sorted(subnets.items(), key=lambda s: str(s[0])):
             refs = sorted({ref for ref, _ in members})
             if len(refs) < 2:
                 continue
+            # Link IDs keep the VRF: one subnet may exist in several VRFs, evidence is shared.
             scope = "" if vrf == "default" else _uri(vrf) + ":"
             link_id = self.base + "l3-link:" + scope + str(network)
-            link = self.link(self.l3_net, link_id, refs)
+            link = self.link(self.l3_network(vrf), link_id, refs)
             supporting = sorted({link_of[c] for _, cs in members for c in cs if c in link_of})
             if supporting:
                 link["supporting-link"] = [
                     {"network-ref": self.l2_net, "link-ref": ref} for ref in supporting
                 ]
-            links.append(link)
+            links.setdefault(vrf, []).append(link)
             evidence[link_id] = [f"subnet {vrf} {network}"]
-        return dict(sorted(nodes.items())), links
+        return {vrf: (dict(sorted(n.items())), links.get(vrf, [])) for vrf, n in nodes.items()}
 
     @staticmethod
     def link(network, link_id, refs):

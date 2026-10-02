@@ -17,13 +17,19 @@ def _network(tree, network_type):
 def canvas(tree, evidence, collected, base):
     """collected: {node-id: {"address", "evidence_id", "observed_at"}} for collected devices."""
     l2 = _network(tree, L2T + "l2-topology")
-    l3 = _network(tree, L3T + "l3-unicast-topology")
-    l3_nodes = {n["node-id"]: n for n in l3["node"]}
-    carried = {}
-    for link in l3.get(NT + "link", []):
-        subnet = link["link-id"].removeprefix(base + "l3-link:")
-        for ref in link.get("supporting-link", []):
-            carried.setdefault(ref["link-ref"], []).append(subnet)
+    # One L3 network per VRF; a VRF's addresses are shown with its name.
+    l3_tps, carried = {}, {}
+    for l3 in tree["ietf-network:networks"]["network"]:
+        if L3T + "l3-unicast-topology" not in l3["network-types"]:
+            continue
+        vrf = l3.get(L3T + "l3-topology-attributes", {}).get("name")
+        for node in l3["node"]:
+            for tp in node.get(NT + "termination-point", []):
+                l3_tps.setdefault(node["node-id"], []).append((vrf, tp))
+        for link in l3.get(NT + "link", []):
+            subnet = link["link-id"].removeprefix(base + "l3-link:")
+            for ref in link.get("supporting-link", []):
+                carried.setdefault(ref["link-ref"], []).append(subnet)
     nodes, links = [], []
     for node in l2["node"]:
         node_id = node["node-id"]
@@ -34,8 +40,8 @@ def canvas(tree, evidence, collected, base):
                 {"id": tp["tp-id"], "name": attrs.get("interface-name") or attrs.get("mac-address")}
             )
         addresses = [
-            " ".join(filter(None, (tp.get(ST + "name"), ip)))
-            for tp in l3_nodes.get(node_id, {}).get(NT + "termination-point", [])
+            " ".join(filter(None, (vrf, tp.get(ST + "name"), ip)))
+            for vrf, tp in l3_tps.get(node_id, [])
             for ip in tp.get(L3T + "l3-termination-point-attributes", {}).get("ip-address", [])
         ]
         item = {"id": node_id, "tps": tps, "addresses": addresses, "freshness": "observed"}

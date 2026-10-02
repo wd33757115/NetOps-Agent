@@ -1030,7 +1030,8 @@ P2-9 根据 Q5 取消，不引入 SNMP。P3 及后续仍在进入阶段时展开
 - 采样：`collect_lab_samples.py` 按 SSH 横幅区分 Comware/IOS；批次 `20261003-001138` 经 `import_lab_fixtures.py --lab campus-wan` 秘密扫描后入库 `tests/fixtures/topology/campus-wan/`（169 文件，不含设备配置），`expected.json` 为实际接线。
 - 平台首轮发现暴露并已修复：Cisco 短名 `Et`/`Vl` 不被识别（LLDP 判失败致整台失败）；`show interfaces description`、`show ip interface` 块格式、IOS 路由表（NTC 模板 + 逐行覆盖校验，保留递归下一跳与 ECMP）、IOS 空 ARP 输出、`Total Mac Addresses` 条数行。建模：IOS 无本机 LLDP 命令时，以邻居 LLDP 通告的、属于该设备自身地址的管理地址认定其机箱（仅一一对应）；VRRP/HSRP 虚拟 MAC（RFC 5798 §7.3、RFC 2281）不作终端；聚合口上学到的 MAC 与 LLDP 口同为弱证据；只有弱证据的 MAC 须有 IP 且全部位于同一 LLDP 网段才放置；对端端口子类型缺省时按对端平台接口名规范化；单端口后有多台终端时定位为共享网段。
 - 结果：拓扑 App 0.4.8 已部署，平台发现 8 台全部成功，L2 16 节点/23 链路（16 根设备间网线与实际接线一一对应），L3 16 段；`test_topology_campus_wan.py` 15 项、拓扑相关 465 项通过。
-- 负责人要求建模优先采纳 IETF 标准；对照结论与后续设计（LAG 按 RFC 8944 `lag`/`member-link-tp`、VRRP 按 RFC 8347、递归下一跳按 RFC 8349 语义、VRF 表示）待确认后实施。
+- 负责人要求建模优先采纳 IETF 标准（第一任务）。VRF 表示已按标准落地：每个 VRF 是网络列表中的独立三层网络（RFC 8345 §3 图 3 的 VPN 拓扑叠加、RFC 9375 §4.2“separate entries in the network list”、SIMAP 概念 -13 REQ-CONTROL-PLANE 要求叠加层路由状态对应叠加层三层拓扑；设备侧为 RFC 8529 网络实例）。VRF-lite 由二层网络支撑，网络名用 RFC 8346 `l3-topology-attributes/name`；默认 VRF 网络 ID 不变，三层链路 ID 保留 VRF 前缀以免证据键冲突；画布汇总所有三层网络，VRF 地址带 VRF 名。园区网导出（L2 16/23、L3 16/15、L3:MGMT 6/1）通过冻结 YANG 模块校验（yangson 1.6.3 置于 `.runtime/p0-2/yang-deps`，未改 venv）；拓扑 App 0.4.9 已部署并实测。同时发现 `test_pre_simap_snapshot_export_still_validates` 在装有 yangson 时失败（旧格式导出 network-id `lab-network` 不是 URI），为原有问题，此前因缺 yangson 一直跳过。
+- 其余按标准实施，顺序：VRRP 按 RFC 8347（实例/状态/`last-adv-source`）与 RFC 5798 虚拟 MAC；递归下一跳按 RFC 8349 只有地址的简单下一跳语义在本机 RIB 解析；LAG 按 RFC 8944 `lag`/`member-link-tp`；节点 `management-address`/`management-mac`（RFC 8944）。STP 端口状态在 RFC 8944/IEEE 802.1Q 拓扑模型中无对应，暂作设备事实。
 
 ### 2026-10-02 会话级模型与思考强度（完成此前记下的后续计划 1）
 

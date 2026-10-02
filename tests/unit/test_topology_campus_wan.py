@@ -13,6 +13,7 @@ from src.apps.topology.backend.collectors.identify import Identity
 from src.apps.topology.backend.collectors.parse import parse
 from src.apps.topology.backend.model.builder import (
     L2T,
+    L3T,
     NT,
     ST,
     VIRTUAL_ROUTER_MACS,
@@ -143,8 +144,24 @@ def test_endpoints_attach_where_the_lab_wired_them(devices, ip):
 
 
 def test_l3_subnets(l2):
-    links = l2[1][NT + "link"]
+    links = [link for network in l2[1:] for link in network[NT + "link"]]
     assert {link["link-id"].rsplit("l3-link:", 1)[-1] for link in links} == set(EXPECTED["subnets"])
+
+
+def test_each_vrf_is_its_own_l3_network_over_l2(l2):
+    # RFC 8345 §3 / RFC 9375 §4.2: a VRF is a separate entry in the network list.
+    default, mgmt = l2[1], l2[2]
+    assert mgmt["network-id"] == default["network-id"] + ":MGMT"
+    assert mgmt[L3T + "l3-topology-attributes"] == {"name": "MGMT"}
+    for network in (default, mgmt):
+        assert network["supporting-network"] == [{"network-ref": l2[0]["network-id"]}]
+    names = {n["node-id"]: n.get(L2T + "l2-node-attributes", {}).get("name") for n in l2[0]["node"]}
+    assert sorted(names[n["node-id"]] for n in mgmt["node"]) == sorted(
+        d["name"] for d in EXPECTED["devices"].values() if d["platform"] == "ios"
+    )
+    assert [link["link-id"].rsplit("l3-link:", 1)[-1] for link in mgmt[NT + "link"]] == [
+        "MGMT:10.10.1.0/24"
+    ]
 
 
 def test_ios_route_table_with_an_unknown_line_is_rejected():
@@ -164,3 +181,12 @@ def test_ios_address_line_in_an_unknown_phrasing_is_not_dropped_silently():
     outcome = parse(IDENTITY["ios"], "ip", odd)
     assert outcome.status == "partial"
     assert any(w.endswith("unrecognized_address_line") for w in outcome.warnings)
+
+
+def test_export_validates_against_the_frozen_yang_modules(devices):
+    yangson = pytest.importorskip("yangson", reason="Install tests/topology-requirements.txt")
+    content = pytest.importorskip("yangson.enumerations").ContentType.all
+    root = FIXTURES.parents[3] / "src/apps/topology/resources/yang"
+    model = yangson.DataModel((root / "library.json").read_text(), [str(root)])
+    tree, _ = build_topology(devices, "urn:netops:topology:campus:")
+    model.from_raw(tree).validate(ctype=content)
