@@ -17,6 +17,7 @@ from .workspace import DocumentWorkspace
 
 RUN = "device_access__run"
 COMPARE = "device_access__compare_baseline"
+ROWS = "device_access__compare_rows"
 BASELINE = "inspection__read_baseline"
 SCOPE_TOOLS = frozenset({"topology__trace_path", "topology__locate"})
 PLATFORMS = frozenset({"comware", "nxos", "ios", "vrp"})
@@ -47,19 +48,24 @@ class DiagnosticWorkspace(DocumentWorkspace):
 
     def definitions(self):
         definitions = super().definitions()
-        available = registry.available_tools(actor_id=self.actor_id, names={RUN, COMPARE, BASELINE})
+        available = registry.available_tools(
+            actor_id=self.actor_id, names={RUN, COMPARE, ROWS, BASELINE}
+        )
         has_baseline = any(tool["name"] == BASELINE for tool in available)
         extra = [tool for tool in available if tool["name"] == RUN
-                 or (tool["name"] == COMPARE and has_baseline)]
+                 or (tool["name"] in {COMPARE, ROWS} and has_baseline)]
         for tool in extra:
             schema = tool["input_schema"]
             for field in SERVER_FIELDS:
                 schema["properties"].pop(field, None)
                 if field in schema.get("required", []):
                     schema["required"].remove(field)
+            scope = "本轮 topology__trace_path 或 topology__locate 结果中出现的"
             tool["description"] += (
-                f"。只能登录本轮 topology__trace_path 或 topology__locate 结果中出现的已采集设备，"
-                f"每轮最多 {MAX_DEVICES} 台、共 {MAX_COMMANDS} 条命令（基线对比每台设备计 1 条）"
+                f"。只查{scope}设备，不登录设备，不占命令预算"
+                if tool["name"] == ROWS
+                else f"。只能登录{scope}已采集设备，每轮最多 {MAX_DEVICES} 台、"
+                f"共 {MAX_COMMANDS} 条命令（基线对比每台设备计 1 条）"
             )
         return definitions + extra
 
@@ -72,6 +78,8 @@ class DiagnosticWorkspace(DocumentWorkspace):
                     self.scope.setdefault(device["address"], device["platform"])
 
     def invoke(self, name, arguments):
+        if name == ROWS:
+            return self.rows(arguments)
         if name not in {RUN, COMPARE}:
             result = super().invoke(name, arguments)
             if name in SCOPE_TOOLS:
@@ -121,4 +129,30 @@ class DiagnosticWorkspace(DocumentWorkspace):
             "citation": reference["citation"],
             "retrieved_at": reference["retrieved_at"],
             "notice": "本轮只读命令的现场观测；未执行的命令不能作为证据，登录失败不得重试。",
+        }
+
+    def rows(self, arguments):
+        """Look rows up in this turn's reads of a scoped device; no login, no budget."""
+        self.check()
+        if set(arguments) - {"host", "command", "match", "limit"}:
+            raise PermissionError("Turn is filled by the server")
+        try:
+            host = str(ipaddress.ip_address(str(arguments.get("host", "")).strip()))
+        except ValueError:
+            raise PermissionError("需要设备管理地址") from None
+        with self.lock:
+            if host not in self.scope:
+                raise PermissionError(f"{host} 不在本轮路径计算或终端定位的结果中")
+        result = in_beijing(
+            registry.invoke(
+                ROWS, {**arguments, "host": host, "turn_id": self.run_id}, actor_id=self.actor_id
+            )
+        )
+        reference = evidence.capture(ROWS, result)
+        self.business_evidence[reference["id"]] = reference
+        return {
+            "data": result,
+            "citation": reference["citation"],
+            "retrieved_at": reference["retrieved_at"],
+            "notice": "按关键词查到的基线与本轮已读取的现场内容；没有再次登录设备。",
         }

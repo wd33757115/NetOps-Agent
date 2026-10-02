@@ -23,16 +23,32 @@ def test_a_stripped_baseline_matches_live_output_with_leading_indentation():
     assert compare_text(stored, live)["status"] == "unchanged"
 
 
-def test_removed_and_changed_routes_are_named_line_by_line():
+def test_routes_are_compared_by_entry_naming_what_changed():
     live = ROUTES.replace(
         "1.1.1.0/24         O_INTRA 10  2           2.2.2.1         GE2/0",
         "1.1.1.0/24         Static  5   0           0.0.0.0         NULL0",
     ).replace("192.168.1.0/24     Direct  0   0           192.168.1.1     Vlan200\r\r\n", "")
-    result = compare_text(ROUTES, live)
+    result = compare_text(ROUTES, live, command="display ip routing-table")
     assert result["status"] == "changed"
-    assert result["removed_count"] == 2 and result["added_count"] == 1
-    assert "+1.1.1.0/24         Static  5   0           0.0.0.0         NULL0" in result["diff"]
-    assert "-192.168.1.0/24     Direct  0   0           192.168.1.1     Vlan200" in result["diff"]
+    assert (result["removed_count"], result["added_count"], result["changed_rows"]) == (1, 0, 1)
+    [table] = result["tables"]
+    assert table["removed"]["examples"] == [
+        "192.168.1.0/24 | Direct | 0 | 0 | 192.168.1.1 | Vlan200"
+    ]
+    changed = table["changed"]
+    assert set(changed["columns"]) == {"Proto", "Pre", "Cost", "NextHop", "Interface"}
+    assert changed["columns"]["Proto"]["examples"] == ["O_INTRA→Static"]
+    assert changed["examples"][0].startswith("1.1.1.0/24：Proto O_INTRA→Static")
+    # The table is not repeated as text lines.
+    assert result["diff"] == []
+
+
+def test_configuration_is_compared_as_text_not_tables():
+    config = "#\nsysname R1\n#\ninterface GE1/0\n ip address 10.0.0.1 255.255.255.0\n#\n"
+    result = compare_text(config, config.replace("10.0.0.1", "10.0.0.9"),
+                          command="display current-configuration")
+    assert result["tables"] == [] and result["changed_rows"] == 0
+    assert "+ ip address 10.0.0.9 255.255.255.0" in result["diff"]
 
 
 def test_every_line_is_compared_as_collected():
@@ -50,8 +66,8 @@ def test_every_line_is_compared_as_collected():
     rekeyed = compare_text(after, after.replace("EXAMPLE-KEY", "OTHER-KEY"))
     assert rekeyed["added_count"] == rekeyed["removed_count"] == 1
     assert set(result) == {
-        "status", "added_count", "removed_count", "baseline_lines", "current_lines",
-        "diff", "diff_truncated",
+        "status", "added_count", "removed_count", "changed_rows", "tables",
+        "unchanged_tables", "baseline_lines", "current_lines", "diff", "diff_truncated",
     }
 
 

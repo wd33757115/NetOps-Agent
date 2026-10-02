@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -99,6 +100,7 @@ def world(monkeypatch):
                 output=self.output if ran else "",
                 output_complete=True,
                 failure_code=None,
+                finished_at=datetime(2026, 10, 2, 8, 0, tzinfo=timezone.utc),
             )
 
         def close(self):
@@ -269,12 +271,12 @@ def test_diagnosis_runs_read_only_commands_and_never_sends_the_rest(world):
     assert view["login"] == "succeeded"
     status = {c["command"]: (c.get("policy_level"), c["status"]) for c in view["commands"]}
     assert status["display ip routing-table"] == ("L1", "succeeded")
-    assert status["display current-configuration"] == ("L1", "not_executed")
+    # Configuration views run like other reads (owner, 2026-10-02); policy decides the rest.
+    assert status["display current-configuration"] == ("L1", "succeeded")
     assert status["debugging ospf event"] == ("L3", "not_executed")
     assert status["system-view"][1] == "not_executed"
     assert status["ping -c 2 192.168.1.2"][0] == "L2"
-    # A configuration dump never reaches the session; the policy decides the rest there.
-    assert "display current-configuration" not in world.sent
+    assert "display current-configuration" in world.sent
     routes = next(c for c in view["commands"] if c["command"] == "display ip routing-table")
     assert routes["output"] == "output" and routes["evidence_ref"].startswith("device-access:audit")
 
@@ -287,14 +289,21 @@ def test_diagnosis_login_failure_is_reported_once_and_not_retried(world):
     assert len(world.opened) == 1 and "secret" not in repr(view)
 
 
-def test_diagnosis_bounds_output_and_skips_login_for_dumps_only(world):
+def test_diagnosis_excerpts_long_output_and_keeps_it_whole_for_the_turn(world):
+    from src.apps.device_access.backend import live_outputs
+
     saved.save_default("u", Login(username="admin", password="default-secret"))
     # Bytes, not characters: interface descriptions may be Chinese.
     world.handle.output = "接口描述" * diagnosis.EXCERPT_BYTES
     [item] = diagnosis.run("u", "10.0.0.2", "comware", ["display arp"], "看 ARP", "t")["commands"]
     assert len(item["output"].encode()) <= diagnosis.EXCERPT_BYTES and item["output_truncated"]
-    view = diagnosis.run("u", "10.0.0.2", "comware", ["display this"], "看配置", "t")
-    assert view["login"] == "not_needed" and len(world.opened) == 1
+    assert "compare_rows" in item["note"]
+    assert live_outputs.get("t", "10.0.0.2", "display  ARP")[0] == world.handle.output
+    # Configuration views run like any other read (owner, 2026-10-02).
+    [config] = diagnosis.run(
+        "u", "10.0.0.2", "comware", ["display current-configuration"], "看配置", "t"
+    )["commands"]
+    assert config["status"] == "succeeded" and len(world.opened) == 2
 
 
 def test_terminal_ticket_is_one_time_and_bound_to_its_operation(world):
@@ -513,3 +522,16 @@ def test_comparison_requires_authorized_baseline_provider_and_hides_internal_fie
         assert not hidden & set(offered[0]["input_schema"]["properties"])
         assert not hidden & set(offered[0]["input_schema"]["required"])
         assert set(offered[0]["input_schema"]["properties"]) == {"hosts", "purpose"}
+
+
+def test_row_lookups_stay_in_scope_but_need_no_login_or_budget(workspace):
+    space = workspace.space
+    query = {"host": "10.0.0.1", "command": "display arp", "match": "GE2/0"}
+    with pytest.raises(PermissionError, match="不在本轮"):
+        space.invoke("device_access__compare_rows", query)
+    space.invoke("topology__trace_path", {})
+    with pytest.raises(PermissionError):
+        space.invoke("device_access__compare_rows", {**query, "turn_id": "another"})
+    result = space.invoke("device_access__compare_rows", query)
+    assert result["citation"] and space.commands == 0
+    assert workspace.calls[-1] == ("device_access__compare_rows", {**query, "turn_id": "turn-1"})

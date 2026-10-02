@@ -1,4 +1,4 @@
-catalog_version: 14
+catalog_version: 15
 defaults:
   check_item:
     freshness_policy:
@@ -4160,6 +4160,60 @@ check_items:
     expected_count: 1
     require_rule_evaluation: false
   status: active
+- id: network.routing_statistics_text
+  version: 1
+  name: 路由统计原文
+  category: network
+  description: 保存未解析的统计原文作为诊断基线；大表不整表对比时，先对比这些数量。
+  result_mode: evidence_only
+  assessment_mode: evidence
+  canonical_contract:
+    entity_type: device_command_output
+    identity_dimensions:
+    - device_id
+  report_projection: auto@1
+  applicability: {}
+  coverage_policy:
+    model: fixed
+    expected_count: 1
+    require_rule_evaluation: false
+  status: active
+- id: network.arp_count_text
+  version: 1
+  name: ARP 条目数原文
+  category: network
+  description: 保存未解析的统计原文作为诊断基线；大表不整表对比时，先对比这些数量。
+  result_mode: evidence_only
+  assessment_mode: evidence
+  canonical_contract:
+    entity_type: device_command_output
+    identity_dimensions:
+    - device_id
+  report_projection: auto@1
+  applicability: {}
+  coverage_policy:
+    model: fixed
+    expected_count: 1
+    require_rule_evaluation: false
+  status: active
+- id: network.mac_count_text
+  version: 1
+  name: MAC 条目数原文
+  category: network
+  description: 保存未解析的统计原文作为诊断基线；大表不整表对比时，先对比这些数量。
+  result_mode: evidence_only
+  assessment_mode: evidence
+  canonical_contract:
+    entity_type: device_command_output
+    identity_dimensions:
+    - device_id
+  report_projection: auto@1
+  applicability: {}
+  coverage_policy:
+    model: fixed
+    expected_count: 1
+    require_rule_evaluation: false
+  status: active
 implementations:
 - id: h3c-device-version
   version: 2
@@ -4572,6 +4626,51 @@ implementations:
     vendor: H3C
   commands:
   - command: display lldp neighbor-information list
+    priority: 100
+  collector: cli
+  parser_requirement: evidence_only
+  template_scope: null
+  selection_priority: 100
+  status: active
+- id: h3c-routing-statistics-text
+  version: 1
+  name: H3C display ip routing-table statistics raw text
+  check_item_ids:
+  - network.routing_statistics_text
+  match:
+    vendor: H3C
+  commands:
+  - command: display ip routing-table statistics
+    priority: 100
+  collector: cli
+  parser_requirement: evidence_only
+  template_scope: null
+  selection_priority: 100
+  status: active
+- id: h3c-arp-count-text
+  version: 1
+  name: H3C display arp count raw text
+  check_item_ids:
+  - network.arp_count_text
+  match:
+    vendor: H3C
+  commands:
+  - command: display arp count
+    priority: 100
+  collector: cli
+  parser_requirement: evidence_only
+  template_scope: null
+  selection_priority: 100
+  status: active
+- id: h3c-mac-count-text
+  version: 1
+  name: H3C display mac-address count raw text
+  check_item_ids:
+  - network.mac_count_text
+  match:
+    vendor: H3C
+  commands:
+  - command: display mac-address count
     priority: 100
   collector: cli
   parser_requirement: evidence_only

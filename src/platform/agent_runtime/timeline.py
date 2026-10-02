@@ -7,6 +7,7 @@ a model. The same data can feed the chat page's execution view later.
 
 import difflib
 import json
+from collections import Counter
 from pathlib import Path
 
 from .session_store import key
@@ -117,14 +118,30 @@ def _items(data):
 
 
 def _baseline(data):
-    """Each device's summary line, then the diff lines of whatever changed."""
+    """Each device's summary line, then table summaries and diff lines of what changed."""
     rows = list(data.get("summary", []))
     for device in data.get("devices", []):
         for item in device.get("commands", []):
             changed = [line for line in item.get("diff", []) if line[:1] in "+-@"]
-            if changed:
+            tables = [table.get("summary", "") for table in item.get("tables", [])]
+            if changed or tables:
                 rows.append(f"{device.get('host')} {item.get('command')}：")
+                rows += [f"  {summary}" for summary in tables]
                 rows += changed[:8] + (["…"] if len(changed) > 8 else [])
+    return "\n".join(rows)
+
+
+def _rows(data):
+    """What a lookup found: entries by status, sections by name."""
+    rows = [f"{data.get('command')} 查「{data.get('match')}」"]
+    for table in data.get("tables", []):
+        status = Counter(entry["status"] for entry in table.get("entries", []))
+        rows.append(
+            f"  表 {table['columns'][0]}：匹配 {table['matches']} 条（"
+            + "，".join(f"{name} {count}" for name, count in status.items()) + "）"
+        )
+    for section in data.get("sections", []):
+        rows.append(f"  段 {section['section']}：" + ("相同" if section.get("same") else "有差异"))
     return "\n".join(rows)
 
 
@@ -172,6 +189,7 @@ SUMMARIES = {
     "inspection__list_events": _items,
     "inspection__list_runs": _items,
     "device_access__compare_baseline": _baseline,
+    "device_access__compare_rows": _rows,
     "device_access__compare_config": _compare,
     "device_access__run": _run,
 }

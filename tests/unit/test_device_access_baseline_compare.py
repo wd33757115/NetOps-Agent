@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+from collections import OrderedDict
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -11,7 +12,7 @@ from fastapi import HTTPException
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from src.apps.device_access.backend import baseline_compare, diagnosis, service
+from src.apps.device_access.backend import baseline_compare, diagnosis, live_outputs, service
 from src.apps.device_access.backend.models import SessionAudit
 from src.apps.inspection.backend import config_baseline, diagnostics
 from src.infrastructure.db.models import CommandSnapshot, NetworkDevice, PatrolRun
@@ -106,6 +107,9 @@ def config_lab(tmp_path, monkeypatch):
         snapshot(db, "baseline-routes", HOST, ROUTES, ROUTE_TABLE)
     monkeypatch.setattr(config_baseline, "get_db_session", database)
     monkeypatch.setattr(diagnostics, "get_db_session", database)
+    # This turn's live reads are process-wide; every test starts without any.
+    monkeypatch.setattr(live_outputs, "_items", OrderedDict())
+    monkeypatch.setattr(live_outputs, "_size", 0)
     monkeypatch.setattr(service, "sessions", database)
     manifests = discover()
     monkeypatch.setattr(
@@ -200,7 +204,7 @@ def test_every_baseline_command_runs_in_one_session_and_only_diffs_return(
     assert config["added"] == config["removed"] == 1
     # One summary line per device names what changed; the scope is spelled out.
     assert result["summary"] == [
-        f"{HOST}：对比 2 条基线命令，1 条有变化（{COMMAND} +1 -1），1 条无变化"
+        f"{HOST}：对比 2 条基线命令，1 条有变化（{COMMAND} 文本 +1 -1 行），1 条无变化"
     ]
     assert "没列出的设备" in result["scope"]
     # Both sides in Beijing time with the gap spelled out; mixed offsets were once misread.
@@ -357,36 +361,93 @@ def test_every_host_needs_a_platform_from_the_server(config_lab):
         )
 
 
-@pytest.mark.parametrize(
-    "platform,command",
-    [
-        ("comware", "display CURRENT-CONFIGURATION"),
-        ("comware", "dis cur interface GigabitEthernet3/0"),
-        ("comware", "display SAV"),
-        ("comware", "display th"),
-        ("vrp", "display current"),
-        ("ios", "show RUN"),
-        ("nxos", "show START"),
-    ],
+REAL_ROUTES = (
+    "Destinations : 4\tRoutes : 4\n\n"
+    "Destination/Mask   Proto   Pre Cost        NextHop         Interface\n"
+    "2.2.2.0/24         Direct  0   0           2.2.2.1         GE2/0\n"
+    "4.4.4.4/32         O_INTRA 10  1           2.2.2.2         GE2/0\n"
+    "10.10.1.0/24       Direct  0   0           10.10.1.2       GE1/0\n"
+    "192.168.1.0/24     O_INTRA 10  2           2.2.2.2         GE2/0\n"
 )
-def test_generic_diagnosis_config_abbreviations_remain_blocked(
-    config_lab, monkeypatch, platform, command
-):
-    monkeypatch.setattr(diagnosis, "login_for", lambda *args: pytest.fail("resolved SSH login"))
-    result = diagnosis.run("alice", HOST, platform, [command], "检查", "generic-dump-test")
-    assert result["login"] == "not_needed"
-    assert result["commands"][0]["status"] == "not_executed"
-    assert config_lab.connects == 0
+OSPF_GONE = REAL_ROUTES.replace(
+    "4.4.4.4/32         O_INTRA 10  1           2.2.2.2         GE2/0\n", ""
+).replace("192.168.1.0/24     O_INTRA 10  2           2.2.2.2         GE2/0\n", "")
 
 
-@pytest.mark.parametrize(
-    "platform,command",
-    [
-        ("comware", "display ip routing-table"),
-        ("comware", "display interface brief"),
-        ("comware", "display clock"),
-        ("ios", "show ip route"),
-    ],
-)
-def test_generic_dump_gate_preserves_normal_read_commands(platform, command):
-    assert not diagnosis._dump(platform, command)
+def retext(lab, identifier, text):
+    with lab.database() as db:
+        row = db.get(CommandSnapshot, identifier)
+        row.raw_text, row.raw_text_hash = text, hashlib.sha256(text.encode()).hexdigest()
+
+
+def lookup(lab, command, match, turn="diagnosis-config-test"):
+    arguments = {"host": HOST, "command": command, "match": match, "turn_id": turn}
+    return registry.invoke("device_access__compare_rows", arguments, actor_id="alice")
+
+
+def test_tables_are_compared_by_entry_and_summarised(config_lab):
+    retext(config_lab, "baseline-routes", REAL_ROUTES)
+    config_lab.outputs[(HOST, ROUTES)] = OSPF_GONE
+    result = compare(config_lab)
+    routes = rows(result)[ROUTES]
+    [table] = routes["tables"]
+    assert table["key"] == ["Destination/Mask"] and table["rows"] == [4, 2]
+    assert table["removed"]["count"] == 2
+    assert "NextHop=2.2.2.2（2/2）" in table["removed"]["mostly"]
+    assert table["summary"].startswith("表 Destination/Mask 等 6 列，4→2 条：消失 2")
+    assert f"{ROUTES} 消失 2）" in result["summary"][0]
+
+
+def test_rows_are_looked_up_afterwards_without_logging_in(config_lab):
+    retext(config_lab, "baseline-routes", REAL_ROUTES)
+    config_lab.outputs[(HOST, ROUTES)] = OSPF_GONE
+    compare(config_lab)
+    connects = config_lab.connects
+    found = lookup(config_lab, ROUTES, "192.168.1")
+    [table] = found["tables"]
+    assert table["entries"] == [{
+        "baseline": "192.168.1.0/24 | O_INTRA | 10 | 2 | 2.2.2.2 | GE2/0",
+        "current": None,
+        "status": "only_baseline",
+    }]
+    assert found["current"]["command"] == ROUTES
+    # Configuration is searched by section, baseline beside current.
+    [section] = lookup(config_lab, COMMAND, "GigabitEthernet3/0")["sections"]
+    assert section["baseline"][1] == " port access vlan 100"
+    assert section["current"][1] == " port access vlan 200"
+    assert config_lab.connects == connects
+
+
+def test_a_large_table_is_looked_up_rather_than_read_whole(config_lab, monkeypatch):
+    big = REAL_ROUTES + "".join(
+        f"{f'10.{n // 256}.{n % 256}.0/24':<19}O_INTRA 10  2           2.2.2.2         GE2/0\n"
+        for n in range(baseline_compare.LARGE_LINES)
+    )
+    retext(config_lab, "baseline-routes", big)
+    result = compare(config_lab)
+    routes = rows(result)[ROUTES]
+    assert "large_table_not_read_live" in routes["quality_gaps"]
+    assert "compare_rows" in routes["note"]
+    assert ROUTES not in config_lab.sent
+    assert "1 张大表没有整表读取" in result["summary"][0]
+    # Baseline rows only, until a filtered live read exists ...
+    found = lookup(config_lab, ROUTES, "192.168.1.0/24")
+    assert found["current"] is None and "note" in found
+    assert found["tables"][0]["entries"][0]["status"] == "only_baseline"
+    # ... then the filtered read lines up with the full baseline by its header.
+    config_lab.outputs[(HOST, "display ip routing-table 192.168.1.0 24")] = (
+        "Summary count : 1\n\n"
+        "Destination/Mask   Proto   Pre Cost        NextHop         Interface\n"
+        "192.168.1.0/24     O_INTRA 10  20          2.2.2.2         GE2/0\n"
+    )
+    diagnosis.run(
+        "alice", HOST, "comware", ["display ip routing-table 192.168.1.0 24"], "查一条路由",
+        "diagnosis-config-test",
+    )
+    entry = lookup(config_lab, ROUTES, "192.168.1.0/24")["tables"][0]["entries"][0]
+    assert entry["status"] == "changed" and entry["changed"] == ["Cost"]
+
+
+def test_a_lookup_with_nothing_to_look_in_says_so(config_lab):
+    with pytest.raises(ValueError, match="没有这条命令的巡检基线"):
+        lookup(config_lab, "display version", "VSR")

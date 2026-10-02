@@ -210,3 +210,20 @@ def test_requests_show_each_round_once_then_only_what_changed(tmp_path):
     assert text.count(QUESTION) == 1
     assert "  → 调用 read {}" in text and "（共 2000 字" in text
     assert '"max_tokens": 8192' in text
+
+
+def test_a_row_lookup_reads_as_what_it_found():
+    result = {
+        "command": "display ip routing-table",
+        "match": "192.168.1",
+        "tables": [{
+            "columns": ["Destination/Mask", "Proto"], "matches": 2,
+            "entries": [{"status": "only_baseline"}, {"status": "changed"}],
+        }],
+        "sections": [{"section": "interface GigabitEthernet2/0", "same": True}],
+    }
+    assert summarize("device_access__compare_rows", json.dumps({"data": result})).splitlines() == [
+        "display ip routing-table 查「192.168.1」",
+        "  表 Destination/Mask：匹配 2 条（only_baseline 1，changed 1）",
+        "  段 interface GigabitEthernet2/0：相同",
+    ]

@@ -106,6 +106,9 @@ _ZH_CN_PRESENTATIONS = MappingProxyType(
                 ("network.mac_text", "MAC 地址表原文"),
                 ("network.vlan_text", "VLAN 原文"),
                 ("network.lldp_neighbor_text", "LLDP 邻居原文"),
+                ("network.routing_statistics_text", "路由统计原文"),
+                ("network.arp_count_text", "ARP 条目数原文"),
+                ("network.mac_count_text", "MAC 条目数原文"),
             )
         },
     }

@@ -3,7 +3,8 @@
 The caller (the assistant's diagnostic workspace) decides which devices a turn may
 reach; this module only logs in and runs commands through the platform session, so
 every command is classified (L1/L2 run, L3/L4 never) and every step is audited.
-Configuration dumps are not sent at all: their output can carry secrets.
+Each full output stays for this turn (live_outputs): the result carries an excerpt,
+and compare_rows finds the rows or configuration sections the model asks for.
 """
 
 from sqlalchemy import select
@@ -13,24 +14,19 @@ from src.platform.device_access.command_policy import classify
 from src.platform.device_access.contracts import DeviceAccessError
 from src.platform.device_access.sessions import SessionBudget
 
-from . import saved, service
+from . import live_outputs, saved, service
 from .models import SavedSession, now
 from .sessions import write_audit
 
-# Normalized command prefixes whose output is a configuration dump.
-CONFIG_DUMPS = {
-    "comware": ("display current-configuration", "display saved-configuration", "display this"),
-    "vrp": ("display current-configuration", "display saved-configuration", "display this"),
-    "ios": ("show running-config", "show startup-config"),
-    "nxos": ("show running-config", "show startup-config"),
-}
 # Five excerpts must fit the assistant's 24000-byte evidence snapshot, CJK included.
 EXCERPT_BYTES = 3000
 NOT_RUN = {
     "L3": "需要人工审批，本轮不执行",
     "L4": "不允许的命令（配置或危险操作），不执行",
-    "config": "配置导出可能包含密文，不执行；请用针对性的 display/show 命令",
 }
+EXCERPT_NOTE = (
+    "输出较长，这里是开头部分；完整输出已保留到本轮，可用 device_access__compare_rows 按关键词查"
+)
 # How each platform writes a bounded probe with a source address.
 PROBE_EXAMPLE = {
     "comware": "ping -a 源地址 -c 3 目标地址（选项写在目标地址之前）",
@@ -86,38 +82,11 @@ def login_for(owner, host):
     return port, username, password, device_name
 
 
-def _dump(platform, normalized):
-    tokens = normalized.casefold().split()
-    # Device CLIs accept unambiguous keyword prefixes and case variations. Do not
-    # let the generic command tool bypass the dedicated configuration-scope gate.
-    return any(
-        len(tokens) >= len(prefix.split())
-        and all(expected.startswith(actual) for actual, expected in zip(tokens, prefix.split()))
-        for prefix in CONFIG_DUMPS.get(platform, ())
-    )
-
-
 def run(owner, host, platform, commands, purpose, turn_id):
     """Log in once, run up to five commands, close. Never retries a failed login."""
     ref = f"diagnosis:{turn_id}:{host}"
     view = {"host": host, "platform": platform, "observed_at": now().isoformat(), "commands": []}
-    planned = []
-    for text in commands:
-        decision = classify(platform, text)
-        if decision.level in {"L1", "L2"} and _dump(platform, decision.normalized):
-            view["commands"].append(
-                {
-                    "command": text,
-                    "policy_level": decision.level,
-                    "status": "not_executed",
-                    "reason": NOT_RUN["config"],
-                }
-            )
-        else:
-            planned.append(text)
-    if not planned:
-        view["login"] = "not_needed"
-        return view
+    planned = list(commands)
     guard = service._guard(owner, "账号不能执行诊断登录")
     try:
         guard()
@@ -164,12 +133,17 @@ def run(owner, host, platform, commands, purpose, turn_id):
                     reason=why_not_run(platform, text, result.policy_level),
                 )
             else:
+                truncated = len(result.output.encode()) > EXCERPT_BYTES
                 item.update(
                     output=result.output.encode()[:EXCERPT_BYTES].decode(errors="ignore"),
-                    output_truncated=len(result.output.encode()) > EXCERPT_BYTES,
+                    output_truncated=truncated,
                     output_complete=result.output_complete,
                     failure_code=result.failure_code,
                 )
+                if result.output_complete and result.failure_code is None:
+                    live_outputs.keep(turn_id, host, text, result.output, result.finished_at)
+                    if truncated:
+                        item["note"] = EXCERPT_NOTE
             view["commands"].append(item)
             if result.execution_status == "failed":
                 break

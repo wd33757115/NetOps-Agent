@@ -39,21 +39,35 @@ def tool_view(result):
     return result
 
 
+def compare_rows(user, body):
+    return baseline_compare.rows(user.user_id, body)
+
+
 TOOLS = [
     Tool(
         "compare_baseline",
         "看设备和之前比变了什么：每台设备登录一次，把巡检为它保存的每条基线命令"
         "（配置、接口、路由表、OSPF 邻居、ARP、MAC、VLAN、LLDP 等，以实际保存的为准）"
-        "在现场原样执行一次，与基线原文逐行对比；返回每台设备的汇总和每条命令的差异行，"
-        "不回传整份输出，不接受任意命令，不自动重试",
+        "在现场原样执行一次再对比。表格按条目对比，给出每张表消失、新增、内容变化各多少，"
+        "多数条目共有的值（如同一个下一跳、接口）、哪几列变了和少量例子；配置等文本给差异行。"
+        "要看具体条目用 compare_rows；超大的表不整表读取。不接受任意命令，不自动重试",
         baseline_compare.CompareBaseline,
         compare_baseline,
         mutates=True,
     ),
     Tool(
+        "compare_rows",
+        "按关键词（前缀、地址、接口、VLAN、MAC、配置关键词等）查一条命令在基线和本轮现场的内容："
+        "表格条目按键对齐，标出只在基线、只在现场、哪几列变了；配置按段给出。现场一侧取自本轮"
+        "compare_baseline 或 run 已读取的输出（大表可先用 run 执行带过滤条件的命令），不登录设备",
+        baseline_compare.CompareRows,
+        compare_rows,
+    ),
+    Tool(
         "run",
-        "登录本轮路径计算或终端定位结果中出现的设备，执行只读 display/show 或有限 ping/tracert，"
-        "一次最多 5 条；配置导出、需审批和配置命令不会执行；每步写入审计，登录失败不自动重试",
+        "登录本轮路径计算或终端定位结果中出现的设备，执行只读 display/show（含配置查看）或有限的"
+        " ping/tracert，一次最多 5 条；需审批和配置命令不会执行。结果里是每条输出的开头部分，"
+        "完整输出保留到本轮，可用 compare_rows 按关键词查；每步写入审计，登录失败不自动重试",
         DiagnosisRun,
         run,
         mutates=True,

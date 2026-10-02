@@ -117,3 +117,5 @@ if ($failed) {
     exit 1
 }
 Write-ColorOutput "All checks passed. Open http://localhost:$ReactPort/chat in your browser." "Green"
+# An App's failed verification is a warning; its exit code must not leak out as ours.
+exit 0

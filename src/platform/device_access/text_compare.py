@@ -1,12 +1,15 @@
-"""Line-by-line text comparison of a retained baseline and a live read; no parsing.
+"""Comparison of a retained baseline and a live read of the same command.
 
 Both sides are cleaned the same way (escapes, carriage returns, trailing blanks,
-the command echo and the closing prompt) and every remaining line is compared,
-as collected: nothing is masked on either side.
+the command echo and the closing prompt), as collected: nothing is masked. Tables
+are compared entry by entry and summarised (text_table); every other line, such as
+configuration, is compared as a unified diff. No parser is written per command.
 """
 
 import difflib
 import re
+
+from . import text_table
 
 _ANSI = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))")
 # A bare device prompt: Comware/VRP <name> or [name], Cisco-style name# / name>.
@@ -71,15 +74,39 @@ def _with_sections(diff: list[str], old: list[str]) -> list[str]:
     return named
 
 
+def tabular(command: str) -> bool:
+    """Configuration is text, compared by line; everything else may hold tables."""
+    words = " ".join(command.lower().split())
+    return not any(
+        dump in words
+        for dump in ("current-configuration", "saved-configuration", "running-config",
+                     "startup-config", "display this")
+    )
+
+
 def compare_text(before: str, after: str, *, command: str = "") -> dict:
-    """Unified diff with one line of context; bounded, never silently empty."""
+    """Tables by entry (text_table), all other lines as a unified diff; bounded."""
     old, new = comparable_lines(before, command), comparable_lines(after, command)
-    diff = list(difflib.unified_diff(old, new, "baseline", "current", n=1, lineterm=""))[2:]
-    diff = _with_sections(diff, old)
+    pairs, rest_old, rest_new = (
+        text_table.pair_all(old, new) if tabular(command) else ([], old, new)
+    )
+    tables = [table for table in (text_table.compare(a, b) for a, b in pairs) if table]
+    diff = list(
+        difflib.unified_diff(rest_old, rest_new, "baseline", "current", n=1, lineterm="")
+    )[2:]
+    diff = _with_sections(diff, rest_old)
+    rows = {
+        label: sum(table.get(label, {}).get("count", 0) for table in tables)
+        for label in ("added", "removed", "changed")
+    }
     return {
-        "status": "changed" if diff else "unchanged",
-        "added_count": sum(line.startswith("+") for line in diff),
-        "removed_count": sum(line.startswith("-") for line in diff),
+        "status": "changed" if diff or tables else "unchanged",
+        # Table entries plus text lines; a table entry counts once however wide.
+        "added_count": rows["added"] + sum(line.startswith("+") for line in diff),
+        "removed_count": rows["removed"] + sum(line.startswith("-") for line in diff),
+        "changed_rows": rows["changed"],
+        "tables": tables,
+        "unchanged_tables": len(pairs) - len(tables),
         "baseline_lines": len(old),
         "current_lines": len(new),
         "diff": diff[:MAX_DIFF_LINES],

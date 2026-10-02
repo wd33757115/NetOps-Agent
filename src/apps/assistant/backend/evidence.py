@@ -16,6 +16,7 @@ def source_apps(reference):
     # compare_config is the earlier single-snapshot name, kept for recorded citations.
     if reference.get("tool") in {
         "device_access__compare_baseline",
+        "device_access__compare_rows",
         "device_access__compare_config",
     }:
         return ("device-access", "inspection")
