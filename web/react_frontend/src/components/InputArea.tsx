@@ -7,6 +7,7 @@ import { ArrowUpOutlined, CloseOutlined, PlusOutlined, FileTextOutlined } from '
 import { useChatStore } from '../store/useChatStore'
 import { chatApi } from '../services/api'
 import { useIsMobile } from '../hooks/useBreakpoint'
+import ModelSettings from './ModelSettings'
 
 const { TextArea } = Input
 
@@ -107,6 +108,8 @@ const InputArea: React.FC<InputAreaProps> = ({ onSend, loading, compact, allowUp
           variant="borderless"
           className="grok-input-field"
         />
+
+        <ModelSettings conversationId={currentConversationId} disabled={loading} />
 
         <button
           type="button"

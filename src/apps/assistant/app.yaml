@@ -1,7 +1,7 @@
 manifest_version: 1
 id: assistant
 name: 知识问答
-version: 0.8.8
+version: 0.8.9
 platform_api: '>=1.0,<2.0'
 icon: document
 dependencies:
@@ -13,8 +13,8 @@ frontend:
 database:
   mode: package
   migrations: migrations
-  head: assistant_0002
-  tables: [app_assistant_documents, app_assistant_revisions, app_assistant_turns]
+  head: assistant_0003
+  tables: [app_assistant_documents, app_assistant_revisions, app_assistant_turns, app_assistant_conversation_settings]
 lifecycle:
   drain: src.apps.assistant.backend.turns:drain
   pending: src.apps.assistant.backend.turns:pending

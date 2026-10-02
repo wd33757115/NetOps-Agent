@@ -71,6 +71,12 @@ def tool_failure(exc, seconds):
 NATIVE = {"read", "glob", "grep"}
 SUBMIT_ANSWER = "mcp__netops__submit_answer"
 MAX_OUTPUT_TOKENS = 8192
+# Reasoning is output too: a thinking run gets room for it before the answer.
+THINKING_OUTPUT_TOKENS = 32768
+
+
+def output_cap(context):
+    return MAX_OUTPUT_TOKENS if context.reasoning_effort == "off" else THINKING_OUTPUT_TOKENS
 _slots = asyncio.Semaphore(2)
 
 
@@ -104,6 +110,8 @@ class Bridge:
         self.sdk_finish_reason = None
         # Durable runs keep each round's request as the provider received it.
         self.request_log = None
+        # The model this run uses; the deployment default is filled in at start.
+        self.model_id = context.model
 
     def log_request(self, round_number, request, started, usage=None, error=None):
         """The session log holds what DSH built; this is what left after our changes."""
@@ -137,7 +145,9 @@ class Bridge:
             "timings_ms": {key: round(value) for key, value in self.timings.items()},
             "model_finish_reason": self.model_finish_reason,
             "sdk_finish_reason": self.sdk_finish_reason,
-            "max_output_tokens": MAX_OUTPUT_TOKENS,
+            "max_output_tokens": output_cap(self.context),
+            "model": self.model_id,
+            "reasoning_effort": self.context.reasoning_effort,
         }
 
     async def observe_completion(self, chunks, started, sent=None):
@@ -318,7 +328,8 @@ class Bridge:
                     "type": "function",
                     "function": {"name": SUBMIT_ANSWER},
                 }
-            body["max_tokens"] = min(body.get("max_tokens") or MAX_OUTPUT_TOKENS, MAX_OUTPUT_TOKENS)
+            cap = output_cap(self.context)
+            body["max_tokens"] = min(body.get("max_tokens") or cap, cap)
             body["stream_options"] = {**body.get("stream_options", {}), "include_usage": True}
             self.events.put_nowait(
                 (
@@ -555,7 +566,7 @@ def system_prompt(diagnostics=False):
     )
 
 
-def patch_file(home, port, *, active_diagnostics=False, durable=False):
+def patch_file(home, port, *, active_diagnostics=False, durable=False, thinking=False):
     import yaml
 
     rows = [
@@ -573,7 +584,8 @@ def patch_file(home, port, *, active_diagnostics=False, durable=False):
             "id": "llm-deepseek",
             "config": {
                 "protocol": "chat-completions",
-                "thinking": "disabled",
+                # Off unless the conversation chose a reasoning effort.
+                "thinking": "enabled" if thinking else "disabled",
                 "streamIdleTimeoutMs": 35000,
             },
         }
@@ -745,7 +757,13 @@ class DshRuntime:
                 await asyncio.sleep(0.02)
             if not server.started:
                 raise RuntimeError("Tool server startup timed out")
-            patch = patch_file(runtime_home, port, active_diagnostics=getattr(bridge.catalog, "active_diagnostics", False), durable=durable)
+            patch = patch_file(
+                runtime_home,
+                port,
+                active_diagnostics=getattr(bridge.catalog, "active_diagnostics", False),
+                durable=durable,
+                thinking=context.reasoning_effort != "off",
+            )
             env = {
                 k: v
                 for k, v in os.environ.items()
@@ -762,6 +780,7 @@ class DshRuntime:
             )
             from src.common.config import get_settings
 
+            bridge.model_id = context.model or get_settings().LLM_MODEL
             config = {
                 "harness": {
                     "dsh_home": str(runtime_home),
@@ -771,8 +790,13 @@ class DshRuntime:
                     "runtime_cwd": str(workspace),
                     "api_key": bridge.token,
                     "base_url": f"http://127.0.0.1:{port}",
-                    "model": get_settings().LLM_MODEL,
-                    "max_tokens": MAX_OUTPUT_TOKENS,
+                    "model": bridge.model_id,
+                    "max_tokens": output_cap(context),
+                    **(
+                        {"reasoning_effort": context.reasoning_effort}
+                        if context.reasoning_effort != "off"
+                        else {}
+                    ),
                     "initialize_timeout_seconds": 15,
                     "request_timeout_seconds": context.timeout_seconds,
                 },

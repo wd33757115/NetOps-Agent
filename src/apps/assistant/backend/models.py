@@ -25,3 +25,14 @@ class Turn(Base):
     error_code = Column(String(64))
     progress_json = Column(JSON)
     __table_args__ = (UniqueConstraint("owner_id", "request_id", name="uq_assistant_turn_request"),)
+
+
+class ConversationSettings(Base):
+    """Model and reasoning effort chosen for one conversation only."""
+
+    __tablename__ = "app_assistant_conversation_settings"
+    conversation_id = Column(String(64), primary_key=True)
+    owner_id = Column(String(64), nullable=False)
+    model = Column(String(64), nullable=False)
+    reasoning_effort = Column(String(16), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)

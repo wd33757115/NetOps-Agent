@@ -2,6 +2,9 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
+# DeepSeek's reasoning levels; "off" keeps thinking disabled for the run.
+REASONING_EFFORTS = ("off", "low", "high", "max")
+
 
 @dataclass(frozen=True)
 class RunContext:
@@ -11,10 +14,15 @@ class RunContext:
     timeout_seconds: float = 90
     max_tool_calls: int = 12
     max_model_rounds: int = 8
+    # Chosen per conversation; None is the deployment's configured model.
+    model: str | None = None
+    reasoning_effort: str = "off"
 
     def __post_init__(self):
         if not self.run_id or not self.actor_id or not self.session_id:
             raise ValueError("A server-owned run, actor and session are required")
+        if self.reasoning_effort not in REASONING_EFFORTS:
+            raise ValueError("Invalid reasoning effort")
         if not 0 < self.timeout_seconds <= 300:
             raise ValueError("Invalid run timeout")
         if not 1 <= self.max_tool_calls <= 30 or not 1 <= self.max_model_rounds <= 15:

@@ -152,7 +152,7 @@ def test_migration_preserves_existing_turns(tmp_path):
             VALUES ('old', 'alice', 'chat', 'old', 'digest', 'completed',
                     '2026-09-21 00:00:00', '2026-09-21 00:00:00', 5)""")
         )
-    assert migrate(manifest, engine) == "assistant_0002"
+    assert migrate(manifest, engine) == "assistant_0003"
     with engine.connect() as connection:
         row = connection.execute(
             text(

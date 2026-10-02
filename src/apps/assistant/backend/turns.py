@@ -17,7 +17,7 @@ from src.platform.agent_runtime import timeline
 from src.platform.agent_runtime.base import AgentEvent, RunContext
 from src.platform.authorization.client import authority_session, authorize_worker
 
-from . import evidence, history, progress, tool_outputs
+from . import evidence, history, model_settings, progress, tool_outputs
 from .diagnostic_workspace import DiagnosticWorkspace
 from .models import Turn
 from .repository import now, sessions
@@ -281,6 +281,10 @@ async def _execute(actor_id, run, body, *, agent_runtime=None, on_event=None):
         )
         return await asyncio.to_thread(read, actor_id, run["id"])
     # A diagnosis logs into devices on the path, so turns use the platform's run ceiling.
+    # The conversation's own choice, read now: a question never carries its own.
+    model, effort = await asyncio.to_thread(
+        model_settings.for_run, actor_id, run["conversation_id"]
+    )
     context = RunContext(
         run["id"],
         actor_id,
@@ -288,6 +292,8 @@ async def _execute(actor_id, run, body, *, agent_runtime=None, on_event=None):
         timeout_seconds=TURN_SECONDS,
         max_tool_calls=30,
         max_model_rounds=15,
+        model=model,
+        reasoning_effort=effort,
     )
 
     def check():

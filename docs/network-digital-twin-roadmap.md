@@ -1024,6 +1024,13 @@ P2-9 根据 Q5 取消，不引入 SNMP。P3 及后续仍在进入阶段时展开
 
 ## 14. 进度台账（执行者维护）
 
+### 2026-10-02 会话级模型与思考强度（完成此前记下的后续计划 1）
+
+- 对话输入框右侧加选择器（参照 ChatGPT 的“思考强度”）：模型 V4 Flash / V4 Pro，思考强度 关 / 低 / 高 / 最高；选了立即保存，只对当前会话生效，没选过的会话用部署默认模型、思考关。
+- 服务端按会话保存（assistant 迁移 `assistant_0003`，表 `app_assistant_conversation_settings`），每轮开始时读取，提问本身不携带设置；接口 `GET /model-settings`、`GET/PUT /conversations/{id}/model-settings`，只接受列出的模型和强度。
+- 运行时：`RunContext` 带 `model`、`reasoning_effort`；强度为“关”时与以前相同（thinking disabled、输出上限 8192）；开启时 DSH 设 thinking enabled 与对应 reasoning_effort，输出上限放宽到 32768（推理也算输出）。指标和每轮请求记录里都有实际用的模型和强度。
+- 前端组件 `ModelSettings` 放在 `InputArea` 里，没有改 `ChatPage.tsx`（另一会话有暂存改动）。部署 assistant 0.8.9；接口与界面在本机验证：设置、读回、非法值 422、切换会话各自独立。
+
 ### 2026-10-02 负责人改定：对比改为“先给摘要，模型按需追问”；放开 run 的配置查看
 
 - 起因：逐行对比里 ARP 老化、Dead-Time 这类列每次都变；检查项治理里“哪些列参与对比”是对解析后的列预先设置的，故障诊断无法预知模型要哪些证据；真实网络的路由表、ARP 表很大，逐行差异推不动。参考 Batfish 的差异分析和 IP Fabric 的快照对比：按条目报告新增、消失、变化。

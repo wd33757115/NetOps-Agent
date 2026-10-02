@@ -7,7 +7,7 @@ from fastapi.responses import Response
 from src.apps.materials.backend import import_service, library
 from src.platform.authorization.client import authorize_worker, require_app
 
-from . import evidence, history, tool_outputs, turns
+from . import evidence, history, model_settings, tool_outputs, turns
 
 router = APIRouter()
 user = require_app("assistant")
@@ -90,6 +90,24 @@ def conversation(conversation_id: str, actor=Depends(user)):
         ],
         "latest_turn": latest_turn,
     }
+
+
+@router.get("/model-settings")
+def model_options(actor=Depends(user)):
+    return model_settings.options()
+
+
+@router.get("/conversations/{conversation_id}/model-settings")
+def conversation_model(conversation_id: str, actor=Depends(user)):
+    return model_settings.get(actor.user_id, conversation_id)
+
+
+@router.put("/conversations/{conversation_id}/model-settings")
+def choose_model(conversation_id: str, body: model_settings.Choice, actor=Depends(user)):
+    try:
+        return model_settings.save(actor.user_id, conversation_id, body)
+    except ValueError as exc:
+        raise HTTPException(422, "不支持的模型或思考强度") from exc
 
 
 @router.post("/conversations/{conversation_id}/questions")

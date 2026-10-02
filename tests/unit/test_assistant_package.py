@@ -29,7 +29,7 @@ def database(tmp_path, monkeypatch):
     manifest = discover()["assistant"]
     migrate(manifest, engine)
     migrate(discover()["materials"], engine)
-    assert migrate(manifest, engine, check=True) == "assistant_0002"
+    assert migrate(manifest, engine, check=True) == "assistant_0003"
 
     @contextmanager
     def sessions():
