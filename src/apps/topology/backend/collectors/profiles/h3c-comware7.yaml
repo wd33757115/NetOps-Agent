@@ -23,6 +23,7 @@ capabilities:
   routes: {command: display ip routing-table, timeout: 300, parser: template_routes}
   vrfs: {command: display ip vpn-instance, parser: null}
   irf: {command: display irf, parser: null}
+  vrrp: {command: display vrrp verbose, parser: generic_vrrp}
 verified:
   - model: VSR1000
     version: 7.1.064 Release 1362P12

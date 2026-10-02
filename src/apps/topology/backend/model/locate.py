@@ -9,6 +9,7 @@ attachment. The link's other ends classify the answer:
 - a port on a device that was only advertised: ``behind_uncollected``;
 - no attachment evidence: ``not_found``;
 - an address or MAC of a collected device itself: ``device``.
+- a VRRP virtual address: ``virtual_router``, every member with its RFC 8347 state.
 - one IP answered by several MACs: ``conflict``, every MAC located.
 
 A port is backed by the MAC table when a MAC row names it, otherwise it is inferred
@@ -26,6 +27,10 @@ from .builder import L2T, NT, ST, _Topology
 # ruled out a misconfigured host on that "fact". Say plainly what is not seen.
 HOST_SETTINGS_UNSEEN = (
     "router_interfaces 是该网段在路由器上的三层接口；终端自己配置的网关、掩码看不到，不能当作已证实"
+)
+VIRTUAL_ROUTER_NOTE = (
+    "VRRP 虚拟地址（RFC 5798/8347）：由组内 state 为 master 的成员应答；"
+    "各成员的 state 与 last_adv_source（主设备地址）取自采集时各自的 VRRP 状态"
 )
 
 
@@ -63,6 +68,29 @@ class _Locator:
         if key in self.observed:
             item.update(self.observed[key])
         return item
+
+    def vrrp(self):
+        """VRRP instances (RFC 8347 state) on collected devices: [(device key, record)]."""
+        return [
+            (key, rec)
+            for key, facts in sorted(self.devices.items())
+            for rec in facts.get("vrrp", [])
+        ]
+
+    def virtual_router(self, ip):
+        """Every collected member of the VRRP groups that hold this virtual address."""
+        return [
+            {
+                **self.device(self.topo.device_node(self.topo.chassis[key])),
+                "interface": rec["ifname"],
+                "vrid": rec["vrid"],
+                "state": rec["state"],
+                "priority": rec.get("priority"),
+                "last_adv_source": rec.get("last_adv_source"),
+            }
+            for key, rec in self.vrrp()
+            if ip in rec["virtual_addresses"]
+        ]
 
     def router_interfaces(self, ip):
         found = []
@@ -175,6 +203,16 @@ def answer(locator, kind, value):
         result["status"] = "device"
         return result
     if kind == "ip":
+        members = locator.virtual_router(value)
+        if members:
+            # A gateway, not a host: each member's own VRRP state answers who holds it.
+            result.update(
+                status="virtual_router",
+                members=members,
+                router_interfaces=locator.router_interfaces(value),
+                note=VIRTUAL_ROUTER_NOTE,
+            )
+            return result
         result["router_interfaces"] = locator.router_interfaces(value)
         # The network side only; what the host itself has configured is not observed.
         result["note"] = HOST_SETTINGS_UNSEEN

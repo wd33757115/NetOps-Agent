@@ -21,6 +21,7 @@ from src.apps.topology.backend.model.builder import (
     device_node_ids,
 )
 from src.apps.topology.backend.model.locate import locate
+from src.apps.topology.backend.model.path import trace
 
 FIXTURES = Path(__file__).resolve().parents[2] / "tests/fixtures/topology/campus-wan"
 MANIFEST = json.loads((FIXTURES / "manifest.json").read_text(encoding="utf-8"))
@@ -38,6 +39,7 @@ FACTS = {
         "ip": "ip_interfaces",
         "arp": "arp",
         "mac": "mac",
+        "vrrp": "vrrp",
         "routes": "routes",
     },
     "ios": {
@@ -46,6 +48,7 @@ FACTS = {
         "ip": "ip_interface",
         "arp": "arp",
         "mac": "mac",
+        "vrrp": "vrrp",
         "routes": "routes",
     },
 }
@@ -190,3 +193,32 @@ def test_export_validates_against_the_frozen_yang_modules(devices):
     model = yangson.DataModel((root / "library.json").read_text(), [str(root)])
     tree, _ = build_topology(devices, "urn:netops:topology:campus:")
     model.from_raw(tree).validate(ctype=content)
+
+
+@pytest.mark.parametrize("vip", sorted(EXPECTED["vrrp"]))
+def test_vrrp_virtual_address_locates_as_virtual_router(devices, vip):
+    answer = locate(devices, BASE, vip)
+    assert answer["status"] == "virtual_router"
+    members = [[m["name"], m["interface"], m["vrid"], m["state"]] for m in answer["members"]]
+    assert sorted(members) == sorted(EXPECTED["vrrp"][vip])
+    # RFC 8347 last-adv-source: every member names the same master.
+    assert len({m["last_adv_source"] for m in answer["members"]}) == 1
+
+
+def test_first_hop_is_the_vrrp_master_of_each_subnet(devices):
+    # PC1 (VLAN10, master DIST1) and PC4 (VLAN20, master DIST2): asymmetric by design.
+    result = trace(devices, BASE, "172.16.10.11", "172.16.20.14")
+    forward, reverse = result["forward"], result["reverse"]
+    assert (forward["first_hop"], reverse["first_hop"]) == ("vrrp_master", "vrrp_master")
+    assert [h["device"]["name"] for h in forward["paths"][0]["hops"]] == ["DIST1.lab.local"]
+    assert [h["device"]["name"] for h in reverse["paths"][0]["hops"]] == ["DIST2.lab.local"]
+    assert result["symmetric"] is False
+
+
+def test_vrrp_block_without_a_virtual_address_is_rejected():
+    text = (FIXTURES / "br2/vrrp.txt").read_text("utf-8")
+    assert parse(IDENTITY["comware"], "vrrp", text).status == "complete"
+    odd = "\n".join(line for line in text.splitlines() if "Virtual IP" not in line)
+    outcome = parse(IDENTITY["comware"], "vrrp", odd)
+    assert outcome.status == "failed"
+    assert any(w.endswith("vrrp_block_without_virtual_address") for w in outcome.warnings)

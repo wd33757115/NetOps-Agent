@@ -1024,6 +1024,13 @@ P2-9 根据 Q5 取消，不引入 SNMP。P3 及后续仍在进入阶段时展开
 
 ## 14. 进度台账（执行者维护）
 
+### 2026-10-03 IETF 顺序第 1 项：VRRP 按 RFC 8347
+
+- 新能力 `vrrp`（Comware `display vrrp verbose`、IOS `show vrrp`）进入 topology 采集模式与观测事实；`generic_vrrp` 记录按 ietf-vrrp 的 vrrp-instance：`ifname`、`vrid`、`state`（initialize/backup/master）、运行 `priority`、`virtual_addresses`、`last_adv_source`（主设备地址）。缺 VRID/状态/虚拟地址的块拒绝；Comware 未配置为“VRRP4 is not configured.”，IOS 未配置时无输出，均为已确认的空。
+- 定位：VRRP 虚拟地址返回 `virtual_router`，列出各成员的主备、优先级与 last-adv-source；虚拟 MAC 仍按 RFC 5798 不作终端。路径：源网段有 VRRP 时第一跳取 state=master 的成员（`first_hop: vrrp_master`，注明终端自身网关看不到）；园区网 PC1→PC4 去程 DIST1、回程 DIST2，如实为非对称。
+- 为取得 H3C 真实 VRRP 回显，经负责人同意在 BR1/BR2 GE1/0（带外管理网段）加 VRID 1、虚拟地址 10.10.1.10（BR1 优先级 110），已写入 `campus_wan/configs`；夹具换为批次 `20261003-010038`。旧 VSR 夹具无 VRRP，档案测试缺失项取同版本园区网 BR1 回显。
+- 测试：园区网 22 项（含 YANG 校验）与拓扑/知识问答相关 536 项通过。拓扑 App 0.4.10 已部署，但平台实测被另一会话在同一工作区未提交的 `normalize.py` 修改阻断（代码摘要不一致，App 不可用）；待其提交后重新部署再验。
+
 ### 2026-10-03 第一套复杂拓扑：园区 + 双出口实验网（campus-wan）与 Cisco 真机建模
 
 - 拓扑参照 Batfish 示例网络（双 border/core/汇聚）与常见园区三层组网：H3C VSR 边界 ×2（eBGP 上联、iBGP、OSPF area 0），Cisco IOL 核心 ×2（路由反射器、/31 互联）、汇聚 ×2（ABR area 0/10、VRRP、LACP Po1、rapid-PVST）、接入 ×2（双上联 trunk），傻瓜交换机后两台终端，ISP 不纳管且不发 LLDP，Cisco 管理口在 VRF MGMT。工具包 `scripts/topology/campus_wan/`（生成 GNS3 工程、经控制台推送配置；VSR 先在 VNC 给 aux 口授权）；账号由负责人运行 `lab.py account` 建立。

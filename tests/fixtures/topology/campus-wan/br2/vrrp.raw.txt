@@ -1,3 +1,17 @@
 display vrrp verbose
-VRRP4 is not configured.
+IPv4 Virtual Router Information:  
+ Running mode      : Standard
+ Total number of virtual routers : 1
+   Interface GigabitEthernet1/0
+     VRID           : 1                   Adver Timer  : 100       
+     Admin Status   : Up                  State        : Backup    
+     Config Pri     : 100                 Running Pri  : 100       
+     Preempt Mode   : Yes                 Delay Time   : 0         
+     Become Master  : 2780ms left 
+     Auth Type      : Not supported      
+     Version        : 3
+     Virtual IP     : 10.10.1.10/32
+     Virtual MAC    : 0000-5e00-0101
+     Master IP      : 10.10.1.11                                    
+
 <BR2>

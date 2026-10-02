@@ -26,6 +26,10 @@ from .locate import _Locator, answer
 
 MAX_PATHS = 8
 MAX_HOPS = 32
+# The host's own gateway setting is not observed; the VRRP master is the inferred gateway.
+VRRP_FIRST_HOP = (
+    "终端自己配置的网关看不到；该网段有 VRRP，按采集时的主设备（state=master）作为第一跳"
+)
 
 
 def _unicast(value):
@@ -66,6 +70,28 @@ class _Tracer:
             if best is None or rank < best[0]:
                 best = (rank, route)
         return best and best[1]
+
+    def redundancy(self, gateways):
+        """VRRP members on the subnet's router interfaces holding a virtual address in it."""
+        members = []
+        for gateway in gateways:
+            subnet = ipaddress.ip_network(gateway["subnet"])
+            for key, rec in self.loc.vrrp():
+                if (key, rec["ifname"]) != (gateway["address"], gateway["interface"]):
+                    continue
+                if any(ipaddress.ip_address(a) in subnet for a in rec["virtual_addresses"]):
+                    members.append(
+                        {
+                            "name": gateway["name"],
+                            "address": gateway["address"],
+                            "interface": rec["ifname"],
+                            "vrid": rec["vrid"],
+                            "state": rec["state"],
+                            "priority": rec.get("priority"),
+                            "virtual_addresses": rec["virtual_addresses"],
+                        }
+                    )
+        return members
 
     def link_between(self, a_key, a_if, b_key, b_if):
         """The L2 link joining the two routed ports, when LLDP observed one."""
@@ -136,6 +162,7 @@ class _Tracer:
     def direction(self, source, dst):
         """source is the locate answer for the start address."""
         result = {"to": dst, "first_hop": "none", "paths": [], "truncated": False}
+        masters = []
         if source["status"] == "device":
             starts = [(source["locations"][0]["device"]["address"], None)]
         else:
@@ -146,10 +173,25 @@ class _Tracer:
                 result["status"] = "same_subnet"
                 return result
             starts = [(g["address"], g["interface"]) for g in gateways]
+            # With VRRP on the subnet the gateway is the group's master (RFC 8347 state).
+            groups = self.redundancy(gateways)
+            masters = sorted(
+                {(m["address"], m["interface"]) for m in groups if m["state"] == "master"}
+            )
+            if groups:
+                result["vrrp"] = groups
+            if masters:
+                starts = masters
         if not starts:
             result["status"] = "no_gateway"
             return result
-        result["first_hop"] = "single" if len(starts) == 1 else "ambiguous"
+        if len(starts) > 1:
+            result["first_hop"] = "ambiguous"
+        elif source["status"] != "device" and masters:
+            result["first_hop"] = "vrrp_master"
+            result["note"] = VRRP_FIRST_HOP
+        else:
+            result["first_hop"] = "single"
         for key, first_in in starts:
             paths, truncated = self.walk(key, first_in, dst)
             room = MAX_PATHS - len(result["paths"])

@@ -89,7 +89,7 @@ IOS_FACTS = frozenset(
 )
 SWITCH_FACTS = IOS_FACTS | {"lag", "stp", "vlan", "trunk"}
 CAMPUS = Lab(
-    "20261003-001138",
+    "20261003-010038",
     CAMPUS_HOSTS,
     {
         host: COMWARE_FACTS

@@ -1,14 +1,46 @@
 {
   "source": "GNS3 wiring and addressing in scripts/topology/campus_wan (lab.py LINKS, configs/)",
   "devices": {
-    "br1": {"management": "10.10.1.11", "platform": "comware", "name": "BR1"},
-    "br2": {"management": "10.10.1.12", "platform": "comware", "name": "BR2"},
-    "core1": {"management": "10.10.1.13", "platform": "ios", "name": "CORE1.lab.local"},
-    "core2": {"management": "10.10.1.14", "platform": "ios", "name": "CORE2.lab.local"},
-    "dist1": {"management": "10.10.1.15", "platform": "ios", "name": "DIST1.lab.local"},
-    "dist2": {"management": "10.10.1.16", "platform": "ios", "name": "DIST2.lab.local"},
-    "acc1": {"management": "10.10.1.17", "platform": "ios", "name": "ACC1.lab.local"},
-    "acc2": {"management": "10.10.1.18", "platform": "ios", "name": "ACC2.lab.local"}
+    "br1": {
+      "management": "10.10.1.11",
+      "platform": "comware",
+      "name": "BR1"
+    },
+    "br2": {
+      "management": "10.10.1.12",
+      "platform": "comware",
+      "name": "BR2"
+    },
+    "core1": {
+      "management": "10.10.1.13",
+      "platform": "ios",
+      "name": "CORE1.lab.local"
+    },
+    "core2": {
+      "management": "10.10.1.14",
+      "platform": "ios",
+      "name": "CORE2.lab.local"
+    },
+    "dist1": {
+      "management": "10.10.1.15",
+      "platform": "ios",
+      "name": "DIST1.lab.local"
+    },
+    "dist2": {
+      "management": "10.10.1.16",
+      "platform": "ios",
+      "name": "DIST2.lab.local"
+    },
+    "acc1": {
+      "management": "10.10.1.17",
+      "platform": "ios",
+      "name": "ACC1.lab.local"
+    },
+    "acc2": {
+      "management": "10.10.1.18",
+      "platform": "ios",
+      "name": "ACC2.lab.local"
+    }
   },
   "cables": [
     [["BR1", "GigabitEthernet3/0"], ["CORE1.lab.local", "Ethernet0/1"]],
@@ -29,24 +61,66 @@
     [["DIST2.lab.local", "Ethernet2/1"], ["ACC1.lab.local", "Ethernet0/2"]]
   ],
   "endpoints": {
-    "172.16.10.11": {"status": "confirmed", "ports": [["ACC1.lab.local", "Ethernet1/0"]], "lab": "PC1"},
-    "172.16.20.12": {"status": "confirmed", "ports": [["ACC1.lab.local", "Ethernet1/1"]], "lab": "PC2"},
-    "172.16.10.13": {"status": "confirmed", "ports": [["ACC2.lab.local", "Ethernet1/0"]], "lab": "PC3"},
-    "172.16.20.14": {"status": "shared_segment", "ports": [["ACC2.lab.local", "Ethernet1/1"]], "lab": "PC4 behind UNM-SW"},
-    "172.16.10.15": {"status": "shared_segment", "ports": [["ACC2.lab.local", "Ethernet1/1"]], "lab": "PC5 behind UNM-SW"},
-    "100.64.1.1": {"status": "confirmed", "ports": [["BR1", "GigabitEthernet2/0"]], "lab": "ISP e0/1, no LLDP"},
-    "100.64.2.1": {"status": "confirmed", "ports": [["BR2", "GigabitEthernet2/0"]], "lab": "ISP e0/2, no LLDP"},
-    "10.10.1.254": {"status": "shared_segment", "ports": [["BR1", "GigabitEthernet1/0"], ["BR2", "GigabitEthernet1/0"]], "lab": "management host via MGMT-SW"}
+    "172.16.10.11": {
+      "status": "confirmed",
+      "ports": [
+        ["ACC1.lab.local", "Ethernet1/0"]
+      ],
+      "lab": "PC1"
+    },
+    "172.16.20.12": {
+      "status": "confirmed",
+      "ports": [
+        ["ACC1.lab.local", "Ethernet1/1"]
+      ],
+      "lab": "PC2"
+    },
+    "172.16.10.13": {
+      "status": "confirmed",
+      "ports": [
+        ["ACC2.lab.local", "Ethernet1/0"]
+      ],
+      "lab": "PC3"
+    },
+    "172.16.20.14": {
+      "status": "shared_segment",
+      "ports": [
+        ["ACC2.lab.local", "Ethernet1/1"]
+      ],
+      "lab": "PC4 behind UNM-SW"
+    },
+    "172.16.10.15": {
+      "status": "shared_segment",
+      "ports": [
+        ["ACC2.lab.local", "Ethernet1/1"]
+      ],
+      "lab": "PC5 behind UNM-SW"
+    },
+    "100.64.1.1": {
+      "status": "confirmed",
+      "ports": [
+        ["BR1", "GigabitEthernet2/0"]
+      ],
+      "lab": "ISP e0/1, no LLDP"
+    },
+    "100.64.2.1": {
+      "status": "confirmed",
+      "ports": [
+        ["BR2", "GigabitEthernet2/0"]
+      ],
+      "lab": "ISP e0/2, no LLDP"
+    },
+    "10.10.1.254": {
+      "status": "shared_segment",
+      "ports": [["BR1", "GigabitEthernet1/0"], ["BR2", "GigabitEthernet1/0"]],
+      "lab": "management host via MGMT-SW"
+    }
   },
-  "subnets": [
-    "MGMT:10.10.1.0/24", "10.10.1.0/24", "10.0.12.0/30", "10.0.13.0/30", "10.0.14.0/30",
-    "10.0.23.0/30", "10.0.24.0/30", "10.0.34.0/31", "10.0.35.0/30", "10.0.36.0/30",
-    "10.0.45.0/30", "10.0.46.0/30", "100.64.1.0/30", "100.64.2.0/30", "172.16.10.0/24",
-    "172.16.20.0/24"
-  ],
-  "not_observable": [
-    "VRRP virtual MACs 00:00:5e:00:01:0a/14 are gateways, not hosts",
-    "Cisco management ports are in VRF MGMT; their ARP (show ip arp vrf MGMT) is not a topology capability",
-    "VPCS MACs are reassigned when the GNS3 project reopens; IPs are stable"
-  ]
+  "subnets": ["MGMT:10.10.1.0/24", "10.10.1.0/24", "10.0.12.0/30", "10.0.13.0/30", "10.0.14.0/30", "10.0.23.0/30", "10.0.24.0/30", "10.0.34.0/31", "10.0.35.0/30", "10.0.36.0/30", "10.0.45.0/30", "10.0.46.0/30", "100.64.1.0/30", "100.64.2.0/30", "172.16.10.0/24", "172.16.20.0/24"],
+  "not_observable": ["VRRP virtual MACs are gateways, not hosts; virtual addresses locate as virtual routers", "Cisco management ports are in VRF MGMT; their ARP (show ip arp vrf MGMT) is not a topology capability", "VPCS MACs are reassigned when the GNS3 project reopens; IPs are stable"],
+  "vrrp": {
+    "172.16.10.1": [["DIST1.lab.local", "Vlan10", 10, "master"], ["DIST2.lab.local", "Vlan10", 10, "backup"]],
+    "172.16.20.1": [["DIST1.lab.local", "Vlan20", 20, "backup"], ["DIST2.lab.local", "Vlan20", 20, "master"]],
+    "10.10.1.10": [["BR1", "GigabitEthernet1/0", 1, "master"], ["BR2", "GigabitEthernet1/0", 1, "backup"]]
+  }
 }

@@ -15,6 +15,7 @@ from .tiers import (
     generic_lldp_local,
     generic_mac,
     generic_version,
+    generic_vrrp,
 )
 from .tiers.common import audit_table, table_count
 
@@ -26,12 +27,14 @@ PARSERS = {
     "interfaces": generic_ifbrief.parse,
     "ip": generic_ipif.parse,
     "version": generic_version.parse,
+    "vrrp": generic_vrrp.parse,
 }
 EMPTY = {
     "lldp": r"No (?:LLDP )?neighbors?(?: found)?\.?",
     "arp": r"No ARP entries(?: found)?\.?",
     "mac": r"No MAC(?: address)? entries(?: found)?\.?",
     "lag": r"No link aggregation group exists\.",
+    "vrrp": r"VRRP4 is not configured\.",
     "vrfs": (
         r"(?:L3VPN is not configured\.|Total VPN-Instances configured\s*:\s*0"
         r"(?:\s*\n[ \t]*License limit\s*:\s*[YN]\s*\n[ \t]*"
@@ -128,8 +131,8 @@ def parse_generic(identity, capability, raw, *, complete=True, command=None, pro
         else getattr(identity, "os_family", "unknown")
     )
     empty_pattern = EMPTY.get(capability)
-    if family in {"ios", "iosxe"} and capability == "arp" and not text.strip():
-        # IOS prints nothing at all, not even a header, for an empty ARP table.
+    if family in {"ios", "iosxe"} and capability in {"arp", "vrrp"} and not text.strip():
+        # IOS prints nothing at all, not even a header, for an empty ARP or VRRP table.
         empty_pattern = ""
     if empty_pattern is not None and re.fullmatch(empty_pattern, text.strip(), re.I):
         result.status = "failed" if incomplete else "complete"

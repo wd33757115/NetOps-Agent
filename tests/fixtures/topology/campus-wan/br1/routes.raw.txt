@@ -1,6 +1,6 @@
 display ip routing-table
 
-Destinations : 41	Routes : 46
+Destinations : 42	Routes : 47
 
 Destination/Mask   Proto   Pre Cost        NextHop         Interface
 0.0.0.0/0          BGP     255 0           100.64.1.1      GE2/0
@@ -24,6 +24,7 @@ Destination/Mask   Proto   Pre Cost        NextHop         Interface
 10.0.45.0/30       O_INTRA 10  11          10.0.14.2       GE4/0
 10.0.46.0/30       O_INTRA 10  11          10.0.14.2       GE4/0
 10.10.1.0/24       Direct  0   0           10.10.1.11      GE1/0
+10.10.1.10/32      Direct  1   0           127.0.0.1       InLoop0
 10.10.1.11/32      Direct  0   0           127.0.0.1       InLoop0
 10.10.1.255/32     Direct  0   0           10.10.1.11      GE1/0
 10.255.0.1/32      Direct  0   0           127.0.0.1       InLoop0

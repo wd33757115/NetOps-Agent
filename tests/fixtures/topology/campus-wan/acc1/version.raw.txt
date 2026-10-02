@@ -6,7 +6,7 @@ Compiled Sun 11-Aug-24 22:06 by mcpre
 
 ROM: Bootstrap program is Linux
 
-ACC1 uptime is 53 minutes
+ACC1 uptime is 1 hour, 42 minutes
 System returned to ROM by unknown reload cause - suspect boot_data[BOOT_COUNT] 0x9, BOOT_COUNT 0, BOOTDATA 19
 System image file is "unix:/opt/gns3/images/IOU/x86_64_crb_linux_l2-adventerprisek9-ms.iol"
 Last reload reason: Unknown reason

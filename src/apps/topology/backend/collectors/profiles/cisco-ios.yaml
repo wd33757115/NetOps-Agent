@@ -22,4 +22,5 @@ capabilities:
   lag: {command: show etherchannel summary, parser: null}
   routes: {command: show ip route, timeout: 300, parser: template_routes}
   vrfs: {command: show vrf, parser: null}
+  vrrp: {command: show vrrp, parser: generic_vrrp}
 verified: []

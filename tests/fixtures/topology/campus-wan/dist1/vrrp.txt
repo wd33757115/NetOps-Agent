@@ -19,5 +19,5 @@ Vlan20 - Group 20
   Priority is 100 
   Master Router is 172.16.20.3, priority is 110 
   Master Advertisement interval is 1.000 sec
-  Master Down interval is 3.609 sec (expires in 3.512 sec)
+  Master Down interval is 3.609 sec (expires in 3.320 sec)
   FLAGS: 0/1

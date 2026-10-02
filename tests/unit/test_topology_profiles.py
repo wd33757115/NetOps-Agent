@@ -29,6 +29,8 @@ from src.platform.device_access.errors import CommandExecutionError
 from src.platform.device_access.service import DeviceAccessService
 
 LAB = Path(__file__).parents[1] / "fixtures/topology/h3c/vsr1000-7.1.064/vsr-1"
+# Capabilities the first lab never captured (VRRP) come from the same Comware release there.
+CAMPUS_BR1 = Path(__file__).parents[1] / "fixtures/topology/campus-wan/br1"
 
 
 def identity(text=None):
@@ -174,7 +176,11 @@ def setup(monkeypatch):
     profiles = load_profiles()
     mapping = {"lldp": "lldp_verbose", "ip": "ip_interfaces"}
     outputs = {
-        spec.command: (LAB / (mapping.get(cap, cap) + ".txt")).read_text()
+        spec.command: next(
+            path
+            for path in (LAB / f"{mapping.get(cap, cap)}.txt", CAMPUS_BR1 / f"{cap}.txt")
+            if path.exists()
+        ).read_text()
         for cap, spec in profiles["h3c-comware7"].capabilities.items()
     }
     trace = SimpleNamespace(

@@ -1,6 +1,6 @@
 # Campus + WAN lab fixtures
 
-Source: authorized GNS3 lab batch `20261003-001138` from the lab built by
+Source: authorized GNS3 lab batch `20261003-010038` from the lab built by
 `scripts/topology/campus_wan` (see its README for wiring and addressing). Two H3C VSR1000
 borders (Comware 7.1.064 Release 1362P12) and six Cisco IOL 17.15.1 nodes: two core
 routers, two distribution and two access switches. Folders are named after the lab

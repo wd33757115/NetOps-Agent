@@ -12,6 +12,8 @@ interface GigabitEthernet1/0
  description OOB-MGMT
  ip address 10.10.1.11 24
  undo lldp enable
+ vrrp vrid 1 virtual-ip 10.10.1.10
+ vrrp vrid 1 priority 110
  quit
 interface GigabitEthernet2/0
  description to ISP e0/1

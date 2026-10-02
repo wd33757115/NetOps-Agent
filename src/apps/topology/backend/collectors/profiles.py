@@ -22,7 +22,17 @@ MODE_CAPABILITIES = {
     "fast": ("version", "lldp_local", "lldp", "interfaces"),
     # The facts the SIMAP L2/L3 builder consumes, plus routes for path tracing (last, so a
     # large table cannot starve the adjacency facts of the node budget).
-    "topology": ("version", "lldp_local", "lldp", "interfaces", "ip", "arp", "mac", "routes"),
+    "topology": (
+        "version",
+        "lldp_local",
+        "lldp",
+        "interfaces",
+        "ip",
+        "arp",
+        "mac",
+        "vrrp",
+        "routes",
+    ),
     "standard": (
         "version",
         "lldp_local",
