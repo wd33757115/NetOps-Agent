@@ -5,8 +5,64 @@ import re
 from ..normalize import interface_address, vrf_name
 from .common import IFNAME, Parsed, interface, valid_ip
 
+# IOS "show ip interface": one block per interface, addresses and VRF inside it.
+BLOCK = re.compile(r"(\S+) is (?:up|down|administratively down|deleted), line protocol is .+")
+ADDRESS = re.compile(r"\s+(?:Internet address is|Secondary address) (\S+)\s*")
+BLOCK_VRF = re.compile(r'\s+VPN Routing/Forwarding "([^"]+)"\s*')
+# Other block lines that carry addresses but are not the interface's own.
+OTHER_ADDRESSES = re.compile(
+    r"\s+(?:Broadcast address is|Multicast reserved groups joined:|Helper address(?:es)? (?:is|are)"
+    r"|Interface is unnumbered\.)\s.*"
+)
+ADDRESS_LIKE = re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}\b")  # "show ip interface" is IPv4 only
+
+
+def parse_blocks(text, family):
+    """Every block line is read; an address line in an unknown phrasing rejects."""
+    result = Parsed()
+    name, own, vrf = None, [], "default"
+
+    def close():
+        for record, lines, raw in own:
+            result.add({**record, "vrf": vrf}, lines, {"text": raw})
+
+    for number, line in enumerate(text.splitlines(), 1):
+        header = BLOCK.fullmatch(line)
+        if header:
+            close()
+            own, vrf = [], "default"
+            result.candidates += 1
+            result.handled_lines.add(number)
+            try:
+                name = (interface(header[1], family).name, number)
+            except ValueError as exc:
+                name = None
+                result.reject(number, str(exc))
+            continue
+        if name is None:
+            continue
+        result.handled_lines.add(number)
+        address, block_vrf = ADDRESS.fullmatch(line), BLOCK_VRF.fullmatch(line)
+        try:
+            if address:
+                record = {"ifname": name[0], **interface_address(address[1])}
+                own.append((record, [name[1], number], line))
+            elif block_vrf:
+                vrf = vrf_name(block_vrf[1], family)
+                for _, lines, _ in own:
+                    lines.append(number)
+            elif ADDRESS_LIKE.search(line) and not OTHER_ADDRESSES.fullmatch(line):
+                raise ValueError("unrecognized_address_line")
+        except ValueError as exc:
+            result.reject(number, str(exc))
+    close()
+    result.empty_verified = result.candidates > 0 and not result.records and not result.rejected
+    return result
+
 
 def parse(text, family):
+    if BLOCK.fullmatch(next((line for line in text.splitlines() if line.strip()), "")):
+        return parse_blocks(text, family)
     result = Parsed()
     recognized_table = bool(
         re.search(r"IP address/Mask|IP Address/Mask|IP-Address.*Mask", text, re.I)

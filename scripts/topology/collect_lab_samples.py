@@ -1,8 +1,9 @@
 """Collect read-only CLI samples from lab devices for topology parser fixtures.
 
-Only fixed, read-only ``display`` commands are sent. The password is read from
-the NETOPS_LAB_PASSWORD environment variable or prompted interactively; it is
-never written to disk, logs, or output files.
+Only fixed, read-only ``display``/``show`` commands are sent (Comware or Cisco IOS,
+chosen by the SSH banner). The password is read from the NETOPS_LAB_PASSWORD
+environment variable or prompted interactively; it is never written to disk, logs,
+or output files.
 
 Output: .runtime/lab-samples/<timestamp>/<host>/<command>.txt (normalized),
 <command>.raw.txt (exact bytes received) + meta.json
@@ -47,11 +48,46 @@ COMMANDS = [
     ("routes", "display ip routing-table"),
     ("vrfs", "display ip vpn-instance"),
     ("irf", "display irf"),
+    ("vrrp", "display vrrp verbose"),
+    ("ospf", "display ospf peer"),
+    ("bgp", "display bgp peer ipv4"),
+    ("config", "display current-configuration"),
 ]
 
-# Refuse anything that is not a pure display command (defence in depth).
-READ_ONLY = re.compile(r"^(display\s+[^;|\r\n]+|screen-length disable)$")
-PROMPT = re.compile(r"(?m)^[<\[][^\r\n<>\[\]]{1,64}[>\]]\s*$")
+# Cisco IOS / IOS-XE (chosen when the SSH banner says Cisco), read-only.
+CISCO_COMMANDS = [
+    ("paging", "terminal length 0"),
+    ("width", "terminal width 511"),
+    ("version", "show version"),
+    ("inventory", "show inventory"),
+    ("lldp_verbose", "show lldp neighbors detail"),
+    ("lldp_list", "show lldp neighbors"),
+    ("interfaces", "show interfaces"),
+    ("interfaces_status", "show interfaces status"),
+    ("interfaces_description", "show interfaces description"),
+    ("ip_interfaces", "show ip interface brief"),
+    ("ip_interface", "show ip interface"),
+    ("arp", "show ip arp"),
+    ("arp_mgmt", "show ip arp vrf MGMT"),
+    ("mac", "show mac address-table"),
+    ("vlan", "show vlan brief"),
+    ("trunk", "show interfaces trunk"),
+    ("lag", "show etherchannel summary"),
+    ("stp", "show spanning-tree"),
+    ("routes", "show ip route"),
+    ("vrfs", "show vrf"),
+    ("vrrp", "show vrrp"),
+    ("ospf", "show ip ospf neighbor"),
+    ("bgp", "show ip bgp summary"),
+    ("config", "show running-config"),
+]
+SETUP = ("paging", "width")
+
+# Refuse anything that is not a pure display/show command (defence in depth).
+READ_ONLY = re.compile(
+    r"^((?:display|show)\s+[^;|\r\n]+|screen-length disable|terminal (?:length 0|width 511))$"
+)
+PROMPT = re.compile(r"(?m)^(?:[<\[][^\r\n<>\[\]]{1,64}[>\]]|[\w.\-]{1,64}[#>])\s*$")
 MORE = re.compile(r"-{2,}\s*More\s*-{2,}")
 # Paging prompt plus the cursor-back/space padding the device uses to erase it.
 MORE_ERASE = re.compile(r"[ \t]*-{2,}\s*More\s*-{2,}(?:\x1b\[\d*D|[ \x08])*")
@@ -149,7 +185,8 @@ def collect(host: str, username: str, password: str, out_dir: Path, port: int) -
         meta["prompt"] = ANSI.sub("", banner).strip().splitlines()[-1].strip()
         host_dir = out_dir / host
         host_dir.mkdir(parents=True, exist_ok=True)
-        for command_id, command in COMMANDS:
+        commands = CISCO_COMMANDS if "Cisco" in meta["server_version"] else COMMANDS
+        for command_id, command in commands:
             if not READ_ONLY.match(command):
                 raise ValueError(f"refusing non read-only command: {command}")
             entry = {"id": command_id, "command": command}
@@ -162,7 +199,7 @@ def collect(host: str, username: str, password: str, out_dir: Path, port: int) -
                 rejected = re.search(r"(?im)(unrecognized command|wrong parameter|incomplete command|% ?invalid)", text)
                 if rejected:
                     entry["status"] = "rejected_by_device"
-                if command_id != "paging":
+                if command_id not in SETUP:
                     # newline="" keeps Windows from turning \n into \r\n.
                     with open(host_dir / f"{command_id}.txt", "w", encoding="utf-8", newline="") as fh:
                         fh.write(text)

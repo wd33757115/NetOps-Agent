@@ -297,7 +297,7 @@ def test_show_fallback_uses_own_profile_and_reports_missing_local_identity(setup
         "display version",
         "show version",
         "show lldp neighbors detail",
-        "show interfaces",
+        "show interfaces description",
     ]
     assert setup.trace.connections[1][1].platform == "ios"
 

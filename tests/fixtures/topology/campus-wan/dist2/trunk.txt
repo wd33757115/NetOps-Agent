@@ -1,0 +1,19 @@
+Port           Mode             Encapsulation  Status        Native vlan  
+Et2/0          on               802.1q         trunking      1
+Et2/1          on               802.1q         trunking      1
+Po1            on               802.1q         trunking      1
+
+Port           Vlans allowed on trunk
+Et2/0          10,20
+Et2/1          10,20
+Po1            10,20
+
+Port           Vlans allowed and active in management domain
+Et2/0          10,20
+Et2/1          10,20
+Po1            10,20
+
+Port           Vlans in spanning tree forwarding state and not pruned
+Et2/0          10,20
+Et2/1          10,20
+Po1            10,20

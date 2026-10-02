@@ -1,0 +1,12 @@
+show vlan brief
+
+VLAN Name                             Status    Ports
+---- -------------------------------- --------- -------------------------------
+1    default                          active    Et0/3, Et1/2, Et1/3, Et2/2, Et2/3, Et3/0, Et3/1, Et3/2, Et3/3
+10   USERS-A                          active    
+20   USERS-B                          active    
+1002 fddi-default                     act/unsup 
+1003 token-ring-default               act/unsup 
+1004 fddinet-default                  act/unsup 
+1005 trnet-default                    act/unsup 
+DIST1#

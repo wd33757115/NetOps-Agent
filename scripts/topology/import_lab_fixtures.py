@@ -1,4 +1,4 @@
-"""Copy the approved lab batch only after secret scanning; never print secret terms."""
+"""Copy an approved lab batch only after secret scanning; never print secret terms."""
 
 import argparse
 import getpass
@@ -7,13 +7,24 @@ import json
 import os
 import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from scripts.scan_sensitive_device_data import scan_project_files  # noqa: E402
-from scripts.topology.collect_lab_samples import COMMANDS, clean  # noqa: E402
+from scripts.topology.collect_lab_samples import CISCO_COMMANDS, COMMANDS, clean  # noqa: E402
+
+
+@dataclass(frozen=True)
+class Lab:
+    batch: str
+    devices: dict  # host -> fixture folder
+    capabilities: dict  # host -> capabilities copied (others in the batch are left out)
+    destination: Path
+    unsupported: frozenset  # capabilities whose output is an unsupported-command message
+
 
 BATCH = "20260928-163159"
 DEVICES = {"10.10.1.1": "vsr-1", "10.10.1.2": "vsr-2"}
@@ -36,13 +47,74 @@ CAPABILITIES = frozenset(
     }
 )
 DESTINATION = ROOT / "tests/fixtures/topology/h3c/vsr1000-7.1.064"
+VSR = Lab(
+    BATCH,
+    DEVICES,
+    dict.fromkeys(DEVICES, CAPABILITIES),
+    DESTINATION,
+    frozenset({"inventory", "irf"}),
+)
+
+# Campus + WAN lab (scripts/topology/campus_wan): what the SIMAP builder and the
+# planned VRRP/LAG facts read. Device configuration output is never copied.
+CAMPUS_HOSTS = {
+    f"10.10.1.{11 + i}": name
+    for i, name in enumerate(("br1", "br2", "core1", "core2", "dist1", "dist2", "acc1", "acc2"))
+}
+COMWARE_FACTS = frozenset(
+    {
+        "version",
+        "lldp_local",
+        "lldp_verbose",
+        "interfaces",
+        "ip_interfaces",
+        "arp",
+        "mac",
+        "routes",
+        "lag",
+        "vrrp",
+    }
+)
+IOS_FACTS = frozenset(
+    {
+        "version",
+        "lldp_verbose",
+        "interfaces_description",
+        "ip_interface",
+        "arp",
+        "mac",
+        "routes",
+        "vrrp",
+    }
+)
+SWITCH_FACTS = IOS_FACTS | {"lag", "stp", "vlan", "trunk"}
+CAMPUS = Lab(
+    "20261003-001138",
+    CAMPUS_HOSTS,
+    {
+        host: COMWARE_FACTS
+        if name.startswith("br")
+        else SWITCH_FACTS
+        if name.startswith(("dist", "acc"))
+        else IOS_FACTS
+        for host, name in CAMPUS_HOSTS.items()
+    },
+    ROOT / "tests/fixtures/topology/campus-wan",
+    frozenset(),
+)
+LABS = {"vsr1000": VSR, "campus-wan": CAMPUS}
 SENSITIVE = re.compile(
     rb"(?im)^\s*(?:password\s+|secret\s+|community\s+|"
     rb"snmp-agent\s+community\b|-----BEGIN .*PRIVATE KEY-----)"
 )
 
 
-def prepare(source, secrets):
+def command_of(capability, command):
+    """The collector's own command for this capability, Comware or IOS."""
+    return command in {dict(COMMANDS).get(capability), dict(CISCO_COMMANDS).get(capability)}
+
+
+def prepare(source, secrets, lab=VSR):
     """Validate everything in memory before creating any destination files."""
     if not secrets or any(not secret for secret in secrets):
         raise ValueError("secret scan requires nonempty terms")
@@ -51,21 +123,28 @@ def prepare(source, secrets):
     if scan["match_count"] or scan["skipped_error_count"]:
         raise ValueError("sensitive data scan failed")
     source_meta = json.loads((source / "meta.json").read_text(encoding="utf-8"))
-    if {item["host"] for item in source_meta} != set(DEVICES) or len(source_meta) != 2:
+    if {item["host"] for item in source_meta} != set(lab.devices) or len(source_meta) != len(
+        lab.devices
+    ):
         raise ValueError("unexpected lab devices")
     files, observations = {}, []
     for device in source_meta:
-        name, host = DEVICES[device["host"]], device["host"]
-        seen = set()
+        name, host = lab.devices[device["host"]], device["host"]
+        wanted, seen = lab.capabilities[host], set()
         for entry in device["commands"]:
             capability = entry["id"]
-            if capability == "paging":
+            if capability in {"paging", "width"}:
                 continue
-            if capability not in CAPABILITIES or capability in seen:
+            if lab is VSR and capability not in wanted:
                 raise ValueError("unexpected or repeated capability")
-            if entry["command"] != dict(COMMANDS)[capability]:
+            if capability not in wanted:
+                continue
+            if capability in seen:
+                raise ValueError("unexpected or repeated capability")
+            if not command_of(capability, entry["command"]):
                 raise ValueError("command differs from approved lab collection")
             seen.add(capability)
+            rejected = entry["status"] == "rejected_by_device"
             record = {
                 "device": name,
                 "host": host,
@@ -74,7 +153,7 @@ def prepare(source, secrets):
                 "observed_at": entry["finished_at"],
                 "transport_status": entry["status"],
                 "expected_status": "unsupported"
-                if capability in {"inventory", "irf"}
+                if capability in lab.unsupported or rejected
                 else "complete",
                 "files": {},
             }
@@ -99,11 +178,11 @@ def prepare(source, secrets):
             if clean(pair["raw.txt"].decode("utf-8"), entry["command"]).encode() != pair["txt"]:
                 raise ValueError("raw and cleaned evidence disagree")
             observations.append(record)
-        if seen != CAPABILITIES:
+        if seen != wanted:
             raise ValueError("incomplete capability set")
     manifest = {
         "schema_version": 1,
-        "batch": BATCH,
+        "batch": lab.batch,
         "source": "GNS3 authorized lab capture",
         "raw_format": "UTF-8 text saved by collector before CLI cleanup; original line endings",
         "limitations": ["Not an arbitrary-encoding wire capture", "No initial login banner saved"],
@@ -120,27 +199,31 @@ def prepare(source, secrets):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source", type=Path, default=ROOT / ".runtime/lab-samples" / BATCH)
+    parser.add_argument("--lab", choices=sorted(LABS), default="vsr1000")
+    parser.add_argument("--source", type=Path)
     args = parser.parse_args()
-    if args.source.name != BATCH:
+    lab = LABS[args.lab]
+    source = args.source or ROOT / ".runtime/lab-samples" / lab.batch
+    if source.name != lab.batch:
         raise ValueError("only the approved source batch may be imported")
     secret = os.getenv("NETOPS_LAB_PASSWORD") or getpass.getpass("Lab password for scan (hidden): ")
-    files = prepare(args.source, [secret])
+    files = prepare(source, [secret], lab)
     # Refuse a changed import, preserving already reviewed fixtures.
     for relative, content in files.items():
-        path = DESTINATION / relative
+        path = lab.destination / relative
         if path.exists() and path.read_bytes() != content:
             raise ValueError("existing fixture differs; review the source batch")
     for relative, content in files.items():
-        path = DESTINATION / relative
+        path = lab.destination / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(content)
     print(
         json.dumps(
             {
+                "lab": args.lab,
                 "files": len(files),
-                "devices": 2,
-                "capabilities_per_device": 14,
+                "devices": len(lab.devices),
+                "observations": len(files) // 2,
                 "sensitive_matches": 0,
             }
         )

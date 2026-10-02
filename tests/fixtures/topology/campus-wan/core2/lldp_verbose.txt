@@ -1,0 +1,137 @@
+------------------------------------------------
+Local Intf: Et0/3
+Local Intf service instance: -
+Chassis id: aabb.cc00.0200
+Port id: Et0/3
+Port Description: to CORE2 e0/3
+System Name: CORE1.lab.local
+
+System Description: 
+Cisco IOS Software [IOSXE], Linux Software (X86_64BI_LINUX-ADVENTERPRISEK9-M), Version 17.15.1, RELEASE SOFTWARE (fc4)
+Technical Support: http://www.cisco.com/techsupport
+Copyright (c) 1986-2024 by Cisco Systems, Inc.
+Compiled Sun 11-Aug-24 22:07 by mcpre
+
+Time remaining: 115 seconds
+System Capabilities: B,R
+Enabled Capabilities: R
+Management Addresses:
+    IP: 10.0.34.0
+Auto Negotiation - not supported
+Physical media capabilities - not advertised
+Media Attachment Unit type - not advertised
+Vlan ID: - not advertised
+Peer Source MAC: aabb.cc00.0230
+
+------------------------------------------------
+Local Intf: Et1/0
+Local Intf service instance: -
+Chassis id: aabb.cc00.0500
+Port id: Et0/1
+Port Description: to CORE2 e1/0
+System Name: DIST2.lab.local
+
+System Description: 
+Cisco IOS Software [IOSXE], Linux Software (X86_64BI_LINUX_L2-ADVENTERPRISEK9-M), Version 17.15.1, RELEASE SOFTWARE (fc4)
+Technical Support: http://www.cisco.com/techsupport
+Copyright (c) 1986-2024 by Cisco Systems, Inc.
+Compiled Sun 11-Aug-24 22:06 by mc
+
+Time remaining: 116 seconds
+System Capabilities: B,R
+Enabled Capabilities: B,R
+Management Addresses:
+    IP: 10.0.46.2
+Auto Negotiation - supported, enabled
+Physical media capabilities:
+    1000baseT(FD)
+Media Attachment Unit type - not advertised
+Vlan ID: - not advertised
+Peer Source MAC: aabb.cc00.0510
+
+------------------------------------------------
+Local Intf: Et1/1
+Local Intf service instance: -
+Chassis id: aabb.cc00.0400
+Port id: Et0/2
+Port Description: to CORE2 e1/1
+System Name: DIST1.lab.local
+
+System Description: 
+Cisco IOS Software [IOSXE], Linux Software (X86_64BI_LINUX_L2-ADVENTERPRISEK9-M), Version 17.15.1, RELEASE SOFTWARE (fc4)
+Technical Support: http://www.cisco.com/techsupport
+Copyright (c) 1986-2024 by Cisco Systems, Inc.
+Compiled Sun 11-Aug-24 22:06 by mc
+
+Time remaining: 116 seconds
+System Capabilities: B,R
+Enabled Capabilities: B,R
+Management Addresses:
+    IP: 10.0.45.2
+Auto Negotiation - supported, enabled
+Physical media capabilities:
+    1000baseT(FD)
+Media Attachment Unit type - not advertised
+Vlan ID: - not advertised
+Peer Source MAC: aabb.cc00.0420
+
+------------------------------------------------
+Local Intf: Et0/2
+Local Intf service instance: -
+Chassis id: 7425.8ae4.03f3
+Port id: GigabitEthernet4/0
+Port Description: to CORE2 e0/2
+System Name: BR1
+
+System Description: 
+H3C Comware Platform Software, Software Version 7.1.064, Release 1362P12
+H3C VSR1000
+Copyright (c) 2004-2023 New H3C Technologies Co., Ltd. All rights reserved.
+
+Time remaining: 117 seconds
+System Capabilities: B,R
+Enabled Capabilities: B,R
+Management Addresses:
+    IP: 10.0.14.1
+Auto Negotiation - supported, enabled
+Physical media capabilities:
+    1000baseT(FD)
+    100base-TX(FD)
+    100base-TX(HD)
+    10base-T(FD)
+    10base-T(HD)
+Media Attachment Unit type: 30
+Vlan ID: - not advertised
+Peer Source MAC: 0cb1.0000.0003
+
+------------------------------------------------
+Local Intf: Et0/1
+Local Intf service instance: -
+Chassis id: 7425.8ae3.cfe7
+Port id: GigabitEthernet3/0
+Port Description: to CORE2 e0/1
+System Name: BR2
+
+System Description: 
+H3C Comware Platform Software, Software Version 7.1.064, Release 1362P12
+H3C VSR1000
+Copyright (c) 2004-2023 New H3C Technologies Co., Ltd. All rights reserved.
+
+Time remaining: 110 seconds
+System Capabilities: B,R
+Enabled Capabilities: B,R
+Management Addresses:
+    IP: 10.0.24.1
+Auto Negotiation - supported, enabled
+Physical media capabilities:
+    1000baseT(FD)
+    100base-TX(FD)
+    100base-TX(HD)
+    10base-T(FD)
+    10base-T(HD)
+Media Attachment Unit type: 30
+Vlan ID: - not advertised
+Peer Source MAC: 0cb2.0000.0002
+
+
+Total entries displayed: 5

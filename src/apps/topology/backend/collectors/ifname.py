@@ -28,8 +28,10 @@ PLATFORMS = {
         ("GigabitEthernet", "ethernet", ("GigabitEthernet", "Gi")),
         ("TenGigabitEthernet", "ethernet", ("TenGigabitEthernet", "Te")),
         ("FastEthernet", "ethernet", ("FastEthernet", "Fa")),
+        # IOL and some platforms name ports Ethernet0/1; LLDP and MAC tables shorten to Et0/1.
+        ("Ethernet", "ethernet", ("Ethernet", "Et")),
         ("Port-channel", "lag", ("Port-channel", "Po")),
-        ("Vlan", "vlanif", ("Vlan",)),
+        ("Vlan", "vlanif", ("Vlan", "Vl")),
         ("Loopback", "loopback", ("Loopback", "Lo")),
         ("Null", "null", ("Null",)),
     ),
@@ -62,7 +64,7 @@ def normalize_ifname(raw, platform):
     if any(ord(char) < 32 or ord(char) == 127 for char in raw):
         raise ValueError("control character in interface name")
     text = raw.strip(" ")
-    for canonical, kind, aliases in PLATFORMS.get(platform, ()):
+    for canonical, kind, aliases in PLATFORMS.get("ios" if platform == "iosxe" else platform, ()):
         for alias in aliases:
             match = re.fullmatch(
                 re.escape(alias) + r"([0-9]+(?:/[0-9]+)*(?:\.[0-9]+)?)", text, re.I | re.ASCII

@@ -1,0 +1,3 @@
+display vrrp verbose
+VRRP4 is not configured.
+<BR1>

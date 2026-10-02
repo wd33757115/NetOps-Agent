@@ -137,6 +137,8 @@ class Profile(StrictModel):
             allowed = {GENERIC_NAMES.get(cap)}
             if cap in {"routes", "vlan"} and self.os_family == "comware":
                 allowed.add("template_" + cap)
+            if cap == "routes" and self.os_family == "ios":
+                allowed.add("template_routes")
             if spec.parser is not None and spec.parser not in allowed:
                 raise ValueError("unknown or mismatched parser reference")
             seen.add(spec.command)

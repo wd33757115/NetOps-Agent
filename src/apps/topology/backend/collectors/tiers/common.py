@@ -76,9 +76,9 @@ def vrf_header(line):
 # Shape recognition is broader than canonicalization. Unknown family preserves spelling.
 IFNAME = re.compile(
     r"(?:GigabitEthernet|Ten-GigabitEthernet|TenGigabitEthernet|XGigabitEthernet|"
-    r"FastEthernet|Ethernet|Gi|GE|XGE|Te|Fa|Eth|"
+    r"FastEthernet|Ethernet|Gi|GE|XGE|Te|Fa|Eth|Et|"
     r"Bridge-Aggregation|Route-Aggregation|BAGG|RAGG|Port-channel|Po|Eth-Trunk|"
-    r"Vlan-interface|Vlanif|Vlan|InLoopBack|InLoop|LoopBack|Loop|Lo|NULL|REG|mgmt)"
+    r"Vlan-interface|Vlanif|Vlan|Vl|InLoopBack|InLoop|LoopBack|Loop|Lo|NULL|REG|mgmt)"
     r"[0-9]+(?:/[0-9]+)*(?:\.[0-9]+)?",
     re.I | re.ASCII,
 )
@@ -116,5 +116,6 @@ def table_count(text):
         r"^\s*Total (?:number of )?(?:entries|neighbors|neighbours|MAC addresses)"
         r"\s*[:=]\s*(\d+)\s*$",
         r"^\s*Total (?:entries|neighbors|neighbours) (?:displayed|are)\s*:\s*(\d+)\s*$",
+        r"^\s*Total Mac Addresses for this criterion\s*:\s*(\d+)\s*$",  # IOS
     )
     return [int(m.group(1)) for p in patterns for m in re.finditer(p, text, re.I | re.M)]

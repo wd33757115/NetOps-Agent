@@ -122,19 +122,22 @@ def parse_generic(identity, capability, raw, *, complete=True, command=None, pro
     incomplete = not complete or clean.had_paging or classified in {"paged", "truncated"}
     if incomplete:
         result.warnings.append("collection_incomplete")
+    family = (
+        identity.get("os_family", "unknown")
+        if isinstance(identity, dict)
+        else getattr(identity, "os_family", "unknown")
+    )
     empty_pattern = EMPTY.get(capability)
-    if empty_pattern and re.fullmatch(empty_pattern, text.strip(), re.I):
+    if family in {"ios", "iosxe"} and capability == "arp" and not text.strip():
+        # IOS prints nothing at all, not even a header, for an empty ARP table.
+        empty_pattern = ""
+    if empty_pattern is not None and re.fullmatch(empty_pattern, text.strip(), re.I):
         result.status = "failed" if incomplete else "complete"
         return result
     parser = PARSERS.get(capability)
     if parser is None:
         result.warnings.append("no_generic_parser")
         return result
-    family = (
-        identity.get("os_family", "unknown")
-        if isinstance(identity, dict)
-        else getattr(identity, "os_family", "unknown")
-    )
     try:
         parsed = parser(text, family)
     except ValueError:

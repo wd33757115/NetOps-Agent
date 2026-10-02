@@ -1,0 +1,16 @@
+show mac address-table
+          Mac Address Table
+-------------------------------------------
+
+Vlan    Mac Address       Type        Ports
+----    -----------       --------    -----
+  10    0000.5e00.010a    DYNAMIC     Et0/1
+  10    0050.7966.6801    DYNAMIC     Et1/0
+  10    aabb.cc00.0402    DYNAMIC     Et0/1
+  10    aabb.cc80.0500    DYNAMIC     Et0/1
+  20    0000.5e00.0114    DYNAMIC     Et0/2
+  20    0050.7966.6802    DYNAMIC     Et1/1
+  20    aabb.cc00.0512    DYNAMIC     Et0/2
+  20    aabb.cc80.0400    DYNAMIC     Et0/2
+Total Mac Addresses for this criterion: 8
+ACC1#

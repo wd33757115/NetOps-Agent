@@ -1,0 +1,49 @@
+Codes: L - local, C - connected, S - static, R - RIP, M - mobile, B - BGP
+       D - EIGRP, EX - EIGRP external, O - OSPF, IA - OSPF inter area 
+       N1 - OSPF NSSA external type 1, N2 - OSPF NSSA external type 2
+       E1 - OSPF external type 1, E2 - OSPF external type 2, m - OMP
+       n - NAT, Ni - NAT inside, No - NAT outside, Nd - NAT DIA
+       i - IS-IS, su - IS-IS summary, L1 - IS-IS level-1, L2 - IS-IS level-2
+       ia - IS-IS inter area, * - candidate default, U - per-user static route
+       H - NHRP, G - NHRP registered, g - NHRP registration summary
+       o - ODR, P - periodic downloaded static route, l - LISP
+       a - application route
+       + - replicated route, % - next hop override, p - overrides from PfR
+       & - replicated local route overrides by connected
+
+Gateway of last resort is 10.255.0.1 to network 0.0.0.0
+
+B*    0.0.0.0/0 [200/0] via 10.255.0.1, 00:51:11
+      8.0.0.0/24 is subnetted, 1 subnets
+B        8.8.8.0 [200/0] via 10.255.0.1, 00:51:11
+      10.0.0.0/8 is variably subnetted, 18 subnets, 3 masks
+O        10.0.12.0/30 [110/21] via 10.0.46.1, 00:52:19, Ethernet0/1
+                      [110/21] via 10.0.36.1, 00:51:27, Ethernet0/2
+O        10.0.13.0/30 [110/20] via 10.0.36.1, 00:53:13, Ethernet0/2
+O        10.0.14.0/30 [110/20] via 10.0.46.1, 00:53:13, Ethernet0/1
+O        10.0.23.0/30 [110/20] via 10.0.36.1, 00:53:13, Ethernet0/2
+O        10.0.24.0/30 [110/20] via 10.0.46.1, 00:53:13, Ethernet0/1
+O        10.0.34.0/31 [110/20] via 10.0.46.1, 00:53:13, Ethernet0/1
+                      [110/20] via 10.0.36.1, 00:53:13, Ethernet0/2
+O        10.0.35.0/30 [110/20] via 10.0.36.1, 00:53:13, Ethernet0/2
+C        10.0.36.0/30 is directly connected, Ethernet0/2
+L        10.0.36.2/32 is directly connected, Ethernet0/2
+O        10.0.45.0/30 [110/20] via 10.0.46.1, 00:53:13, Ethernet0/1
+C        10.0.46.0/30 is directly connected, Ethernet0/1
+L        10.0.46.2/32 is directly connected, Ethernet0/1
+O        10.255.0.1/32 [110/20] via 10.0.46.1, 00:51:27, Ethernet0/1
+                       [110/20] via 10.0.36.1, 00:51:33, Ethernet0/2
+O        10.255.0.2/32 [110/20] via 10.0.46.1, 00:52:19, Ethernet0/1
+                       [110/20] via 10.0.36.1, 00:52:15, Ethernet0/2
+O        10.255.0.3/32 [110/11] via 10.0.36.1, 00:53:13, Ethernet0/2
+O        10.255.0.4/32 [110/11] via 10.0.46.1, 00:53:13, Ethernet0/1
+O        10.255.0.5/32 [110/21] via 10.0.46.1, 00:53:13, Ethernet0/1
+                       [110/21] via 10.0.36.1, 00:53:13, Ethernet0/2
+C        10.255.0.6/32 is directly connected, Loopback0
+      172.16.0.0/16 is variably subnetted, 5 subnets, 3 masks
+B        172.16.0.0/16 [200/0] via 10.255.0.1, 00:51:28
+C        172.16.10.0/24 is directly connected, Vlan10
+L        172.16.10.3/32 is directly connected, Vlan10
+C        172.16.20.0/24 is directly connected, Vlan20
+L        172.16.20.3/32 is directly connected, Vlan20
+B     198.51.100.0/24 [200/0] via 10.255.0.1, 00:51:11

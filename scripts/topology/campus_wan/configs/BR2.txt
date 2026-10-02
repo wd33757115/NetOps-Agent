@@ -1,0 +1,61 @@
+sysname BR2
+lldp global enable
+ospf 1 router-id 10.255.0.2
+ area 0.0.0.0
+ quit
+ quit
+interface LoopBack0
+ ip address 10.255.0.2 32
+ ospf 1 area 0.0.0.0
+ quit
+interface GigabitEthernet1/0
+ description OOB-MGMT
+ ip address 10.10.1.12 24
+ undo lldp enable
+ quit
+interface GigabitEthernet2/0
+ description to ISP e0/2
+ ip address 100.64.2.2 30
+ quit
+interface GigabitEthernet3/0
+ description to CORE2 e0/1
+ ip address 10.0.24.1 30
+ ospf 1 area 0.0.0.0
+ quit
+interface GigabitEthernet4/0
+ description to CORE1 e0/2
+ ip address 10.0.23.1 30
+ ospf 1 area 0.0.0.0
+ quit
+interface GigabitEthernet5/0
+ description to BR1 GE5/0
+ ip address 10.0.12.2 30
+ ospf 1 area 0.0.0.0
+ quit
+ip route-static 172.16.0.0 16 NULL0
+route-policy TO-ISP permit node 10
+ apply as-path 65000 65000
+ quit
+bgp 65000
+ router-id 10.255.0.2
+ peer 100.64.2.1 as-number 65100
+ peer 10.255.0.3 as-number 65000
+ peer 10.255.0.3 connect-interface LoopBack0
+ peer 10.255.0.4 as-number 65000
+ peer 10.255.0.4 connect-interface LoopBack0
+ address-family ipv4 unicast
+  network 172.16.0.0 255.255.0.0
+  peer 100.64.2.1 enable
+  peer 100.64.2.1 route-policy TO-ISP export
+  peer 10.255.0.3 enable
+  peer 10.255.0.3 next-hop-local
+  peer 10.255.0.4 enable
+  peer 10.255.0.4 next-hop-local
+  quit
+ quit
+ssh server enable
+line vty 0 63
+ authentication-mode scheme
+ protocol inbound ssh
+ quit
+public-key local create ecdsa secp256r1

@@ -21,6 +21,8 @@ def parse(text, family):
             mode = "route"
         elif "interfaces in bridge mode:" in line.lower():
             mode = "bridge"
+        elif re.fullmatch(r"Interface\s+Status\s+Protocol\s+Description\s*", line):
+            mode = "description"  # IOS "show interfaces description"
         tokens = re.sub(r"administratively\s+down|admin\s+down", "ADM", line, flags=re.I).split()
         if not tokens or not IFNAME.fullmatch(tokens[0]):
             continue
@@ -60,6 +62,11 @@ def parse(text, family):
                 result.reject(number, "incomplete_route_interface_row")
                 continue
             record["description"] = " ".join(tokens[4:]) or None
+        elif mode == "description":
+            if len(tokens) < 3:
+                result.reject(number, "incomplete_description_row")
+                continue
+            record["description"] = " ".join(tokens[3:]) or None
         result.add(record, [number], {"text": line})
         seen.add(name.name)
     return result

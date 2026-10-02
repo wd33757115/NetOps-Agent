@@ -4,7 +4,8 @@ Reuses the builder's attachment decision: a host's L2 link in the built tree is 
 attachment. The link's other ends classify the answer:
 
 - one device port: ``confirmed``;
-- several ports, all on collected devices: ``shared_segment`` (hub or unmanaged switch);
+- several ports, all on collected devices, or one port shared with other hosts:
+  ``shared_segment`` (hub or unmanaged switch);
 - a port on a device that was only advertised: ``behind_uncollected``;
 - no attachment evidence: ``not_found``;
 - an address or MAC of a collected device itself: ``device``.
@@ -139,7 +140,7 @@ class _Locator:
             )
         if any(not p["collected"] for p in ports):
             status = "behind_uncollected"
-        elif len(ports) == 1:
+        elif len(ports) == 1 and len(link[ST + "tp"]) == 2:
             status = "confirmed"
         else:
             status = "shared_segment"

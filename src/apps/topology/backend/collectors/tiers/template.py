@@ -83,6 +83,13 @@ ASSETS = {
             "28b93670e7c4a393e8cefd4501cb7230ba7269e6ee3939d887d7f2959e5d09e6",
         ),
     ),
+    ("ios", "routes"): (
+        Asset(
+            "ntc",
+            "cisco_ios_show_ip_route.textfsm",
+            "3132bebd7273530d80717ae29b7db5fb2a542caa1f4c46d89f1d6a2fcab9555c",
+        ),
+    ),
     ("nxos", "arp"): (
         Asset(
             "repository",
@@ -252,6 +259,66 @@ def route_records(rows, text):
     return list(groups.values()), list(sources.values())
 
 
+# Fixed IOS "show ip route" text around the routes (lab sample 20261002, IOS-XE 17.15).
+IOS_ROUTE_NOISE = (
+    r"Codes: .*",
+    r"\s+\S+ - .*",  # legend continuation lines
+    r"Gateway of last resort is .*",
+    r"\s*\S+/\d+ is (?:variably )?subnetted, \d+ subnets(?:, \d+ masks)?",
+)
+
+
+def ios_route_records(rows, text):
+    """One record per prefix/protocol/preference/metric; every line is a route or known text.
+
+    A recursive route ("via 10.255.0.1" with no interface) keeps its next hop without one;
+    a connected route has an interface and no next-hop address.
+    """
+    lines = text.splitlines()
+    groups, sources = {}, {}
+    for raw, number in rows:
+        line = lines[number - 1]
+        next_ip, next_if = raw["NEXTHOP_IP"], raw["NEXTHOP_IF"]
+        if (next_ip and next_ip not in line) or (next_if and next_if not in line):
+            raise ValueError("route_unmatched_row_fields")
+        prefix = network_prefix(raw["NETWORK"] + "/" + raw["PREFIX_LENGTH"])
+        preference, metric = int(raw["DISTANCE"] or 0), int(raw["METRIC"] or 0)
+        if not 0 <= preference <= 255 or not 0 <= metric <= 2147483647:
+            raise ValueError("invalid_route_metric")
+        protocol = " ".join(part for part in (raw["PROTOCOL"], raw["TYPE"]) if part)
+        key = (prefix, protocol, preference, metric)
+        record = groups.setdefault(
+            key,
+            {
+                "vrf": "default",
+                "prefix": prefix,
+                "protocol": protocol,
+                "preference": preference,
+                "metric": metric,
+                "next_hops": [],
+            },
+        )
+        hop = {
+            "ip": ip_address(next_ip) if next_ip else None,
+            "ifname": interface(next_if, "ios").name if next_if else None,
+            "vrf": "default",
+        }
+        if not hop["ip"] and not hop["ifname"]:
+            raise ValueError("route_without_next_hop")
+        if hop not in record["next_hops"]:
+            record["next_hops"].append(hop)
+        source = sources.setdefault(key, {"lines": [], "raw": []})
+        source["lines"] = sorted(set(source["lines"] + [number]))
+        source["raw"].append(raw)
+    allowed = {n for source in sources.values() for n in source["lines"]}
+    for number, line in enumerate(lines, 1):
+        if number in allowed or not line.strip():
+            continue
+        if not any(re.fullmatch(pattern, line) for pattern in IOS_ROUTE_NOISE):
+            raise ValueError("uncovered_route_line")
+    return list(groups.values()), list(sources.values())
+
+
 def vlan_records(rows, text):
     """NTC matches VLAN IDs but its word-only name truncates spaced names.
 
@@ -321,7 +388,8 @@ def apply(identity, capability, text, fallback, *, complete, model=None):
             if not rows and capability != "routes":
                 raise ValueError("template_zero_rows_nonempty")
             if capability == "routes":
-                records, sources = route_records(rows, text)
+                projection = ios_route_records if family == "ios" else route_records
+                records, sources = projection(rows, text)
             elif capability == "vlan":
                 records, sources = vlan_records(rows, text)
             else:

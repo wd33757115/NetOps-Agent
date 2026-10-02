@@ -1024,6 +1024,14 @@ P2-9 根据 Q5 取消，不引入 SNMP。P3 及后续仍在进入阶段时展开
 
 ## 14. 进度台账（执行者维护）
 
+### 2026-10-03 第一套复杂拓扑：园区 + 双出口实验网（campus-wan）与 Cisco 真机建模
+
+- 拓扑参照 Batfish 示例网络（双 border/core/汇聚）与常见园区三层组网：H3C VSR 边界 ×2（eBGP 上联、iBGP、OSPF area 0），Cisco IOL 核心 ×2（路由反射器、/31 互联）、汇聚 ×2（ABR area 0/10、VRRP、LACP Po1、rapid-PVST）、接入 ×2（双上联 trunk），傻瓜交换机后两台终端，ISP 不纳管且不发 LLDP，Cisco 管理口在 VRF MGMT。工具包 `scripts/topology/campus_wan/`（生成 GNS3 工程、经控制台推送配置；VSR 先在 VNC 给 aux 口授权）；账号由负责人运行 `lab.py account` 建立。
+- 采样：`collect_lab_samples.py` 按 SSH 横幅区分 Comware/IOS；批次 `20261003-001138` 经 `import_lab_fixtures.py --lab campus-wan` 秘密扫描后入库 `tests/fixtures/topology/campus-wan/`（169 文件，不含设备配置），`expected.json` 为实际接线。
+- 平台首轮发现暴露并已修复：Cisco 短名 `Et`/`Vl` 不被识别（LLDP 判失败致整台失败）；`show interfaces description`、`show ip interface` 块格式、IOS 路由表（NTC 模板 + 逐行覆盖校验，保留递归下一跳与 ECMP）、IOS 空 ARP 输出、`Total Mac Addresses` 条数行。建模：IOS 无本机 LLDP 命令时，以邻居 LLDP 通告的、属于该设备自身地址的管理地址认定其机箱（仅一一对应）；VRRP/HSRP 虚拟 MAC（RFC 5798 §7.3、RFC 2281）不作终端；聚合口上学到的 MAC 与 LLDP 口同为弱证据；只有弱证据的 MAC 须有 IP 且全部位于同一 LLDP 网段才放置；对端端口子类型缺省时按对端平台接口名规范化；单端口后有多台终端时定位为共享网段。
+- 结果：拓扑 App 0.4.8 已部署，平台发现 8 台全部成功，L2 16 节点/23 链路（16 根设备间网线与实际接线一一对应），L3 16 段；`test_topology_campus_wan.py` 15 项、拓扑相关 465 项通过。
+- 负责人要求建模优先采纳 IETF 标准；对照结论与后续设计（LAG 按 RFC 8944 `lag`/`member-link-tp`、VRRP 按 RFC 8347、递归下一跳按 RFC 8349 语义、VRF 表示）待确认后实施。
+
 ### 2026-10-02 会话级模型与思考强度（完成此前记下的后续计划 1）
 
 - 对话输入框右侧加选择器（参照 ChatGPT 的“思考强度”）：模型 V4 Flash / V4 Pro，思考强度 关 / 低 / 高 / 最高；选了立即保存，只对当前会话生效，没选过的会话用部署默认模型、思考关。

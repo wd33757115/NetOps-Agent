@@ -13,13 +13,13 @@ budgets: {fast: 120, standard: 300, full: 600}
 capabilities:
   version: {command: show version, parser: generic_version}
   lldp: {command: show lldp neighbors detail, parser: generic_lldp}
-  interfaces: {command: show interfaces, parser: null}
+  interfaces: {command: show interfaces description, parser: generic_ifbrief}
   inventory: {command: show inventory, parser: null}
-  ip: {command: show ip interface, parser: null}
+  ip: {command: show ip interface, parser: generic_ipif}
   arp: {command: show ip arp, parser: generic_arp}
   mac: {command: show mac address-table, parser: generic_mac}
   vlan: {command: show vlan brief, parser: null}
   lag: {command: show etherchannel summary, parser: null}
-  routes: {command: show ip route, timeout: 300, parser: null}
+  routes: {command: show ip route, timeout: 300, parser: template_routes}
   vrfs: {command: show vrf, parser: null}
 verified: []

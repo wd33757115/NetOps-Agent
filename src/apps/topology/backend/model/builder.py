@@ -23,6 +23,25 @@ NT = "ietf-network-topology:"
 L2T = "ietf-l2-topology:"
 L3T = "ietf-l3-unicast-topology:"
 L2_PORT_TYPES = frozenset({"ethernet", "lag"})
+# Virtual router MACs are gateways, never hosts: VRRP 00-00-5E-00-01/02-{VRID} for IPv4/IPv6
+# (RFC 5798 §7.3) and HSRP 00-00-0C-07-AC-{group} (RFC 2281).
+VIRTUAL_ROUTER_MACS = ("00:00:5e:00:01:", "00:00:5e:00:02:", "00:00:0c:07:ac:")
+
+
+def _components(pairs):
+    """Connected components of member pairs: {member: representative}."""
+    parent = {}
+
+    def find(member):
+        parent.setdefault(member, member)
+        while parent[member] != member:
+            parent[member] = parent[parent[member]]
+            member = parent[member]
+        return member
+
+    for a, b in pairs:
+        parent[find(a)] = find(b)
+    return {member: find(member) for member in parent}
 
 
 def _uri(value):
@@ -43,14 +62,41 @@ class _Topology:
         for key, facts in devices.items():
             chassis = (facts.get("lldp_local") or {}).get("chassis_id")
             self.chassis[key] = chassis or f"target:{key}"
-        self.by_chassis = {c: k for k, c in self.chassis.items()}
         # Every address on a collected device, so ARP entries for it are not hosts.
         self.owner = {}
         for key, facts in devices.items():
             for rec in facts.get("ip", []):
                 self.owner[(rec.get("vrf", "default"), rec["address"])] = (key, rec["ifname"])
+        self.advertised_identity()
+        self.by_chassis = {c: k for k, c in self.chassis.items()}
         self.l2_nodes = {}
         self.host_ips = {}
+
+    def advertised_identity(self):
+        """A device that cannot report its own chassis (IOS has no local LLDP command) is
+        the chassis its neighbours advertise with one of its own addresses as the LLDP
+        management address. Only a one-to-one claim counts; anything ambiguous stays apart.
+        """
+        holders = {}
+        for (_, address), (key, _) in self.owner.items():
+            holders.setdefault(address, set()).add(key)
+        claims = {}
+        for observer, facts in self.devices.items():
+            for rec in facts.get("lldp", []):
+                for address in rec.get("remote_mgmt_addresses", []):
+                    keys = holders.get(address, set())
+                    if len(keys) == 1 and observer not in keys:
+                        claims.setdefault(next(iter(keys)), set()).add(rec["remote_chassis_id"])
+        reported = {c for c in self.chassis.values() if not c.startswith("target:")}
+        unresolved = {
+            key: next(iter(chassis))
+            for key, chassis in claims.items()
+            if self.chassis[key].startswith("target:") and len(chassis) == 1
+        }
+        wanted = list(unresolved.values())
+        for key, chassis in unresolved.items():
+            if chassis not in reported and wanted.count(chassis) == 1:
+                self.chassis[key] = chassis
 
     # identifiers -------------------------------------------------------------
     def device_node(self, chassis):
@@ -72,24 +118,38 @@ class _Topology:
 
     # L2 ------------------------------------------------------------------------
     def remote_port(self, chassis, port_id, subtype):
+        """A collected neighbour's port in its own spelling. IOS does not print the port ID
+        subtype (it sends "interface name"); an unknown subtype counts only when the name
+        is one of the neighbour platform's interface names."""
         key = self.by_chassis.get(chassis)
-        if key and str(subtype).lower() == "interface name":
-            return normalize_ifname(port_id, self.devices[key].get("platform", "")).name
+        if key and (subtype is None or str(subtype).lower() == "interface name"):
+            name = normalize_ifname(port_id, self.devices[key].get("platform", ""))
+            if name.recognized or subtype is not None:
+                return name.name
         return port_id
 
     def observations(self):
         """Pairs of L2 endpoints with evidence.
 
         Hosts attach where the evidence is most specific: an edge port (no LLDP
-        neighbour) from the MAC table or ARP beats a sighting on an LLDP port, which
-        in a switch chain only means "somewhere behind that neighbour". A host seen
-        only on LLDP ports (a hub segment) keeps those sightings.
+        neighbour) from the MAC table or ARP beats a sighting on an LLDP port or an
+        aggregate, which in a switch chain only means "somewhere behind that neighbour".
+        A host seen only there is placed when it has an IP and every sighting is on one
+        shared segment (a hub); otherwise placing it would join separate links.
+        Virtual router MACs are gateways, not hosts.
         """
         found, hosts = [], {}
-        managed_macs = set()
+        managed_macs = {c for c in self.chassis.values() if not c.startswith("target:")}
         for key, facts in self.devices.items():
             me = self.chassis[key]
+            platform = facts.get("platform", "")
             lldp_ports = {rec["local_if"] for rec in facts.get("lldp", [])}
+            # An aggregate's LLDP is reported on its members; what it learns is behind a peer.
+            lldp_ports |= {
+                rec["port"]
+                for rec in facts.get("mac", [])
+                if normalize_ifname(rec["port"], platform).kind == "lag"
+            }
             advertised = {}
             for rec in facts.get("lldp", []):
                 local, peer = rec["local_if"], rec["remote_chassis_id"]
@@ -132,10 +192,15 @@ class _Topology:
                         f"{key} mac {rec['mac']} vlan {rec.get('vlan_or_bd')} {port}",
                     )
                 )
+        segment = _components((a, b) for a, b, _ in found)
         for mac, seen in sorted(hosts.items()):
-            if mac in managed_macs:
-                continue  # a collected or advertised device's own interface
-            for member, why in seen["strong"] or seen["weak"]:
+            if mac in managed_macs or mac.startswith(VIRTUAL_ROUTER_MACS):
+                continue  # a collected or advertised device's own interface, or a gateway
+            members = seen["strong"]
+            if not members and mac in self.host_ips:
+                if len({segment.get(member, member) for member, _ in seen["weak"]}) == 1:
+                    members = seen["weak"]
+            for member, why in members:
                 found.append((member, ("nic", mac), why))
         return found
 

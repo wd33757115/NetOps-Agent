@@ -1,0 +1,8 @@
+  Type: S-Static   D-Dynamic   O-Openflow   R-Rule   M-Multiport  I-Invalid
+IP address      MAC address    VLAN/VSI name Interface/Link ID        Aging Type
+10.0.23.2       aabb-cc00-0220 --            GE4/0                    7     D   
+10.0.24.2       aabb-cc00-0310 --            GE3/0                    7     D   
+100.64.2.1      aabb-cc00-0120 --            GE2/0                    7     D   
+10.0.12.1       0cb1-0000-0004 --            GE5/0                    8     D   
+10.10.1.11      0cb1-0000-0000 --            GE1/0                    8     D   
+10.10.1.254     0015-5d01-0314 --            GE1/0                    12    D   
