@@ -645,6 +645,193 @@ def lab_run(world):
     return service.read("user", row["id"])
 
 
+def test_snapshot_state_is_independent_partial_tree_and_owner_scoped(world):
+    result = lab_run(world)
+    state = service.snapshot_state("user", result["snapshot_id"])
+    assert state["snapshot_id"] == result["snapshot_id"]
+    assert len(state["devices"]) == 2
+    device = state["devices"][0]
+    assert set(device["tree"]) == {"ietf-interfaces:interfaces"}
+    assert device["metadata"]["completeness"] == "partial"
+    assert device["metadata"]["observation_id"]
+    exported_device = service.device_model("user", result["snapshot_id"], device["address"])
+    assert exported_device["tree"] == device["tree"]
+    with pytest.raises(HTTPException) as missing:
+        service.device_model("user", result["snapshot_id"], "192.0.2.99")
+    assert missing.value.status_code == 404
+    assert any(g["code"] == "mandatory_statistics_not_observed" for g in device["gaps"])
+    assert all(
+        "state" not in n
+        for n in service.export("user", result["snapshot_id"])["ietf-network:networks"]["network"]
+    )
+    with pytest.raises(HTTPException) as error:
+        service.snapshot_state("stranger", result["snapshot_id"])
+    assert error.value.status_code == 404
+
+
+def test_older_snapshot_state_uses_its_run_without_rewriting_it(world):
+    result = lab_run(world)
+    with world.sessions() as session:
+        snap = session.get(Snapshot, result["snapshot_id"])
+        graph = dict(snap.graph)
+        graph.pop("state")
+        snap.graph = graph
+        # A newer attempt in this run with failed LLDP still has valid current
+        # interfaces. It must replace the old UP interface observation for state.
+        target = session.scalar(select(Target).where(Target.run_id == snap.run_id))
+        target.version = 2
+        session.add(
+            Observation(
+                id="latest-state",
+                run_id=snap.run_id,
+                target_id=target.id,
+                attempt=2,
+                observed_at=now(),
+                evidence_key="latest-state",
+                data={
+                    "complete": False,
+                    "capabilities": {"interfaces": "complete", "lldp": "failed"},
+                    "facts": {
+                        "interfaces": [
+                            {
+                                "ifname": "GigabitEthernet2/0",
+                                "type": "ethernet",
+                                "oper_status": "down",
+                            }
+                        ]
+                    },
+                },
+            )
+        )
+    state = service.snapshot_state("user", result["snapshot_id"])
+    device = next(
+        d for d in state["devices"] if d["metadata"].get("observation_id") == "latest-state"
+    )
+    assert device["collection_status"] == "failed"
+    assert device["tree"]["ietf-interfaces:interfaces"]["interface"][0]["oper-status"] == "down"
+    with world.sessions() as session:
+        assert "state" not in session.get(Snapshot, result["snapshot_id"]).graph
+
+
+def test_stored_snapshot_state_does_not_change_when_new_attempt_arrives(world):
+    result = lab_run(world)
+    original = service.snapshot_state("user", result["snapshot_id"])
+    with world.sessions() as session:
+        target = session.scalar(select(Target).where(Target.run_id == result["id"]))
+        session.add(
+            Observation(
+                id="too-late",
+                run_id=result["id"],
+                target_id=target.id,
+                attempt=2,
+                observed_at=now(),
+                evidence_key="too-late",
+                data={"complete": False},
+            )
+        )
+    assert service.snapshot_state("user", result["snapshot_id"]) == original
+
+
+def test_graph_keeps_same_network_l2_history_without_old_current_state(world):
+    from src.apps.topology.backend.model.builder import L2T, NT
+
+    result = lab_run(world)
+    with world.sessions() as session:
+        network = session.get(Network, result["network_id"])
+        run = Run(
+            id="failed-run",
+            owner_id="user",
+            network_id=network.id,
+            request_id="failed-run",
+            input_hash="x",
+            settings={
+                "mode": "ssh",
+                "allowed_cidrs": ["10.10.1.0/24"],
+                "max_depth": 1,
+                "profile_id": "auto",
+            },
+            status="partial",
+        )
+        session.add(run)
+        session.flush()
+        for index in (1, 2):
+            session.add(
+                Target(
+                    id=f"failed-{index}",
+                    run_id=run.id,
+                    depth=0,
+                    target_key=f"failed-{index}",
+                    address=f"10.10.1.{index}",
+                    status="failed",
+                    reason="connection_failed",
+                )
+            )
+        session.flush()
+        graph = service._graph(session, run)
+    l2 = next(
+        n
+        for n in graph["simap"]["ietf-network:networks"]["network"]
+        if L2T + "l2-topology" in n["network-types"]
+    )
+    # Only managed two-ended L2 history is retained; host/shared-media links and
+    # every old L3 subnet are not asserted as current observations.
+    assert len(l2[NT + "link"]) == 1
+    assert all(d["collection_status"] != "complete" for d in graph["state"]["devices"])
+    link = graph["links"][0]
+    assert link["freshness"] == "historical" and link["available"] is None
+    assert link["prior_snapshot_id"] == result["snapshot_id"]
+    assert all(n["identity_status"] == "known" for n in graph["nodes"])
+
+
+def test_graph_rejects_previous_snapshot_from_another_network(world):
+    result = lab_run(world)
+    with world.sessions() as session:
+        network = Network(
+            id="other-network",
+            owner_id="user",
+            name="Other",
+            domain="default",
+            current_snapshot=result["snapshot_id"],
+        )
+        session.add(network)
+        session.flush()
+        run = Run(
+            id="other-run",
+            owner_id="user",
+            network_id=network.id,
+            request_id="other-run",
+            input_hash="x",
+            settings={
+                "mode": "ssh",
+                "allowed_cidrs": ["10.10.1.0/24"],
+                "max_depth": 1,
+                "profile_id": "auto",
+            },
+            status="completed",
+        )
+        session.add(run)
+        session.flush()
+        graph = service._graph(session, run)
+        assert graph["state"] == {"devices": [], "links": {}}
+        assert graph["nodes"] == []
+
+
+def test_failed_current_attempt_without_evidence_cannot_borrow_old_up(world):
+    result = lab_run(world)
+    with world.sessions() as session:
+        target = session.scalar(select(Target).where(Target.run_id == result["id"]))
+        target.version += 1
+        target.status, target.reason = "waiting_for_input", "evidence_unavailable"
+        session.flush()
+        current = service._all_observations(session, result["id"])
+        assert target.address not in {o["address"] for o in current}
+        graph = service._graph(session, session.get(Run, result["id"]))
+        device = next(d for d in graph["state"]["devices"] if d["address"] == target.address)
+        assert device["collection_status"] != "complete"
+        assert device["tree"]["ietf-interfaces:interfaces"]["interface"] == []
+        assert all(link["available"] is not True for link in graph["state"]["links"].values())
+
+
 def test_discovery_keeps_each_route_table_for_path_tracing(world):
     lab_run(world)
     with world.sessions() as session:

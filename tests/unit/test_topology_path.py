@@ -118,6 +118,9 @@ def router(chassis, ips, routes=None):
     facts = {
         "platform": "comware",
         "lldp_local": {"chassis_id": chassis},
+        "interfaces": [
+            {"ifname": ifname, "type": "other", "oper_status": "up"} for ifname, _, _ in ips
+        ],
         "ip": [
             {"ifname": ifname, "address": address, "prefix_len": length, "vrf": "default"}
             for ifname, address, length in ips
@@ -259,3 +262,142 @@ def test_an_address_only_next_hop_resolves_through_the_rib_or_is_a_gap():
     assert first["resolved_via"][0]["prefix"] == "172.16.4.0/24"
     gap = trace(devices, BASE, "172.16.1.10", "172.16.5.20")["gaps"][0]
     assert (gap["status"], gap["next_hop"]) == ("unresolved_next_hop", "10.9.9.9")
+
+
+def set_interface(devices, address, ifname, **fields):
+    row = next(row for row in devices[address]["interfaces"] if row["ifname"] == ifname)
+    row.update(fields)
+    return row
+
+
+@pytest.mark.parametrize(
+    "status", ["down", "testing", "dormant", "not-present", "lower-layer-down"]
+)
+def test_explicit_nonforwarding_egress_ends_only_its_ecmp_branch_with_evidence(status):
+    devices = network()
+    set_interface(devices, "10.0.0.1", "GigabitEthernet1/0", oper_status=status)
+    observed = {"10.0.0.1": {"evidence_id": "current-r1", "observed_at": "2026-10-03T03:00:00Z"}}
+    result = trace(devices, BASE, "172.16.1.10", "172.16.4.20", observed)
+    assert ends(result) == [
+        (["10.0.0.1"], "interface_unavailable"),
+        (["10.0.0.1", "10.0.0.3", "10.0.0.4"], "delivered"),
+    ]
+    end = result["forward"]["paths"][0]["end"]
+    assert end["interface"] == "GigabitEthernet1/0" and end["interface_role"] == "out"
+    assert end["oper_status"] == status and end["evidence_id"] == "current-r1"
+    assert end["observed_at"] == "2026-10-03T03:00:00Z"
+    assert result["forward"]["status"] == "partial"
+    gap = next(g for g in result["gaps"] if g["status"] == "interface_unavailable")
+    assert gap["oper_status"] == status and gap["evidence_id"] == "current-r1"
+
+
+def test_real_next_hop_ingress_is_checked_before_route_or_device_delivery():
+    devices = network()
+    set_interface(devices, "10.0.0.2", "GigabitEthernet1/0", oper_status="down")
+    result = trace(devices, BASE, "172.16.1.10", "172.16.4.20")
+    path = result["forward"]["paths"][0]
+    assert path["end"]["status"] == "interface_unavailable"
+    assert path["end"]["interface_role"] == "in"
+    assert path["end"]["interface"] == "GigabitEthernet1/0"
+    assert path["hops"][-1]["out_interface"] is None and path["hops"][-1]["route"] is None
+
+
+def test_raw_administrative_down_blocks_even_with_operational_up_without_rewriting_it():
+    devices = network()
+    set_interface(devices, "10.0.0.1", "GigabitEthernet1/0", admin_status="down")
+    result = trace(devices, BASE, "172.16.1.10", "172.16.4.20")
+    end = result["forward"]["paths"][0]["end"]
+    assert end["status"] == "interface_unavailable"
+    assert end["oper_status"] == "up" and end["admin_status"] == "down"
+
+
+@pytest.mark.parametrize("damage", ["unknown", "missing_status", "missing_interface", "duplicate"])
+def test_missing_or_ambiguous_egress_keeps_candidate_but_cannot_claim_complete(damage):
+    devices = network()
+    rows = devices["10.0.0.1"]["interfaces"]
+    row = next(row for row in rows if row["ifname"] == "GigabitEthernet1/0")
+    if damage == "unknown":
+        row["oper_status"] = "unknown"
+    elif damage == "missing_status":
+        row.pop("oper_status")
+    elif damage == "missing_interface":
+        rows.remove(row)
+    else:
+        rows.append({**row, "oper_status": "down", "admin_status": "down"})
+    result = trace(devices, BASE, "172.16.1.10", "172.16.4.20")
+    assert all(path["end"]["status"] == "delivered" for path in result["forward"]["paths"])
+    assert result["forward"]["status"] == "partial"
+    first = result["forward"]["paths"][0]["hops"][0]
+    assert first["interface_states"]["out"]["oper_status"] == "unknown"
+    assert any(
+        g["status"] == "interface_state_unknown" and g["interface"] == "GigabitEthernet1/0"
+        for g in result["gaps"]
+    )
+
+
+def test_wholly_unobserved_interfaces_never_become_default_up():
+    devices = network()
+    devices["10.0.0.1"].pop("interfaces")
+    result = trace(devices, BASE, "172.16.1.10", "172.16.4.20")
+    assert result["forward"]["status"] == "partial"
+    assert all(path["end"]["status"] == "delivered" for path in result["forward"]["paths"])
+    assert {
+        gap["interface_role"]
+        for gap in result["gaps"]
+        if gap["status"] == "interface_state_unknown"
+    } == {"in", "out"}
+
+
+def test_recursive_next_hop_checks_the_resolved_physical_egress():
+    devices = network()
+    devices["10.0.0.1"]["routes"].append(
+        route("172.16.6.0/24", ("172.16.4.1", None), protocol="BGP")
+    )
+    set_interface(devices, "10.0.0.1", "GigabitEthernet1/0", oper_status="lower-layer-down")
+    result = trace(devices, BASE, "172.16.1.10", "172.16.6.20")
+    first = result["forward"]["paths"][0]
+    assert first["end"]["status"] == "interface_unavailable"
+    assert first["end"]["interface"] == "GigabitEthernet1/0"
+    assert first["hops"][0]["resolved_via"][0]["prefix"] == "172.16.4.0/24"
+
+
+def test_unknown_gateway_ingress_marks_partial_even_when_local_device_delivery_succeeds():
+    devices = lab()
+    set_interface(devices, "10.10.1.1", "Vlan-interface200", oper_status="unknown")
+    result = trace(devices, BASE, "192.168.1.2", "4.4.4.4")
+    assert result["forward"]["paths"][0]["end"]["status"] == "delivered"
+    assert result["forward"]["status"] == "partial"
+    assert any(
+        g["status"] == "interface_state_unknown" and g["interface_role"] == "in"
+        for g in result["gaps"]
+    )
+
+
+def test_device_loopback_delivery_checks_actual_ingress_without_inventing_an_egress():
+    devices = lab()
+    set_interface(devices, "10.10.1.1", "LoopBack0", oper_status="down")
+    result = trace(devices, BASE, "192.168.1.2", "4.4.4.4")
+    forward = result["forward"]
+    assert forward["status"] == "complete"
+    hop = forward["paths"][0]["hops"][0]
+    assert hop["out_interface"] is None and set(hop["interface_states"]) == {"in"}
+    assert forward["paths"][0]["end"] == {
+        "status": "delivered",
+        "to": "device",
+        "interface": "LoopBack0",
+    }
+
+
+def test_null_and_inloop_terminals_do_not_require_forwarding_egress_state():
+    devices = network()
+    blackhole = trace(devices, BASE, "172.16.1.10", "172.16.9.1")["forward"]["paths"][0]
+    assert blackhole["end"]["status"] == "blackhole"
+    assert set(blackhole["hops"][0]["interface_states"]) == {"in"}
+    devices["10.0.0.1"]["routes"].append(route("172.16.11.0/24", ("0.0.0.0", "InLoopBack0")))
+    forward = trace(devices, BASE, "172.16.1.10", "172.16.11.1")["forward"]
+    assert forward["status"] == "complete"
+    assert forward["paths"][0]["end"] == {
+        "status": "delivered",
+        "to": "device",
+        "interface": "InLoopBack0",
+    }

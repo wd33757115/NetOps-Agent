@@ -25,6 +25,8 @@ capabilities:
   vrfs: {command: display ip vpn-instance, parser: null}
   irf: {command: display irf, parser: null}
   vrrp: {command: display vrrp verbose, parser: generic_vrrp}
+  ospf_interfaces: {command: display ospf interface, parser: generic_ospf_interfaces}
+  ospf_process: {command: display ospf, parser: generic_ospf_process}
 verified:
   - model: VSR1000
     version: 7.1.064 Release 1362P12

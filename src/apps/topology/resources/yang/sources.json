@@ -1,47 +1,108 @@
 {
+  "iana-bfd-types@2021-10-21.yang": {
+    "sha256": "1aa6103af9143e7095a9fd4295f8f42090b8cefb790518406eab2232f9bf89d9",
+    "source": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ietf/RFC/iana-bfd-types@2021-10-21.yang"
+  },
   "iana-if-type@2014-05-08.yang": {
-    "source": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ietf/RFC/iana-if-type@2014-05-08.yang",
-    "sha256": "e3b33c79dc9090ceb732155dc554e9975d1220a411c184cbe635216d9720820e"
+    "sha256": "e3b33c79dc9090ceb732155dc554e9975d1220a411c184cbe635216d9720820e",
+    "source": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ietf/RFC/iana-if-type@2014-05-08.yang"
+  },
+  "iana-routing-types@2017-12-04.yang": {
+    "sha256": "560eef90e2a7f51ed1f521824eb42558e6bb65135d2a33d62cf80a5af79643f4",
+    "source": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ietf/RFC/iana-routing-types@2017-12-04.yang"
+  },
+  "ieee802-dot1ab-lldp@2022-03-15.yang": {
+    "sha256": "a57d47d2ddfa6014d0ee634c947e0f3cd4fd637b1b6cd6e266cbf11573fc85e9",
+    "source": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ieee/published/802.1/ieee802-dot1ab-lldp.yang"
+  },
+  "ieee802-dot1ab-types@2022-03-15.yang": {
+    "sha256": "f2989e709e186a0f4f25c0b474ea253c77b70dd1ddcfe4ec0eac5d354e5b9009",
+    "source": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ieee/published/802.1/ieee802-dot1ab-types.yang"
   },
   "ieee802-dot1q-types@2023-10-26.yang": {
-    "source": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ieee/published/802.1/ieee802-dot1q-types.yang",
-    "sha256": "019af9e03c5ac6e3e91eeb5a8ae76249cfd5f1d9435fb59c1514774a3dbf52d3"
+    "sha256": "019af9e03c5ac6e3e91eeb5a8ae76249cfd5f1d9435fb59c1514774a3dbf52d3",
+    "source": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ieee/published/802.1/ieee802-dot1q-types.yang"
+  },
+  "ieee802-types@2023-10-22.yang": {
+    "sha256": "c88ae16c9c9b2bd58d781f84de8252c7c866b3c65554aba195befd9c6c28d7de",
+    "source": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ieee/published/802/ieee802-types.yang"
+  },
+  "ietf-bfd-types@2022-09-22.yang": {
+    "sha256": "65abd568987103be19342cdfb1611970f59577b97cf760455a553a6149c0fb88",
+    "source": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ietf/RFC/ietf-bfd-types@2022-09-22.yang"
   },
   "ietf-inet-types@2025-12-22.yang": {
-    "source": "https://www.rfc-editor.org/rfc/rfc9911.txt",
-    "sha256": "2fb39c45cd28d95f60838e5f74ac509d780d18f3c5bf78db251049a4d022e266"
+    "sha256": "2fb39c45cd28d95f60838e5f74ac509d780d18f3c5bf78db251049a4d022e266",
+    "source": "https://www.rfc-editor.org/rfc/rfc9911.txt"
   },
   "ietf-interfaces@2018-02-20.yang": {
-    "source": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ietf/RFC/ietf-interfaces@2018-02-20.yang",
-    "sha256": "f6faea9938f0341ed48fda93dba9a69aa32ee7142c463342efec3d38f4eb3621"
+    "sha256": "f6faea9938f0341ed48fda93dba9a69aa32ee7142c463342efec3d38f4eb3621",
+    "source": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ietf/RFC/ietf-interfaces@2018-02-20.yang"
+  },
+  "ietf-ip@2018-02-22.yang": {
+    "sha256": "b624c84a66c128ae69ab107a5179ca8e20e693fb57dbe5cb56c3db2ebb18c894",
+    "source": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ietf/RFC/ietf-ip@2018-02-22.yang"
+  },
+  "ietf-ipv4-unicast-routing@2018-03-13.yang": {
+    "sha256": "1a35b04f7fdbbdde4cb0defb1d627620f68890c187e85102deb0e16902678c8a",
+    "source": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ietf/RFC/ietf-ipv4-unicast-routing@2018-03-13.yang"
+  },
+  "ietf-ipv6-router-advertisements@2018-03-13.yang": {
+    "sha256": "554e7ed2841cc9e87530855a03bfda3a2a645fd8b2f61bc36f0f49040ac27372",
+    "source": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ietf/RFC/ietf-ipv6-router-advertisements@2018-03-13.yang"
+  },
+  "ietf-ipv6-unicast-routing@2018-03-13.yang": {
+    "sha256": "4d7e31f70e97b55f91e8f91619c024eba7846a596bf735aad1a5741fb9aeccc8",
+    "source": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ietf/RFC/ietf-ipv6-unicast-routing@2018-03-13.yang"
+  },
+  "ietf-key-chain@2017-06-15.yang": {
+    "sha256": "6250705f59fc9ad786e8d74172ce90d58deec437982cbca7922af40b3ae8107c",
+    "source": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ietf/RFC/ietf-key-chain@2017-06-15.yang"
   },
   "ietf-l2-topology@2020-11-15.yang": {
-    "source": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ietf/RFC/ietf-l2-topology@2020-11-15.yang",
-    "sha256": "9653885e616b8e5096872eda1d46b611d2b2ab654a0e9e35c234b519a793576f"
+    "sha256": "9653885e616b8e5096872eda1d46b611d2b2ab654a0e9e35c234b519a793576f",
+    "source": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ietf/RFC/ietf-l2-topology@2020-11-15.yang"
   },
   "ietf-l3-unicast-topology@2018-02-26.yang": {
-    "source": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ietf/RFC/ietf-l3-unicast-topology@2018-02-26.yang",
-    "sha256": "4758cc09bb33a051828a8ac90c3ef4358a1a4f67dc7507eeca9d9b326f6c5eff"
+    "sha256": "4758cc09bb33a051828a8ac90c3ef4358a1a4f67dc7507eeca9d9b326f6c5eff",
+    "source": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ietf/RFC/ietf-l3-unicast-topology@2018-02-26.yang"
   },
-  "ietf-network@2018-02-26.yang": {
-    "source": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ietf/RFC/ietf-network@2018-02-26.yang",
-    "sha256": "312b23187229cde2baec533bdf897a603f1a697e10081cefea3a2f0ef1db2089"
+  "ietf-netconf-acm@2018-02-14.yang": {
+    "sha256": "e03f91317f9538a89296e99df3ff0c4003cdfea70bf517407643b3ec13c1ed25",
+    "source": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ietf/RFC/ietf-netconf-acm@2018-02-14.yang"
   },
   "ietf-network-topology@2018-02-26.yang": {
-    "source": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ietf/RFC/ietf-network-topology@2018-02-26.yang",
-    "sha256": "dacf41a3ed966d3afa76cb540a1c2866f26b4137d27ae4b317fec0b70568e0c3"
+    "sha256": "dacf41a3ed966d3afa76cb540a1c2866f26b4137d27ae4b317fec0b70568e0c3",
+    "source": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ietf/RFC/ietf-network-topology@2018-02-26.yang"
+  },
+  "ietf-network@2018-02-26.yang": {
+    "sha256": "312b23187229cde2baec533bdf897a603f1a697e10081cefea3a2f0ef1db2089",
+    "source": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ietf/RFC/ietf-network@2018-02-26.yang"
+  },
+  "ietf-ospf@2022-10-19.yang": {
+    "sha256": "5b544e4753ffd1da9e7236f556a8b21524112223d70e3349cffbeaf5e6c92d7f",
+    "source": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ietf/RFC/ietf-ospf@2022-10-19.yang"
   },
   "ietf-routing-types@2017-12-04.yang": {
-    "source": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ietf/RFC/ietf-routing-types@2017-12-04.yang",
-    "sha256": "bfa3d48b34f76ed544006a4c5d8773620e164574b24f6395adef10c2ecb6cfbe"
+    "sha256": "bfa3d48b34f76ed544006a4c5d8773620e164574b24f6395adef10c2ecb6cfbe",
+    "source": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ietf/RFC/ietf-routing-types@2017-12-04.yang"
+  },
+  "ietf-routing@2018-03-13.yang": {
+    "sha256": "c0993dea3c233a135ac5e8185c0f3d2f3aa4cf4de27d963309bc0d61b50a8b23",
+    "source": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ietf/RFC/ietf-routing@2018-03-13.yang"
   },
   "ietf-simap-topology@2025-01-01.yang": {
-    "source": "https://www.ietf.org/archive/id/draft-havel-nmop-simap-yang-03.txt",
+    "note": "Local syntax compatibility copy of draft-havel-nmop-simap-yang-03 section 9; see models/network-twin/patches/simap-03-syntax.patch (upstream sha256 82b7e6c2adf8d5208e1cbc60555071bcb3d246426898b7e73d048728a5631df8)",
     "sha256": "8e740ecdb5fef737f93bbbb5708462dd8dab3ab2a9a2e011ed743214a9214bb3",
-    "note": "Local syntax compatibility copy of draft-havel-nmop-simap-yang-03 section 9; see models/network-twin/patches/simap-03-syntax.patch (upstream sha256 82b7e6c2adf8d5208e1cbc60555071bcb3d246426898b7e73d048728a5631df8)"
+    "source": "https://www.ietf.org/archive/id/draft-havel-nmop-simap-yang-03.txt"
+  },
+  "ietf-vrrp@2018-03-13.yang": {
+    "reference": "https://www.rfc-editor.org/rfc/rfc8347.html#section-4",
+    "sha256": "242358c009481e6708ec3a5b7b8d162056e34521134953dbd07862d6861ec708",
+    "source": "https://www.iana.org/assignments/yang-parameters/ietf-vrrp@2018-03-13.yang"
   },
   "ietf-yang-types@2025-12-22.yang": {
-    "source": "https://www.rfc-editor.org/rfc/rfc9911.txt",
-    "sha256": "5e4ff4c837f303050fa46369987f11eb909c24dae2d4ec338342a7aa596f7b2b"
+    "sha256": "5e4ff4c837f303050fa46369987f11eb909c24dae2d4ec338342a7aa596f7b2b",
+    "source": "https://www.rfc-editor.org/rfc/rfc9911.txt"
   }
 }

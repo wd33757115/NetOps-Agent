@@ -30,9 +30,10 @@ from .collectors.collect import collect_node, command_allowlist
 from .collectors.identify import TopologyDiscoveryPlan as DiscoveryPlan
 from .collectors.tiers.common import valid_mac
 from .logins import DOMAIN
-from .model.builder import build_topology, device_node_ids
+from .model.builder import build_topology_details, device_node_ids
 from .model.locate import locate as locate_in
 from .model.path import trace as trace_in
+from .model.snapshot_state import enrich_snapshot_state
 from .model.view import canvas
 from .models import (
     Alias,
@@ -53,8 +54,20 @@ from .repository import owned, sessions
 APP_ID = "topology"
 ACTIVE = ("queued", "running", "waiting_for_input")
 TOPOLOGY_FACTS = (
-    "lldp_local", "lldp", "interfaces", "ip", "arp", "mac", "vlan", "trunk", "switchport",
-    "lag", "vrrp", "routes",
+    "lldp_local",
+    "lldp",
+    "interfaces",
+    "ip",
+    "arp",
+    "mac",
+    "vlan",
+    "trunk",
+    "switchport",
+    "lag",
+    "vrrp",
+    "routes",
+    "ospf_interfaces",
+    "ospf_process",
 )
 NODE_BUDGET_SECONDS = 240
 # A lease outlives the node budget, so a live collection is never reclaimed mid-way.
@@ -178,23 +191,39 @@ def submit(owner, body):
 
 
 def _observations(session, run_id):
+    # Only the current attempt can prove current adjacency. Older structure may
+    # be retained from an authorized snapshot, explicitly marked historical.
+    return [o for o in _all_observations(session, run_id) if o["data"].get("complete")]
+
+
+def _all_observations(session, run_id):
+    """Latest attempt per address in this run, even when LLDP failed.
+
+    A usable interface observation is independent of adjacency discovery. Never
+    borrow the previous attempt's UP state when the latest attempt is unusable.
+    """
     rows = session.execute(
         select(Observation, Target.address)
         .join(Target, Target.id == Observation.target_id)
-        .where(Observation.run_id == run_id)
-        .order_by(Observation.received_at, Observation.id)
+        .where(Observation.run_id == run_id, Observation.attempt == Target.version)
+        .order_by(Observation.attempt, Observation.received_at, Observation.id)
     ).all()
-    # Latest successful parse per target; failures retain raw evidence but cannot overwrite a graph.
     latest = {}
     for row, address in rows:
-        if row.data.get("complete"):
-            latest[address] = {
-                "id": row.id,
-                "address": address,
-                "data": row.data,
-                "observed_at": row.observed_at.isoformat(),
-            }
+        latest[address] = {
+            "id": row.id,
+            "address": address,
+            "data": row.data,
+            "observed_at": row.observed_at.isoformat(),
+        }
     return list(latest.values())
+
+
+def _state_inputs(session, run_id):
+    targets = session.scalars(select(Target).where(Target.run_id == run_id)).all()
+    return _all_observations(session, run_id), [
+        {"address": t.address, "status": t.status, "reason": t.reason} for t in targets
+    ]
 
 
 # Observations from the manual LLDP-only plan or offline import carry these profile ids.
@@ -223,6 +252,16 @@ def _facts(data):
             ]
         }
     identity = platform.get("identity") or {}
+    # Typed facts keep their existing list schema. Explicit transport truncation
+    # is carried separately and cannot establish current modeling inputs.
+    metadata = data.get("fact_metadata", {})
+    if isinstance(metadata, dict):
+        for cap in ("interfaces", "ip", "arp", "mac", "vrrp", "routes", "lag", "vlan"):
+            details = metadata.get(cap, {})
+            if isinstance(details, dict) and "collection_incomplete" in details.get("warnings", []):
+                facts.pop(cap, None)
+                if cap == "vlan":
+                    facts.pop("vlan_members", None)
     facts["platform"] = identity.get("os_family") or LEGACY_PLATFORMS.get(
         platform.get("profile_id"), ""
     )
@@ -235,7 +274,7 @@ def _graph(session, run):
     observations = _observations(session, run.id)
     base = f"urn:netops:topology:{network.id}:"
     devices = {o["address"]: _facts(o["data"]) for o in observations}
-    tree, links_evidence = build_topology(devices, base)
+    tree, links_evidence, protocols = build_topology_details(devices, base)
     ids = device_node_ids(devices, base)
     collected = {
         ids[o["address"]]: {
@@ -245,7 +284,17 @@ def _graph(session, run):
         }
         for o in observations
     }
-    nodes, links = canvas(tree, links_evidence, collected, base)
+    previous = session.get(Snapshot, network.current_snapshot) if network.current_snapshot else None
+    prior = None
+    if previous and previous.network_id == network.id and previous.run_id != run.id:
+        prior = {
+            "snapshot_id": previous.id,
+            "graph": previous.graph,
+            "created_at": previous.created_at.isoformat(),
+        }
+    all_observations, state_targets = _state_inputs(session, run.id)
+    tree, state = enrich_snapshot_state(tree, collected, all_observations, state_targets, prior)
+    nodes, links = canvas(tree, links_evidence, collected, base, state)
     graph = {
         "network_id": network.id,
         "model_profile": "rfc8345+simap-yang-03:l2-l3",
@@ -253,6 +302,8 @@ def _graph(session, run):
         "links": links,
         "simap": tree,
         "evidence": links_evidence,
+        "state": state,
+        "protocols": {"ospf": protocols},
     }
     targets = session.scalars(select(Target).where(Target.run_id == run.id)).all()
     addresses = {target.address: target for target in targets}
@@ -399,6 +450,44 @@ def snapshot(owner, snapshot_id):
             raise HTTPException(404, "快照不存在")
         owned(session, Network, row.network_id, owner)
         return row.graph
+
+
+def snapshot_state(owner, snapshot_id):
+    """Independent partial RFC 8343 trees associated with one immutable snapshot.
+
+    Older snapshots are projected from their own observations on read; they are
+    never rewritten and never use the current FactRepository or another run.
+    """
+    with sessions() as session:
+        row = session.get(Snapshot, snapshot_id)
+        if not row:
+            raise HTTPException(404, "快照不存在")
+        owned(session, Network, row.network_id, owner)
+        state = row.graph.get("state")
+        if state is None:
+            if "simap" not in row.graph:
+                raise HTTPException(422, "该快照格式较旧，请重新发现后查看接口状态")
+            collected = {
+                node["id"]: {
+                    key: node[key]
+                    for key in ("address", "evidence_id", "observed_at")
+                    if key in node
+                }
+                for node in row.graph.get("nodes", [])
+                if node.get("identity_status") == "collected" and node.get("address")
+            }
+            observations, targets = _state_inputs(session, row.run_id)
+            _, state = enrich_snapshot_state(row.graph["simap"], collected, observations, targets)
+        return {"network_id": row.network_id, "snapshot_id": row.id, **state}
+
+
+def device_model(owner, snapshot_id, address):
+    """One observed device's independent native trees and completeness diagnostics."""
+    state = snapshot_state(owner, snapshot_id)
+    devices = [d for d in state["devices"] if d["address"] == address]
+    if len(devices) != 1:
+        raise HTTPException(404, "该快照没有此设备的观测")
+    return {"network_id": state["network_id"], "snapshot_id": snapshot_id, **devices[0]}
 
 
 def _analyse(session, snap, question, *args):
@@ -713,7 +802,11 @@ def topology_observation(result):
     """
     status = {cap: parsed.status for cap, parsed in result.parsed.items()}
     facts = {
-        cap: parsed.summary if cap in {"lldp_local", "trunk", "switchport"} else parsed.records
+        cap: parsed.fact_summary()
+        if cap in {"ospf_interfaces", "ospf_process"}
+        else parsed.summary
+        if cap in {"lldp_local", "trunk", "switchport"}
+        else parsed.records
         for cap, parsed in result.parsed.items()
         if cap in TOPOLOGY_FACTS and parsed.status in {"complete", "partial"}
     }
@@ -741,6 +834,19 @@ def topology_observation(result):
         "neighbors": neighbors,
         "facts": facts,
         "capabilities": status,
+        "fact_metadata": {
+            cap: {
+                "tier": parsed.tier,
+                "confidence": parsed.confidence,
+                "warnings": parsed.warnings,
+                "sources": parsed.sources,
+                "line_coordinates": "parser_text_v1_1based",
+                "candidate_count": parsed.candidate_count,
+                "rejected_count": parsed.rejected_count,
+            }
+            for cap, parsed in result.parsed.items()
+            if cap in TOPOLOGY_FACTS
+        },
         "failure_code": None
         if complete
         else (

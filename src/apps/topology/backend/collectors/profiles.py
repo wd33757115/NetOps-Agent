@@ -35,6 +35,8 @@ MODE_CAPABILITIES = {
         "switchport",
         "lag",
         "vrrp",
+        "ospf_interfaces",
+        "ospf_process",
         "routes",
     ),
     "standard": (
@@ -50,6 +52,8 @@ MODE_CAPABILITIES = {
         "trunk",
         "switchport",
         "lag",
+        "ospf_interfaces",
+        "ospf_process",
     ),
     "full": (
         "version",
@@ -64,6 +68,8 @@ MODE_CAPABILITIES = {
         "trunk",
         "switchport",
         "lag",
+        "ospf_interfaces",
+        "ospf_process",
         "routes",
         "vrfs",
         "irf",

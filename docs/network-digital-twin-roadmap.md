@@ -1024,6 +1024,19 @@ P2-9 根据 Q5 取消，不引入 SNMP。P3 及后续仍在进入阶段时展开
 
 ## 14. 进度台账（执行者维护）
 
+### 2026-10-03 GPT 后续：状态、OSPF 与独立部分设备树（topology 0.4.14）
+
+- 接手核实网页报告：报告无仓库链接却把假设写成实现结论；“单层、无 TP/支持网络、无标准导出与测试”不符合实际。数据模型、协议服务与 NMDA datastore 不能混为一项合规判断。原文与代码/RFC 的逐项对照见[交接文档的核实记录](network-digital-twin-handoff.md)。
+- 状态：`model/device_state.py`、`device_ip.py`、`snapshot_state.py` 与 `retained_links.py`；标准树只有 RFC 8343/8344/8347 原生字段，快照、设备身份、采集完整性、原证据与历史关联在应用返回体中。当前 Observation 必须匹配 `Target.version`；证据保存失败或 lease 丢失而没有新 Observation 时不借旧 UP/LLDP。只保留同网络已知设备两端的 L2 历史，当前新 LLDP 占口关系优先；历史最后确认时间和来源快照不会被续写刷新。L3 子网与旧 VLAN 标签不借历史事实恢复。
+- 路径：`model/path.py` 在真实 ingress/egress 检查状态，明确 down/testing/dormant/not-present/lower-layer-down 或有证据的 admin-down 时结束为 `interface_unavailable`，保留本快照证据；未知/缺失/重复状态保留候选并给 gap、标 partial。递归检查最终出接口；NULL/InLoop 与设备自身交付语义保留。画布显示历史虚线、不可用红色和状态未知灰色。
+- OSPF：新 summary-only `ospf_interfaces`/`ospf_process` 接入 profiles、FactSet、发现和公共解析；真实 8 台 16 条样本批次 `20261003-015834` 在 `tests/fixtures/topology/campus-wan/ospf/`，32 份 clean/raw 原字节及哈希经过内存口令扫描（0 命中）。Comware brief/full 按本地 PID/IP 合并，IOS process 未输出 VRF 时不补 default；精确 ifname+IP 绑定已有明确 IP.vrf，完整过程只绑定到一个 scope 时填 router-id。6 个真实 RID 不传播到 MGMT。
+- 度量：RFC 8346 没有规定 metric1/2 为 IGP/TE 或两个方向。每个 modeled TP（包括主机）必须有唯一当前 OSPF 接口成本、scope 明确且全部相同时，按本项目投影政策填共同 `metric1`（uint64 RFC 7951 字符串），metric2 留空。BR=1/Cisco=10 的差异分别保留，缺失/多义/损坏/截断/主机 TP 时省略度量并诊断；PID 不要求跨设备相同。当前子网邻接并非 OSPF LSDB/Full 证明，也不能以相同接口成本独自解释 ECMP。IP TP 保留 RFC 8346 的 IP choice，不加互斥 interface-name。
+- 截断门禁：trunk/switchport 空或非空的 transport incomplete 均为 partial + 全局否决；不能被另一份完整 capability 绕过而投影标签。OSPF 经 `fact_summary` 保留 collection_incomplete 元数据，typed capabilities 在 Observation 另存 `fact_metadata`；截断的接口/IP/ARP/VRRP/路由等不能证明状态、作用域或原生实例，原始事实与诊断仍保留。真实 CORE1 IP/ARP、DIST1 VRRP 的公共 parse → Observation → native 回放覆盖此边界；已知局部坏行的普通 partial 仍可使用验证通过的行。
+- 原生设备树：`model/device_ip.py` 和 `device_control.py` 接入独立 RFC 7951 实例；接口 IPv4/IPv6、同 VRF 唯一归属的 ARP、VRRP 状态/VIP、具证据的 LLDP local-system-data。路由按显式 scope 分开，只有原事实包含原生 RIB name 才建 rib；本轮素材缺该键，保留记录与 gap，不造 captured/default 名称。LLDP 远端缺 agent MAC/time-mark/remote-index 时不造表项键。VRRP version 缺失不猜 v2，运行优先级不充当 configured priority。统计/类型等必需项缺失时为 partial，完整 native 校验应报告缺项；含显式真实字段的控制与语法/枚举/地址/身份/ref 反例已覆盖。
+- API：`GET /apps/topology/snapshots/{snapshot_id}/state` 返回该快照独立设备树与链路状态，`GET .../devices/{address}` 返回单设备及原生控制树；均沿用 App 与网络 owner 权限。旧快照从自己的 run 只读投影且不改写，绝不读当前 FactRepository。新增 `device-library.json` 和完整原生依赖，原已冻结模块 checksum 不变，VRRP 固定 IANA 官方原文；不裁剪 OSPF identity 模块，不创建自定义 augment 或 mount 外键。
+- 最终回归：`pytest -q tests/unit -k "topology or twin" -p no:cacheprovider -rs` **1149 通过、2 个可选本地模板素材跳过、3140 deselected**，140.87 秒；Yangson 原生正反例均执行。前端 Page/Located/layout 共 **18 项通过**，ESLint、Vite 构建、30 个改动 Python 文件的 Ruff/format、差异检查通过。原生七个根模块 Pyang 通过，19 个模块 + 1 个子模块依赖闭合且 SHA 匹配，已有 11 项冻结来源及 checksum 未改。
+- 升级部署与实机证明：发布验证进行中，完成后回填本条。实验配置仍未修改；BR1 GE3/0 只读预检 UP，固定 shutdown/undo shutdown 脚本在 `.runtime/state-shutdown-exercise.py`，实际注入必须另获负责人同意。
+
 ### 2026-10-03 GPT 接手：VLAN/trunk 进入 RFC 8944（topology 0.4.13）
 
 - 依据 [RFC 8944 §5.2](https://www.rfc-editor.org/rfc/rfc8944.html#section-5.2) 启用冻结模块的 `VLAN` feature，并更新 YANG library 的 module-set-id。`outer-tag` 只表示同口观测支持的 802.1Q 标签范围；access VLAN/PVID 是 IEEE 802.1Q bridge-port 的设备事实，不能写成拓扑标签。没有增加自定义 YANG 字段、设备树关联或新 UI。

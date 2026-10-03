@@ -114,7 +114,19 @@ CAMPUS_VLAN = Lab(
     ROOT / "tests/fixtures/topology/campus-wan/vlan-trunk",
     frozenset(),
 )
-LABS = {"vsr1000": VSR, "campus-wan": CAMPUS, "campus-vlan": CAMPUS_VLAN}
+CAMPUS_OSPF = Lab(
+    "20261003-015834",
+    CAMPUS_HOSTS,
+    dict.fromkeys(CAMPUS_HOSTS, frozenset({"ospf_interfaces", "ospf_process"})),
+    ROOT / "tests/fixtures/topology/campus-wan/ospf",
+    frozenset(),
+)
+LABS = {
+    "vsr1000": VSR,
+    "campus-wan": CAMPUS,
+    "campus-vlan": CAMPUS_VLAN,
+    "campus-ospf": CAMPUS_OSPF,
+}
 SENSITIVE = re.compile(
     rb"(?im)^\s*(?:password\s+|secret\s+|community\s+|"
     rb"snmp-agent\s+community\b|-----BEGIN .*PRIVATE KEY-----)"

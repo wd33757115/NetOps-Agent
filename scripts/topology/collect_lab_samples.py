@@ -11,7 +11,7 @@ Host keys: trust-on-first-use, pinned in .runtime/lab-samples/known_hosts
 (a changed key aborts the connection).
 
 Usage (Windows, project venv):
-    venv\\Scripts\\python.exe scripts\\topology\\collect_lab_samples.py 10.10.1.1 10.10.1.2 --username admin
+    venv\\Scripts\\python.exe scripts\\topology\\collect_lab_samples.py 10.10.1.1 --username admin
 """
 
 from __future__ import annotations
@@ -51,6 +51,8 @@ COMMANDS = [
     ("irf", "display irf"),
     ("vrrp", "display vrrp verbose"),
     ("ospf", "display ospf peer"),
+    ("ospf_interfaces", "display ospf interface"),
+    ("ospf_process", "display ospf"),
     ("bgp", "display bgp peer ipv4"),
     ("config", "display current-configuration"),
 ]
@@ -80,6 +82,8 @@ CISCO_COMMANDS = [
     ("vrfs", "show vrf"),
     ("vrrp", "show vrrp"),
     ("ospf", "show ip ospf neighbor"),
+    ("ospf_interfaces", "show ip ospf interface brief"),
+    ("ospf_process", "show ip ospf"),
     ("bgp", "show ip bgp summary"),
     ("config", "show running-config"),
 ]
@@ -96,14 +100,16 @@ MORE_ERASE = re.compile(r"[ \t]*-{2,}\s*More\s*-{2,}(?:\x1b\[\d*D|[ \x08])*")
 ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 
 
-class PromptTimeout(TimeoutError):
+class PromptTimeout(TimeoutError):  # noqa: N818 - existing collector helper API
     def __init__(self, message: str, received: str):
         super().__init__(message)
         self.received = received
 
 
 # Interactive questions we must never answer automatically (they change device state).
-QUESTION = re.compile(r"(?i)(\[Y/N\]|\(Y/N\)|change (?:your |the )?password|new password|password.*expired)")
+QUESTION = re.compile(
+    r"(?i)(\[Y/N\]|\(Y/N\)|change (?:your |the )?password|new password|password.*expired)"
+)
 
 
 def read_until_prompt(channel, timeout: float, *, wake: bool = False) -> str:
@@ -125,7 +131,9 @@ def read_until_prompt(channel, timeout: float, *, wake: bool = False) -> str:
             if lines and PROMPT.search(lines[-1].strip()):
                 return buffer
             if wake and lines and QUESTION.search("\n".join(lines[-3:])):
-                raise PromptTimeout("device is asking an interactive question; not answered automatically", buffer)
+                raise PromptTimeout(
+                    "device is asking an interactive question; not answered automatically", buffer
+                )
         elif channel.closed:
             raise ConnectionError("channel closed by device")
         else:
@@ -198,15 +206,23 @@ def collect(host: str, username: str, password: str, out_dir: Path, port: int) -
                 raw = read_until_prompt(channel, 120 if command_id == "routes" else 60)
                 text = clean(raw, command)
                 entry.update(status="ok", lines=text.count("\n"))
-                rejected = re.search(r"(?im)(unrecognized command|wrong parameter|incomplete command|% ?invalid)", text)
+                rejected = re.search(
+                    r"(?im)(unrecognized command|wrong parameter|incomplete command|% ?invalid)",
+                    text,
+                )
                 if rejected:
                     entry["status"] = "rejected_by_device"
                 if command_id not in SETUP:
                     # newline="" keeps Windows from turning \n into \r\n.
-                    with open(host_dir / f"{command_id}.txt", "w", encoding="utf-8", newline="") as fh:
+                    with open(
+                        host_dir / f"{command_id}.txt", "w", encoding="utf-8", newline=""
+                    ) as fh:
                         fh.write(text)
-                    # Exact bytes as received (echo, paging and prompt included) for parser fixtures.
-                    with open(host_dir / f"{command_id}.raw.txt", "w", encoding="utf-8", newline="") as fh:
+                    # Exact bytes received, including echo, paging and prompt,
+                    # are preserved for parser fixtures.
+                    with open(
+                        host_dir / f"{command_id}.raw.txt", "w", encoding="utf-8", newline=""
+                    ) as fh:
                         fh.write(raw)
             except (TimeoutError, ConnectionError) as exc:
                 entry.update(status="failed", error=str(exc))
@@ -220,7 +236,10 @@ def collect(host: str, username: str, password: str, out_dir: Path, port: int) -
         meta["status"] = "ok"
     except paramiko.BadHostKeyException:
         meta["status"] = "host_key_changed"
-        meta["error"] = "host key differs from pinned key; verify the device, then remove its line from known_hosts"
+        meta["error"] = (
+            "host key differs from pinned key; verify the device, "
+            "then remove its line from known_hosts"
+        )
     except PromptTimeout as exc:
         meta["status"] = "shell_not_ready"
         meta["error"] = str(exc)
@@ -239,7 +258,9 @@ def collect(host: str, username: str, password: str, out_dir: Path, port: int) -
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("hosts", nargs="+")
     parser.add_argument("--username", default="admin")
     parser.add_argument("--port", type=int, default=22)
@@ -254,7 +275,9 @@ def main() -> int:
         meta = collect(host, args.username, password, out_dir, args.port)
         print(f"[{host}] {meta['status']} {meta.get('error', '')}")
         results.append(meta)
-    (out_dir / "meta.json").write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
+    (out_dir / "meta.json").write_text(
+        json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     print(f"\nSamples written to {out_dir}")
     return 0 if all(r["status"] == "ok" for r in results) else 1
 

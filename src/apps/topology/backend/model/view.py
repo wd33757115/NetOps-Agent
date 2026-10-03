@@ -14,9 +14,11 @@ def _network(tree, network_type):
     )
 
 
-def canvas(tree, evidence, collected, base):
+def canvas(tree, evidence, collected, base, state=None):
     """collected: {node-id: {"address", "evidence_id", "observed_at"}} for collected devices."""
     l2 = _network(tree, L2T + "l2-topology")
+    state = state or {}
+    known = {d["node_id"]: d for d in state.get("devices", []) if d.get("node_id")}
     # One L3 network per VRF; a VRF's addresses are shown with its name.
     l3_tps, carried = {}, {}
     for l3 in tree["ietf-network:networks"]["network"]:
@@ -48,10 +50,22 @@ def canvas(tree, evidence, collected, base):
         if node_id.startswith(host_node_prefix(base)):
             item.update(name=addresses[0] if addresses else tps[0]["name"], identity_status="host")
         else:
-            name = node.get(L2T + "l2-node-attributes", {}).get("name") or node_id
+            name = (
+                node.get(L2T + "l2-node-attributes", {}).get("name")
+                or known.get(node_id, {}).get("name")
+                or node_id
+            )
             item.update(name=name, identity_status="advertised")
             if node_id in collected:
                 item.update(collected[node_id], identity_status="collected")
+            elif node_id in known:
+                item.update(
+                    address=known[node_id]["address"],
+                    identity_status="known",
+                    freshness="historical",
+                )
+            if node_id in known:
+                item["collection_status"] = known[node_id]["collection_status"]
         nodes.append(item)
     by_id = {n["id"]: n for n in nodes}
 
@@ -72,6 +86,10 @@ def canvas(tree, evidence, collected, base):
             "evidence": evidence.get(link["link-id"], []),
             "subnets": sorted(carried.get(link["link-id"], [])),
         }
+        status = state.get("links", {}).get(link["link-id"])
+        if status:
+            common.update(status)
+            common["freshness"] = "historical" if status.get("historical") else "observed"
         if len(ends) == 2:
             links.append(
                 {

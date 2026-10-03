@@ -18,6 +18,7 @@ import re
 from urllib.parse import quote
 
 from ..collectors.ifname import normalize_ifname
+from .ospf import link_metric, project_ospf
 
 ST = "ietf-simap-topology:"
 NT = "ietf-network-topology:"
@@ -175,6 +176,7 @@ def _outer_tag(trunk, switchport=None):
 class _Topology:
     def __init__(self, devices, base):
         self.devices = devices
+        self.protocol = {**project_ospf(devices), "links": {}}
         self.base = base
         self.l2_net = base + "l2"
         self.l3_net = base + "l3"
@@ -499,7 +501,7 @@ class _Topology:
         Every collected device is a node of the default network; of a VRF's network only
         where it has addresses in that VRF.
         """
-        nodes, subnets = {"default": {}}, {}
+        nodes, subnets, metric_ends = {"default": {}}, {}, {}
         for key, facts in sorted(self.devices.items()):
             me = self.chassis[key]
             platform = facts.get("platform", "")
@@ -536,12 +538,27 @@ class _Topology:
                     subnets.setdefault((vrf, address.network), []).append(
                         ((self.device_node(me), self.port_tp(rec["ifname"])), carriers)
                     )
+                    metric_ends.setdefault(
+                        (vrf, address.network, self.device_node(me), self.port_tp(rec["ifname"])),
+                        [],
+                    ).append(
+                        {
+                            "address": key,
+                            "vrf": vrf,
+                            "ifname": rec["ifname"],
+                            "address_ip": str(address.ip),
+                        }
+                    )
             node_id = self.device_node(me)
             for vrf in tps:
+                attributes = {"prefix": prefixes[vrf]}
+                router_ids = self.protocol["devices"].get(key, {}).get("router_ids", {}).get(vrf)
+                if router_ids:
+                    attributes["router-id"] = router_ids
                 nodes.setdefault(vrf, {})[node_id] = {
                     "node-id": node_id,
                     "supporting-node": [{"network-ref": self.l2_net, "node-ref": node_id}],
-                    L3T + "l3-node-attributes": {"prefix": prefixes[vrf]},
+                    L3T + "l3-node-attributes": attributes,
                     NT + "termination-point": tps[vrf],
                 }
         for mac, addresses in sorted(self.host_ips.items()):
@@ -584,6 +601,14 @@ class _Topology:
             scope = "" if vrf == "default" else _uri(vrf) + ":"
             link_id = self.base + "l3-link:" + scope + str(network)
             link = self.link(self.l3_network(vrf), link_id, refs)
+            terminations = []
+            for node_id, tp_id in refs:
+                candidates = metric_ends.get((vrf, network, node_id, tp_id), [])
+                terminations.append(candidates[0] if len(candidates) == 1 else {"vrf": vrf})
+            metric = link_metric(self.protocol, terminations)
+            self.protocol["links"][link_id] = metric
+            if "metric1" in metric:
+                link[L3T + "l3-link-attributes"] = {"metric1": metric["metric1"]}
             supporting = sorted({link_of[c] for _, cs in members for c in cs if c in link_of})
             if supporting:
                 link["supporting-link"] = [
@@ -657,3 +682,10 @@ def build_topology(devices, base):
     Returns (RFC 7951 ietf-network tree with an L2 and an L3 network, {link-id: evidence}).
     """
     return _Topology(devices, base).build()
+
+
+def build_topology_details(devices, base):
+    """Standard tree, adjacency evidence, and independent OSPF projection metadata."""
+    topology = _Topology(devices, base)
+    tree, evidence = topology.build()
+    return tree, evidence, topology.protocol

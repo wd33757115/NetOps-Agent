@@ -34,6 +34,46 @@ def port_rows(parsed):
     return {row["ifname"]: row for row in parsed.summary.get("ports", [])}
 
 
+@pytest.mark.parametrize("capability", ["trunk", "switchport"])
+@pytest.mark.parametrize("damage", ["transport", "paging", "empty"])
+def test_incomplete_real_vlan_port_capture_persists_veto_and_cannot_export_tags(capability, damage):
+    from src.apps.topology.backend.model.builder import L2T, NT, build_topology
+
+    summaries = {
+        cap: parse_cli({"os_family": "ios"}, cap, source("acc1", cap, new=True)).summary
+        for cap in ("trunk", "switchport")
+    }
+
+    def tags(facts):
+        tree, _ = build_topology({"10.0.0.1": {"platform": "ios", **facts}}, "urn:test:paged:")
+        return [
+            point[L2T + "l2-termination-point-attributes"]["outer-tag"]
+            for net in tree["ietf-network:networks"]["network"]
+            for node in net.get("node", [])
+            for point in node.get(NT + "termination-point", [])
+            if "outer-tag" in point.get(L2T + "l2-termination-point-attributes", {})
+        ]
+
+    assert tags(summaries) == ["10,20", "10,20"]
+    text = source("acc1", capability, new=True)
+    parsed = parse_cli(
+        {"os_family": "ios"},
+        capability,
+        "" if damage == "empty" else text + "\n--More--\n" if damage == "paging" else text,
+        complete=damage == "paging",
+    )
+    assert parsed.status == "partial" and "collection_incomplete" in parsed.warnings
+    assert parsed.summary["invalid_structure"] is True
+    if damage == "empty":
+        assert parsed.summary == {"invalid_structure": True}
+    else:
+        assert parsed.summary.get("ports")
+    persisted = parsed.fact_summary()
+    assert persisted["invalid_structure"] is True
+    summaries[capability] = persisted
+    assert tags(summaries) == []
+
+
 def switchport_block(name="Et1/0"):
     blocks = re.split(r"(?m)(?=^Name: )", source("dist1", "switchport", new=True))
     return next(block for block in blocks if block.startswith(f"Name: {name}\n"))

@@ -1,0 +1,25 @@
+{
+  "ietf-yang-library:modules-state": {
+    "module-set-id": "netops-rfc8343-interface-observations",
+    "module": [
+      {
+        "name": "ietf-interfaces",
+        "revision": "2018-02-20",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-interfaces",
+        "conformance-type": "implement"
+      },
+      {
+        "name": "iana-if-type",
+        "revision": "2014-05-08",
+        "namespace": "urn:ietf:params:xml:ns:yang:iana-if-type",
+        "conformance-type": "implement"
+      },
+      {
+        "name": "ietf-yang-types",
+        "revision": "2025-12-22",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-yang-types",
+        "conformance-type": "import"
+      }
+    ]
+  }
+}

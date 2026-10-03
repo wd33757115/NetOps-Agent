@@ -31,6 +31,8 @@ Capability = Literal[
     "vlan",
     "trunk",
     "switchport",
+    "ospf_interfaces",
+    "ospf_process",
     "lag",
     "irf",
     "mlag",

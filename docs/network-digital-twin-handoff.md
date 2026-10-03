@@ -12,7 +12,25 @@
 
 负责人已授权按计划开始，并确认 ACC1/ACC2 两条新 SSH 指纹；使用平台已保存的默认登录完成只读采样，未记录口令、未修改设备配置。第一项 VLAN/trunk 已部署为 **topology 0.4.13**：真实发现 8 台全成功，快照 `894ad28d1fdc415cb942fafa9247786c`，11 个 trunk TP 导出 `outer-tag="10,20"`，access/PVID 留在设备事实中，导出通过冻结 YANG 完整校验。16 条设备间接线按 LLDP 验收；额外管理网 ARP 逻辑邻接不当物理网线。最终相关回归 636 通过、2 个可选模板源用例跳过；详情、限制与证据路径见路线图 §14 新台账。
 
-下一步状态的标准选择已有答案：冻结 SIMAP 无通用状态 leaf，按既定 Q-IETF-1 通过应用层快照身份访问独立 RFC 8343 接口状态，不补自定义 YANG 外键；接口部分树缺 mandatory 统计时间须如实诊断。下一批 OSPF 真样本已只读采集，BR cost=1/Cisco cost=10 的方向差异不能用 `metric1/metric2` 的名字冒充标准方向语义。下文 Claude 原始统计及计划保留为接手时的基线。
+本轮后续实现按计划接入状态、OSPF 和独立设备树：冻结 SIMAP 无通用状态 leaf，沿用 Q-IETF-1 应用层快照身份访问 RFC 8343/8344/8347 部分接口树及独立路由/LLDP 树，不补自定义 YANG 外键。只消费本次最新 attempt；失败且没有新证据时不借旧 UP。链路历史仅保留同网络、身份明确的 L2 两设备关系，原始来源与最后确认时间不随新快照刷新。路径遇不可用端口终止，缺状态保留候选并标 partial。发布版本、最终测试数字和实机证明见路线图 §14 最新台账。
+
+**标准核查修正**：下文 Claude 原计划把 RFC 8346 `metric1` 标成 IGP cost，这是该标准没有规定的具体语义；也不能把 `metric1/metric2` 当两个方向。真实 BR=1/Cisco=10 分别保留在设备事实，仅当全部参与 TP 均唯一绑定当前 OSPF 接口、明确 scope 且成本相同，按本项目声明的投影政策填共同 `metric1`，其余省略并给 gap；PID 是设备本地键，不要求两端相同。L3 TP 的 `ip-address`、`unnumbered-id`、`interface-name` 在同一 choice，现有 IP TP 不加互斥接口名，接口关联使用既有 IP 事实。[RFC 8346](https://www.rfc-editor.org/rfc/rfc8346.html)
+
+设备树为部分实例：统计中断时间、VRRP version、原生 RIB name、LLDP agent/time-mark/remote-index 等缺项如实给 gap；不造默认值、表项键、计数器或时间，未宣称完整设备 datastore 已通过校验。完整冻结模块与独立 library 位于 `src/apps/topology/resources/yang/`，校验控制与反例在新增 native 投影测试中。下文 Claude 原始统计及计划保留为接手时的历史基线。
+
+### 网页 GPT 报告核实：2026-10-03
+
+对照负责人提供的 `Downloads/deep-research-report (1).md`、本地源码与 RFC 原文后，报告可用作领域清单，**不能作为本仓库的静态审计结论**：它的背景明确承认没有仓库链接，大部分判断使用假设，但执行摘要和表格却写成确定的实现现状。
+
+| 报告结论 | 核实结果 |
+| --- | --- |
+| 单层拓扑、没有支持网络映射、TP/端口未实现 | 与接手时的代码不符。`model/builder.py` 已构建 SIMAP L2 和按 VRF 分开的 L3，包含 TP 与 supporting-network/node/TP/link；有冻结模块校验和真实园区回放。 |
+| 尚未引入标准 YANG、标准导出和测试 | 与代码不符。接手前已支持 RFC 7951 标准树导出及 Yangson 冻结模块验证；本轮补充独立部分设备树。 |
+| 缺少完整设备树、服务模型、策略、清单与协议层 | 方向基本成立，需逐项用采集事实与实例验证衡量，不能因某个 RFC 存在就把所有模型列为当前必做项。 |
+| 没有 NETCONF/RESTCONF/gNMI 即拓扑模型不合规 | 混淆数据模型与协议能力。RFC 8345 定义拓扑结构；协议服务和采集渠道需另外设计，当前 JSON 导出不冒称 NETCONF/RESTCONF 服务。[RFC 8345](https://www.rfc-editor.org/rfc/rfc8345.html) |
+| NMDA 就是配置表和状态表分开；RFC 6241/8040 直接公开 operational | 表述不准确。NMDA 是概念 datastore 与实例语义，并未要求所有协议公开所有 datastore；访问 NMDA 的 NETCONF/RESTCONF 扩展分别由 RFC 8526/8527 定义。[RFC 8342](https://www.rfc-editor.org/rfc/rfc8342.html)、[RFC 8526](https://www.rfc-editor.org/rfc/rfc8526.html)、[RFC 8527](https://datatracker.ietf.org/doc/html/rfc8527) |
+
+本轮执行顺序继续以本地路线图和有证据的标准映射为准，报告中的工期与优先级没有仓库依据，未直接采纳。
 
 ### 负责人本轮新定的要求（与第 2 节同等优先）
 

@@ -13,7 +13,7 @@ import './topology.css'
 
 interface Network { id: string; name: string; active_run?: string; current_snapshot?: string }
 interface TopologyNode { id: string; name: string; address?: string; addresses?: string[]; identity_status: string; freshness: string; observed_at?: string; evidence_id?: string; members?: number; subnets?: string[]; tps: { id: string; name: string }[] }
-interface Link { id: string; source: string; target: string; source_tp: string; target_tp: string; freshness: string; observed_at?: string; evidence_id?: string; link_type?: string; direction?: string; label?: string; ends?: string[]; subnets?: string[]; evidence?: string[] }
+interface Link { id: string; source: string; target: string; source_tp: string; target_tp: string; freshness: string; observed_at?: string; evidence_id?: string; link_type?: string; direction?: string; label?: string; ends?: string[]; subnets?: string[]; evidence?: string[]; state?: string; available?: boolean | null }
 interface Graph { nodes: TopologyNode[]; links: Link[]; model_profile: string }
 interface Target { id: string; address: string; depth: number; status: string; reason?: string; version: number; evidence_id?: string }
 interface Run { id: string; network_id: string; status: string; port?: number; snapshot_id?: string; graph: Graph; targets: Target[]; created_at: string }
@@ -23,6 +23,14 @@ const failures: Record<string, string> = { platform_unrecognized: '平台未识�
 const loginReasons = ['authentication_failed', 'credential_expired', 'credentials_required']
 const profiles = [{ value: 'auto', label: '自动识别（无需预先知道型号）' }, { value: 'comware-lldp-v1', label: 'Comware · LLDP v1' }, { value: 'nxos-lldp-v1', label: 'NX-OS · LLDP v1' }]
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : '操作未完成，请重试'
+Object.assign(labels, { known: '已知设备', historical: '历史观测', up: '运行中', down: '已断开', unavailable: '不可用', unknown: '状态未知', complete: '采集完成', failed: '采集失败' })
+const detailLabels: Record<string, string> = { state: '运行状态', available: '是否可用', collection_status: '采集状态', historical: '历史关系', current_lldp_proven: '本次邻接已确认', state_sources: '端口状态依据', prior_snapshot_id: '原观测快照', prior_evidence: '原观测依据', last_seen: '最后确认时间', last_seen_source: '时间来源', network_id: '网络编号', scope: '关系范围' }
+function detailValue(key: string, value: unknown) {
+  if (key === 'available') return value === true ? '可用' : value === false ? '不可用' : '待确认'
+  if (typeof value === 'boolean') return value ? '是' : '否'
+  if (key === 'state_sources' && Array.isArray(value)) return value.map(s => `${s.address || s.node_id} ${s.interface_name || '端口未知'}：${labels[s.oper_status] || s.oper_status}（${s.observed_at || '无采样时间'}，证据 ${s.evidence_id || '缺失'}）`).join('；')
+  return labels[String(value)] || (typeof value === 'object' ? JSON.stringify(value) : String(value))
+}
 
 const SIDES: [Side, Position][] = [['top', Position.Top], ['bottom', Position.Bottom], ['left', Position.Left], ['right', Position.Right]]
 
@@ -49,10 +57,10 @@ function Canvas({ graph, highlight, onNode, onLink }: { graph: Graph; highlight:
     const [from, to] = sides(positions.get(link.source) ?? { x: 0, y: 0 }, positions.get(link.target) ?? { x: 0, y: 0 }, find(link.source), find(link.target))
     return { id: link.id, source: link.source, target: link.target, sourceHandle: `${from}-s`, targetHandle: `${to}-t`,
       // SIMAP links carry both endpoints; older snapshots only name the source port.
-      label: link.label ?? find(link.source)?.tps.find(tp => tp.id === link.source_tp)?.name,
+      label: [link.label ?? find(link.source)?.tps.find(tp => tp.id === link.source_tp)?.name, link.state && labels[link.state]].filter(Boolean).join(' · '),
       labelBgPadding: [4, 2] as [number, number], labelStyle: { fontSize: 11 },
       ...(link.direction === 'bi' && link.link_type === 'p2p' ? { markerStart: { type: MarkerType.ArrowClosed }, markerEnd: { type: MarkerType.ArrowClosed } } : {}),
-      style: highlight.has(link.source) && highlight.has(link.target) ? { stroke: '#1671e8', strokeWidth: 2.5 } : { stroke: link.freshness === 'observed' ? '#477b8a' : '#aeb8c3', strokeDasharray: link.freshness === 'observed' ? undefined : '5 5' },
+      style: { stroke: link.available === false ? '#bc3b42' : highlight.has(link.source) && highlight.has(link.target) ? '#1671e8' : link.state === 'unknown' || link.freshness !== 'observed' ? '#aeb8c3' : '#477b8a', strokeWidth: link.available === false || highlight.has(link.source) && highlight.has(link.target) ? 2.5 : 1, strokeDasharray: link.freshness === 'observed' ? undefined : '5 5' },
     }
   }), [graph, positions, highlight])
   useEffect(() => { const timer = setTimeout(() => void fitView({ padding: 0.3, maxZoom: 1.1 }), 80); return () => clearTimeout(timer) }, [fitView, nodes.length])
@@ -164,8 +172,8 @@ export default function Page() {
     finally { retryForm.setFieldValue('password', ''); setBusy(false) }
   }
   const pickRun = (id: string) => { setSelected(undefined); setLocated(undefined); setRunId(id) }
-  const exportSnapshot = (id: string) => void api.get(`/apps/topology/snapshots/${id}/rfc8345`).then(({ data }) => {
-    const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })); const a = document.createElement('a'); a.href = url; a.download = `topology-${id}.json`; a.click(); URL.revokeObjectURL(url)
+  const exportSnapshot = (id: string, devices = false) => void api.get(`/apps/topology/snapshots/${id}/${devices ? 'state' : 'rfc8345'}`).then(({ data }) => {
+    const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })); const a = document.createElement('a'); a.href = url; a.download = `${devices ? 'device-models' : 'topology'}-${id}.json`; a.click(); URL.revokeObjectURL(url)
   }).catch(error => message.error(errorMessage(error)))
   return <ConfigProvider theme={{ token: { colorPrimary: '#1671e8', borderRadius: 9, colorText: '#242b38', colorBorder: '#dce1e9', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif', controlHeight: 36 } }}>
   <div className="tp-app">
@@ -189,6 +197,7 @@ export default function Page() {
         {run && <Tag color={active ? 'processing' : run.status === 'completed' ? 'success' : 'default'}>{labels[run.status]}</Tag>}
         <Input.Search className="tp-locate" aria-label="定位 IP 或 MAC" placeholder={run?.snapshot_id ? '定位 IP 或 MAC' : '任务完成后可定位'} enterButton="定位" loading={locating} disabled={!run?.snapshot_id} onSearch={value => void locate(value)} allowClear />
         {run?.snapshot_id && <Button icon={<DownloadOutlined aria-hidden="true" />} onClick={() => exportSnapshot(run.snapshot_id!)}>导出 RFC 8345 + SIMAP</Button>}
+        {run?.snapshot_id && <Button icon={<DownloadOutlined aria-hidden="true" />} title="包含采样标准实例、证据和完整性差距" onClick={() => exportSnapshot(run.snapshot_id!, true)}>导出设备模型</Button>}
         {active && <Button danger onClick={() => void api.post(`/apps/topology/runs/${run.id}/cancel`).then(({ data }) => setRun(data)).catch(error => message.error(errorMessage(error)))}>停止任务</Button>}
       </div>
       {waiting.length > 0 && <Alert className="tp-alert" type="warning" showIcon message={`${waiting.length} 个节点等待人工处理；成功节点的观测已保留`} />}
@@ -196,10 +205,10 @@ export default function Page() {
         {run?.graph.nodes.length ? <ReactFlowProvider><Canvas graph={run.graph} highlight={highlight} onNode={node => { setLocated(undefined); setSelected(node) }} onLink={link => { setLocated(undefined); setSelected(link) }} /></ReactFlowProvider> : <div className="tp-empty"><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={run ? '尚无成功的拓扑观测，请查看下方节点状态' : '从一个管理地址开始发现，或导入已有 LLDP 输出'} /><p>每条链路都保留来源与观测时间。未确认的邻居以候选身份展示。</p></div>}
         {run && <div className="tp-map-caption">{run.graph.nodes.length} 个节点 · {run.graph.links.length} 条邻接记录 · L2/L3 拓扑（RFC 8345 + SIMAP）</div>}
       </section><aside className="tp-inspector"><h2>{located ? '定位结果' : selected ? '观测详情' : '阅读这张拓扑'}</h2>
-        {located ? <Located result={located} onEvidence={id => void readEvidence(id)} onClear={() => setLocated(undefined)} /> : selected ? <><dl>{Object.entries(selected).filter(([key]) => !['tps', 'id', 'source_tp', 'target_tp', 'source', 'target'].includes(key)).map(([key, value]) => <React.Fragment key={key}><dt>{({ name: '名称', address: '管理地址', addresses: '通告地址', identity_status: '身份状态', freshness: '新鲜度', observed_at: '观测时间', evidence_id: '证据编号', members: '端口数', subnets: '三层网段', link_type: '链路类型', evidence: '依据', direction: '方向', ends: '两端端口', label: '端口' } as Record<string, string>)[key] || key}</dt><dd>{labels[String(value)] || (typeof value === 'object' ? JSON.stringify(value) : String(value))}</dd></React.Fragment>)}</dl>
+        {located ? <Located result={located} onEvidence={id => void readEvidence(id)} onClear={() => setLocated(undefined)} /> : selected ? <><dl>{Object.entries(selected).filter(([key]) => !['tps', 'id', 'source_tp', 'target_tp', 'source', 'target'].includes(key)).map(([key, value]) => <React.Fragment key={key}><dt>{({ name: '名称', address: '管理地址', addresses: '通告地址', identity_status: '身份状态', freshness: '新鲜度', observed_at: '观测时间', evidence_id: '证据编号', members: '端口数', subnets: '三层网段', link_type: '链路类型', evidence: '依据', direction: '方向', ends: '两端端口', label: '端口', ...detailLabels } as Record<string, string>)[key] || key}</dt><dd>{detailValue(key, value)}</dd></React.Fragment>)}</dl>
           {'tps' in selected && <><h3>终结点 / 端口</h3>{selected.tps.map(tp => <div key={tp.id}>{tp.name}</div>)}</>}
           <Space direction="vertical" style={{ marginTop: 16 }}><Button disabled={!selected.evidence_id} onClick={() => void readEvidence(selected.evidence_id)}>查看原始证据</Button>{'address' in selected && selected.address && <Button onClick={() => setTerminal(selected.address)}>打开 SSH 终端</Button>}</Space>
-        </> : <><p>拓扑只展示本次任务的观测结果。链路表示二层邻接，不代表一根实际线缆；共享网段表示同一介质上的多个端口，例如经过 Hub。</p><p>只被邻居通告、尚未采集的设备用虚线框显示。设备按自身报告的机箱 ID 识别，采集后与通告合并为同一节点。</p><p>点击节点或链路可查看观测时间与命令证据。</p></>}
+        </> : <><p>链路表示二层邻接，不代表一根实际线缆；共享网段表示同一介质上的多个端口，例如经过 Hub。已知设备失联时保留历史关系，以虚线显示；红色链路表示采样端口不可用，灰色表示状态待确认。</p><p>只被邻居通告、尚未采集的设备用虚线框显示。设备按自身报告的机箱 ID 识别，采集后与通告合并为同一节点。</p><p>点击节点或链路可查看观测时间与命令证据。</p></>}
         {run?.snapshot_id && <><h3>快照比较</h3><Select aria-label="比较基线" placeholder="选择较早的快照" style={{ width: '100%' }} options={history.filter(h => h.snapshot_id && h.id !== run.id).map(h => ({ value: h.snapshot_id!, label: new Date(h.created_at).toLocaleString() }))} onChange={before => void api.get(`/apps/topology/snapshots/${run.snapshot_id}/diff/${before}`).then(({ data }) => setChanges(data)).catch(error => message.error(errorMessage(error)))} /></>}
       </aside></div>
       <section className="tp-targets"><div className="tp-section-title"><h2>发现节点</h2><span>{run?.targets.length || 0} 个目标 · 重试由人工确认</span></div>

@@ -15,6 +15,7 @@ from .tiers import (
     generic_lldp,
     generic_lldp_local,
     generic_mac,
+    generic_ospf,
     generic_switchport,
     generic_trunk,
     generic_version,
@@ -36,6 +37,8 @@ PARSERS = {
     "vlan": generic_vlan.parse,
     "trunk": generic_trunk.parse,
     "switchport": generic_switchport.parse,
+    "ospf_interfaces": generic_ospf.parse_interfaces,
+    "ospf_process": generic_ospf.parse_process,
 }
 EMPTY = {
     "lldp": r"No (?:LLDP )?neighbors?(?: found)?\.?",
@@ -147,7 +150,11 @@ def parse_generic(identity, capability, raw, *, complete=True, command=None, pro
         # and Comware trunks; transport completeness is still required.
         empty_pattern = ""
     if empty_pattern is not None and re.fullmatch(empty_pattern, text.strip(), re.I):
-        result.status = "failed" if incomplete else "complete"
+        if incomplete and capability in {"trunk", "switchport"}:
+            result.summary["invalid_structure"] = True
+            result.status = "partial"
+        else:
+            result.status = "failed" if incomplete else "complete"
         return result
     parser = PARSERS.get(capability)
     if parser is None:
@@ -169,6 +176,11 @@ def parse_generic(identity, capability, raw, *, complete=True, command=None, pro
     count_mismatch = any(count != len(parsed.records) for count in counts)
     if count_mismatch:
         result.warnings.append("advertised_count_mismatch")
+    if incomplete and capability in {"trunk", "switchport"}:
+        # Unread tables/blocks can hide another row or operational contradiction.
+        # Persist the veto in summary-only facts, even for callers that omit the
+        # parse metadata; individually damaged known ports still use local gates.
+        parsed.summary["invalid_structure"] = True
     has_facts = bool(parsed.records or parsed.summary)
     if has_facts:
         result.records, result.summary = parsed.records, parsed.summary

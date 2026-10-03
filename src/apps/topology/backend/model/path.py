@@ -23,7 +23,9 @@ from __future__ import annotations
 import ipaddress
 
 from .builder import NT, ST
+from .device_state import project_interfaces, read_interface_state
 from .locate import _Locator, answer
+from .retained_links import UNAVAILABLE_OPER_STATUSES
 
 MAX_PATHS = 8
 MAX_HOPS = 32
@@ -54,6 +56,35 @@ class _Tracer:
         self.devices = devices
         self.loc = _Locator(devices, base, observed)
         self.topo = self.loc.topo
+        self.interface_trees = {
+            key: project_interfaces(facts.get("interfaces")) for key, facts in devices.items()
+        }
+        self.observed = observed
+
+    def interface_state(self, key, role, ifname, hop):
+        """Check a real ingress/egress without inventing UP for missing facts."""
+        if role == "in" and ifname is None:
+            return None  # Device-originated traffic has no observed ingress port.
+        entry = read_interface_state(self.interface_trees[key], ifname)
+        status = entry.get("oper-status", "unknown") if entry else "unknown"
+        state = {"interface": ifname, "interface_role": role, "oper_status": status}
+        rows = self.devices[key].get("interfaces")
+        matches = (
+            [row for row in rows if isinstance(row, dict) and row.get("ifname") == ifname]
+            if isinstance(rows, list)
+            else []
+        )
+        if len(matches) == 1 and matches[0].get("admin_status") == "down":
+            state["admin_status"] = "down"
+        for name in ("evidence_id", "observed_at"):
+            if name in self.observed.get(key, {}):
+                state[name] = self.observed[key][name]
+        hop.setdefault("interface_states", {})[role] = state
+        if status in UNAVAILABLE_OPER_STATUSES or state.get("admin_status") == "down":
+            return state
+        if status != "up":
+            hop.setdefault("gaps", []).append({"status": "interface_state_unknown", **state})
+        return None
 
     def device(self, key):
         return self.loc.device(self.topo.device_node(self.topo.chassis[key]))
@@ -168,6 +199,10 @@ class _Tracer:
                 "out_interface": None,
                 "route": None,
             }
+            unavailable = self.interface_state(key, "in", in_if, hop)
+            if unavailable:
+                end([*trail, hop], "interface_unavailable", **unavailable)
+                return
             owner = self.topo.owner.get((vrf, dst))
             if owner and owner[0] == key:
                 end([*trail, hop], "delivered", to="device", interface=owner[1])
@@ -185,7 +220,17 @@ class _Tracer:
             matched = {k: route.get(k) for k in ("prefix", "protocol", "preference", "metric")}
             for next_hop in route["next_hops"]:
                 ip, out = next_hop.get("ip"), next_hop.get("ifname") or ""
-                current = {**hop, "out_interface": out, "route": {**matched, "next_hop": ip}}
+                current = {
+                    **hop,
+                    "out_interface": out,
+                    "route": {**matched, "next_hop": ip},
+                    **({"gaps": list(hop["gaps"])} if "gaps" in hop else {}),
+                    **(
+                        {"interface_states": dict(hop["interface_states"])}
+                        if "interface_states" in hop
+                        else {}
+                    ),
+                }
                 here = [*trail, current]
                 next_vrf = next_hop.get("vrf") or vrf
                 owner = self.topo.owner.get((next_vrf, ip))
@@ -197,6 +242,10 @@ class _Tracer:
                     continue
                 if not ip or ip in {"0.0.0.0", "::"} or (owner and owner[0] == key):
                     # A connected route: the device's own address on the egress interface.
+                    unavailable = self.interface_state(key, "out", out, current)
+                    if unavailable:
+                        end(here, "interface_unavailable", **unavailable)
+                        continue
                     end(here, "delivered", to="subnet", interface=out)
                     continue
                 resolved = self.resolve(key, next_vrf, ip)
@@ -208,10 +257,29 @@ class _Tracer:
                     end(here, "unresolved_next_hop", next_hop=ip)
                 base = current
                 for neighbour_ip, neighbour_out, chain in resolved:
-                    current = {**base, "out_interface": neighbour_out}
+                    current = {
+                        **base,
+                        "out_interface": neighbour_out,
+                        **({"gaps": list(base["gaps"])} if "gaps" in base else {}),
+                        **(
+                            {"interface_states": dict(base["interface_states"])}
+                            if "interface_states" in base
+                            else {}
+                        ),
+                    }
                     if chain:
                         current["resolved_via"] = chain
                     here = [*trail, current]
+                    if neighbour_out.upper().startswith("NULL"):
+                        end(here, "blackhole")
+                        continue
+                    if neighbour_out.lower().startswith("inloop"):
+                        end(here, "delivered", to="device", interface=neighbour_out)
+                        continue
+                    unavailable = self.interface_state(key, "out", neighbour_out, current)
+                    if unavailable:
+                        end(here, "interface_unavailable", **unavailable)
+                        continue
                     neighbour = self.topo.owner.get((next_vrf, neighbour_ip))
                     if neighbour is None:
                         end(here, "unmanaged_next_hop", next_hop=neighbour_ip)
@@ -261,7 +329,10 @@ class _Tracer:
             result["paths"].extend(paths[:room])
             result["truncated"] |= truncated or len(paths) > room
         delivered = all(p["end"]["status"] == "delivered" for p in result["paths"])
-        result["status"] = "complete" if delivered and not result["truncated"] else "partial"
+        state_gaps = any(hop.get("gaps") for path in result["paths"] for hop in path["hops"])
+        result["status"] = (
+            "complete" if delivered and not result["truncated"] and not state_gaps else "partial"
+        )
         return result
 
 
@@ -289,21 +360,31 @@ def trace(devices, base, src, dst, observed=None):
         and reverse["paths"]
         and "ambiguous" not in (forward["first_hop"], reverse["first_hop"])
     )
-    gaps = [
-        {
-            "direction": name,
-            "status": path["end"]["status"],
-            "device": path["hops"][-1]["device"],
-            **({"next_hop": path["end"]["next_hop"]} if "next_hop" in path["end"] else {}),
-        }
-        for name, part in (("forward", forward), ("reverse", reverse))
-        for path in part["paths"]
-        if path["end"]["status"] != "delivered"
-    ] + [
-        {"direction": name, "status": part["status"]}
-        for name, part in (("forward", forward), ("reverse", reverse))
-        if part["status"] == "no_gateway"
-    ]
+    gaps = (
+        [
+            {
+                "direction": name,
+                "status": path["end"]["status"],
+                "device": path["hops"][-1]["device"],
+                **{key: value for key, value in path["end"].items() if key != "status"},
+            }
+            for name, part in (("forward", forward), ("reverse", reverse))
+            for path in part["paths"]
+            if path["end"]["status"] != "delivered"
+        ]
+        + [
+            {"direction": name, "status": part["status"]}
+            for name, part in (("forward", forward), ("reverse", reverse))
+            if part["status"] == "no_gateway"
+        ]
+        + [
+            {"direction": name, "device": hop["device"], **gap}
+            for name, part in (("forward", forward), ("reverse", reverse))
+            for path in part["paths"]
+            for hop in path["hops"]
+            for gap in hop.get("gaps", [])
+        ]
+    )
     return {
         "src": src,
         "dst": dst,

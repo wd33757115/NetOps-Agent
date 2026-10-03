@@ -90,6 +90,16 @@ def locate(
     return service.locate(user.user_id, snapshot_id, q)
 
 
+@router.get("/snapshots/{snapshot_id}/state")
+def snapshot_state(snapshot_id: str, user: CurrentUser = Depends(actor)):
+    return service.snapshot_state(user.user_id, snapshot_id)
+
+
+@router.get("/snapshots/{snapshot_id}/devices/{address}")
+def device_model(snapshot_id: str, address: str, user: CurrentUser = Depends(actor)):
+    return service.device_model(user.user_id, snapshot_id, address)
+
+
 @router.get("/snapshots/{snapshot_id}/path")
 def trace(
     snapshot_id: str,
