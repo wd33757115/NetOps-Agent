@@ -12,7 +12,7 @@
 
 负责人已授权按计划开始，并确认 ACC1/ACC2 两条新 SSH 指纹；使用平台已保存的默认登录完成只读采样，未记录口令、未修改设备配置。第一项 VLAN/trunk 已部署为 **topology 0.4.13**：真实发现 8 台全成功，快照 `894ad28d1fdc415cb942fafa9247786c`，11 个 trunk TP 导出 `outer-tag="10,20"`，access/PVID 留在设备事实中，导出通过冻结 YANG 完整校验。16 条设备间接线按 LLDP 验收；额外管理网 ARP 逻辑邻接不当物理网线。最终相关回归 636 通过、2 个可选模板源用例跳过；详情、限制与证据路径见路线图 §14 新台账。
 
-本轮后续实现按计划接入状态、OSPF 和独立设备树：冻结 SIMAP 无通用状态 leaf，沿用 Q-IETF-1 应用层快照身份访问 RFC 8343/8344/8347 部分接口树及独立路由/LLDP 树，不补自定义 YANG 外键。只消费本次最新 attempt；失败且没有新证据时不借旧 UP。链路历史仅保留同网络、身份明确的 L2 两设备关系，原始来源与最后确认时间不随新快照刷新。路径遇不可用端口终止，缺状态保留候选并标 partial。发布版本、最终测试数字和实机证明见路线图 §14 最新台账。
+本轮后续已部署 **topology 0.4.14**，按计划接入状态、OSPF 和独立设备树：冻结 SIMAP 无通用状态 leaf，沿用 Q-IETF-1 应用层快照身份访问 RFC 8343/8344/8347 部分接口树及独立路由/LLDP 树，不补自定义 YANG 外键。只消费本次最新 attempt；失败且没有新证据时不借旧 UP。链路历史仅保留同网络、身份明确的 L2 两设备关系，原始来源与最后确认时间不随新快照刷新。路径遇不可用端口终止，缺状态保留候选并标 partial。最终后端 **1149 通过、2 个可选模板源跳过**，前端 **18 通过**；真实 8 台再次全成功，快照 `660c20b7ae0b42f6b3e48f1b0a3c5b57`，16 条 LLDP 接线、11 个 trunk 与冻结拓扑校验通过，6 个默认 VRF RID 不传播到 MGMT。明细、度量与原生部分实例的缺项见路线图 §14 最新台账；临时关闭接口的故障实测仍待负责人确认，当前未修改实验配置。代码本地提交 `28defe6`，未推送。
 
 **标准核查修正**：下文 Claude 原计划把 RFC 8346 `metric1` 标成 IGP cost，这是该标准没有规定的具体语义；也不能把 `metric1/metric2` 当两个方向。真实 BR=1/Cisco=10 分别保留在设备事实，仅当全部参与 TP 均唯一绑定当前 OSPF 接口、明确 scope 且成本相同，按本项目声明的投影政策填共同 `metric1`，其余省略并给 gap；PID 是设备本地键，不要求两端相同。L3 TP 的 `ip-address`、`unnumbered-id`、`interface-name` 在同一 choice，现有 IP TP 不加互斥接口名，接口关联使用既有 IP 事实。[RFC 8346](https://www.rfc-editor.org/rfc/rfc8346.html)
 
@@ -72,7 +72,7 @@
 
 ### 部署与测试
 
-- 平台当前版本：topology **0.4.12**、assistant **0.8.9**。App 源码改后要升 `app.yaml` 版本并执行 `scripts/windows/start.ps1 -SkipLangfuse -UpgradeApps topology -NoBrowser`；部署会先停用并排空，**进行中的发现任务会被取消**。
+- Claude 交接时平台版本：topology **0.4.12**、assistant **0.8.9**；GPT 本轮部署版本见文首更新。App 源码改后要升 `app.yaml` 版本并执行 `scripts/windows/start.ps1 -SkipLangfuse -UpgradeApps topology -NoBrowser`；部署会先停用并排空，**进行中的发现任务会被取消**。
 - **代码摘要准入**：部署后工作区里该 App 的源码只要再变（包括其他会话的改动），App 就返回 503“应用不可用”，直到重新部署。本轮就因另一会话在同一工作区改 `normalize.py` 而中断过一次。
 - 测试：`venv/Scripts/python.exe -m pytest -q tests/unit -k "topology or twin" -p no:cacheprovider`（交接时 478 通过）。YANG 校验依赖 yangson，不在 venv 里，放在 `.runtime/p0-2/yang-deps`：加 `PYTHONPATH=.runtime/p0-2/yang-deps` 后 YANG 用例才真正运行，否则跳过。园区网回归 `tests/unit/test_topology_campus_wan.py`（25 项，含导出 YANG 校验）。
 
