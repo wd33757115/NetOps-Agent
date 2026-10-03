@@ -1,0 +1,9 @@
+display mpls lsp
+FEC                         Proto       In/Out Label    Out Inter/NHLFE/LSINDEX 
+10.255.20.1/32              LDP         24128/16        GE2/0                   
+10.255.20.1/32              LDP         -/16            GE2/0                   
+10.255.20.2/32              LDP         24127/3         GE2/0                   
+10.255.20.2/32              LDP         -/3             GE2/0                   
+10.255.20.3/32              LDP         3/-             -                       
+10.20.23.1                  Local       -/-             GE2/0                   
+<PE2>

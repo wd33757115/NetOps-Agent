@@ -1,0 +1,5 @@
+display arp vpn-instance SHARED
+  Type: S-Static   D-Dynamic   O-Openflow   R-Rule   M-Multiport  I-Invalid
+IP address      MAC address    VLAN/VSI name Interface/Link ID        Aging Type
+10.99.1.10      0050-7966-6807 --            GE4/0                    20    D   
+<PE2>

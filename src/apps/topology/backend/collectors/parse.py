@@ -10,6 +10,7 @@ from .normalize import parser_text
 from .tiers import (
     generic_arp,
     generic_bgp_peers,
+    generic_evpn,
     generic_ifbrief,
     generic_ipif,
     generic_lag,
@@ -23,6 +24,7 @@ from .tiers import (
     generic_trunk,
     generic_version,
     generic_vlan,
+    generic_vpn,
     generic_vrfs,
     generic_vrrp,
 )
@@ -41,12 +43,24 @@ PARSERS = {
     "stp": generic_stp.parse,
     "ospf_neighbors": generic_ospf_neighbors.parse,
     "bgp_peers": generic_bgp_peers.parse,
+    # The same summary tables for the VPN address families (plan §8 M5).
+    "bgp_vpnv4": generic_bgp_peers.parse,
+    "bgp_evpn": generic_bgp_peers.parse,
     "vlan": generic_vlan.parse,
     "trunk": generic_trunk.parse,
     "switchport": generic_switchport.parse,
     "ospf_interfaces": generic_ospf.parse_interfaces,
     "ospf_process": generic_ospf.parse_process,
     "vrfs": generic_vrfs.parse,
+    # VPN / EVPN / VXLAN (plan §8 M5)
+    "vrf_detail": generic_vpn.parse_vrf_detail,
+    "ldp_peers": generic_vpn.parse_ldp_peers,
+    "mpls_lfib": generic_vpn.parse_mpls_lfib,
+    "evpn_instances": generic_evpn.parse_evpn_instances,
+    "evpn_peers": generic_evpn.parse_evpn_peers,
+    "vxlan_vnis": generic_evpn.parse_vxlan_vnis,
+    "tunnel_interfaces": generic_evpn.parse_tunnel_interfaces,
+    "evpn_mac": generic_evpn.parse_evpn_mac,
 }
 EMPTY = {
     "lldp": r"No (?:LLDP )?neighbors?(?: found)?\.?",
@@ -55,6 +69,9 @@ EMPTY = {
     "lag": r"No link aggregation group exists\.",
     "stp": r"No spanning tree instances? exists?\.?",
     "bgp_peers": r"% BGP not active\.?",
+    "bgp_vpnv4": r"% BGP not active\.?",
+    "bgp_evpn": r"% BGP not active\.?",
+    "mpls_lfib": r"no MPLS apps enabled or MPLS not enabled on any interfaces",
     "vrrp": r"VRRP4 is not configured\.",
     "vrfs": (
         r"(?:L3VPN is not configured\.|Total VPN-Instances configured\s*:\s*0"
@@ -62,6 +79,23 @@ EMPTY = {
         r"Max VPN instances permitted by license\s*:\s*\d+)?)"
     ),
 }
+# A feature that is not configured prints nothing (vpn-fabric: BGP address families,
+# LDP, label tables, EVPN, VXLAN on devices that do not run them).
+ABSENT_EMPTY = frozenset(
+    {
+        "bgp_peers",
+        "bgp_vpnv4",
+        "bgp_evpn",
+        "ldp_peers",
+        "mpls_lfib",
+        "evpn_instances",
+        "evpn_peers",
+        "vxlan_vnis",
+        "tunnel_interfaces",
+        "evpn_mac",
+        "vrf_detail",
+    }
+)
 MAX_BYTES = 8 * 1024 * 1024
 
 
@@ -155,9 +189,11 @@ def parse_generic(identity, capability, raw, *, complete=True, command=None, pro
     if (
         (family in {"ios", "iosxe"} and capability in {"arp", "vrrp", "trunk", "ospf_neighbors"})
         or (family == "comware" and capability == "trunk")
+        or (family in {"ios", "iosxe", "comware"} and capability in ABSENT_EMPTY)
     ) and not text.strip():
         # Verified lab outputs have no header for empty IOS ARP/VRRP/trunks/OSPF neighbours
-        # and Comware trunks; transport completeness is still required.
+        # and Comware trunks, nor for a feature the device does not run (ABSENT_EMPTY);
+        # transport completeness is still required.
         empty_pattern = ""
     if empty_pattern is not None and re.fullmatch(empty_pattern, text.strip(), re.I):
         if incomplete and capability in {"trunk", "switchport"}:

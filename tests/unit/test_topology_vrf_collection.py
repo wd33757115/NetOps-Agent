@@ -10,7 +10,6 @@ from src.apps.topology.backend.collectors.parse import parse
 from src.apps.topology.backend.model.builder import device_node_ids
 from src.apps.topology.backend.service import (
     _facts,
-    _scoped_arp_context,
     _scoped_context,
     topology_observation,
 )
@@ -103,8 +102,10 @@ def ios():
             mode="topology",
             should_continue=lambda: True,
             on_result=lambda result: state.evidence.append(result),
-            scoped_arp_context=(
-                lambda scopes: _scoped_arp_context(context, "node", "connection", scopes)
+            scoped_context=(
+                lambda capability, scopes, family: _scoped_context(
+                    context, "node", "connection", scopes, capability, family
+                )
             )
             if scoped
             else None,
@@ -192,11 +193,11 @@ def test_duplicate_vrf_name_is_not_silently_complete(ios):
 )
 def test_dynamic_scope_tokens_cannot_broaden_or_inject_cli(ios, scope):
     with pytest.raises(ValueError):
-        _scoped_arp_context(ios.context, "node", "connection", (scope,))
+        _scoped_context(ios.context, "node", "connection", (scope,), "arp")
 
 
 def test_exact_grant_cannot_authorize_another_scope_target_or_connection(ios):
-    context = _scoped_arp_context(ios.context, "node", "connection", ("blue",))
+    context = _scoped_context(ios.context, "node", "connection", ("blue",), "arp")
     authorize(
         context, BatchRequest("node", "connection", (Command("one", "show ip arp vrf blue"),))
     )
@@ -258,7 +259,7 @@ def test_budget_expiry_keeps_completed_scope_and_marks_remaining_scope_missing(i
         "arp",
         result,
         BudgetEnds(),
-        lambda scopes: ios.context,
+        lambda capability, scopes, family: ios.context,
         "node",
         "connection",
         lambda: 1,
@@ -284,7 +285,7 @@ def test_authorization_and_trust_errors_are_not_swallowed_as_coverage_gaps(ios, 
             "arp",
             result,
             Rejected(),
-            lambda scopes: ios.context,
+            lambda capability, scopes, family: ios.context,
             "node",
             "connection",
             lambda: 1,
@@ -397,11 +398,7 @@ def mgmt_only(ios):
             "show ip route vrf MGMT": MGMT_ROUTES,
         }
     )
-    return dict(
-        scoped_route_context=lambda scopes: _scoped_context(
-            ios.context, "node", "connection", scopes, "routes"
-        )
-    )
+    return {}  # one scoped context covers ARP and routes
 
 
 def test_each_vrf_route_table_is_collected_into_its_own_scope(ios):

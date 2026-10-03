@@ -105,9 +105,11 @@ def trace(
     snapshot_id: str,
     src: str = Query(min_length=1, max_length=64),
     dst: str = Query(min_length=1, max_length=64),
+    src_vrf: str | None = Query(default=None, min_length=1, max_length=64),
+    dst_vrf: str | None = Query(default=None, min_length=1, max_length=64),
     user: CurrentUser = Depends(actor),
 ):
-    return service.trace(user.user_id, snapshot_id, src, dst)
+    return service.trace(user.user_id, snapshot_id, src, dst, src_vrf, dst_vrf)
 
 
 @router.get("/snapshots/{snapshot_id}/rfc8345")

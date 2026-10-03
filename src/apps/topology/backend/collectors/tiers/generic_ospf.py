@@ -16,7 +16,8 @@ IOS_PROCESS = re.compile(r'Routing Process "ospf (\d+)" with ID (\S+)')
 IOS_TABLE = re.compile(r"Interface\s+PID\s+Area\s+IP Address/Mask\s+Cost\s+State\s+Nbrs F/C")
 COMWARE_TABLE = re.compile(r"IP Address\s+Type\s+State\s+Cost\s+Pri\s+DR\s+BDR")
 COMWARE_AREA = re.compile(r"Area:\s*(\S+)(?:\s+\(MPLS TE not enabled\))?")
-COMWARE_INTERFACE = re.compile(r"Interface:\s*(\S+)\s+\((\S+)\)")
+# A point-to-point interface names its peer: "... (GigabitEthernet2/0) --> 10.10.13.1".
+COMWARE_INTERFACE = re.compile(r"Interface:\s*(\S+)\s+\((\S+)\)(?:\s+-->\s+\S+)?")
 COMWARE_COST = re.compile(r"Cost:\s*(\S+)\s+State:\s*(\S+)\s+Type:\s*(\S+)\s+MTU:\s*\d+")
 DEFAULT_COMWARE = "output:Multi-VPN-Instance is not enabled"
 

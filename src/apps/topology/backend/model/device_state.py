@@ -20,6 +20,8 @@ INTERFACE_TYPES = {
     "lag": "iana-if-type:ieee8023adLag",
     "vlanif": "iana-if-type:l3ipvlan",
     "loopback": "iana-if-type:softwareLoopback",
+    # IANA tunnel(131), "encapsulation interface". NVE and VSI interfaces have no IANA type.
+    "tunnel": "iana-if-type:tunnel",
 }
 
 

@@ -11,7 +11,15 @@ Where the data ends, a branch ends with a reason instead of a guess:
 - ``unmanaged_next_hop``: the next hop is not an address of any collected device;
 - ``unresolved_next_hop``: a next-hop address with no route to it in the device's RIB;
 - ``routes_missing``: this device's routing table was not collected;
-- ``loop``: the walk came back to a device it already passed.
+- ``loop``: the walk came back to a device it already passed;
+- ``tunnel_down``: the VXLAN tunnel the route uses is observed down;
+- ``tunnel_egress_unresolved`` / ``tunnel_egress_ambiguous``: where a VPN tunnel ends,
+  no (or more than one) instance is proven to receive the packet.
+
+A next hop marked as a tunnel (``overlay.prepare``: MPLS VPN or VXLAN L3 VNI) is routed
+in the underlay toward the tunnel endpoint; at the device owning the endpoint the packet
+is routed again in the receiving instance. MPLS hops need an LSP for the endpoint in the
+device's label table, VXLAN ingress needs the tunnel to that VTEP observed up.
 
 A source host starts at the gateway of its subnet (every candidate when several could
 be its gateway); a source that is a device starts at that device. Equal-cost next hops
@@ -26,6 +34,7 @@ import ipaddress
 from .builder import NT, ST
 from .device_state import project_interfaces, read_interface_state
 from .locate import _Locator, answer
+from .overlay import egress_instances, prepare
 from .retained_links import UNAVAILABLE_OPER_STATUSES
 
 MAX_PATHS = 8
@@ -54,6 +63,7 @@ def _unicast(value):
 
 class _Tracer:
     def __init__(self, devices, base, observed):
+        devices = prepare(devices)
         self.devices = devices
         self.loc = _Locator(devices, base, observed)
         self.topo = self.loc.topo
@@ -215,6 +225,34 @@ class _Tracer:
             )
         return evidence
 
+    def lsp_gap(self, key, endpoint):
+        """MPLS forwarding toward a PE needs a labelled entry for its /32 in this device."""
+        lfib = self.devices[key].get("mpls_lfib")
+        if lfib is None:
+            return {"status": "lfib_not_collected", "fec": endpoint}
+        if any(
+            row.get("fec") == f"{endpoint}/32" and row.get("out_label") not in {None, "untagged"}
+            for row in lfib
+        ):
+            return None
+        return {"status": "lsp_not_observed", "fec": endpoint}
+
+    def vxlan_state(self, key, tunnel):
+        """The observed state of the tunnel to a VTEP: IOS NVE peers, Comware tunnels."""
+        facts = self.devices[key]
+        states = {
+            row.get("state")
+            for row in facts.get("evpn_peers") or []
+            if row.get("peer") == tunnel["endpoint"] and row.get("vni") == tunnel["vni"]
+        } | {
+            row.get("state")
+            for row in facts.get("tunnel_interfaces") or []
+            if row.get("destination") == tunnel["endpoint"] and row.get("mode") == "vxlan"
+        }
+        if not states:
+            return None
+        return "up" if states == {"up"} else "down"
+
     def walk(
         self, start, first_in, dst, start_vrf="default", initial_gaps=(), source_interface=None
     ):
@@ -238,7 +276,7 @@ class _Tracer:
                 end(trail, "delivered", to="device", interface=own[0][1])
             return True
 
-        def step(key, vrf, in_if, trail, visited):
+        def step(key, vrf, in_if, trail, visited, tunnel=None):
             nonlocal truncated
             if len(paths) >= MAX_PATHS:
                 truncated = True
@@ -251,6 +289,8 @@ class _Tracer:
                 "out_interface": None,
                 "route": None,
             }
+            if tunnel is not None:
+                hop["tunnel"] = {k: v for k, v in tunnel.items() if k != "import"}
             if not trail and initial_gaps:
                 hop["gaps"] = list(initial_gaps)
             if not trail and source_interface:
@@ -262,15 +302,34 @@ class _Tracer:
             if unavailable:
                 end([*trail, hop], "interface_unavailable", **unavailable)
                 return
-            if deliver_local(key, vrf, [*trail, hop]):
+            if tunnel is not None and self.topo.ip_candidates(
+                tunnel["endpoint"], device=key, vrf=vrf
+            ):
+                # The tunnel ends here: route the packet again in the receiving instance.
+                egress = egress_instances(self.devices[key], tunnel, dst)
+                hop["tunnel"]["ends"] = True
+                if len(egress) != 1:
+                    status = "tunnel_egress_ambiguous" if egress else "tunnel_egress_unresolved"
+                    end([*trail, hop], status, endpoint=tunnel["endpoint"], candidates=egress)
+                    return
+                vrf = hop["vrf"] = egress[0]
+                tunnel = None
+            if tunnel is None and deliver_local(key, vrf, [*trail, hop]):
                 return
-            if (key, vrf) in visited or len(trail) >= MAX_HOPS:
+            target = tunnel["endpoint"] if tunnel else dst
+            if (key, vrf, target) in visited or len(trail) >= MAX_HOPS:
                 end([*trail, hop], "loop")
                 return
             if "routes" not in self.devices[key]:
                 end([*trail, hop], "routes_missing")
                 return
-            route = self.lookup(key, vrf, dst)
+            if (
+                tunnel is not None
+                and tunnel["type"] == "mpls"
+                and (gap := self.lsp_gap(key, target))
+            ):
+                hop.setdefault("gaps", []).append(gap)
+            route = self.lookup(key, vrf, target)
             if route is None:
                 end([*trail, hop], "no_route")
                 return
@@ -284,6 +343,11 @@ class _Tracer:
                 next_vrf = next_hop.get("vrf") or vrf
                 # A leaked route resolves its next hop in another local NI; say which.
                 leak = {"next_hop_vrf": next_vrf} if next_vrf != vrf else {}
+                entering = next_hop.get("tunnel")
+                carried = tunnel or entering
+                if entering:
+                    leak["tunnel"] = {k: v for k, v in entering.items() if k != "import"}
+                    out = ""  # the overlay interface is not the underlay egress
                 current = {
                     **hop,
                     "out_interface": out,
@@ -296,7 +360,22 @@ class _Tracer:
                     ),
                 }
                 here = [*trail, current]
+                if entering and entering["type"] == "vxlan":
+                    state = self.vxlan_state(key, entering)
+                    if state == "down":
+                        end(here, "tunnel_down", endpoint=entering["endpoint"])
+                        continue
+                    if state is None:
+                        current.setdefault("gaps", []).append(
+                            {"status": "vxlan_tunnel_not_observed", "endpoint": ip}
+                        )
+                if entering and entering["type"] == "mpls" and (gap := self.lsp_gap(key, ip)):
+                    current.setdefault("gaps", []).append(gap)
                 own = self.topo.ip_candidates(ip, device=key, vrf=next_vrf) if ip else ()
+                if carried and (not ip or ip in {"0.0.0.0", "::"} or own):
+                    # Inside a tunnel a connected route reaches the endpoint device itself.
+                    ip = target
+                    own = ()
                 if out.upper().startswith("NULL"):
                     end(here, "blackhole")
                     continue
@@ -380,14 +459,16 @@ class _Tracer:
                             neighbour_vrf,
                             neighbour_if,
                             [*trail, branch],
-                            visited | {(key, vrf)},
+                            visited | {(key, vrf, target)},
+                            carried,
                         )
 
         step(start, start_vrf, first_in, [], frozenset())
         return paths, truncated
 
-    def direction(self, source, dst):
-        """source is the locate answer for the start address."""
+    def direction(self, source, dst, vrf=None):
+        """source is the locate answer for the start address; ``vrf`` keeps only starts in
+        that network instance of their first-hop device (device-local name)."""
         result = {"to": dst, "first_hop": "none", "paths": [], "truncated": False}
         masters = []
         device_locations = [
@@ -427,6 +508,10 @@ class _Tracer:
                 result["vrrp"] = groups
             if masters:
                 starts = masters
+        if vrf is not None:
+            starts = [start for start in starts if start[2] == vrf]
+            masters = [start for start in masters if start[2] == vrf]
+            result["vrf"] = vrf
         if not starts:
             result["status"] = "no_gateway"
             return result
@@ -475,14 +560,19 @@ def _sequences(direction, reverse=False):
     }
 
 
-def trace(devices, base, src, dst, observed=None):
-    """devices: builder input keyed by collected address; observed: {address: evidence}."""
+def trace(devices, base, src, dst, observed=None, src_vrf=None, dst_vrf=None):
+    """devices: builder input keyed by collected address; observed: {address: evidence}.
+
+    ``src_vrf``/``dst_vrf`` name the network instance an end is in on its first-hop device,
+    for addresses that several VPNs reuse.
+    """
     src, dst = _unicast(src), _unicast(dst)
     if src == dst:
         raise ValueError("源和目的地址相同")
     tracer = _Tracer(devices, base, observed or {})
     source, destination = answer(tracer.loc, "ip", src), answer(tracer.loc, "ip", dst)
-    forward, reverse = tracer.direction(source, dst), tracer.direction(destination, src)
+    forward = tracer.direction(source, dst, src_vrf)
+    reverse = tracer.direction(destination, src, dst_vrf)
     forward["from"], reverse["from"] = src, dst
     # Candidate first hops are not observed choices, so they cannot show asymmetry.
     routed = (

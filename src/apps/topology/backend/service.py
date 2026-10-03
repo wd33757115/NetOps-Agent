@@ -75,6 +75,17 @@ TOPOLOGY_FACTS = (
     "ospf_process",
     "ospf_neighbors",
     "bgp_peers",
+    "vrfs",
+    "vrf_detail",
+    "bgp_vpnv4",
+    "bgp_evpn",
+    "ldp_peers",
+    "mpls_lfib",
+    "evpn_instances",
+    "evpn_peers",
+    "vxlan_vnis",
+    "tunnel_interfaces",
+    "evpn_mac",
 )
 NODE_BUDGET_SECONDS = 240
 # A lease outlives the node budget, so a live collection is never reclaimed mid-way.
@@ -523,7 +534,7 @@ def device_model(owner, snapshot_id, address):
     return {"network_id": state["network_id"], "snapshot_id": snapshot_id, **devices[0]}
 
 
-def _analyse(session, snap, question, *args):
+def _analyse(session, snap, question, *args, **options):
     """Rebuild the snapshot's facts and answer one read-only question over them."""
     network = session.get(Network, snap.network_id)
     if "simap" not in snap.graph:
@@ -535,7 +546,7 @@ def _analyse(session, snap, question, *args):
         for o in observations
     }
     try:
-        result = question(devices, f"urn:netops:topology:{network.id}:", *args, observed)
+        result = question(devices, f"urn:netops:topology:{network.id}:", *args, observed, **options)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from None
     return {
@@ -607,17 +618,19 @@ def _as_history(result):
     return {**result, "meaning": PATH_MEANING.format(when=when)}
 
 
-def trace(owner, snapshot_id, src, dst):
+def trace(owner, snapshot_id, src, dst, src_vrf=None, dst_vrf=None):
     """Forwarding paths src->dst and dst->src in one snapshot, ending at data gaps."""
     with sessions() as session:
         snap = session.get(Snapshot, snapshot_id)
         if not snap:
             raise HTTPException(404, "快照不存在")
         owned(session, Network, snap.network_id, owner)
-        return _as_history(_analyse(session, snap, trace_in, src, dst))
+        return _as_history(
+            _analyse(session, snap, trace_in, src, dst, src_vrf=src_vrf, dst_vrf=dst_vrf)
+        )
 
 
-def trace_current(owner, src, dst):
+def trace_current(owner, src, dst, src_vrf=None, dst_vrf=None):
     """The same question over the current snapshot of every network that knows either end."""
     with sessions() as session:
         found = []
@@ -629,7 +642,9 @@ def trace_current(owner, src, dst):
         ):
             snap = session.get(Snapshot, network.current_snapshot)
             if snap and "simap" in snap.graph:
-                result = _analyse(session, snap, trace_in, src, dst)
+                result = _analyse(
+                    session, snap, trace_in, src, dst, src_vrf=src_vrf, dst_vrf=dst_vrf
+                )
                 if {result["forward"]["status"], result["reverse"]["status"]} != {"no_gateway"}:
                     found.append(_as_history(result))
         return found
@@ -827,11 +842,8 @@ def _collect_topology(job, choice):
             should_continue=job.guard,
             on_result=capture,
             known_hosts_provider=lambda target, port: trust.known_hosts(target.host, port),
-            scoped_arp_context=lambda scopes: _scoped_arp_context(
-                context, job.target_id, job.target_id, scopes
-            ),
-            scoped_route_context=lambda scopes: _scoped_context(
-                context, job.target_id, job.target_id, scopes, "routes"
+            scoped_context=lambda capability, scopes, family: _scoped_context(
+                context, job.target_id, job.target_id, scopes, capability, family
             ),
         )
         data = topology_observation(result)
@@ -841,16 +853,22 @@ def _collect_topology(job, choice):
     return outputs, command_metadata, data, reason
 
 
-# The global command a per-VRF expansion extends; the job must already be allowed it.
-SCOPE_BASE_COMMANDS = {"arp": "show ip arp", "routes": "show ip route"}
+# The command a per-VRF expansion extends; the job must already be allowed it. A Comware
+# instance detail extends the instance enumeration itself.
+IOS_SCOPE_BASE = {"arp": "show ip arp", "routes": "show ip route"}
+SCOPE_BASE_COMMANDS = {
+    "ios": IOS_SCOPE_BASE,
+    "iosxe": IOS_SCOPE_BASE,
+    "nxos": {"arp": "show ip arp"},
+    "comware": {
+        "routes": "display ip routing-table",
+        "vrf_detail": "display ip vpn-instance",
+    },
+}
 
 
-def _scoped_arp_context(context, target_ref, connection_profile_id, scopes):
-    return _scoped_context(context, target_ref, connection_profile_id, scopes, "arp")
-
-
-def _scoped_context(context, target_ref, connection_profile_id, scopes, capability):
-    """Issue exact backend grants for a bounded, validated per-VRF ARP or route expansion.
+def _scoped_context(context, target_ref, connection_profile_id, scopes, capability, family="ios"):
+    """Issue exact backend grants for a bounded, validated per-VRF expansion.
 
     Target and connection come from the already authorized job, which must already be
     allowed the global command. Device-provided VRF names cannot introduce command
@@ -864,12 +882,12 @@ def _scoped_context(context, target_ref, connection_profile_id, scopes, capabili
         BatchRequest(
             target_ref,
             connection_profile_id,
-            (Command(capability, SCOPE_BASE_COMMANDS[capability]),),
+            (Command(capability, SCOPE_BASE_COMMANDS[family][capability]),),
         ),
     )
     if len(scopes) > 64:
         raise ValueError("VRF collection scope exceeds node limit")
-    commands = frozenset(scoped_command(capability, scope) for scope in scopes)
+    commands = frozenset(scoped_command(capability, scope, family) for scope in scopes)
     return replace(
         context,
         grants=(*context.grants, AccessGrant(target_ref, connection_profile_id, commands)),
@@ -892,9 +910,10 @@ def topology_observation(result):
         for cap, parsed in result.parsed.items()
         if cap in TOPOLOGY_FACTS and parsed.status in {"complete", "partial"}
     }
-    if "bgp_peers" in facts:
-        # The local identity (router ID, AS) and the peer rows belong together.
-        facts["bgp_peers"] = {**result.parsed["bgp_peers"].summary, "peers": facts["bgp_peers"]}
+    for cap in ("bgp_peers", "bgp_vpnv4", "bgp_evpn"):
+        if cap in facts:
+            # The local identity (router ID, AS) and the peer rows belong together.
+            facts[cap] = {**result.parsed[cap].summary, "peers": facts[cap]}
     vlan = result.parsed.get("vlan")
     if vlan is not None and vlan.status in {"complete", "partial"} and "members" in vlan.summary:
         facts["vlan_members"] = vlan.summary["members"]

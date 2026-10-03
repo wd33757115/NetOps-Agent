@@ -1,0 +1,217 @@
+{
+ "ietf-l2vpn-ntw:l2vpn-ntw": {
+  "vpn-services": {
+   "vpn-service": [
+    {
+     "vpn-id": "vpls7714825356",
+     "vpn-description": "Sample BGP-based VPLS",
+     "customer-name": "customer-7714825356",
+     "vpn-type": "ietf-vpn-common:vpls",
+     "bgp-ad-enabled": true,
+     "signaling-type": "ietf-vpn-common:bgp-signaling",
+     "global-parameters-profiles": {
+      "global-parameters-profile": [
+       {
+        "profile-id": "simple-profile",
+        "local-autonomous-system": 65535,
+        "svc-mtu": 1518,
+        "rd-suffix": 1,
+        "vpn-target": [
+         {
+          "id": 1,
+          "route-targets": [
+           {
+            "route-target": "0:65535:1"
+           }
+          ],
+          "route-target-type": "both"
+         }
+        ]
+       }
+      ]
+     },
+     "vpn-nodes": {
+      "vpn-node": [
+       {
+        "vpn-node-id": "pe1",
+        "ne-id": "198.51.100.1",
+        "active-global-parameters-profiles": {
+         "global-parameters-profile": [
+          {
+           "profile-id": "simple-profile"
+          }
+         ]
+        },
+        "bgp-auto-discovery": {
+         "vpn-id": "1"
+        },
+        "signaling-option": {
+         "pw-encapsulation-type": "iana-bgp-l2-encaps:ethernet-tagged-mode",
+         "vpls-instance": {
+          "vpls-edge-id": 1,
+          "vpls-edge-id-range": 100
+         }
+        },
+        "vpn-network-accesses": {
+         "vpn-network-access": [
+          {
+           "id": "1/1/1.1",
+           "interface-id": "1/1/1",
+           "description": "Interface to CE1",
+           "active-vpn-node-profile": "simple-profile",
+           "status": {
+            "admin-status": {
+             "status": "ietf-vpn-common:admin-up"
+            }
+           },
+           "connection": {
+            "encapsulation": {
+             "encap-type": "ietf-vpn-common:dot1q",
+             "dot1q": {
+              "cvlan-id": 1
+             }
+            }
+           }
+          }
+         ]
+        }
+       },
+       {
+        "vpn-node-id": "pe2",
+        "ne-id": "198.51.100.2",
+        "active-global-parameters-profiles": {
+         "global-parameters-profile": [
+          {
+           "profile-id": "simple-profile"
+          }
+         ]
+        },
+        "bgp-auto-discovery": {
+         "vpn-id": "1"
+        },
+        "signaling-option": {
+         "pw-encapsulation-type": "iana-bgp-l2-encaps:ethernet-tagged-mode",
+         "vpls-instance": {
+          "vpls-edge-id": 2,
+          "vpls-edge-id-range": 100
+         }
+        },
+        "vpn-network-accesses": {
+         "vpn-network-access": [
+          {
+           "id": "1/1/1.1",
+           "interface-id": "1/1/1",
+           "description": "Interface to CE2",
+           "active-vpn-node-profile": "simple-profile",
+           "status": {
+            "admin-status": {
+             "status": "ietf-vpn-common:admin-up"
+            }
+           },
+           "connection": {
+            "encapsulation": {
+             "encap-type": "ietf-vpn-common:dot1q",
+             "dot1q": {
+              "cvlan-id": 1
+             }
+            }
+           }
+          }
+         ]
+        }
+       },
+       {
+        "vpn-node-id": "pe3",
+        "ne-id": "198.51.100.3",
+        "active-global-parameters-profiles": {
+         "global-parameters-profile": [
+          {
+           "profile-id": "simple-profile"
+          }
+         ]
+        },
+        "bgp-auto-discovery": {
+         "vpn-id": "1"
+        },
+        "signaling-option": {
+         "pw-encapsulation-type": "iana-bgp-l2-encaps:ethernet-tagged-mode",
+         "vpls-instance": {
+          "vpls-edge-id": 3,
+          "vpls-edge-id-range": 100
+         }
+        },
+        "vpn-network-accesses": {
+         "vpn-network-access": [
+          {
+           "id": "1/1/1.1",
+           "interface-id": "1/1/1",
+           "description": "Interface to CE3",
+           "active-vpn-node-profile": "simple-profile",
+           "status": {
+            "admin-status": {
+             "status": "ietf-vpn-common:admin-up"
+            }
+           },
+           "connection": {
+            "encapsulation": {
+             "encap-type": "ietf-vpn-common:dot1q",
+             "dot1q": {
+              "cvlan-id": 1
+             }
+            }
+           }
+          }
+         ]
+        }
+       },
+       {
+        "vpn-node-id": "pe4",
+        "ne-id": "198.51.100.4",
+        "active-global-parameters-profiles": {
+         "global-parameters-profile": [
+          {
+           "profile-id": "simple-profile"
+          }
+         ]
+        },
+        "bgp-auto-discovery": {
+         "vpn-id": "1"
+        },
+        "signaling-option": {
+         "pw-encapsulation-type": "iana-bgp-l2-encaps:ethernet-tagged-mode",
+         "vpls-instance": {
+          "vpls-edge-id": 4,
+          "vpls-edge-id-range": 100
+         }
+        },
+        "vpn-network-accesses": {
+         "vpn-network-access": [
+          {
+           "id": "1/1/1.1",
+           "interface-id": "1/1/1",
+           "description": "Interface to CE4",
+           "active-vpn-node-profile": "simple-profile",
+           "status": {
+            "admin-status": {
+             "status": "ietf-vpn-common:admin-up"
+            }
+           },
+           "connection": {
+            "encapsulation": {
+             "encap-type": "ietf-vpn-common:dot1q",
+             "dot1q": {
+              "cvlan-id": 1
+             }
+            }
+           }
+          }
+         ]
+        }
+       }
+      ]
+     }
+    }
+   ]
+  }
+ }
+}

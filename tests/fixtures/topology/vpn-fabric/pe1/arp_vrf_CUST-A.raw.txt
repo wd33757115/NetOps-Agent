@@ -1,0 +1,5 @@
+show ip arp vrf CUST-A
+Protocol  Address          Age (min)  Hardware Addr   Type   Interface
+Internet  10.1.1.1                -   aabb.cc00.0c01  ARPA   Ethernet1/0
+Internet  10.1.1.10              50   0050.7966.6804  ARPA   Ethernet1/0
+PE1#

@@ -22,13 +22,22 @@ capabilities:
   trunk: {command: display port trunk, parser: generic_trunk}
   lag: {command: display link-aggregation verbose, parser: generic_lag}
   routes: {command: display ip routing-table, timeout: 300, parser: template_routes}
-  vrfs: {command: display ip vpn-instance, parser: null}
+  vrfs: {command: display ip vpn-instance, parser: generic_vrfs}
   irf: {command: display irf, parser: null}
   vrrp: {command: display vrrp verbose, parser: generic_vrrp}
   ospf_interfaces: {command: display ospf interface, parser: generic_ospf_interfaces}
   ospf_process: {command: display ospf, parser: generic_ospf_process}
   ospf_neighbors: {command: display ospf peer, parser: generic_ospf_neighbors}
   bgp_peers: {command: display bgp peer ipv4, parser: generic_bgp_peers}
+  bgp_vpnv4: {command: display bgp peer vpnv4, parser: generic_bgp_vpnv4}
+  bgp_evpn: {command: display bgp peer l2vpn evpn, parser: generic_bgp_evpn}
+  ldp_peers: {command: display mpls ldp peer, parser: generic_ldp_peers}
+  mpls_lfib: {command: display mpls lsp, parser: generic_mpls_lfib}
+  evpn_instances: {command: display evpn instance verbose, parser: generic_evpn_instances}
+  evpn_peers: {command: display evpn auto-discovery imet, parser: generic_evpn_peers}
+  vxlan_vnis: {command: display l2vpn vsi verbose, parser: generic_vxlan_vnis}
+  tunnel_interfaces: {command: display interface tunnel, parser: generic_tunnel_interfaces}
+  evpn_mac: {command: display evpn route mac, parser: generic_evpn_mac}
 verified:
   - model: VSR1000
     version: 7.1.064 Release 1362P12

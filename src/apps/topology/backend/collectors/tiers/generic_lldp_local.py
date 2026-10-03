@@ -16,6 +16,10 @@ def parse(text, family):
             except ValueError:
                 result.reject(lines[0], "invalid_local_interface")
                 local = None
+        elif key == "mgmt" and valid_mac(value) and not valid_ip(value):
+            # IEEE 802.1AB address subtype all802: a port without an IP advertises its MAC
+            # (vpn-fabric LEAF3). Only IP management addresses are modeled.
+            result.handled_lines.update(lines)
         elif key == "mgmt":
             result.candidates += 1
             address = valid_ip(value)

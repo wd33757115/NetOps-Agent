@@ -1,0 +1,2 @@
+show l2vpn evpn evi detail
+PE1#

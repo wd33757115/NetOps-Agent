@@ -1,0 +1,8 @@
+display ip vpn-instance
+  Total VPN-Instances configured : 2
+  License limit : Y
+  Max VPN instances permitted by license : 8191
+  VPN-Instance Name               RD                     Create time
+  CUST-A                          65200:11               2026/10/03 14:06:30
+  SHARED                          65200:99               2026/10/03 14:06:32
+<PE2>

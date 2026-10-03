@@ -78,7 +78,8 @@ IFNAME = re.compile(
     r"(?:GigabitEthernet|Ten-GigabitEthernet|TenGigabitEthernet|XGigabitEthernet|"
     r"FastEthernet|Ethernet|Gi|GE|XGE|Te|Fa|Eth|Et|"
     r"Bridge-Aggregation|Route-Aggregation|BAGG|RAGG|Port-channel|Po|Eth-Trunk|"
-    r"Vlan-interface|Vlanif|Vlan|Vl|InLoopBack|InLoop|LoopBack|Loop|Lo|NULL|REG|mgmt)"
+    r"Vlan-interface|Vlanif|Vlan|Vl|InLoopBack|InLoop|LoopBack|Loop|Lo|NULL|REG|mgmt|"
+    r"Tunnel|Tun|Tu|Vsi-interface|Vsi|nve|nv)"
     r"[0-9]+(?:/[0-9]+)*(?:\.[0-9]+)?",
     re.I | re.ASCII,
 )

@@ -20,19 +20,30 @@ from .tiers.template import IOS_ROUTE_TABLE
 MAX_VRF_SCOPES = 64
 
 
-SCOPED_COMMANDS = {"arp": "show ip arp vrf {}", "routes": "show ip route vrf {}"}
-# Platforms whose per-VRF layout is verified: IOS ARP and route tables (campus-wan), NX-OS ARP.
-SCOPED_FAMILIES = {"arp": {"ios", "iosxe", "nxos"}, "routes": {"ios", "iosxe"}}
+IOS_SCOPED = {"arp": "show ip arp vrf {}", "routes": "show ip route vrf {}"}
+# Per-VRF commands whose layout is verified: IOS ARP and route tables (campus-wan), NX-OS
+# ARP, Comware VPN-instance route tables and instance detail (vpn-fabric).
+SCOPED_COMMANDS = {
+    "ios": IOS_SCOPED,
+    "iosxe": IOS_SCOPED,
+    "nxos": {"arp": IOS_SCOPED["arp"]},
+    "comware": {
+        "routes": "display ip routing-table vpn-instance {}",
+        "vrf_detail": "display ip vpn-instance instance-name {}",
+    },
+}
+# No table of their own outside the VRFs: only the per-VRF commands run.
+INSTANCE_ONLY = frozenset({"vrf_detail"})
 
 
-def scoped_command(capability, scope):
+def scoped_command(capability, scope, family="ios"):
     """Only literal VRF tokens, never wildcards, options, separators or CLI filters."""
     if not isinstance(scope, str) or not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.:-]{0,63}", scope):
         raise ValueError("unsafe VRF command token")
     if scope.lower() in {"all", "default"}:
         raise ValueError("reserved VRF command token")
-    command = SCOPED_COMMANDS[capability].format(scope)
-    decision = classify("ios", command)
+    command = SCOPED_COMMANDS[family][capability].format(scope)
+    decision = classify("comware" if family == "comware" else "ios", command)
     if decision.level != "L1" or decision.normalized != command:
         raise ValueError("VRF command is not canonical read-only CLI")
     return command
@@ -49,6 +60,21 @@ def _scope_headers(capability, text):
     return {vrf_header(line) for line in text.splitlines() if vrf_header(line)}
 
 
+def _bound_elsewhere(result, parsed, scope):
+    """A Comware VPN route table does not name itself; a connected route out of an
+    interface bound to another instance proves the table is not this scope's."""
+    ip = result.parsed.get("ip")
+    if not ip or ip.status != "complete":
+        return False
+    bound = {row["ifname"]: row.get("vrf", "default") for row in ip.records if "ifname" in row}
+    return any(
+        bound.get(hop.get("ifname"), scope) != scope
+        for row in parsed.records
+        if str(row.get("protocol", "")).lower() == "direct"
+        for hop in row.get("next_hops", [])
+    )
+
+
 def _collect_scoped(
     capability,
     result,
@@ -61,17 +87,18 @@ def _collect_scoped(
     on_result,
 ):
     """Merge only complete scopes and retain a coverage record for every attempt."""
-    if (
-        result.identity.os_family not in SCOPED_FAMILIES[capability]
-        or capability not in result.parsed
-        or capability not in result.results
+    family = result.identity.os_family
+    instance_only = capability in INSTANCE_ONLY
+    if capability not in SCOPED_COMMANDS.get(family, {}) or (
+        not instance_only and (capability not in result.parsed or capability not in result.results)
     ):
         return
-    global_table = result.parsed[capability]
-    global_output = result.results[capability].output
-    if _scope_headers(capability, global_output) - {"default"}:
-        global_table.status = "failed"
-        global_table.warnings.append("vrf_output_scope_mismatch")
+    if not instance_only:
+        global_table = result.parsed[capability]
+        global_output = result.results[capability].output
+        if _scope_headers(capability, global_output) - {"default"}:
+            global_table.status = "failed"
+            global_table.warnings.append("vrf_output_scope_mismatch")
     enumeration = result.parsed.get("vrfs")
     enumeration_status = enumeration.status if enumeration else "missing"
     instances = enumeration.summary.get("instances", []) if enumeration else []
@@ -86,12 +113,19 @@ def _collect_scoped(
     if ip and ip.status == "complete":
         scopes.update(row.get("vrf", "default") for row in ip.records)
     scopes.discard("default")
-    coverage = {"default": {"status": global_table.status, "command_id": capability}}
+    coverage = (
+        {}
+        if instance_only
+        else {"default": {"status": global_table.status, "command_id": capability}}
+    )
     combined = ParseResult(
         status="complete",
         parser_ref=f"generic:{capability}:scoped:v1",
         summary={"scope_coverage": {"enumeration_status": enumeration_status, "scopes": coverage}},
     )
+    if not instance_only:
+        # The merged table is read by the global table's parser tier.
+        combined.tier, combined.confidence = global_table.tier, global_table.confidence
 
     def add_scope(scope, parsed, command_id):
         combined.candidate_count += parsed.candidate_count
@@ -112,7 +146,8 @@ def _collect_scoped(
             {**source, "command_id": command_id, "vrf": scope} for source in parsed.sources
         )
 
-    add_scope("default", global_table, capability)
+    if not instance_only:
+        add_scope("default", global_table, capability)
     if enumeration_status != "complete":
         combined.status = "partial"
         combined.warnings.append("vrf_enumeration_incomplete")
@@ -120,7 +155,7 @@ def _collect_scoped(
     scope_by_id = {}
     for scope in sorted(scopes):
         try:
-            text = scoped_command(capability, scope)
+            text = scoped_command(capability, scope, family)
         except ValueError:
             coverage[scope] = {"status": "missing", "reason": "unsafe_or_reserved_vrf_name"}
             combined.status = "partial"
@@ -146,9 +181,22 @@ def _collect_scoped(
             item.output,
             complete=item.output_complete and not item.failure_code,
         )
-        explicit_scopes = _scope_headers(capability, item.output)
-        # A VRF route table names itself; one without (or with another) name is refused.
-        if explicit_scopes - {scope} or (capability == "routes" and explicit_scopes != {scope}):
+        if capability == "vrf_detail":
+            explicit_scopes = {row["vrf"] for row in parsed.records}
+        else:
+            explicit_scopes = _scope_headers(capability, item.output)
+        # An IOS VRF route table and an instance detail name themselves; one without (or
+        # with another) name is refused. A Comware table must not contradict its bindings.
+        named = capability == "vrf_detail" or (capability == "routes" and family != "comware")
+        if (
+            explicit_scopes - {scope}
+            or (named and explicit_scopes != {scope})
+            or (
+                family == "comware"
+                and capability == "routes"
+                and _bound_elsewhere(result, parsed, scope)
+            )
+        ):
             parsed.status = "failed"
             parsed.warnings.append("vrf_output_scope_mismatch")
         coverage[scope] = {
@@ -161,7 +209,7 @@ def _collect_scoped(
 
     if commands and context_factory is not None:
         try:
-            context = context_factory(tuple(scope_by_id.values()))
+            context = context_factory(capability, tuple(scope_by_id.values()), family)
             collector.execute_batch(
                 context,
                 BatchRequest(
@@ -223,8 +271,7 @@ def collect_node(
     should_continue=None,
     on_result=None,
     known_hosts_provider=None,
-    scoped_arp_context=None,
-    scoped_route_context=None,
+    scoped_context=None,
 ):
     """Backend only. Caller supplies authenticated grants, revocation guard and evidence sink.
 
@@ -383,7 +430,7 @@ def collect_node(
         "arp",
         result,
         collector,
-        scoped_arp_context,
+        scoped_context,
         target_ref,
         connection_profile_id,
         remaining,
@@ -416,11 +463,24 @@ def collect_node(
         "routes",
         result,
         collector,
-        scoped_route_context,
+        scoped_context,
         target_ref,
         connection_profile_id,
         remaining,
         should_continue,
         on_result,
     )
+    if "vrf_detail" in MODE_CAPABILITIES[mode]:
+        # Comware gives each VPN instance's RD, targets and interfaces one by one.
+        _collect_scoped(
+            "vrf_detail",
+            result,
+            collector,
+            scoped_context,
+            target_ref,
+            connection_profile_id,
+            remaining,
+            should_continue,
+            on_result,
+        )
     return result

@@ -2,8 +2,8 @@
 
 Only fixed, read-only ``display``/``show`` commands are sent (Comware or Cisco IOS,
 chosen by the SSH banner). The password is read from the NETOPS_LAB_PASSWORD
-environment variable or prompted interactively; it is never written to disk, logs,
-or output files.
+environment variable, else from that line of the owner's repository .env, else prompted
+interactively; it is never written to disk, logs, or output files.
 
 Output: .runtime/lab-samples/<timestamp>/<host>/<command>.txt (normalized),
 <command>.raw.txt (exact bytes received) + meta.json
@@ -54,6 +54,19 @@ COMMANDS = [
     ("ospf_interfaces", "display ospf interface"),
     ("ospf_process", "display ospf"),
     ("bgp", "display bgp peer ipv4"),
+    # VPN / EVPN / VXLAN (plan §8 M5)
+    ("bgp_vpnv4", "display bgp peer vpnv4"),
+    ("bgp_evpn", "display bgp peer l2vpn evpn"),
+    ("bgp_vpnv4_routes", "display bgp routing-table vpnv4"),
+    ("bgp_evpn_routes", "display bgp l2vpn evpn"),
+    ("ldp", "display mpls ldp peer"),
+    ("mpls_lsp", "display mpls lsp"),
+    ("vxlan_tunnels", "display vxlan tunnel"),
+    ("vsi", "display l2vpn vsi verbose"),
+    ("evpn_instances", "display evpn instance verbose"),
+    ("evpn_imet", "display evpn auto-discovery imet"),
+    ("tunnel_interfaces", "display interface tunnel"),
+    ("evpn_mac", "display evpn route mac"),
     ("config", "display current-configuration"),
 ]
 
@@ -86,9 +99,57 @@ CISCO_COMMANDS = [
     ("ospf_interfaces", "show ip ospf interface brief"),
     ("ospf_process", "show ip ospf"),
     ("bgp", "show ip bgp summary"),
+    # VPN / EVPN / VXLAN (plan §8 M5)
+    ("vrf_detail", "show vrf detail"),
+    ("bgp_vpnv4", "show bgp vpnv4 unicast all summary"),
+    ("bgp_evpn", "show bgp l2vpn evpn summary"),
+    ("bgp_vpnv4_routes", "show bgp vpnv4 unicast all"),
+    ("bgp_evpn_routes", "show bgp l2vpn evpn"),
+    ("ldp", "show mpls ldp neighbor"),
+    ("mpls_forwarding", "show mpls forwarding-table"),
+    ("nve_peers", "show nve peers"),
+    ("nve_vni", "show nve vni"),
+    ("nve_interface", "show nve interface nve1 detail"),
+    ("evpn_evi", "show l2vpn evpn evi detail"),
+    ("evpn_mac", "show l2vpn evpn mac"),
     ("config", "show running-config"),
 ]
 SETUP = ("paging", "width")
+
+
+def lab_password(prompt: str) -> str:
+    """NETOPS_LAB_PASSWORD: environment, then the owner's repository .env, then a prompt.
+
+    Every lab tool reads the same source, so device accounts and samplers cannot drift.
+    """
+    if os.environ.get("NETOPS_LAB_PASSWORD"):
+        return os.environ["NETOPS_LAB_PASSWORD"]
+    env = ROOT / ".env"
+    if env.exists():
+        for line in env.read_text(encoding="utf-8").splitlines():
+            key, _, value = line.partition("=")
+            if key.strip() == "NETOPS_LAB_PASSWORD" and value.strip():
+                return value.strip().strip("\"'")
+    return getpass.getpass(prompt)
+
+
+def vrf_commands(names, cisco: bool) -> list[tuple[str, str]]:
+    """Per-VRF tables for the VRF/vpn-instance names given with --vrf (read-only)."""
+    commands = []
+    for name in names:
+        if cisco:
+            commands += [
+                (f"routes_vrf_{name}", f"show ip route vrf {name}"),
+                (f"arp_vrf_{name}", f"show ip arp vrf {name}"),
+            ]
+        else:
+            commands += [
+                (f"vrf_{name}", f"display ip vpn-instance instance-name {name}"),
+                (f"routes_vrf_{name}", f"display ip routing-table vpn-instance {name}"),
+                (f"arp_vrf_{name}", f"display arp vpn-instance {name}"),
+            ]
+    return commands
+
 
 # Refuse anything that is not a pure display/show command (defence in depth).
 READ_ONLY = re.compile(
@@ -166,7 +227,7 @@ def clean(raw: str, command: str) -> str:
     return "\n".join(lines).strip("\n") + "\n"
 
 
-def collect(host: str, username: str, password: str, out_dir: Path, port: int) -> dict:
+def collect(host: str, username: str, password: str, out_dir: Path, port: int, vrfs=()) -> dict:
     known_hosts = OUT_ROOT / "known_hosts"
     known_hosts.parent.mkdir(parents=True, exist_ok=True)
     known_hosts.touch(exist_ok=True)
@@ -196,7 +257,8 @@ def collect(host: str, username: str, password: str, out_dir: Path, port: int) -
         meta["prompt"] = ANSI.sub("", banner).strip().splitlines()[-1].strip()
         host_dir = out_dir / host
         host_dir.mkdir(parents=True, exist_ok=True)
-        commands = CISCO_COMMANDS if "Cisco" in meta["server_version"] else COMMANDS
+        cisco = "Cisco" in meta["server_version"]
+        commands = (CISCO_COMMANDS if cisco else COMMANDS) + vrf_commands(vrfs, cisco)
         for command_id, command in commands:
             if not READ_ONLY.match(command):
                 raise ValueError(f"refusing non read-only command: {command}")
@@ -265,15 +327,16 @@ def main() -> int:
     parser.add_argument("hosts", nargs="+")
     parser.add_argument("--username", default="admin")
     parser.add_argument("--port", type=int, default=22)
+    parser.add_argument("--vrf", action="append", default=[], help="also sample this VRF")
     args = parser.parse_args()
-    password = os.environ.get("NETOPS_LAB_PASSWORD") or getpass.getpass("SSH password: ")
+    password = lab_password("SSH password: ")
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     out_dir = OUT_ROOT / stamp
     out_dir.mkdir(parents=True, exist_ok=True)
     results = []
     for host in args.hosts:
         print(f"[{host}] connecting ...")
-        meta = collect(host, args.username, password, out_dir, args.port)
+        meta = collect(host, args.username, password, out_dir, args.port, args.vrf)
         print(f"[{host}] {meta['status']} {meta.get('error', '')}")
         results.append(meta)
     (out_dir / "meta.json").write_text(

@@ -40,6 +40,18 @@ MODE_CAPABILITIES = {
         "ospf_process",
         "ospf_neighbors",
         "bgp_peers",
+        # VPN / EVPN / VXLAN (plan §8 M5); the VRF list scopes per-VRF commands.
+        "vrfs",
+        "vrf_detail",
+        "bgp_vpnv4",
+        "bgp_evpn",
+        "ldp_peers",
+        "mpls_lfib",
+        "evpn_instances",
+        "evpn_peers",
+        "vxlan_vnis",
+        "tunnel_interfaces",
+        "evpn_mac",
         "routes",
     ),
     "standard": (
@@ -131,7 +143,7 @@ class Profile(StrictModel):
     preferred_driver: Literal["paramiko", "netmiko"] = "paramiko"
     session: SessionSpec
     budgets: BudgetSpec = Field(default_factory=BudgetSpec)
-    capabilities: dict[str, CapabilitySpec] = Field(min_length=3, max_length=20)
+    capabilities: dict[str, CapabilitySpec] = Field(min_length=3, max_length=40)
     verified: list[VerificationSpec]
 
     @model_validator(mode="after")

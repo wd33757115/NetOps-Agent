@@ -1,0 +1,3 @@
+show nve vni
+Interface  VNI        Multicast-group  VNI state  Mode  BD    cfg vrf                      
+SPINE2#

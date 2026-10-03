@@ -1,0 +1,34 @@
+display ip vpn-instance instance-name SHARED
+  VPN-Instance Name and Index : SHARED, 2
+  Route Distinguisher : 65200:99
+  Interfaces : GigabitEthernet4/0
+  TTL mode: pipe
+   Diffserv-mode information: pipe be
+  Address-family IPv4:
+   Export VPN Targets :
+       65200:99
+   Import VPN Targets :
+       65200:99 65200:1
+   Apply Label Type : Per-nexthop
+  Address-family IPv6:
+   Export VPN Targets :
+       65200:99
+   Import VPN Targets :
+       65200:99 65200:1
+   Apply Label Type : Per-nexthop
+  Address-family IPv4 Flowspec:
+   Export VPN Targets :
+       65200:99
+   Import VPN Targets :
+       65200:99 65200:1
+  Address-family IPv6 Flowspec:
+   Export VPN Targets :
+       65200:99
+   Import VPN Targets :
+       65200:99 65200:1
+  Address-family EVPN:
+   Export VPN Targets :
+       65200:99
+   Import VPN Targets :
+       65200:99 65200:1
+<PE2>

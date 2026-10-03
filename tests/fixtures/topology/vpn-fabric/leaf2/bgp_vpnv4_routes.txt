@@ -1,0 +1,15 @@
+BGP table version is 5, local router ID is 10.255.10.12
+Status codes: s suppressed, d damped, h history, * valid, > best, i - internal, 
+              r RIB-failure, S Stale, m multipath, b backup-path, f RT-Filter, 
+              x best-external, a additional-path, c RIB-compressed, 
+              t secondary path, L long-lived-stale,
+Origin codes: i - IGP, e - EGP, ? - incomplete
+RPKI validation codes: V valid, I invalid, N Not found
+
+     Network          Next Hop            Metric LocPrf Weight Path
+Route Distinguisher: 10.255.10.12:2 (default for vrf BLUE)
+AF-Private Import to Address-Family: L2VPN E-VPN, Pfx Count/Limit: 1/1000
+ *>   192.168.10.0     0.0.0.0                  0         32768 ?
+ *>i  192.168.20.0     10.255.10.13             0    100      0 ?
+ *>i  192.168.20.1/32  10.255.10.13             0    100      0 i
+ *>i  192.168.20.14/32 10.255.10.13             0    100      0 i

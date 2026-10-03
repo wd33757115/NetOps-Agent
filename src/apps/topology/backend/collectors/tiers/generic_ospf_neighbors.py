@@ -32,7 +32,8 @@ IOS_ROW = re.compile(rf"({IPV4})\s+(\d+)\s+([\w-]+)/\s*(\S+)\s+(\S+)\s+({IPV4})\
 COMWARE_PROCESS = re.compile(rf"\s*OSPF Process (\d+) with Router ID ({IPV4})\s*")
 COMWARE_AREA = re.compile(rf"\s*Area:\s*({IPV4})\s*")
 COMWARE_HEADER = re.compile(r"\s*Router ID\s+Address\s+Pri\s+Dead-Time\s+State\s+Interface\s*")
-COMWARE_ROW = re.compile(rf"\s*({IPV4})\s+({IPV4})\s+(\d+)\s+(\S+)\s+([\w-]+)/(\S+)\s+(\S+)\s*")
+# "Full/ -" on a point-to-point link (vpn-fabric LEAF3/PE2), like IOS "FULL/  -".
+COMWARE_ROW = re.compile(rf"\s*({IPV4})\s+({IPV4})\s+(\d+)\s+(\S+)\s+([\w-]+)/\s*(\S+)\s+(\S+)\s*")
 
 
 def parse(text, family):

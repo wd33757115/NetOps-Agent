@@ -1,0 +1,16 @@
+{
+ "ietf-ethernet-segment:ethernet-segments": {
+  "ethernet-segment": [
+   {
+    "name": "esi1",
+    "ethernet-segment-identifier": "00:11:11:11:11:11:11:11:11:11",
+    "esi-redundancy-mode": "all-active"
+   },
+   {
+    "name": "esi2",
+    "ethernet-segment-identifier": "00:22:22:22:22:22:22:22:22:22",
+    "esi-redundancy-mode": "all-active"
+   }
+  ]
+ }
+}

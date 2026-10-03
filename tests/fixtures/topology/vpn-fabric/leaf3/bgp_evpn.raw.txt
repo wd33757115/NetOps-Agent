@@ -1,0 +1,12 @@
+display bgp peer l2vpn evpn
+
+ BGP local router ID: 10.255.10.13
+ Local AS number: 65100
+ Total number of peers: 2		  Peers in established state: 2
+
+  * - Dynamically created peer
+  Peer                    AS  MsgRcvd  MsgSent OutQ PrefRcv Up/Down  State
+
+  10.255.10.1          65100       75       63    0       5 00:53:05 Established
+  10.255.10.2          65100       74       65    0       5 00:53:05 Established
+<LEAF3>

@@ -1,0 +1,10 @@
+display ospf peer
+
+	 OSPF Process 1 with Router ID 10.255.10.13
+               Neighbor Brief Information
+
+ Area: 0.0.0.0        
+ Router ID       Address         Pri Dead-Time  State             Interface
+ 10.255.10.1     10.10.13.1      1   39         Full/ -           GE2/0
+ 10.255.10.2     10.10.23.1      1   36         Full/ -           GE3/0
+<LEAF3>

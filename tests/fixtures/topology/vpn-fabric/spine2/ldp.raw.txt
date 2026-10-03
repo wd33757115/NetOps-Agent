@@ -1,0 +1,2 @@
+show mpls ldp neighbor
+SPINE2#

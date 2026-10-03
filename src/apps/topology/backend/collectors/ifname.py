@@ -15,6 +15,9 @@ PLATFORMS = {
         ("InLoopBack", "loopback", ("InLoopBack", "InLoop")),
         ("NULL", "null", ("NULL",)),
         ("REG", "register", ("REG",)),
+        # VXLAN: auto-created tunnels and the VSI gateway interfaces (vpn-fabric LEAF3).
+        ("Tunnel", "tunnel", ("Tunnel", "Tun")),
+        ("Vsi-interface", "vsi", ("Vsi-interface", "Vsi")),
     ),
     "nxos": (
         ("Ethernet", "ethernet", ("Ethernet", "Eth")),
@@ -34,6 +37,9 @@ PLATFORMS = {
         ("Vlan", "vlanif", ("Vlan", "Vl")),
         ("Loopback", "loopback", ("Loopback", "Lo")),
         ("Null", "null", ("Null",)),
+        # VXLAN NVE and the tunnel it creates (vpn-fabric IOL leaves).
+        ("Tunnel", "tunnel", ("Tunnel", "Tu")),
+        ("nve", "nve", ("nve", "nv")),
     ),
     "vrp": (
         ("GigabitEthernet", "ethernet", ("GigabitEthernet", "GE")),

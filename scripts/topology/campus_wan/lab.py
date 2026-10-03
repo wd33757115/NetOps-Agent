@@ -8,16 +8,14 @@ Device configs are in configs/; the password is never in them.
 Run from the repository root with the project venv:
     venv\\Scripts\\python.exe scripts\\topology\\campus_wan\\lab.py project
     ... screen BR1 | type BR1 | push BR1 | console CORE1 "show ip ospf neighbor"
-    ... account          (owner only: creates the lab login from NETOPS_LAB_PASSWORD)
+    ... account          (owner only: creates the lab login from NETOPS_LAB_PASSWORD, .env)
     ... traffic          (continuous pings from every PC so ARP/MAC tables stay populated)
 """
 
 from __future__ import annotations
 
 import argparse
-import getpass
 import json
-import os
 import re
 import socket
 import struct
@@ -28,6 +26,9 @@ import zlib
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from collect_lab_samples import lab_password  # noqa: E402  one password source for all tools
+
 NAME = "netops-campus-wan"
 PROJECT_DIR = Path.home() / "GNS3" / "projects" / NAME
 PROJECT_FILE = PROJECT_DIR / f"{NAME}.gns3"
@@ -158,7 +159,10 @@ LINKS = [
 
 LABEL_STYLE = "font-family: TypeWriter;font-size: 10.0;font-weight: bold;fill: #000000;"
 MANAGED = ["BR1", "BR2", "CORE1", "CORE2", "DIST1", "DIST2", "ACC1", "ACC2"]
+UNMANAGED = ["ISP"]  # configured by push, never collected
 PCS = ["PC1", "PC2", "PC3", "PC4", "PC5", "INET-PC"]
+# traffic: what each PC pings
+TARGETS = {**dict.fromkeys(PCS, "198.51.100.10"), "INET-PC": "172.16.10.11"}
 
 
 # GNS3 project -----------------------------------------------------------------
@@ -416,7 +420,8 @@ class Console:
         self.sock.sendall((line + end).encode())
 
 
-PROMPT = r"(?m)^[\w.\-]+(?:\([\w\-]+\))?[>#]\s*$|[<\[][\w./\-]+[>\]]\s*$"
+# VPCS starts its prompt line with "\r".
+PROMPT = r"(?m)^\r?[\w.\-]+(?:\([\w\-]+\))?[>#]\s*$|[<\[][\w./\-]+[>\]]\s*$"
 REJECTED = re.compile(r"% *(Unrecognized|Incomplete|Wrong|Too many|Invalid|Ambiguous)|\^", re.I)
 
 
@@ -459,7 +464,7 @@ def run(console, lines, quiet=False):
 def push(args):
     """Configure nodes over their consoles from configs/ and save; report rejected lines."""
     consoles = _consoles()
-    for name in [*MANAGED, "ISP", *PCS] if args.node == "all" else [args.node]:
+    for name in [*MANAGED, *UNMANAGED, *PCS] if args.node == "all" else [args.node]:
         spec = NODES[name]
         if spec["kind"] == "vpcs":
             console = Console(consoles[name])
@@ -512,7 +517,7 @@ def console_cmd(args):
 
 def account(args):
     """Owner-run: the lab login on every managed node. The password is never printed."""
-    password = os.environ.get("NETOPS_LAB_PASSWORD") or getpass.getpass("lab password: ")
+    password = lab_password("lab password: ")
     if "?" in password:
         sys.exit("the password contains ?, which IOS and Comware consoles read as help")
     consoles = _consoles()
@@ -548,7 +553,6 @@ def account(args):
 def traffic(args):
     """Continuous pings from every PC (or Ctrl+C them with --stop)."""
     consoles = _consoles()
-    targets = {"INET-PC": "172.16.10.11"}
     for name in PCS:
         console = Console(consoles[name])
         if args.stop:
@@ -556,7 +560,7 @@ def traffic(args):
         else:
             console.send("")
             console.read(1)
-            console.send(f"ping {targets.get(name, '198.51.100.10')} -t")
+            console.send(f"ping {TARGETS[name]} -t")
         print(f"{name}: {'stopped' if args.stop else 'pinging'}")
 
 
@@ -643,6 +647,7 @@ def type_text(args):
         "",
         "system-view",
         "line aux 0",
+        "authentication-mode none",  # a fresh VSR's aux line refuses the login otherwise
         "user-role network-admin",
         "quit",
         "return",
@@ -684,7 +689,7 @@ def main():
     p.add_argument("lines", nargs="*")
     p.set_defaults(func=type_text)
     p = sub.add_parser("push")
-    p.add_argument("node", choices=["all", *MANAGED, "ISP", *PCS])
+    p.add_argument("node", choices=["all", *MANAGED, *UNMANAGED, *PCS])
     p.set_defaults(func=push)
     p = sub.add_parser("console")
     p.add_argument("node")

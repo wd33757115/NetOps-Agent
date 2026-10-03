@@ -1,8 +1,91 @@
 # 网络数字孪生开发交接
 
-本文最前面记录 2026-10-03 的交叉连线修复交接；其后保留模型修复、Claude → GPT 与 2026-09-30 的历史交接。历史工作约束以负责人后续明确指令为准，模型能力与验收范围以最新记录为准。
+本文最前面记录 2026-10-04 的 M5 进度与解析归属调整；其后保留 2026-10-03 交叉连线修复、模型修复、Claude → GPT 与 2026-09-30 的历史交接。历史工作约束以负责人后续明确指令为准，模型能力与验收范围以最新记录为准。
 
-## 当前交接 2026-10-03 交叉连线修复与剩余验收
+## 当前交接 2026-10-04 M5（VPN/EVPN/VXLAN/DC fabric）进度与解析归属调整
+
+**状态（2026-10-04，Claude）：M4 已完成并推送（topology 0.6.0，`2791956`）。M5 按负责人选择先做 VPN/EVPN/VXLAN/DC fabric，设计已获批准（"批准，按这个设计做"）。实验网已搭好并通过实机验证；采集与解析代码、叠加层解读、路径隧道语义已写完，拓扑单元测试 1281 个通过。代码以检查点提交的方式保存，没有部署，也没有推送。同日负责人调整了解析归属：拓扑改为规则治理的消费方，见下文"方向调整"。**
+
+### M5 设计（已批准）
+| 层次 | 标准 | 说明 |
+|---|---|---|
+| 设备层 | RFC 8529 NI；BGP draft-21 afi-safi；MPLS RFC 8960；LDP RFC 9070 | 设备上的 RD/RT/EVI/VNI 只有过期草案，只作证据 |
+| 叠加拓扑 | RFC 8944 VXLAN 终结点 + SIMAP 支撑关系；RFC 8542 DC fabric | 由证据推导，证明不了的不填 |
+| 网络服务 | L3NM RFC 9182；L2NM RFC 9291；vpn-common RFC 9181 | 按 RT 导入导出关系（EVPN 另看 EVI/VNI）分组；`vpn-id` 等网络层标识由平台分配 |
+| 客户层 | L3SM/L2SM | 不从设备生成 |
+
+### 实验网 netops-vpn-fabric（`scripts/topology/vpn_fabric/`，README 中有拓扑与地址表）
+- **DC fabric**：SPINE1/2（IOL L3，OSPF 底层，EVPN 路由反射器）；LEAF1/2（IOL L2）；LEAF3（H3C VSR）。
+  - RED、BLUE 两个租户都用 192.168.10.0/24。
+  - BLUE 用 L3VNI 50020 做对称 IRB，到 LEAF3 的 192.168.20.0/24。
+- **MPLS L3VPN**：PE1（IOL）— P（IOL）— PE2（VSR）。
+  - CUST-A 和 CUST-B 都用 10.1.1.0/24。
+  - SHARED 和 CUST-A 按 RT 互相泄漏。
+- **管理地址** 10.10.1.21–28，每台设备的账号由负责人运行 `lab.py account` 创建。
+- **已验证的转发**：
+  - 跨厂商 L2VNI、L3VNI 对称 IRB、MPLS VPN 跨站点、RT 泄漏均可达；
+  - 租户之间和 VPN 之间的隔离均成立。
+- **GNS3 界面一次只能打开一个工程**：打开本实验网时 campus-wan 会断电。
+- **VSR 首次启动**：要等出现 "Line con0 is available" 后再运行 `lab.py type`。工具默认会给 aux 口加上 `authentication-mode none`。
+
+### 已完成（检查点提交）
+- **采样与夹具**：
+  - 采样器新增 VPN/EVPN/VXLAN/LDP 命令和 `--vrf` 参数；
+  - 实验工具读取实验口令统一走 `collect_lab_samples.lab_password()`：先环境变量，再 `.env`，最后才提示输入；
+  - 批次 `20261003-225812` 导入 `tests/fixtures/topology/vpn-fabric`：203 份观测，密文扫描命中 0。
+- **修正旧解析器**：IOS 的 Tunnel/nve 接口和 H3C 的 Tunnel/Vsi 接口别名；H3C ARP 的 VSI 列及折行；LLDP all802 管理地址；H3C 点到点 OSPF 邻居和接口行；H3C VPN 实例列表；未配置时为空的 BGP 地址族。
+- **新增解析器与采集接入**（`tiers/generic_vpn.py`、`tiers/generic_evpn.py`）：
+  - 新增 9 类：`vrf_detail`、`ldp_peers`、`mpls_lfib`、`evpn_instances`、`evpn_peers`、`vxlan_vnis`、`tunnel_interfaces`、`evpn_mac`；`bgp_vpnv4`/`bgp_evpn` 复用 BGP 邻居解析器。
+  - 已接入 IOS 和 H3C 档案以及拓扑采集模式。
+  - **按负责人新决定，这些手写解析器要迁移为规则治理的检查项加 TextFSM。**
+- **按 VRF 采集改为按厂商区分**：
+  - 采集侧统一为一个 `scoped_context(capability, scopes, family)`；
+  - H3C 的 VPN 实例路由表通过"直连路由出接口不得属于其他实例"做一致性校验；
+  - H3C 的实例详情只按实例采集。
+- **叠加层解读** `model/overlay.py` 的 `prepare()`：
+  - H3C ARP 按接口或 VSI 网关的绑定归入实例；
+  - 出接口属于另一实例的下一跳视为本地泄漏；
+  - 经 L3VNI 接口的下一跳是 VXLAN 隧道；
+  - VRF 里的 BGP 路由在有 VPNv4 会话时是 MPLS 隧道；
+  - `egress_instances()` 按 RT 和"是否本实例始发"选出对端实例。
+- **路径引擎** `model/path.py` 增加隧道语义：
+  - 入隧道后按端点在底层转发，MPLS 每跳检查标签，VXLAN 检查隧道状态，到端点后在接收实例里重新路由；
+  - trace、API、助手工具增加可选参数 `src_vrf`/`dst_vrf`。
+- **测试**：`tests/unit/test_topology_vpn_fabric.py` 6 个通过；拓扑全部测试 1281 个通过。
+
+### M5 尚未完成
+1. `model/builder.py` 的 `_Topology.__init__` 改为读取 `prepare(devices)` 后的事实（拓扑和路径两边口径一致）。
+2. 用 vpn-fabric 写路径用例：
+   - A1→A2（MPLS）、A1→S2（RT 泄漏）、B1→S2（隔离）；
+   - H-B2→H-B3（L3VNI）、RED/BLUE 同网段隔离；
+   - 隧道 down、缺标签。
+3. 标准投影：L3NM 和 L2NM 的 vpn-service、RFC 8944 VXLAN 叠加网络、RFC 8542 fabric、LDP 与 VXLAN 隧道的邻接。全部用 libyang 校验，加入 M1 正反例。
+   - RFC 示例的离线验收已完成，见 `scripts/topology/m5_examples.py` 和 `models/network-twin/m5/examples.json`：RFC 9291 有 4 个示例单独通过、2 个合并后通过；RFC 9182 的完整示例都有示例自身缺陷。
+4. 文档、topology 0.7.0 部署、实机只读验收。
+
+### 方向调整（负责人决定，2026-10-04）
+1. **拓扑改为规则治理的消费方。** 规则治理生产 TextFSM、检查项、变化规则和事件，巡检与拓扑都只消费。规则治理要增加一组拓扑所需、不可删除的"系统基础检查项"，并定义它们的同名 Value（`value_contract: same-name/v1`）。
+2. **按型号优先、厂商兜底查找模板。** 规则治理现有的 `CheckItemImplementationResolver` 已经按具体程度打分：型号 40 > 系统家族 30 > 平台 25 > 厂商 20。
+   - **"万能 TextFSM"已评估，结论是不作为主方案。** 单行表（如 ARP）可以跨厂商合成一个模板，两家共 8 份样本通过。路由表合不了：TextFSM 的 Value 选项（Required/Filldown）对整个模板生效，IOS 与 H3C 的要求相反。
+   - **采用的方案**：一个检查项一组同名 Value，每个系统家族一份默认模板，型号有差异才加例外模板；Value 名尽量沿用 ntc-templates 的命名。
+3. **先让拓扑接入消费接口，巡检的迁移另开一张卡。**
+
+**现状问题（10-04 核查）**：
+- `src/core/parser` 全部是 4 行转发，实现都在 `src/apps/rule_governance/backend/parser`。
+- `src/core/check_items` 有 29 个转发：15 个转到规则治理，14 个转到巡检；另有 26 个真实实现仍留在核心（含 `value_contract`、`command_adapter`、`canonical`、`execution` 等）。
+- 巡检和拓扑都经这些转发调用规则治理的代码，巡检还直接 import 了 `rule_governance.backend.rollout_tasks`。这属于跨 App 的隐性依赖，消费接口要解决它。
+
+### 接手后
+先读 `docs/network-digital-twin-implementation.md` §8 M5、`models/network-twin/m5/` 和本节，然后按以下顺序进行：
+1. 出"系统基础检查项与 Value 清单"和拓扑消费接口方案；
+2. 在规则治理里实现系统检查项及保护；
+3. 挂上 IOS 和 H3C 模板，用 vpn-fabric、campus-wan、VSR 的夹具校验；
+4. 拓扑经接口消费，替换手写解析器；
+5. 继续完成上面"M5 尚未完成"的 1–4 项。
+
+带 yangson 的测试要这样运行：`PYTHONPATH=.runtime/p0-2/yang-deps venv/Scripts/python.exe -m pytest ...`。
+
+## 历史交接 2026-10-03 交叉连线修复与剩余验收
 
 **状态（2026-10-03 13:40，Claude）：本节剩余验收已完成，并修复了验收中发现的悬停闪烁回归（topology 0.4.17），见本节末“完成记录”。下一项按完整实施方案 M1。**
 

@@ -10,15 +10,30 @@ def parse(text, family):
     result = Parsed()
     age_unit = None
     comware_header = False
+    vsi_column = None
     vrf = "default"
     for number, line in enumerate(text.splitlines(), 1):
         if header := vrf_header(line):
             vrf = vrf_name(header, family)
-        if re.search(r"IP address\s+MAC address\s+VLAN/VSI name", line, re.I):
+        if match := re.search(r"IP address\s+MAC address\s+(VLAN/VSI name)", line, re.I):
             comware_header = True
+            vsi_column = match.start(1)
         if re.search(r"Age\s*\(min(?:utes)?\)", line, re.I):
             age_unit = "min"
         tokens = line.split()
+        if (
+            vsi_column is not None
+            and len(tokens) == 1
+            and len(line) - len(line.lstrip()) == vsi_column
+            and result.records
+            and "vsi" in result.records[-1]
+            and result.sources[-1]["lines"][-1] == number - 1
+        ):
+            # A long VSI name wraps onto the next line in its own column.
+            result.records[-1]["vsi"] += tokens[0]
+            result.sources[-1]["lines"].append(number)
+            result.handled_lines.add(number)
+            continue
         ips = [(i, valid_ip(t)) for i, t in enumerate(tokens) if valid_ip(t)]
         macs = [(i, valid_mac(t)) for i, t in enumerate(tokens) if valid_mac(t)]
         ports = [t for t in tokens if IFNAME.fullmatch(t)]
@@ -35,8 +50,11 @@ def parse(text, family):
             record["ifname"] = interface(ports[0], family).name
         if comware_header:
             try:
-                if tokens[mac_index + 1] != "--":
-                    record["vlan"] = vlan(tokens[mac_index + 1])
+                column = tokens[mac_index + 1]
+                if column.isdigit():
+                    record["vlan"] = vlan(column)
+                elif column != "--":
+                    record["vsi"] = column  # learned in a VSI (VXLAN), not a VLAN
                 record["type"] = {"D": "dynamic", "S": "static"}.get(tokens[-1], tokens[-1])
             except (ValueError, IndexError):
                 result.reject(number, "invalid_arp_columns")

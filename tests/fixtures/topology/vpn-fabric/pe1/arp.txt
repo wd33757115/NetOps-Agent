@@ -1,0 +1,3 @@
+Protocol  Address          Age (min)  Hardware Addr   Type   Interface
+Internet  10.20.12.1              -   aabb.cc00.0c10  ARPA   Ethernet0/1
+Internet  10.20.12.2             66   aabb.cc00.0d10  ARPA   Ethernet0/1

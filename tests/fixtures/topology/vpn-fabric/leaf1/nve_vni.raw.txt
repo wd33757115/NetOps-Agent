@@ -1,0 +1,4 @@
+show nve vni
+Interface  VNI        Multicast-group  VNI state  Mode  VLAN  cfg vrf                      
+nve1       10010      N/A              Up         L2CP  10    CLI N/A                      
+LEAF1#

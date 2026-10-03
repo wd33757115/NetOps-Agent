@@ -1,0 +1,12 @@
+show interfaces description
+Interface                      Status         Protocol Description
+Et0/0                          up             up       OOB-MGMT
+Et0/1                          up             up       to LEAF1 e0/1
+Et0/2                          up             up       to LEAF2 e0/1
+Et0/3                          up             up       to LEAF3 GE2/0
+Et1/0                          admin down     down     
+Et1/1                          admin down     down     
+Et1/2                          admin down     down     
+Et1/3                          admin down     down     
+Lo0                            up             up       
+SPINE1#

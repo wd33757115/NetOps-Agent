@@ -1,0 +1,2 @@
+  Name                             Default RD            Protocols   Interfaces
+  MGMT                             <not set>             ipv4        Et0/0

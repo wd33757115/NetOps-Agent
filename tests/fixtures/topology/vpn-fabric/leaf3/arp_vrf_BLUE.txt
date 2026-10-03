@@ -1,0 +1,5 @@
+  Type: S-Static   D-Dynamic   O-Openflow   R-Rule   M-Multiport  I-Invalid
+IP address      MAC address    VLAN/VSI name Interface/Link ID        Aging Type
+192.168.20.14   0050-7966-6803 BLUE-20       0                        20    D   
+10.255.10.12    aabb-cc80-0b00 Auto_L3VNI500 Tunnel1                  --    R   
+                               20_920

@@ -1,0 +1,195 @@
+{
+ "ietf-l2vpn-ntw:l2vpn-ntw": {
+  "vpn-services": {
+   "vpn-service": [
+    {
+     "vpn-id": "450",
+     "vpn-name": "CORPO-EXAMPLE",
+     "vpn-description": "SEDE_CENTRO_450",
+     "customer-name": "EXAMPLE",
+     "vpn-type": "ietf-vpn-common:vpls",
+     "vpn-service-topology": "ietf-vpn-common:hub-spoke",
+     "bgp-ad-enabled": false,
+     "signaling-type": "ietf-vpn-common:ldp-signaling",
+     "global-parameters-profiles": {
+      "global-parameters-profile": [
+       {
+        "profile-id": "simple-profile",
+        "ce-vlan-preservation": true,
+        "ce-vlan-cos-preservation": true
+       }
+      ]
+     },
+     "vpn-nodes": {
+      "vpn-node": [
+       {
+        "vpn-node-id": "450",
+        "description": "SEDE_CENTRO_450",
+        "ne-id": "2001:db8:5::1",
+        "role": "ietf-vpn-common:hub-role",
+        "status": {
+         "admin-status": {
+          "status": "ietf-vpn-common:admin-up"
+         }
+        },
+        "active-global-parameters-profiles": {
+         "global-parameters-profile": [
+          {
+           "profile-id": "simple-profile"
+          }
+         ]
+        },
+        "signaling-option": {
+         "ldp-or-l2tp": {
+          "t-ldp-pw-type": "vpls-type",
+          "pw-peer-list": [
+           {
+            "peer-addr": "2001:db8:50::1",
+            "vc-id": "1543"
+           }
+          ]
+         }
+        },
+        "vpn-network-accesses": {
+         "vpn-network-access": [
+          {
+           "id": "4508671287",
+           "description": "VPN_450_SNA",
+           "interface-id": "gigabithethernet0/0/1",
+           "status": {
+            "admin-status": {
+             "status": "ietf-vpn-common:admin-up"
+            }
+           },
+           "connection": {
+            "l2-termination-point": "550",
+            "encapsulation": {
+             "encap-type": "ietf-vpn-common:dot1q",
+             "dot1q": {
+              "tag-type": "ietf-vpn-common:c-vlan",
+              "cvlan-id": 550
+             }
+            }
+           },
+           "service": {
+            "mtu": 1550,
+            "svc-pe-to-ce-bandwidth": {
+             "pe-to-ce-bandwidth": [
+              {
+               "bw-type": "ietf-vpn-common:bw-per-port",
+               "cir": "20480000"
+              }
+             ]
+            },
+            "svc-ce-to-pe-bandwidth": {
+             "ce-to-pe-bandwidth": [
+              {
+               "bw-type": "ietf-vpn-common:bw-per-port",
+               "cir": "20480000"
+              }
+             ]
+            },
+            "qos": {
+             "qos-profile": {
+              "qos-profile": [
+               {
+                "profile": "QoS_Profile_A",
+                "direction": "ietf-vpn-common:both"
+               }
+              ]
+             }
+            }
+           }
+          }
+         ]
+        }
+       },
+       {
+        "vpn-node-id": "451",
+        "description": "SEDE_CHAPINERO_451",
+        "ne-id": "2001:db8:50::1",
+        "role": "ietf-vpn-common:spoke-role",
+        "status": {
+         "admin-status": {
+          "status": "ietf-vpn-common:admin-up"
+         }
+        },
+        "active-global-parameters-profiles": {
+         "global-parameters-profile": [
+          {
+           "profile-id": "simple-profile"
+          }
+         ]
+        },
+        "signaling-option": {
+         "ldp-or-l2tp": {
+          "t-ldp-pw-type": "vpls-type",
+          "pw-peer-list": [
+           {
+            "peer-addr": "2001:db8:5::1",
+            "vc-id": "1543"
+           }
+          ]
+         }
+        },
+        "vpn-network-accesses": {
+         "vpn-network-access": [
+          {
+           "id": "4508671288",
+           "description": "VPN_450_SNA",
+           "interface-id": "gigabithethernet0/0/1",
+           "status": {
+            "admin-status": {
+             "status": "ietf-vpn-common:admin-up"
+            }
+           },
+           "connection": {
+            "l2-termination-point": "550",
+            "encapsulation": {
+             "encap-type": "ietf-vpn-common:dot1q",
+             "dot1q": {
+              "tag-type": "ietf-vpn-common:c-vlan",
+              "cvlan-id": 550
+             }
+            }
+           },
+           "service": {
+            "mtu": 1550,
+            "svc-pe-to-ce-bandwidth": {
+             "pe-to-ce-bandwidth": [
+              {
+               "bw-type": "ietf-vpn-common:bw-per-port",
+               "cir": "20480000"
+              }
+             ]
+            },
+            "svc-ce-to-pe-bandwidth": {
+             "ce-to-pe-bandwidth": [
+              {
+               "bw-type": "ietf-vpn-common:bw-per-port",
+               "cir": "20480000"
+              }
+             ]
+            },
+            "qos": {
+             "qos-profile": {
+              "qos-profile": [
+               {
+                "profile": "QoS_Profile_A",
+                "direction": "ietf-vpn-common:both"
+               }
+              ]
+             }
+            }
+           }
+          }
+         ]
+        }
+       }
+      ]
+     }
+    }
+   ]
+  }
+ }
+}

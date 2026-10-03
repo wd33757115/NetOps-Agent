@@ -34,6 +34,7 @@ CAMPUS_BR1 = Path(__file__).parents[1] / "fixtures/topology/campus-wan/br1"
 VLAN_BR1 = Path(__file__).parents[1] / "fixtures/topology/campus-wan/vlan-trunk/br1"
 OSPF_BR1 = Path(__file__).parents[1] / "fixtures/topology/campus-wan/ospf/br1"
 PROTOCOLS_BR1 = Path(__file__).parents[1] / "fixtures/topology/campus-wan/protocols/br1"
+VPN_LEAF3 = Path(__file__).parents[1] / "fixtures/topology/vpn-fabric/leaf3"
 
 
 def identity(text=None):
@@ -182,6 +183,11 @@ def setup(monkeypatch):
         "ip": "ip_interfaces",
         "ospf_neighbors": "ospf",
         "bgp_peers": "bgp",
+        # vpn-fabric sampler command ids
+        "ldp_peers": "ldp",
+        "mpls_lfib": "mpls_lsp",
+        "evpn_peers": "evpn_imet",
+        "vxlan_vnis": "vsi",
     }
     outputs = {
         spec.command: next(
@@ -192,6 +198,7 @@ def setup(monkeypatch):
                 VLAN_BR1 / f"{cap}.txt",
                 OSPF_BR1 / f"{cap}.txt",
                 PROTOCOLS_BR1 / f"{mapping.get(cap, cap)}.txt",
+                VPN_LEAF3 / f"{mapping.get(cap, cap)}.txt",
             )
             if path.exists()
         ).read_text()

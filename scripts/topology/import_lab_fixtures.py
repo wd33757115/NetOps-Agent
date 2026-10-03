@@ -1,10 +1,8 @@
 """Copy an approved lab batch only after secret scanning; never print secret terms."""
 
 import argparse
-import getpass
 import hashlib
 import json
-import os
 import re
 import sys
 from dataclasses import dataclass
@@ -14,7 +12,13 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from scripts.scan_sensitive_device_data import scan_project_files  # noqa: E402
-from scripts.topology.collect_lab_samples import CISCO_COMMANDS, COMMANDS, clean  # noqa: E402
+from scripts.topology.collect_lab_samples import (  # noqa: E402
+    CISCO_COMMANDS,
+    COMMANDS,
+    clean,
+    lab_password,
+    vrf_commands,
+)
 
 
 @dataclass(frozen=True)
@@ -24,6 +28,7 @@ class Lab:
     capabilities: dict  # host -> capabilities copied (others in the batch are left out)
     destination: Path
     unsupported: frozenset  # capabilities whose output is an unsupported-command message
+    vrfs: tuple = ()  # names sampled with --vrf (their per-VRF commands are approved too)
 
 
 BATCH = "20260928-163159"
@@ -142,7 +147,97 @@ CAMPUS_VRF_ROUTES = Lab(
     ROOT / "tests/fixtures/topology/campus-wan/vrf-routes",
     frozenset(),
 )
+# VPN + EVPN/VXLAN fabric lab (scripts/topology/vpn_fabric, plan §8 M5). Each device keeps
+# the topology base set, the VPN/overlay commands that apply to it and its own VRFs' tables.
+VPN_FABRIC_HOSTS = {
+    f"10.10.1.{21 + i}": name
+    for i, name in enumerate(("spine1", "spine2", "leaf1", "leaf2", "leaf3", "pe1", "p", "pe2"))
+}
+VPN_VRFS = ("CUST-A", "CUST-B", "SHARED", "BLUE")
+IOS_VPN = frozenset(
+    {
+        "version",
+        "lldp_verbose",
+        "interfaces_description",
+        "ip_interface",
+        "arp",
+        "routes",
+        "vrfs",
+        "ospf",
+        "ospf_interfaces",
+        "ospf_process",
+        "bgp",
+        "vrf_detail",
+        "bgp_vpnv4",
+        "bgp_evpn",
+        "bgp_vpnv4_routes",
+        "bgp_evpn_routes",
+        "ldp",
+        "mpls_forwarding",
+        "nve_peers",
+        "nve_vni",
+        "evpn_evi",
+    }
+)
+IOS_LEAF = IOS_VPN | {"mac", "vlan", "trunk", "switchport", "nve_interface", "evpn_mac"}
+COMWARE_VPN = frozenset(
+    {
+        "version",
+        "lldp_local",
+        "lldp_verbose",
+        "interfaces",
+        "ip_interfaces",
+        "arp",
+        "mac",
+        "routes",
+        "vrfs",
+        "ospf",
+        "ospf_interfaces",
+        "ospf_process",
+        "bgp",
+        "bgp_vpnv4",
+        "bgp_evpn",
+        "bgp_vpnv4_routes",
+        "bgp_evpn_routes",
+        "ldp",
+        "mpls_lsp",
+        "vxlan_tunnels",
+        "vsi",
+        "evpn_instances",
+        "evpn_imet",
+        "tunnel_interfaces",
+        "evpn_mac",
+    }
+)
+
+
+def _vrf_caps(names, cisco):
+    return frozenset(
+        f"{kind}_{name}"
+        for name in names
+        for kind in (("routes_vrf", "arp_vrf") if cisco else ("vrf", "routes_vrf", "arp_vrf"))
+    )
+
+
+VPN_FABRIC = Lab(
+    "20261003-225812",
+    VPN_FABRIC_HOSTS,
+    {
+        "10.10.1.21": IOS_VPN,
+        "10.10.1.22": IOS_VPN,
+        "10.10.1.23": IOS_LEAF,
+        "10.10.1.24": IOS_LEAF | _vrf_caps(["BLUE"], True),
+        "10.10.1.25": COMWARE_VPN | _vrf_caps(["BLUE"], False),
+        "10.10.1.26": IOS_VPN | _vrf_caps(["CUST-A", "CUST-B"], True),
+        "10.10.1.27": IOS_VPN,
+        "10.10.1.28": COMWARE_VPN | _vrf_caps(["CUST-A", "SHARED"], False),
+    },
+    ROOT / "tests/fixtures/topology/vpn-fabric",
+    frozenset(),
+    VPN_VRFS,
+)
 LABS = {
+    "vpn-fabric": VPN_FABRIC,
     "vsr1000": VSR,
     "campus-vrf-routes": CAMPUS_VRF_ROUTES,
     "campus-wan": CAMPUS,
@@ -156,9 +251,11 @@ SENSITIVE = re.compile(
 )
 
 
-def command_of(capability, command):
+def command_of(capability, command, vrfs=()):
     """The collector's own command for this capability, Comware or IOS."""
-    return command in {dict(COMMANDS).get(capability), dict(CISCO_COMMANDS).get(capability)}
+    comware = dict(COMMANDS + vrf_commands(vrfs, False))
+    cisco = dict(CISCO_COMMANDS + vrf_commands(vrfs, True))
+    return command in {comware.get(capability), cisco.get(capability)} - {None}
 
 
 def prepare(source, secrets, lab=VSR):
@@ -188,7 +285,7 @@ def prepare(source, secrets, lab=VSR):
                 continue
             if capability in seen:
                 raise ValueError("unexpected or repeated capability")
-            if not command_of(capability, entry["command"]):
+            if not command_of(capability, entry["command"], lab.vrfs):
                 raise ValueError("command differs from approved lab collection")
             seen.add(capability)
             rejected = entry["status"] == "rejected_by_device"
@@ -253,7 +350,7 @@ def main():
     source = args.source or ROOT / ".runtime/lab-samples" / lab.batch
     if source.name != lab.batch:
         raise ValueError("only the approved source batch may be imported")
-    secret = os.getenv("NETOPS_LAB_PASSWORD") or getpass.getpass("Lab password for scan (hidden): ")
+    secret = lab_password("Lab password for scan (hidden): ")
     files = prepare(source, [secret], lab)
     # Refuse a changed import, preserving already reviewed fixtures.
     for relative, content in files.items():

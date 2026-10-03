@@ -19,6 +19,20 @@ class Trace(BaseModel):
     model_config = ConfigDict(extra="forbid")
     src: str = Field(min_length=1, max_length=64, description="源 IP 地址")
     dst: str = Field(min_length=1, max_length=64, description="目的 IP 地址")
+    src_vrf: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        description=(
+            "源所在的网络实例（VRF，在其第一跳设备上的本地名称）；地址在多个 VPN 中重复时指定"
+        ),
+    )
+    dst_vrf: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        description="目的所在的网络实例（VRF，在其第一跳设备上的本地名称），用于反方向",
+    )
 
 
 class Evidence(BaseModel):
@@ -45,11 +59,17 @@ TOOLS = [
         "VRRP 主设备仅作为第一跳候选依据，终端自身网关配置未观察。"
         "缺少下一跳邻接、终点 ARP、来源接入或唯一身份时返回 partial 和具体缺口；"
         "仅同前缀不能证明二层可达，接口不可用则终止该分支。"
+        "经 MPLS VPN 或 VXLAN 三层 VNI 的路由按隧道端点在底层转发，"
+        "在对端按 RT 或 L3VNI 进入接收实例；"
+        "MPLS 每跳需观察到到端点的标签，VXLAN 入口需观察到隧道 Up。"
+        "同一地址在多个 VPN 中重复时，用 src_vrf/dst_vrf 指定实例，否则各实例都作为候选。"
         "complete 表示这套推导所需的观测证据齐备，不是数据面实测成功；"
         "未计算全部 ACL、策略路由和二层转发规则。"
         "现场不一致也可能源于覆盖或推导限制；只读，不登录设备。",
         Trace,
-        lambda user, body: service.trace_current(user.user_id, body.src, body.dst),
+        lambda user, body: service.trace_current(
+            user.user_id, body.src, body.dst, body.src_vrf, body.dst_vrf
+        ),
         evidence=True,
     ),
     Tool(

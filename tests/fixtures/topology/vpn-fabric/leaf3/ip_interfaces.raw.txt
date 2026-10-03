@@ -1,0 +1,15 @@
+display ip interface brief
+*down: administratively down
+(s): spoofing  (l): loopback
+Interface          Physical Protocol IP address/Mask    VPN instance Description
+GE1/0              up       up       10.10.1.25/24      --           OOB-MGMT   
+GE2/0              up       up       10.10.13.2/30      --           to SPINE...
+GE3/0              up       up       10.10.23.2/30      --           to SPINE...
+GE4/0              up       up       --                 --           to H-R3    
+GE5/0              up       up       --                 --           to H-B3    
+Loop0              up       up(s)    10.255.10.13/32    --           --         
+Tun0               up       up       --                 --           --         
+Tun1               up       up       --                 --           --         
+Vsi20              up       up       192.168.20.1/24    BLUE         BLUE gat...
+Vsi920             up       up       --                 BLUE         BLUE L3VNI 
+<LEAF3>

@@ -1,0 +1,30 @@
+show lldp neighbors detail
+------------------------------------------------
+Local Intf: Et0/1
+Local Intf service instance: -
+Chassis id: aabb.cc00.0d00
+Port id: Et0/1
+Port Description: to PE1 e0/1
+System Name: P.lab.local
+
+System Description: 
+Cisco IOS Software [IOSXE], Linux Software (X86_64BI_LINUX-ADVENTERPRISEK9-M), Version 17.15.1, RELEASE SOFTWARE (fc4)
+Technical Support: http://www.cisco.com/techsupport
+Copyright (c) 1986-2024 by Cisco Systems, Inc.
+Compiled Sun 11-Aug-24 22:07 by mcpre
+
+Time remaining: 118 seconds
+System Capabilities: B,R
+Enabled Capabilities: R
+Management Addresses:
+    IP: 10.20.12.2
+Auto Negotiation - not supported
+Physical media capabilities - not advertised
+Media Attachment Unit type - not advertised
+Vlan ID: - not advertised
+Peer Source MAC: aabb.cc00.0d10
+
+
+Total entries displayed: 1
+
+PE1#
