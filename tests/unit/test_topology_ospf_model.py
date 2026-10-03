@@ -312,6 +312,13 @@ def test_common_cost_is_a_uint64_json_string_with_no_reverse_metric():
     assert [row["process_id"] for row in result["evidence"]] == ["1", "99"]
 
 
+def test_link_cost_binds_each_device_local_instance_without_requiring_equal_names():
+    projected = project_ospf({"a": facts(vrf="BLUE"), "b": facts(vrf="MGMT", address="10.0.0.2")})
+    result = link_metric(projected, [ref(vrf="BLUE"), ref("b", vrf="MGMT", ip="10.0.0.2")])
+    assert result["metric1"] == "10" and not result["gaps"]
+    assert [row["vrf"] for row in result["evidence"]] == ["BLUE", "MGMT"]
+
+
 def test_actual_asymmetric_shape_one_versus_ten_stays_per_interface():
     projected = pair(1, 10)
     result = link_metric(projected, pair_refs())

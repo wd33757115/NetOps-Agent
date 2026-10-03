@@ -607,7 +607,7 @@ def test_discovery_of_the_lab_publishes_one_simap_topology(world):
     assert {t["address"] for t in result["targets"]} == {"10.10.1.1", "10.10.1.2"}
     graph = result["graph"]
     kinds = sorted(n["identity_status"] for n in graph["nodes"])
-    assert kinds == ["collected", "collected", "host", "host", "host", "segment"]
+    assert kinds == ["collected", "collected", "endpoint", "endpoint", "endpoint", "segment"]
     segment = next(n for n in graph["nodes"] if n["identity_status"] == "segment")
     assert segment["members"] == 3 and segment["subnets"] == ["10.10.1.0/24"]
     assert sorted(link["link_type"] for link in graph["links"]) == ["mp2mp"] * 3 + ["p2p"] * 3
@@ -887,6 +887,8 @@ def test_trace_answers_both_directions_from_a_snapshot(world):
     result = lab_run(world)
     found = service.trace("user", result["snapshot_id"], "1.1.1.2", "192.168.1.2")
     assert found["snapshot_id"] == result["snapshot_id"]
+    assert found["analysis_profile"] == service.MODEL_PROFILE
+    assert found["snapshot_model_profile"] == result["graph"]["model_profile"]
     assert found["forward"]["status"] == found["reverse"]["status"] == "complete"
     first = found["forward"]["paths"][0]["hops"][0]
     assert (first["device"]["address"], first["route"]["next_hop"]) == ("10.10.1.2", "2.2.2.2")
@@ -895,8 +897,8 @@ def test_trace_answers_both_directions_from_a_snapshot(world):
         t["evidence_id"] for t in result["targets"] if t["address"] == "10.10.1.2"
     )
     assert found["symmetric"] is True
-    # The path is the one traffic took when the snapshot was collected, in Beijing time.
-    assert found["meaning"].startswith("这是 ") and "之前的路径" in found["meaning"]
+    # Timestamp the observations without claiming to know the traffic's actual path.
+    assert found["meaning"].startswith("这是根据 ") and "候选路径" in found["meaning"]
     assert "（北京时间）" in found["meaning"] and "+00:00" not in found["meaning"]
     with pytest.raises(HTTPException) as bad:
         service.trace("user", result["snapshot_id"], "1.1.1.2", "224.0.0.5")
@@ -913,7 +915,7 @@ def test_trace_searches_current_snapshots_that_know_either_end(world):
         "10.10.1.1",
         "10.10.1.2",
     ]
-    assert "之前的路径" in found["meaning"]
+    assert "候选路径" in found["meaning"] and "不能单凭差异断定" in found["meaning"]
     assert service.trace_current("user", "10.200.0.1", "10.200.0.2") == []
     assert service.trace_current("stranger", "192.168.1.2", "1.1.1.2") == []
 

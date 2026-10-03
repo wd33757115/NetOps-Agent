@@ -1,6 +1,6 @@
 """Canvas projection of a SIMAP L2/L3 tree; the tree itself stays the exported model.
 
-Devices and hosts are nodes. A p2p L2 link is one edge. An mp2mp L2 link (shared
+Devices and unidentified endpoints are nodes. A p2p L2 link is one edge. An mp2mp L2 link (shared
 media) is drawn as one segment node joined to each member port, because an
 edge can only have two ends. Each edge lists the L3 subnets its L2 link carries.
 """
@@ -19,17 +19,27 @@ def canvas(tree, evidence, collected, base, state=None):
     l2 = _network(tree, L2T + "l2-topology")
     state = state or {}
     known = {d["node_id"]: d for d in state.get("devices", []) if d.get("node_id")}
-    # One L3 network per VRF; a VRF's addresses are shown with its name.
+    # L3 nodes represent device-local instances, supported by their L2 device.
+    # Older snapshots used one network per VRF name; retain their display fallback.
     l3_tps, carried = {}, {}
     for l3 in tree["ietf-network:networks"]["network"]:
         if L3T + "l3-unicast-topology" not in l3["network-types"]:
             continue
         vrf = l3.get(L3T + "l3-topology-attributes", {}).get("name")
         for node in l3["node"]:
+            device_refs = [
+                ref["node-ref"]
+                for ref in node.get("supporting-node", [])
+                if ref.get("network-ref") == l2["network-id"]
+            ]
+            device_id = device_refs[0] if len(device_refs) == 1 else node["node-id"]
+            instance = node.get(ST + "name", vrf)
             for tp in node.get(NT + "termination-point", []):
-                l3_tps.setdefault(node["node-id"], []).append((vrf, tp))
+                l3_tps.setdefault(device_id, []).append((instance, tp))
         for link in l3.get(NT + "link", []):
-            subnet = link["link-id"].removeprefix(base + "l3-link:")
+            subnet = link.get(L3T + "l3-link-attributes", {}).get("name") or link[
+                "link-id"
+            ].removeprefix(base + "l3-link:")
             for ref in link.get("supporting-link", []):
                 carried.setdefault(ref["link-ref"], []).append(subnet)
     nodes, links = [], []
@@ -48,7 +58,11 @@ def canvas(tree, evidence, collected, base, state=None):
         ]
         item = {"id": node_id, "tps": tps, "addresses": addresses, "freshness": "observed"}
         if node_id.startswith(host_node_prefix(base)):
-            item.update(name=addresses[0] if addresses else tps[0]["name"], identity_status="host")
+            # ARP/FDB identify an observed interface endpoint, not a physical host.
+            # Keep existing node URIs so old snapshots and evidence remain addressable.
+            item.update(
+                name=addresses[0] if addresses else tps[0]["name"], identity_status="endpoint"
+            )
         else:
             name = (
                 node.get(L2T + "l2-node-attributes", {}).get("name")

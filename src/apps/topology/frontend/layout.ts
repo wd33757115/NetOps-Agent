@@ -17,7 +17,8 @@ const WIDTH: Record<string, number> = { segment: 150 }
 const NODE_WIDTH = 192
 const NODE_HEIGHT = 96
 
-const isDevice = (node: LayoutNode) => !['host', 'segment'].includes(node.identity_status)
+const isEndpoint = (node: LayoutNode) => ['host', 'endpoint'].includes(node.identity_status)
+const isDevice = (node: LayoutNode) => !isEndpoint(node) && node.identity_status !== 'segment'
 
 export function layout(nodes: LayoutNode[], links: LayoutLink[]): Map<string, Point> {
   const byId = new Map(nodes.map(node => [node.id, node]))
@@ -68,7 +69,7 @@ export function layout(nodes: LayoutNode[], links: LayoutLink[]): Map<string, Po
   }
   const fallbackY = (ordered.length ? Math.max(...ordered.map(id => positions.get(id)!.y)) : 0) + TIER * 2
   let loose = 0
-  for (const host of nodes.filter(node => node.identity_status === 'host')) {
+  for (const host of nodes.filter(isEndpoint)) {
     const attached = neighbours.get(host.id)!.find(id => positions.has(id))
     if (!attached) {
       place(host.id, loose++ * SIBLING_GAP, fallbackY)

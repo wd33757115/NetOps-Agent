@@ -1,9 +1,11 @@
 """One node budget across unknown-platform probing and identified collection."""
 
 import math
+import re
 import time
 from dataclasses import dataclass, field, replace
 
+from src.platform.device_access.command_policy import classify
 from src.platform.device_access.contracts import BatchRequest, Command, DeviceAccessError
 from src.platform.device_access.drivers.netmiko_driver import NetmikoDriver
 from src.platform.device_access.policy import authorize
@@ -12,6 +14,156 @@ from src.platform.device_access.service import DeviceAccessService
 from .identify import PROBES, Identity, Probe, identify
 from .parse import ParseResult, parse
 from .profiles import MODE_CAPABILITIES, load_profiles, select_profile, verified_driver
+from .tiers.common import vrf_header
+
+MAX_VRF_SCOPES = 64
+
+
+def scoped_arp_command(scope):
+    """Only literal VRF tokens, never wildcards, options, separators or CLI filters."""
+    if not isinstance(scope, str) or not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.:-]{0,63}", scope):
+        raise ValueError("unsafe VRF command token")
+    if scope.lower() in {"all", "default"}:
+        raise ValueError("reserved VRF command token")
+    command = f"show ip arp vrf {scope}"
+    decision = classify("ios", command)
+    if decision.level != "L1" or decision.normalized != command:
+        raise ValueError("VRF ARP command is not canonical read-only CLI")
+    return command
+
+
+def _collect_scoped_arp(
+    result,
+    collector,
+    context_factory,
+    target_ref,
+    connection_profile_id,
+    remaining,
+    should_continue,
+    on_result,
+):
+    """Merge only complete scopes and retain a coverage record for every attempt."""
+    if result.identity.os_family not in {"ios", "iosxe", "nxos"} or "arp" not in result.parsed:
+        return
+    global_arp = result.parsed["arp"]
+    global_output = result.results["arp"].output
+    if any(vrf_header(line) not in {None, "default"} for line in global_output.splitlines()):
+        global_arp.status = "failed"
+        global_arp.warnings.append("vrf_output_scope_mismatch")
+    enumeration = result.parsed.get("vrfs")
+    enumeration_status = enumeration.status if enumeration else "missing"
+    instances = enumeration.summary.get("instances", []) if enumeration else []
+    scopes = {
+        row["name"]
+        for row in instances
+        if not row.get("address_families") or "ipv4" in row["address_families"]
+    }
+    # A failed/unsupported enumeration still permits positively observed IP VRFs,
+    # but cannot prove that all scopes have been covered.
+    ip = result.parsed.get("ip")
+    if ip and ip.status == "complete":
+        scopes.update(row.get("vrf", "default") for row in ip.records)
+    scopes.discard("default")
+    coverage = {"default": {"status": global_arp.status, "command_id": "arp"}}
+    combined = ParseResult(
+        status="complete",
+        parser_ref="generic:arp:scoped:v1",
+        summary={"scope_coverage": {"enumeration_status": enumeration_status, "scopes": coverage}},
+    )
+
+    def add_scope(scope, parsed, command_id):
+        combined.candidate_count += parsed.candidate_count
+        combined.rejected_count += parsed.rejected_count
+        # Prefix warnings so transport incompleteness vetoes just this scope;
+        # discarded rows never reach the builder or masquerade as an empty table.
+        combined.warnings.extend(f"scope:{scope}:{warning}" for warning in parsed.warnings)
+        if parsed.status != "complete":
+            combined.status = "partial"
+            combined.warnings.append(f"scope:{scope}:arp_not_complete")
+            return
+        combined.records.extend({**row, "vrf": scope} for row in parsed.records)
+        combined.sources.extend(
+            {**source, "command_id": command_id, "vrf": scope} for source in parsed.sources
+        )
+
+    add_scope("default", global_arp, "arp")
+    if enumeration_status != "complete":
+        combined.status = "partial"
+        combined.warnings.append("vrf_enumeration_incomplete")
+    commands = []
+    scope_by_id = {}
+    for scope in sorted(scopes):
+        try:
+            text = scoped_arp_command(scope)
+        except ValueError:
+            coverage[scope] = {"status": "missing", "reason": "unsafe_or_reserved_vrf_name"}
+            combined.status = "partial"
+            continue
+        if len(commands) >= MAX_VRF_SCOPES:
+            coverage[scope] = {"status": "missing", "reason": "vrf_scope_budget"}
+            combined.status = "partial"
+            continue
+        command_id = f"arp-vrf-{len(commands)}"
+        commands.append(Command(command_id, text))
+        scope_by_id[command_id] = scope
+        coverage[scope] = {"status": "missing", "reason": "not_collected", "command_id": command_id}
+
+    def record_scoped(item):
+        evidence_ref = on_result(item) if on_result else None
+        if isinstance(evidence_ref, str):
+            item = replace(item, evidence_ref=evidence_ref)
+        scope = scope_by_id[item.command_id]
+        result.results[item.command_id] = item
+        parsed = parse(
+            result.identity,
+            "arp",
+            item.output,
+            complete=item.output_complete and not item.failure_code,
+        )
+        explicit_scopes = {
+            vrf_header(line) for line in item.output.splitlines() if vrf_header(line)
+        }
+        if explicit_scopes - {scope}:
+            parsed.status = "failed"
+            parsed.warnings.append("vrf_output_scope_mismatch")
+        coverage[scope] = {
+            "status": parsed.status,
+            "command_id": item.command_id,
+            "warnings": parsed.warnings,
+        }
+        add_scope(scope, parsed, item.command_id)
+        return evidence_ref
+
+    if commands and context_factory is not None:
+        try:
+            context = context_factory(tuple(scope_by_id.values()))
+            collector.execute_batch(
+                context,
+                BatchRequest(
+                    target_ref,
+                    connection_profile_id,
+                    tuple(commands),
+                    stop_on_error=False,
+                    budget_seconds=remaining(),
+                ),
+                should_continue=should_continue,
+                on_result=record_scoped,
+            )
+        except DeviceAccessError as exc:
+            # Expired budget retains earlier evidence. Authorization, host-key,
+            # credential and connection errors keep the normal target retry flow.
+            if exc.failure_code != "budget_exceeded":
+                raise
+            for scope in scope_by_id.values():
+                if coverage[scope]["status"] == "missing":
+                    coverage[scope]["reason"] = exc.failure_code
+    elif commands:
+        for scope in scope_by_id.values():
+            coverage[scope]["reason"] = "scoped_collection_not_authorized"
+    if any(row["status"] != "complete" for row in coverage.values()):
+        combined.status = "partial"
+        combined.warnings.append("arp_scope_coverage_incomplete")
+    result.parsed["arp"] = combined
 
 
 @dataclass
@@ -46,6 +198,7 @@ def collect_node(
     should_continue=None,
     on_result=None,
     known_hosts_provider=None,
+    scoped_arp_context=None,
 ):
     """Backend only. Caller supplies authenticated grants, revocation guard and evidence sink.
 
@@ -58,7 +211,7 @@ def collect_node(
     limit = (
         budget_seconds
         if budget_seconds is not None
-        else {"fast": 120, "standard": 300, "full": 600}[mode]
+        else {"fast": 120, "topology": 240, "standard": 300, "full": 600}[mode]
     )
     if type(limit) not in (int, float) or not math.isfinite(limit) or not 0 < limit <= 600:
         raise ValueError("invalid node budget")
@@ -148,10 +301,11 @@ def collect_node(
         driver=driver,
         admission=access.admission,
     )
+    defer_routes = profile.os_family in {"ios", "nxos"} and "arp" in selected
     commands = tuple(
         Command(cap, spec.command, read_timeout=spec.timeout)
         for cap, spec in selected.items()
-        if cap != "version"
+        if cap != "version" and (cap != "routes" or not defer_routes)
     )
     batch = collector.execute_batch(
         context,
@@ -177,7 +331,8 @@ def collect_node(
         },
         driver_warning=driver_warning,
     )
-    for item in batch.results:
+
+    def record(item):
         cap = item.command_id
         result.results[cap] = item
         # Even capabilities awaiting templates must classify unsupported/verified-empty output.
@@ -195,4 +350,39 @@ def collect_node(
         ):
             parsed = ParseResult(parser_ref=f"pending:{cap}", warnings=["parser_not_declared"])
         result.parsed[cap] = parsed
+
+    for item in batch.results:
+        record(item)
+    _collect_scoped_arp(
+        result,
+        collector,
+        scoped_arp_context,
+        target_ref,
+        connection_profile_id,
+        remaining,
+        should_continue,
+        on_result,
+    )
+    # Large route tables come last, after VRF adjacency evidence, within the same deadline.
+    if defer_routes and "routes" in selected:
+        spec = selected["routes"]
+        try:
+            batch = collector.execute_batch(
+                context,
+                BatchRequest(
+                    target_ref,
+                    connection_profile_id,
+                    (Command("routes", spec.command, read_timeout=spec.timeout),),
+                    stop_on_error=False,
+                    budget_seconds=remaining(),
+                ),
+                should_continue=should_continue,
+                on_result=on_result,
+            )
+            for item in batch.results:
+                record(item)
+        except DeviceAccessError as exc:
+            if exc.failure_code != "budget_exceeded":
+                raise
+            result.parsed["routes"] = ParseResult(warnings=[exc.failure_code])
     return result

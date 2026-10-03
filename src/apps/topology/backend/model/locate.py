@@ -4,8 +4,8 @@ Reuses the builder's attachment decision: a host's L2 link in the built tree is 
 attachment. The link's other ends classify the answer:
 
 - one device port: ``confirmed``;
-- several ports, all on collected devices, or one port shared with other hosts:
-  ``shared_segment`` (hub or unmanaged switch);
+- several observed ports, or a port learning other MACs: ``shared_segment``
+  (shared attachment evidence, not proof of one broadcast domain or a hidden switch);
 - a port on a device that was only advertised: ``behind_uncollected``;
 - no attachment evidence: ``not_found``;
 - an address or MAC of a collected device itself: ``device``.
@@ -111,20 +111,34 @@ class _Locator:
         return found
 
     def own(self, kind, value):
-        """A collected device's own address, or the MAC its ARP peers learned for it."""
-        for (vrf, address), (key, ifname) in sorted(self.topo.owner.items()):
-            owned = address == value if kind == "ip" else self._mac_of(vrf, address) == value
-            if owned:
-                device = self.device(self.topo.device_node(self.topo.chassis[key]))
-                return {"status": "device", "device": device, "interface": ifname, "vrf": vrf}
-        return None
+        """All matching device-local identities; an IP is not a global identity.
 
-    def _mac_of(self, vrf, address):
-        for facts in self.devices.values():
-            for rec in facts.get("arp", []):
-                if rec.get("vrf", "default") == vrf and rec["ip"] == address:
-                    return rec["mac"]
-        return None
+        RFC 8529 network-instance names are device-local. A MAC learned by ARP
+        identifies an owner only when that observation establishes its adjacency.
+        """
+        if kind == "ip":
+            candidates = self.topo.ip_candidates(value)
+        else:
+            if value in self.topo.ambiguous_macs:
+                return []
+            candidates = {
+                candidate
+                for key, facts in self.devices.items()
+                for rec in facts.get("arp", [])
+                if rec["mac"] == value
+                for candidate in self.topo.neighbour_candidates(
+                    key, rec.get("vrf", "default"), rec["ip"], rec["ifname"]
+                )
+            }
+        return [
+            {
+                "status": "device",
+                "device": self.device(self.topo.device_node(self.topo.chassis[key])),
+                "interface": ifname,
+                "vrf": vrf,
+            }
+            for key, ifname, vrf in sorted(candidates)
+        ]
 
     def arp(self, ip=None, mac=None):
         rows = []
@@ -168,7 +182,14 @@ class _Locator:
             )
         if any(not p["collected"] for p in ports):
             status = "behind_uncollected"
-        elif len(ports) == 1 and len(link[ST + "tp"]) == 2:
+        elif (
+            len(ports) == 1
+            and len(link[ST + "tp"]) == 2
+            and not any(
+                row["port"] == ports[0]["port"] and row["mac"] != mac
+                for row in self.devices[ports[0]["address"]].get("mac", [])
+            )
+        ):
             status = "confirmed"
         else:
             status = "shared_segment"
@@ -199,8 +220,34 @@ def answer(locator, kind, value):
     result = {"query": value, "kind": kind, "router_interfaces": [], "locations": []}
     own = locator.own(kind, value)
     if own:
-        result["locations"].append(own)
-        result["status"] = "device"
+        result["locations"].extend(own)
+        if kind == "ip":
+            # An address owned somewhere does not identify an ARP endpoint in an
+            # unrelated device-local NI. Preserve observations we cannot associate.
+            unassociated = {
+                (row["device"], row.get("vrf", "default"), row["ifname"], row["mac"])
+                for row in locator.arp(ip=value)
+                if not locator.topo.ip_candidates(
+                    value, device=row["device"], vrf=row.get("vrf", "default")
+                )
+                and not locator.topo.neighbour_candidates(
+                    row["device"], row.get("vrf", "default"), value, row["ifname"]
+                )
+            }
+            result["locations"].extend(
+                {
+                    "status": "not_found",
+                    "ambiguity": "address_scope",
+                    "ports": [],
+                    "mac": mac,
+                    "ips": [value],
+                    "arp": [{"device": key, "vrf": vrf, "interface": ifname, "ip": value}],
+                }
+                for key, vrf, ifname, mac in sorted(unassociated)
+            )
+        result["status"] = "device" if len(result["locations"]) == 1 else "conflict"
+        if result["status"] == "conflict":
+            result["note"] = "地址匹配多个设备/本地网络实例；缺少作用域，不能选定其中一个。"
         return result
     if kind == "ip":
         members = locator.virtual_router(value)
@@ -222,11 +269,33 @@ def answer(locator, kind, value):
         rows = locator.arp(mac=value)
         macs = [value]
     for mac in macs:
-        location = locator.attachment(mac) or {"status": "not_found", "ports": []}
+        if mac in locator.topo.ambiguous_macs:
+            fdb = [
+                {"device": key, **row}
+                for key, facts in sorted(locator.devices.items())
+                for row in facts.get("mac", [])
+                if row["mac"] == mac
+            ]
+            vlans = {locator.topo.mac_vlan(row) for row in fdb} - {None}
+            location = {
+                "status": "conflict",
+                "ports": [],
+                "ambiguity": "vlan_scope" if len(vlans) > 1 else "attachment_scope",
+                "note": "同一 MAC 出现在多个作用域或未证明相连的观察端口，不能合并为一个端点。",
+                "fdb": fdb,
+            }
+        else:
+            location = locator.attachment(mac) or {"status": "not_found", "ports": []}
         location["mac"] = mac
         location["ips"] = sorted({row["ip"] for row in locator.arp(mac=mac)})
         location["arp"] = [
-            {"device": row["device"], "ip": row["ip"], "interface": row["ifname"]}
+            {
+                "device": row["device"],
+                "ip": row["ip"],
+                "interface": row["ifname"],
+                "vrf": row.get("vrf", "default"),
+                **({"vlan": row["vlan"]} if "vlan" in row else {}),
+            }
             for row in rows
             if row["mac"] == mac
         ]

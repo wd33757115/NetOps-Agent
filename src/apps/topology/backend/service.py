@@ -4,7 +4,7 @@ import hashlib
 import ipaddress
 import json
 import logging
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from uuid import uuid4
@@ -26,7 +26,7 @@ from src.platform.device_access.drivers.paramiko_driver import ParamikoDriver
 from src.platform.device_access.security import CredentialStore
 
 from . import logins, storage
-from .collectors.collect import collect_node, command_allowlist
+from .collectors.collect import collect_node, command_allowlist, scoped_arp_command
 from .collectors.identify import TopologyDiscoveryPlan as DiscoveryPlan
 from .collectors.tiers.common import valid_mac
 from .logins import DOMAIN
@@ -52,6 +52,7 @@ from .normalize import diff, parse, rfc8345
 from .repository import owned, sessions
 
 APP_ID = "topology"
+MODEL_PROFILE = "rfc8345+simap-yang-03:l2-l3:scoped-v2"
 ACTIVE = ("queued", "running", "waiting_for_input")
 TOPOLOGY_FACTS = (
     "lldp_local",
@@ -256,12 +257,36 @@ def _facts(data):
     # is carried separately and cannot establish current modeling inputs.
     metadata = data.get("fact_metadata", {})
     if isinstance(metadata, dict):
-        for cap in ("interfaces", "ip", "arp", "mac", "vrrp", "routes", "lag", "vlan"):
+        for cap in TOPOLOGY_FACTS:
             details = metadata.get(cap, {})
+            warnings = details.get("warnings", []) if isinstance(details, dict) else []
+            if cap == "lldp_local" and any(
+                isinstance(warning, str)
+                and warning.rsplit(":", 1)[-1] == "conflicting_local_identity"
+                for warning in warnings
+            ):
+                # The parser retains the last conflicting value for diagnostics,
+                # not as a chassis identity eligible for device merging.
+                facts.pop(cap, None)
+                continue
             if isinstance(details, dict) and "collection_incomplete" in details.get("warnings", []):
+                if cap in {"trunk", "switchport", "ospf_interfaces", "ospf_process"}:
+                    # Keep an explicit structural veto. Erasing the summary
+                    # could let another partial capability infer missing state.
+                    facts[cap] = {"invalid_structure": True}
+                    continue
                 facts.pop(cap, None)
                 if cap == "vlan":
                     facts.pop("vlan_members", None)
+    capabilities = data.get("capabilities", {})
+    if (
+        isinstance(capabilities, dict)
+        and "lldp_local" in capabilities
+        and capabilities["lldp_local"] != "complete"
+    ):
+        facts.pop("lldp_local", None)
+    # Historical observations without capability metadata remain compatible;
+    # explicit conflicts and truncation above still veto their local identity.
     facts["platform"] = identity.get("os_family") or LEGACY_PLATFORMS.get(
         platform.get("profile_id"), ""
     )
@@ -297,7 +322,7 @@ def _graph(session, run):
     nodes, links = canvas(tree, links_evidence, collected, base, state)
     graph = {
         "network_id": network.id,
-        "model_profile": "rfc8345+simap-yang-03:l2-l3",
+        "model_profile": MODEL_PROFILE,
         "nodes": nodes,
         "links": links,
         "simap": tree,
@@ -505,7 +530,14 @@ def _analyse(session, snap, question, *args):
         result = question(devices, f"urn:netops:topology:{network.id}:", *args, observed)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from None
-    return {"network_id": network.id, "network": network.name, "snapshot_id": snap.id, **result}
+    return {
+        "network_id": network.id,
+        "network": network.name,
+        "snapshot_id": snap.id,
+        "snapshot_model_profile": snap.graph.get("model_profile"),
+        "analysis_profile": MODEL_PROFILE,
+        **result,
+    }
 
 
 def _locate(session, snap, query):
@@ -541,9 +573,10 @@ def locate_current(owner, query):
 
 
 PATH_MEANING = (
-    "这是 {when} 那次拓扑发现采集的路由表算出的路径：当时流量经过哪些设备、从哪个接口进出、"
-    "按哪条路由转发。用它确定要查哪些设备；它是之前的路径，不是现场转发状态，"
-    "现场的路由、下一跳或出接口与它不同，说明之后发生了变化"
+    "这是根据 {when} 的路由、接口和邻居观测推导的候选路径，用于确定后续查证的设备和接口。"
+    "complete 仅表示当前推导所需的观测齐备，partial 表示存在缺口；"
+    "结果没有验证全部二层转发规则、ACL/PBR/NAT 或数据面流量，也不等于物理接线。"
+    "与现场不同可能来自网络变化、采集覆盖或推导限制，不能单凭差异断定发生了变更。"
 )
 
 
@@ -557,7 +590,7 @@ def _observed_times(value):
 
 
 def _as_history(result):
-    """Say when the path was true, in one time zone, so it is read as the earlier path."""
+    """Describe the observation window and the limits of the path inference."""
     times = sorted(beijing(datetime.fromisoformat(t)) for t in set(_observed_times(result)))
     if not times:
         when = "采集时间未知"
@@ -786,12 +819,37 @@ def _collect_topology(job, choice):
             should_continue=job.guard,
             on_result=capture,
             known_hosts_provider=lambda target, port: trust.known_hosts(target.host, port),
+            scoped_arp_context=lambda scopes: _scoped_arp_context(
+                context, job.target_id, job.target_id, scopes
+            ),
         )
         data = topology_observation(result)
         reason = data.get("failure_code")
     except Exception as exc:
         reason = _failure(exc)
     return outputs, command_metadata, data, reason
+
+
+def _scoped_arp_context(context, target_ref, connection_profile_id, scopes):
+    """Issue exact backend grants for a bounded, validated ARP-only expansion.
+
+    Target and connection come from the already authorized job. Device-provided
+    VRF names cannot introduce command syntax or broaden the target scope.
+    """
+    from src.platform.device_access.contracts import Command
+    from src.platform.device_access.policy import authorize
+
+    authorize(
+        context,
+        BatchRequest(target_ref, connection_profile_id, (Command("arp", "show ip arp"),)),
+    )
+    if len(scopes) > 64:
+        raise ValueError("VRF collection scope exceeds node limit")
+    commands = frozenset(scoped_arp_command(scope) for scope in scopes)
+    return replace(
+        context,
+        grants=(*context.grants, AccessGrant(target_ref, connection_profile_id, commands)),
+    )
 
 
 def topology_observation(result):
@@ -843,6 +901,11 @@ def topology_observation(result):
                 "line_coordinates": "parser_text_v1_1based",
                 "candidate_count": parsed.candidate_count,
                 "rejected_count": parsed.rejected_count,
+                **(
+                    {"scope_coverage": parsed.summary["scope_coverage"]}
+                    if "scope_coverage" in parsed.summary
+                    else {}
+                ),
             }
             for cap, parsed in result.parsed.items()
             if cap in TOPOLOGY_FACTS

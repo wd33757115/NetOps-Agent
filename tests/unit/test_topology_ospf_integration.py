@@ -8,7 +8,7 @@ import pytest
 from test_topology_campus_wan import BASE, FIXTURES, IDENTITY, devices  # noqa: F401
 
 from src.apps.topology.backend.collectors.parse import parse
-from src.apps.topology.backend.model.builder import L3T, NT, build_topology_details
+from src.apps.topology.backend.model.builder import L3T, NT, ST, build_topology_details
 from src.apps.topology.backend.service import topology_observation
 
 
@@ -60,10 +60,9 @@ def test_real_campus_ospf_ids_costs_and_topology_are_native(ospf_devices):
         for rid in n.get(L3T + "l3-node-attributes", {}).get("router-id", [])
     ]
     assert sorted(ids) == [f"10.255.0.{i}" for i in range(1, 7)]
-    mgmt = next(
-        n for n in networks if n.get(L3T + "l3-topology-attributes", {}).get("name") == "MGMT"
-    )
-    assert all("router-id" not in n.get(L3T + "l3-node-attributes", {}) for n in mgmt["node"])
+    mgmt_nodes = [n for n in default["node"] if n.get(ST + "name") == "MGMT"]
+    assert len(mgmt_nodes) == 6
+    assert all("router-id" not in n.get(L3T + "l3-node-attributes", {}) for n in mgmt_nodes)
     for n in default["node"]:
         for tp in n.get(NT + "termination-point", []):
             attrs = tp.get(L3T + "l3-termination-point-attributes", {})

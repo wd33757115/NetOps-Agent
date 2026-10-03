@@ -341,7 +341,7 @@ def link_metric(projection, refs):
     makes interface-name mutually exclusive with its existing ip-address leaf.
     This evidence name is not inserted into that native YANG container.
     Missing/duplicate/ambiguous terminations or asymmetric costs omit metric1;
-    equal area IDs or process IDs across devices are not required.  A zero
+    equal local NI names, area IDs or process IDs across devices are not required.  A zero
     loopback cost remains an observation but is not a transmitting link cost.
     """
     result = {"gaps": [], "evidence": []}
@@ -353,7 +353,7 @@ def link_metric(projection, refs):
     if not isinstance(devices, dict):
         gaps.append({"code": "invalid_ospf_projection"})
         return result
-    seen, scopes, costs = set(), set(), set()
+    seen, costs = set(), set()
     for index, ref in enumerate(refs):
         try:
             if not isinstance(ref, dict) or not all(
@@ -369,7 +369,6 @@ def link_metric(projection, refs):
             gaps.append({"code": "duplicate_link_termination", "termination_index": index})
             continue
         seen.add(identity)
-        scopes.add(ref["vrf"])
         device = devices.get(ref["address"])
         records = device.get("interfaces") if isinstance(device, dict) else None
         matches = (
@@ -402,8 +401,6 @@ def link_metric(projection, refs):
         if "area" in row:
             evidence["area"] = row["area"]
         result["evidence"].append(evidence)
-    if len(scopes) > 1:
-        gaps.append({"code": "link_scope_mismatch"})
     if len(costs) > 1:
         gaps.append({"code": "asymmetric_ospf_cost", "costs": sorted(costs)})
     if not gaps and len(result["evidence"]) == len(refs):

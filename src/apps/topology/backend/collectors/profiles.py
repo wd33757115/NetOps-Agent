@@ -180,11 +180,15 @@ class Profile(StrictModel):
     def selected(self, mode):
         if mode not in MODE_CAPABILITIES:
             raise ValueError("unknown collection mode")
-        return {
+        selected = {
             cap: self.capabilities[cap]
             for cap in MODE_CAPABILITIES[mode]
             if cap in self.capabilities
         }
+        if self.os_family in {"ios", "nxos"} and "arp" in selected and "vrfs" in self.capabilities:
+            # ARP's global table does not cover device-local named VRFs.
+            selected["vrfs"] = self.capabilities["vrfs"]
+        return selected
 
 
 class UniqueLoader(yaml.SafeLoader):

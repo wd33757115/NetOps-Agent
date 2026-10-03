@@ -4,7 +4,8 @@ Deterministic and evidence-bound: every routed hop names the device, the route i
 matched in the device's own table (RFC 8349 RIB facts) and the observation behind it.
 Where the data ends, a branch ends with a reason instead of a guess:
 
-- ``delivered``: the destination is on a directly connected subnet, or is the device;
+- ``delivered``: a device-local destination or a directly connected ARP-resolved endpoint;
+- ``endpoint_unresolved``: a connected prefix without evidence for the endpoint;
 - ``blackhole``: the matched route points at a NULL interface;
 - ``no_route``: nothing in the table covers the destination;
 - ``unmanaged_next_hop``: the next hop is not an address of any collected device;
@@ -105,16 +106,17 @@ class _Tracer:
         return best and best[1]
 
     def connected(self, key, vrf, ip):
-        """The device's own interface whose subnet holds this address, if any."""
+        """All local interfaces covering the address; overlap never picks the first row."""
         address = ipaddress.ip_address(ip)
+        interfaces = set()
         for rec in self.devices[key].get("ip", []):
             network = ipaddress.ip_interface(f"{rec['address']}/{rec['prefix_len']}").network
             if rec.get("vrf", "default") == vrf and network.prefixlen < network.max_prefixlen:
                 if address in network:
-                    return rec["ifname"]
-        return None
+                    interfaces.add(rec["ifname"])
+        return sorted(interfaces)
 
-    def resolve(self, key, vrf, ip, depth=0):
+    def resolve(self, key, vrf, ip, depth=0, egress=None):
         """Directly connected next hops behind a next-hop address: [(ip, out, chain)].
 
         RFC 8349 lets a next hop be an address without an outgoing interface (BGP
@@ -122,9 +124,11 @@ class _Tracer:
         subnets is the neighbour itself; any other is looked up again in the same
         RIB until it is, and each lookup is kept as evidence (chain).
         """
-        out = self.connected(key, vrf, ip)
-        if out:
-            return [(ip, out, [])]
+        interfaces = [
+            out for out in self.connected(key, vrf, ip) if egress is None or out == egress
+        ]
+        if interfaces:
+            return [(ip, out, []) for out in interfaces]
         route = self.lookup(key, vrf, ip) if depth < MAX_RECURSION else None
         if route is None:
             return []
@@ -138,13 +142,11 @@ class _Tracer:
                 "next_hop": hop_ip,
                 "out_interface": hop_out,
             }
-            owner = self.topo.owner.get((vrf, hop_ip)) if hop_ip else None
-            if hop_out and (
-                not hop_ip or hop_ip in {"0.0.0.0", "::"} or (owner and owner[0] == key)
-            ):
+            local = self.topo.ip_candidates(hop_ip, device=key, vrf=vrf) if hop_ip else ()
+            if hop_out and (not hop_ip or hop_ip in {"0.0.0.0", "::"} or local):
                 resolved.append((ip, hop_out, [link]))  # the address is on that interface
             elif hop_ip:
-                for found in self.resolve(key, vrf, hop_ip, depth + 1):
+                for found in self.resolve(key, vrf, hop_ip, depth + 1, hop_out):
                     resolved.append((found[0], found[1], [link, *found[2]]))
         return resolved
 
@@ -180,7 +182,42 @@ class _Tracer:
                 return link["link-id"]
         return None
 
-    def walk(self, start, first_in, dst):
+    def endpoint_evidence(self, key, vrf, ifname, ip):
+        """Only a neighbour observation in this device's NI and interface closes a host hop."""
+        facts = self.devices[key]
+        vlan = self.topo.interface_vlan(facts, ifname)
+        evidence = []
+        for row in facts.get("arp", []):
+            if row.get("vrf", "default") != vrf or row["ip"] != ip:
+                continue
+            if row["ifname"] != ifname:
+                # Comware may report the physical learning port and explicit VID
+                # instead of the SVI. Require both that VID and the local SVI scope;
+                # prefix membership by itself is not a neighbour observation.
+                if vlan is None or str(row.get("vlan")) != str(vlan):
+                    continue
+                if not any(
+                    rec["ifname"] == ifname
+                    and rec.get("vrf", "default") == vrf
+                    and ipaddress.ip_address(ip)
+                    in ipaddress.ip_interface(f"{rec['address']}/{rec['prefix_len']}").network
+                    for rec in facts.get("ip", [])
+                ):
+                    continue
+            evidence.append(
+                {
+                    "ip": ip,
+                    "mac": row["mac"],
+                    "interface": ifname,
+                    "observed_interface": row["ifname"],
+                    "vrf": vrf,
+                }
+            )
+        return evidence
+
+    def walk(
+        self, start, first_in, dst, start_vrf="default", initial_gaps=(), source_interface=None
+    ):
         paths, truncated = [], False
 
         def end(trail, status, **extra):
@@ -190,7 +227,22 @@ class _Tracer:
                 return
             paths.append({"hops": trail, "end": {"status": status, **extra}})
 
+        def deliver_local(key, vrf, trail):
+            own = self.topo.ip_candidates(dst, device=key, vrf=vrf)
+            if len(own) != 1:
+                return False
+            unavailable = self.interface_state(key, "destination", own[0][1], trail[-1])
+            if unavailable:
+                end(trail, "interface_unavailable", **unavailable)
+            else:
+                end(trail, "delivered", to="device", interface=own[0][1])
+            return True
+
         def step(key, vrf, in_if, trail, visited):
+            nonlocal truncated
+            if len(paths) >= MAX_PATHS:
+                truncated = True
+                return
             # A hop that ends the branch before a lookup keeps the same shape, with no route.
             hop = {
                 "device": self.device(key),
@@ -199,13 +251,18 @@ class _Tracer:
                 "out_interface": None,
                 "route": None,
             }
+            if not trail and initial_gaps:
+                hop["gaps"] = list(initial_gaps)
+            if not trail and source_interface:
+                unavailable = self.interface_state(key, "source", source_interface, hop)
+                if unavailable:
+                    end([hop], "interface_unavailable", **unavailable)
+                    return
             unavailable = self.interface_state(key, "in", in_if, hop)
             if unavailable:
                 end([*trail, hop], "interface_unavailable", **unavailable)
                 return
-            owner = self.topo.owner.get((vrf, dst))
-            if owner and owner[0] == key:
-                end([*trail, hop], "delivered", to="device", interface=owner[1])
+            if deliver_local(key, vrf, [*trail, hop]):
                 return
             if (key, vrf) in visited or len(trail) >= MAX_HOPS:
                 end([*trail, hop], "loop")
@@ -218,6 +275,10 @@ class _Tracer:
                 end([*trail, hop], "no_route")
                 return
             matched = {k: route.get(k) for k in ("prefix", "protocol", "preference", "metric")}
+            if not route.get("next_hops"):
+                hop["route"] = {**matched, "next_hop": None}
+                end([*trail, hop], "unresolved_next_hop", reason="route_next_hops_missing")
+                return
             for next_hop in route["next_hops"]:
                 ip, out = next_hop.get("ip"), next_hop.get("ifname") or ""
                 current = {
@@ -233,22 +294,28 @@ class _Tracer:
                 }
                 here = [*trail, current]
                 next_vrf = next_hop.get("vrf") or vrf
-                owner = self.topo.owner.get((next_vrf, ip))
+                own = self.topo.ip_candidates(ip, device=key, vrf=next_vrf) if ip else ()
                 if out.upper().startswith("NULL"):
                     end(here, "blackhole")
                     continue
                 if out.lower().startswith("inloop"):
-                    end(here, "delivered", to="device", interface=out)
+                    if not deliver_local(key, next_vrf, here):
+                        end(here, "endpoint_unresolved", interface=out, destination=dst)
                     continue
-                if not ip or ip in {"0.0.0.0", "::"} or (owner and owner[0] == key):
+                if not ip or ip in {"0.0.0.0", "::"} or own:
                     # A connected route: the device's own address on the egress interface.
                     unavailable = self.interface_state(key, "out", out, current)
                     if unavailable:
                         end(here, "interface_unavailable", **unavailable)
                         continue
+                    evidence = self.endpoint_evidence(key, next_vrf, out, dst)
+                    if not evidence or len({row["mac"] for row in evidence}) != 1:
+                        end(here, "endpoint_unresolved", interface=out, destination=dst)
+                        continue
+                    current["endpoint_evidence"] = evidence
                     end(here, "delivered", to="subnet", interface=out)
                     continue
-                resolved = self.resolve(key, next_vrf, ip)
+                resolved = self.resolve(key, next_vrf, ip, egress=out or None)
                 if not resolved and out:
                     # Address and outgoing interface both given (RFC 8349 simple next hop)
                     # and no route to the address: it is reached on that interface.
@@ -274,40 +341,85 @@ class _Tracer:
                         end(here, "blackhole")
                         continue
                     if neighbour_out.lower().startswith("inloop"):
-                        end(here, "delivered", to="device", interface=neighbour_out)
+                        if not deliver_local(key, next_vrf, here):
+                            end(here, "unresolved_next_hop", next_hop=neighbour_ip)
                         continue
                     unavailable = self.interface_state(key, "out", neighbour_out, current)
                     if unavailable:
                         end(here, "interface_unavailable", **unavailable)
                         continue
-                    neighbour = self.topo.owner.get((next_vrf, neighbour_ip))
-                    if neighbour is None:
+                    proven = self.topo.neighbour_candidates(
+                        key, next_vrf, neighbour_ip, neighbour_out
+                    )
+                    neighbours = proven or [
+                        candidate
+                        for candidate in self.topo.ip_candidates(neighbour_ip)
+                        if candidate[0] != key
+                    ]
+                    if not neighbours:
                         end(here, "unmanaged_next_hop", next_hop=neighbour_ip)
                         continue
-                    current["link_id"] = self.link_between(key, neighbour_out, *neighbour)
-                    step(neighbour[0], next_vrf, neighbour[1], here, visited | {(key, vrf)})
+                    for neighbour_key, neighbour_if, neighbour_vrf in neighbours:
+                        branch = {**current, "gaps": list(current.get("gaps", []))}
+                        branch["link_id"] = self.link_between(
+                            key, neighbour_out, neighbour_key, neighbour_if
+                        )
+                        if not proven or len(neighbours) > 1:
+                            branch["gaps"].append(
+                                {
+                                    "status": "adjacency_unproven",
+                                    "next_hop": neighbour_ip,
+                                    "interface": neighbour_out,
+                                    "candidate_count": len(neighbours),
+                                }
+                            )
+                        step(
+                            neighbour_key,
+                            neighbour_vrf,
+                            neighbour_if,
+                            [*trail, branch],
+                            visited | {(key, vrf)},
+                        )
 
-        step(start, "default", first_in, [], frozenset())
+        step(start, start_vrf, first_in, [], frozenset())
         return paths, truncated
 
     def direction(self, source, dst):
         """source is the locate answer for the start address."""
         result = {"to": dst, "first_hop": "none", "paths": [], "truncated": False}
         masters = []
-        if source["status"] == "device":
-            starts = [(source["locations"][0]["device"]["address"], None)]
+        device_locations = [
+            location for location in source["locations"] if location["status"] == "device"
+        ]
+        if device_locations:
+            starts = [
+                (location["device"]["address"], None, location["vrf"], location["interface"])
+                for location in device_locations
+            ]
         else:
             gateways = source["router_interfaces"]
             if any(
                 ipaddress.ip_address(dst) in ipaddress.ip_network(g["subnet"]) for g in gateways
             ):
-                result["status"] = "same_subnet"
+                # A common prefix does not prove the hosts' masks, broadcast domain,
+                # or bridge forwarding state. Keep the relation without claiming a path.
+                result.update(
+                    status="partial",
+                    relation="same_subnet",
+                    gaps=[{"status": "same_subnet_unproven"}],
+                )
                 return result
-            starts = [(g["address"], g["interface"]) for g in gateways]
+            starts = [(g["address"], g["interface"], g["vrf"], None) for g in gateways]
             # With VRRP on the subnet the gateway is the group's master (RFC 8347 state).
             groups = self.redundancy(gateways)
             masters = sorted(
-                {(m["address"], m["interface"]) for m in groups if m["state"] == "master"}
+                {
+                    (m["address"], m["interface"], g["vrf"], None)
+                    for m in groups
+                    if m["state"] == "master"
+                    for g in gateways
+                    if (g["address"], g["interface"]) == (m["address"], m["interface"])
+                }
             )
             if groups:
                 result["vrrp"] = groups
@@ -318,17 +430,33 @@ class _Tracer:
             return result
         if len(starts) > 1:
             result["first_hop"] = "ambiguous"
-        elif source["status"] != "device" and masters:
+        elif not device_locations and masters:
             result["first_hop"] = "vrrp_master"
             result["note"] = VRRP_FIRST_HOP
         else:
             result["first_hop"] = "single"
-        for key, first_in in starts:
-            paths, truncated = self.walk(key, first_in, dst)
+        for key, first_in, vrf, source_interface in starts:
+            initial_gaps = []
+            if source["status"] == "conflict":
+                initial_gaps.append({"status": "source_identity_ambiguous"})
+            if not device_locations and (
+                not self.endpoint_evidence(key, vrf, first_in, source["query"])
+                or (len(starts) > 1 and not masters)
+            ):
+                initial_gaps.append(
+                    {
+                        "status": "source_attachment_unproven",
+                        "interface": first_in,
+                        "source": source["query"],
+                    }
+                )
+            paths, truncated = self.walk(key, first_in, dst, vrf, initial_gaps, source_interface)
             room = MAX_PATHS - len(result["paths"])
             result["paths"].extend(paths[:room])
             result["truncated"] |= truncated or len(paths) > room
-        delivered = all(p["end"]["status"] == "delivered" for p in result["paths"])
+        delivered = bool(result["paths"]) and all(
+            p["end"]["status"] == "delivered" for p in result["paths"]
+        )
         state_gaps = any(hop.get("gaps") for path in result["paths"] for hop in path["hops"])
         result["status"] = (
             "complete" if delivered and not result["truncated"] and not state_gaps else "partial"
@@ -358,6 +486,7 @@ def trace(devices, base, src, dst, observed=None):
     routed = (
         forward["paths"]
         and reverse["paths"]
+        and forward["status"] == reverse["status"] == "complete"
         and "ambiguous" not in (forward["first_hop"], reverse["first_hop"])
     )
     gaps = (
@@ -383,6 +512,11 @@ def trace(devices, base, src, dst, observed=None):
             for path in part["paths"]
             for hop in path["hops"]
             for gap in hop.get("gaps", [])
+        ]
+        + [
+            {"direction": name, **gap}
+            for name, part in (("forward", forward), ("reverse", reverse))
+            for gap in part.get("gaps", [])
         ]
     )
     return {

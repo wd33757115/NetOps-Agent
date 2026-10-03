@@ -449,7 +449,7 @@ def test_ospf_transport_gate_survives_public_observation_and_blocks_router_id_an
             link.get(L3T + "l3-link-attributes", {}).get("metric1")
             for network in tree["ietf-network:networks"]["network"]
             for link in network.get(NT + "link", [])
-            if link["link-id"].endswith("l3-link:10.0.34.0/31")
+            if link.get(L3T + "l3-link-attributes", {}).get("name") == "10.0.34.0/31"
         )
 
     good, _, _ = build(False)

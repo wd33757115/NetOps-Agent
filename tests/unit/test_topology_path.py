@@ -75,7 +75,9 @@ def test_lab_device_address_and_same_subnet_need_no_route_lookup():
     to_loopback = trace(lab(), BASE, "192.168.1.2", "4.4.4.4")["forward"]["paths"][0]
     assert to_loopback["end"] == {"status": "delivered", "to": "device", "interface": "LoopBack0"}
     same = trace(lab(), BASE, "1.1.1.2", "1.1.1.9")
-    assert same["forward"]["status"] == same["reverse"]["status"] == "same_subnet"
+    assert same["forward"]["status"] == same["reverse"]["status"] == "partial"
+    assert same["forward"]["relation"] == "same_subnet"
+    assert {gap["status"] for gap in same["gaps"]} == {"same_subnet_unproven"}
     assert same["symmetric"] is None
 
 
@@ -97,7 +99,7 @@ def test_lab_unknown_destination_ends_where_the_data_ends():
 def test_several_possible_gateways_are_candidates_not_asymmetry():
     result = trace(lab(), BASE, "10.10.1.254", "1.1.1.2")
     forward = result["forward"]
-    assert forward["first_hop"] == "ambiguous" and forward["status"] == "complete"
+    assert forward["first_hop"] == "ambiguous" and forward["status"] == "partial"
     assert [p["hops"][0]["device"]["address"] for p in forward["paths"]] == [
         "10.10.1.1",
         "10.10.1.2",
@@ -144,7 +146,7 @@ def route(prefix, *next_hops, protocol="Static", preference=60):
 
 def network(r3_routes=True):
     delivered = [route("172.16.4.0/24", ("10.1.24.2", "GigabitEthernet2/0"))]
-    return {
+    devices = {
         "10.0.0.1": router(
             "00:00:00:00:00:01",
             [
@@ -187,6 +189,26 @@ def network(r3_routes=True):
             [route("172.16.4.0/24", ("172.16.4.1", "Vlan-interface40"), protocol="Direct")],
         ),
     }
+    # These tests exercise route selection and interface state on an observed
+    # network. Route prefixes alone cannot establish any of these adjacencies.
+    neighbors = {
+        "10.0.0.1": [
+            ("172.16.1.10", "Vlan-interface10", "00:00:00:00:01:10"),
+            ("10.1.12.2", "GigabitEthernet1/0", "00:00:00:00:00:02"),
+            ("10.1.13.2", "GigabitEthernet2/0", "00:00:00:00:00:03"),
+        ],
+        "10.0.0.2": [
+            ("10.1.12.1", "GigabitEthernet1/0", "00:00:00:00:00:01"),
+            ("10.1.24.2", "GigabitEthernet2/0", "00:00:00:00:00:04"),
+        ],
+        "10.0.0.3": [("10.1.34.2", "GigabitEthernet2/0", "00:00:00:00:00:04")],
+        "10.0.0.4": [("172.16.4.20", "Vlan-interface40", "00:00:00:00:04:20")],
+    }
+    for key, rows in neighbors.items():
+        devices[key]["arp"] = [
+            {"ip": ip, "ifname": ifname, "mac": mac, "vrf": "default"} for ip, ifname, mac in rows
+        ]
+    return devices
 
 
 def ends(result):
@@ -373,31 +395,32 @@ def test_unknown_gateway_ingress_marks_partial_even_when_local_device_delivery_s
     )
 
 
-def test_device_loopback_delivery_checks_actual_ingress_without_inventing_an_egress():
+def test_device_loopback_delivery_requires_destination_interface_available():
     devices = lab()
     set_interface(devices, "10.10.1.1", "LoopBack0", oper_status="down")
     result = trace(devices, BASE, "192.168.1.2", "4.4.4.4")
     forward = result["forward"]
-    assert forward["status"] == "complete"
+    assert forward["status"] == "partial"
     hop = forward["paths"][0]["hops"][0]
-    assert hop["out_interface"] is None and set(hop["interface_states"]) == {"in"}
+    assert hop["out_interface"] is None and set(hop["interface_states"]) == {"in", "destination"}
     assert forward["paths"][0]["end"] == {
-        "status": "delivered",
-        "to": "device",
+        "status": "interface_unavailable",
         "interface": "LoopBack0",
+        "interface_role": "destination",
+        "oper_status": "down",
     }
 
 
-def test_null_and_inloop_terminals_do_not_require_forwarding_egress_state():
+def test_null_needs_no_egress_and_inloop_does_not_invent_a_local_destination():
     devices = network()
     blackhole = trace(devices, BASE, "172.16.1.10", "172.16.9.1")["forward"]["paths"][0]
     assert blackhole["end"]["status"] == "blackhole"
     assert set(blackhole["hops"][0]["interface_states"]) == {"in"}
     devices["10.0.0.1"]["routes"].append(route("172.16.11.0/24", ("0.0.0.0", "InLoopBack0")))
     forward = trace(devices, BASE, "172.16.1.10", "172.16.11.1")["forward"]
-    assert forward["status"] == "complete"
+    assert forward["status"] == "partial"
     assert forward["paths"][0]["end"] == {
-        "status": "delivered",
-        "to": "device",
+        "status": "endpoint_unresolved",
+        "destination": "172.16.11.1",
         "interface": "InLoopBack0",
     }

@@ -21,7 +21,7 @@ capabilities:
   vlan: {command: show vlan brief, parser: null}
   lag: {command: show port-channel summary, parser: null}
   routes: {command: show ip route, timeout: 300, parser: null}
-  vrfs: {command: show vrf, parser: null}
+  vrfs: {command: show vrf, parser: generic_vrfs}
   mlag: {command: show vpc brief, parser: null}
   vxlan: {command: show nve peers, parser: null}
 verified: []

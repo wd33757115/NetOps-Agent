@@ -52,3 +52,10 @@ describe('topology layout', () => {
     expect(sides(p('r1'), p('hub'))).toEqual(['top', 'bottom'])
   })
 })
+
+it('positions unidentified endpoints while preserving legacy host snapshots', () => {
+  const oldPositions = layout(nodes, links)
+  const current = layout(nodes.map(node => node.identity_status === 'host' ? { ...node, identity_status: 'endpoint' } : node), links)
+  expect(current).toEqual(oldPositions)
+  expect(current.size).toBe(nodes.length)
+})

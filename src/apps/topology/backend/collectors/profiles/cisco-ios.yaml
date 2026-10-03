@@ -23,7 +23,7 @@ capabilities:
   switchport: {command: show interfaces switchport, parser: generic_switchport}
   lag: {command: show etherchannel summary, parser: generic_lag}
   routes: {command: show ip route, timeout: 300, parser: template_routes}
-  vrfs: {command: show vrf, parser: null}
+  vrfs: {command: show vrf, parser: generic_vrfs}
   vrrp: {command: show vrrp, parser: generic_vrrp}
   ospf_interfaces: {command: show ip ospf interface brief, parser: generic_ospf_interfaces}
   ospf_process: {command: show ip ospf, parser: generic_ospf_process}

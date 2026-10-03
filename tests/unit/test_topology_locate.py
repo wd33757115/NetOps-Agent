@@ -143,7 +143,14 @@ def test_a_known_mac_without_a_port_is_not_found_but_keeps_its_arp_evidence():
     assert result["status"] == "not_found"
     location = result["locations"][0]
     assert location["mac"] == "00:00:00:00:00:09" and location["ports"] == []
-    assert location["arp"] == [{"device": "r", "ip": "10.0.0.9", "interface": "Vlan-interface10"}]
+    assert location["arp"] == [
+        {
+            "device": "r",
+            "ip": "10.0.0.9",
+            "interface": "Vlan-interface10",
+            "vrf": "default",
+        }
+    ]
 
 
 def test_an_unseen_address_still_names_its_gateway():

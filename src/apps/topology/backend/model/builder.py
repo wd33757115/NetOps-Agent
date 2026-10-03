@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import re
+from dataclasses import dataclass
 from urllib.parse import quote
 
 from ..collectors.ifname import normalize_ifname
@@ -28,6 +29,13 @@ L2_PORT_TYPES = frozenset({"ethernet", "lag"})
 # Virtual router MACs are gateways, never hosts: VRRP 00-00-5E-00-01/02-{VRID} for IPv4/IPv6
 # (RFC 5798 §7.3) and HSRP 00-00-0C-07-AC-{group} (RFC 2281).
 VIRTUAL_ROUTER_MACS = ("00:00:5e:00:01:", "00:00:5e:00:02:", "00:00:0c:07:ac:")
+
+
+@dataclass(frozen=True)
+class _TargetChassis:
+    """An unreported chassis cannot collide with an actual LLDP string value."""
+
+    key: str
 
 
 def _components(pairs):
@@ -183,17 +191,108 @@ class _Topology:
         self.chassis = {}
         for key, facts in devices.items():
             chassis = (facts.get("lldp_local") or {}).get("chassis_id")
-            self.chassis[key] = chassis or f"target:{key}"
-        # Every address on a collected device, so ARP entries for it are not hosts.
-        self.owner = {}
-        for key, facts in devices.items():
+            self.chassis[key] = chassis or _TargetChassis(key)
+        # RFC 8529 network-instance names are device-local. Preserve every address
+        # owner; neither a matching VRF name nor input order chooses a remote device.
+        owners = {}
+        for key, facts in sorted(devices.items()):
             for rec in facts.get("ip", []):
-                self.owner[(rec.get("vrf", "default"), rec["address"])] = (key, rec["ifname"])
+                owners.setdefault(rec["address"], set()).add(
+                    (key, rec["ifname"], rec.get("vrf", "default"))
+                )
+        self.address_owners = {ip: tuple(sorted(rows)) for ip, rows in sorted(owners.items())}
+        reported = list(self.chassis.values())
+        self.conflicting_chassis = {chassis for chassis in reported if reported.count(chassis) > 1}
+        for key, chassis in self.chassis.items():
+            if reported.count(chassis) > 1:
+                self.chassis[key] = _TargetChassis(key)
         self.advertised_identity()
         self.by_chassis = {c: k for k, c in self.chassis.items()}
         self.l2_nodes = {}
         self.management = {}  # chassis -> addresses it is managed or advertised by
         self.host_ips = {}
+        scopes = {}
+        for facts in devices.values():
+            for row in facts.get("mac", []):
+                vid = self.mac_vlan(row)
+                if vid is not None:
+                    scopes.setdefault(row["mac"], set()).add(vid)
+            for row in facts.get("arp", []):
+                for vid in (self.interface_vlan(facts, row["ifname"]), self.arp_vlan(row)):
+                    if vid is not None:
+                        scopes.setdefault(row["mac"], set()).add(vid)
+        # Until bridge/FDB instances are projected, a global MAC node cannot
+        # represent independent VLAN attachments. Keep the raw observations and
+        # let locate report their conflict instead of joining the VLANs.
+        self.ambiguous_macs = frozenset(mac for mac, vids in scopes.items() if len(vids) > 1)
+        self.host_vlans = {mac: next(iter(vids)) for mac, vids in scopes.items() if len(vids) == 1}
+
+    def ip_candidates(self, ip, *, device=None, vrf=None):
+        """Sorted (device, interface, local NI) candidates; NI filtering is local."""
+        if vrf is not None and device is None:
+            raise ValueError("a network-instance name needs a device scope")
+        return tuple(
+            row
+            for row in self.address_owners.get(ip, ())
+            if (device is None or row[0] == device) and (vrf is None or row[2] == vrf)
+        )
+
+    def neighbour_candidates(self, device, vrf, ip, ifname=None):
+        """Owners supported by scoped ARP or an exact LLDP remote port.
+
+        LLDP can disambiguate duplicate IPs. An ARP row alone can associate an
+        address only when there is one possible remote owner; it cannot select
+        between duplicate owners using their independently named local NIs.
+        """
+        candidates = tuple(row for row in self.ip_candidates(ip) if row[0] != device)
+        if self.ip_candidates(ip, device=device, vrf=vrf):
+            return ()
+        facts = self.devices[device]
+        local_ifs = {
+            row["ifname"]
+            for row in facts.get("ip", [])
+            if row.get("vrf", "default") == vrf and (ifname is None or row["ifname"] == ifname)
+        }
+        if not local_ifs:
+            return ()
+        direct = set()
+        for row in facts.get("lldp", []):
+            if row["local_if"] not in local_ifs:
+                continue
+            peer = row["remote_chassis_id"]
+            port = self.remote_port(peer, row["remote_port_id"], row.get("remote_port_subtype"))
+            for candidate in candidates:
+                if self.chassis[candidate[0]] == peer and candidate[1] == port:
+                    direct.add(candidate)
+        if direct:
+            return tuple(sorted(direct))
+        arp = [
+            row
+            for row in facts.get("arp", [])
+            if row.get("vrf", "default") == vrf
+            and row["ip"] == ip
+            and any(self.arp_interface(facts, row, name) for name in local_ifs)
+            and self.attachment(facts, row)
+        ]
+        if len(candidates) == 1 and len({row["mac"] for row in arp}) == 1:
+            # The address must be on the observed remote interface's subnet;
+            # a route to a loopback or a different subnet is not adjacency.
+            remote, remote_if, remote_vrf = candidates[0]
+            remote_networks = {
+                ipaddress.ip_interface(f"{row['address']}/{row['prefix_len']}").network
+                for row in self.devices[remote].get("ip", [])
+                if row["ifname"] == remote_if
+                and row.get("vrf", "default") == remote_vrf
+                and row["address"] == ip
+            }
+            if any(
+                ipaddress.ip_address(row["address"]) in network
+                for row in facts.get("ip", [])
+                if row["ifname"] in local_ifs and row.get("vrf", "default") == vrf
+                for network in remote_networks
+            ):
+                return candidates
+        return ()
 
     def advertised_identity(self):
         """A device that cannot report its own chassis (IOS has no local LLDP command) is
@@ -201,8 +300,8 @@ class _Topology:
         management address. Only a one-to-one claim counts; anything ambiguous stays apart.
         """
         holders = {}
-        for (_, address), (key, _) in self.owner.items():
-            holders.setdefault(address, set()).add(key)
+        for address, rows in self.address_owners.items():
+            holders[address] = {key for key, _, _ in rows}
         claims = {}
         for observer, facts in self.devices.items():
             for rec in facts.get("lldp", []):
@@ -210,11 +309,13 @@ class _Topology:
                     keys = holders.get(address, set())
                     if len(keys) == 1 and observer not in keys:
                         claims.setdefault(next(iter(keys)), set()).add(rec["remote_chassis_id"])
-        reported = {c for c in self.chassis.values() if not c.startswith("target:")}
+        reported = {
+            c for c in self.chassis.values() if not isinstance(c, _TargetChassis)
+        } | self.conflicting_chassis
         unresolved = {
             key: next(iter(chassis))
             for key, chassis in claims.items()
-            if self.chassis[key].startswith("target:") and len(chassis) == 1
+            if isinstance(self.chassis[key], _TargetChassis) and len(chassis) == 1
         }
         wanted = list(unresolved.values())
         for key, chassis in unresolved.items():
@@ -223,7 +324,15 @@ class _Topology:
 
     # identifiers -------------------------------------------------------------
     def device_node(self, chassis):
-        return self.base + "device:" + _uri(_dash(chassis))
+        if isinstance(chassis, _TargetChassis):
+            value = "target:" + quote(chassis.key, safe="-._~")
+        elif _MAC.fullmatch(chassis):
+            value = _dash(chassis)  # Preserve existing canonical MAC identities.
+        else:
+            # Colon is encoded too: a reported chassis must not impersonate a
+            # fallback target, a MAC identity, or the suffix of a logical NI node.
+            value = "chassis:" + quote(chassis, safe="-._~")
+        return self.base + "device:" + value
 
     def port_tp(self, ifname):
         return self.base + "if:" + _uri(ifname)
@@ -262,7 +371,9 @@ class _Topology:
         Virtual router MACs are gateways, not hosts.
         """
         found, hosts, bundles = [], {}, {}
-        managed_macs = {c for c in self.chassis.values() if not c.startswith("target:")}
+        managed_macs = {
+            c for c in self.chassis.values() if isinstance(c, str) and _MAC.fullmatch(c)
+        }
         for key, facts in self.devices.items():
             me = self.chassis[key]
             for rec in facts.get("lag", []):
@@ -301,10 +412,16 @@ class _Topology:
                 )
             for rec in facts.get("arp", []):
                 vrf, port = rec.get("vrf", "default"), self.attachment(facts, rec)
-                if (vrf, rec["ip"]) in self.owner:
+                owners = self.neighbour_candidates(key, vrf, rec["ip"], rec["ifname"])
+                if self.ip_candidates(rec["ip"]):
                     managed_macs.add(rec["mac"])
-                    other_key, other_if = self.owner[(vrf, rec["ip"])]
-                    if port and port not in lldp_ports:
+                    if len(owners) != 1:
+                        continue  # ambiguous ownership is not an observed endpoint identity
+                    other_key, other_if, _ = owners[0]
+                    other_kind = normalize_ifname(
+                        other_if, self.devices[other_key].get("platform", "")
+                    ).kind
+                    if port and port not in lldp_ports and other_kind in L2_PORT_TYPES:
                         other = ("port", self.chassis[other_key], other_if)
                         why = f"{key} arp {rec['ip']} {rec['mac']} {port}"
                         found.append((("port", me, port), other, why))
@@ -312,7 +429,9 @@ class _Topology:
                 if (rec["ifname"], rec["ip"]) in advertised:
                     managed_macs.add(rec["mac"])
                     continue
-                self.host_ips.setdefault(rec["mac"], set()).add((vrf, rec["ip"]))
+                self.host_ips.setdefault(rec["mac"], set()).add(
+                    (key, vrf, rec["ifname"], rec["ip"])
+                )
                 if port:
                     strength = "weak" if port in lldp_ports else "strong"
                     hosts.setdefault(rec["mac"], {"strong": [], "weak": []})[strength].append(
@@ -329,9 +448,18 @@ class _Topology:
                 )
         segment = _components((a, b) for a, b, _ in found)
         for mac, seen in sorted(hosts.items()):
-            if mac in managed_macs or mac.startswith(VIRTUAL_ROUTER_MACS):
+            if (
+                mac in managed_macs
+                or mac in self.ambiguous_macs
+                or mac.startswith(VIRTUAL_ROUTER_MACS)
+            ):
                 continue  # a collected or advertised device's own interface, or a gateway
             members = seen["strong"]
+            if len({segment.get(member, member) for member, _ in members}) > 1:
+                # The same MAC at unrelated edge ports is not evidence that the
+                # ports share media. It may be reused in independent bridges.
+                self.ambiguous_macs |= {mac}
+                continue
             if not members and mac in self.host_ips:
                 # An aggregate sighting lies on each member's link, separate cables.
                 places = {
@@ -346,15 +474,51 @@ class _Topology:
         return found
 
     def attachment(self, facts, arp):
-        """Physical port behind an ARP row: its own port, or the MAC table for VLAN rows."""
+        """Own port, or a unique MAC/FDB observation in the SVI's exact VLAN.
+
+        An unknown logical interface, mismatched VID or several same-VID ports
+        cannot be reduced to the first MAC row. The observations remain facts.
+        """
         platform = facts.get("platform", "")
         name = normalize_ifname(arp["ifname"], platform)
         if name.kind in L2_PORT_TYPES:
             return name.name
-        for rec in facts.get("mac", []):
-            if rec["mac"] == arp["mac"]:
-                return rec["port"]
-        return None
+        vid = self.interface_vlan(facts, arp["ifname"])
+        if vid is None:
+            return None
+        if self.arp_vlan(arp) is not None and self.arp_vlan(arp) != vid:
+            return None
+        ports = {
+            rec["port"]
+            for rec in facts.get("mac", [])
+            if rec["mac"] == arp["mac"] and self.mac_vlan(rec) == vid
+        }
+        return next(iter(ports)) if len(ports) == 1 else None
+
+    @staticmethod
+    def interface_vlan(facts, ifname):
+        name = normalize_ifname(ifname, facts.get("platform", ""))
+        if name.kind != "vlanif":
+            return None
+        match = re.search(r"([0-9]+)$", name.name)
+        return int(match[1]) if match and 1 <= int(match[1]) <= 4094 else None
+
+    @staticmethod
+    def mac_vlan(row):
+        value = str(row.get("vlan_or_bd", ""))
+        return int(value) if value.isdecimal() and 1 <= int(value) <= 4094 else None
+
+    @staticmethod
+    def arp_vlan(row):
+        value = str(row.get("vlan", ""))
+        return int(value) if value.isdecimal() and 1 <= int(value) <= 4094 else None
+
+    def arp_interface(self, facts, arp, ifname):
+        """Match an ARP interface, including Comware's explicit physical-port VID."""
+        vid = self.interface_vlan(facts, ifname)
+        if arp["ifname"] == ifname:
+            return vid is None or self.arp_vlan(arp) in {None, vid}
+        return vid is not None and self.arp_vlan(arp) == vid
 
     def l2_node(self, chassis, name=None, collected=False):
         node_id = self.device_node(chassis)
@@ -388,7 +552,7 @@ class _Topology:
             addresses = sorted(a for a in self.management.get(chassis, ()) if _is_ip(a))
             if addresses:
                 attrs["management-address"] = addresses
-            if _MAC.fullmatch(chassis):
+            if isinstance(chassis, str) and _MAC.fullmatch(chassis):
                 attrs["management-mac"] = chassis
 
     def l2_lag(self, chassis, ifname, members):
@@ -445,8 +609,10 @@ class _Topology:
             for member in (a, b):
                 if member[0] == "port":
                     self.l2_port(member[1], member[2])
-            merged = ({a, b}, {why})
-            for seg in [s for s in segments if a in s[0] or b in s[0]]:
+            nic = next((m for m in (a, b) if m[0] == "nic"), None)
+            vid = self.host_vlans.get(nic[1]) if nic else None
+            merged = ({a, b}, {why}, vid)
+            for seg in [s for s in segments if s[2] == vid and (a in s[0] or b in s[0])]:
                 segments.remove(seg)
                 merged[0].update(seg[0])
                 merged[1].update(seg[1])
@@ -465,48 +631,54 @@ class _Topology:
                 ],
             }
         evidence, l2_links, link_of = {}, [], {}
-        for members, why in sorted(segments, key=lambda s: sorted(map(str, s[0]))):
+        self.link_vlans = {}
+        for members, why, vid in sorted(segments, key=lambda s: sorted(map(str, s[0]))):
             refs = sorted(self.ref(m) for m in members)
             link_id = self.base + "l2-link:" + hashlib.sha256(repr(refs).encode()).hexdigest()[:12]
             l2_links.append(self.link(self.l2_net, link_id, refs))
+            self.link_vlans[link_id] = vid
             evidence[link_id] = sorted(why)
             for m in members:
-                link_of[m] = link_id
+                link_of.setdefault(m, set()).add(link_id)
         self.management_attributes()
         self.vlan_attributes()
         l2_nodes = dict(sorted(self.l2_nodes.items()))
         self.navigation(self.l2_net, l2_nodes, l2_links)
         networks = [self.network(self.l2_net, L2T + "l2-topology", l2_nodes, l2_links)]
-        layers = self.layer3(link_of, evidence)
-        for vrf in ["default", *sorted(v for v in layers if v != "default")]:
-            nodes, links = layers.get(vrf, ({}, []))
-            network_id = self.l3_network(vrf)
-            self.navigation(network_id, nodes, links)
-            extra = {"supporting-network": [{"network-ref": self.l2_net}]}
-            if vrf != "default":
-                extra[L3T + "l3-topology-attributes"] = {"name": vrf}
-            networks.append(
-                self.network(network_id, L3T + "l3-unicast-topology", nodes, links, extra)
+        nodes, links = self.layer3(link_of, evidence)
+        self.navigation(self.l3_net, nodes, links)
+        networks.append(
+            self.network(
+                self.l3_net,
+                L3T + "l3-unicast-topology",
+                nodes,
+                links,
+                {"supporting-network": [{"network-ref": self.l2_net}]},
             )
+        )
         return {"ietf-network:networks": {"network": networks}}, evidence
 
-    def l3_network(self, vrf):
-        return self.l3_net if vrf == "default" else f"{self.l3_net}:{_uri(vrf)}"
+    def l3_node(self, device, vrf):
+        node = self.device_node(self.chassis[device])
+        return node if vrf == "default" else node + ":ni:" + _uri(vrf)
 
     def layer3(self, link_of, evidence):
-        """One L3 network per VRF, each supported by the L2 network: {vrf: (nodes, links)}.
+        """An observed L3 graph of device-local routing instances.
 
-        A VRF is its own entry in the network list (RFC 8345 §3 Figure 3, RFC 9375 §4.2),
-        so its routing state correlates to its own topology (SIMAP REQ-CONTROL-PLANE).
-        Every collected device is a node of the default network; of a VRF's network only
-        where it has addresses in that VRF.
+        The network is an observation container, not a global VRF. RFC 8345 nodes
+        may represent logical entities; each local NI is a separate node supported
+        by its L2 device. A common prefix describes addressing, not adjacency.
+        Only scoped ARP or exact LLDP endpoints join a prefix's components.
         """
-        nodes, subnets, metric_ends = {"default": {}}, {}, {}
+        nodes, subnets, endpoints = {}, {}, []
         for key, facts in sorted(self.devices.items()):
             me = self.chassis[key]
             platform = facts.get("platform", "")
-            tps, prefixes = {"default": []}, {"default": []}
-            for rec in sorted(facts.get("ip", []), key=lambda r: r["ifname"]):
+            tps, prefixes = {"default": {}}, {"default": set()}
+            for rec in sorted(
+                facts.get("ip", []),
+                key=lambda r: (r["ifname"], r["address"], r.get("vrf", "default")),
+            ):
                 vrf = rec.get("vrf", "default")
                 address = ipaddress.ip_interface(f"{rec['address']}/{rec['prefix_len']}")
                 kind = normalize_ifname(rec["ifname"], platform).kind
@@ -514,61 +686,87 @@ class _Topology:
                 if kind in L2_PORT_TYPES:
                     carriers.add(("port", me, rec["ifname"]))
                 else:
-                    # A VLAN interface is carried by the ports where its subnet's hosts attach.
+                    # Match the device-local NI and explicit ARP interface/VID;
+                    # another SVI using the same prefix is not this interface.
                     for arp in facts.get("arp", []):
-                        if arp.get("vrf", "default") == vrf and (
-                            ipaddress.ip_address(arp["ip"]) in address.network
+                        if (
+                            arp.get("vrf", "default") == vrf
+                            and self.arp_interface(facts, arp, rec["ifname"])
+                            and (ipaddress.ip_address(arp["ip"]) in address.network)
                         ):
                             port = self.attachment(facts, arp)
                             if port and ("port", me, port) in link_of:
                                 carriers.add(("port", me, port))
-                tp = {
-                    "tp-id": self.port_tp(rec["ifname"]),
-                    ST + "name": rec["ifname"],
-                    L3T + "l3-termination-point-attributes": {"ip-address": [str(address.ip)]},
-                }
+                tp = tps.setdefault(vrf, {}).setdefault(
+                    rec["ifname"],
+                    {
+                        "tp-id": self.port_tp(rec["ifname"]),
+                        ST + "name": rec["ifname"],
+                        L3T + "l3-termination-point-attributes": {"ip-address": []},
+                    },
+                )
+                addresses = tp[L3T + "l3-termination-point-attributes"]["ip-address"]
+                if str(address.ip) not in addresses:
+                    addresses.append(str(address.ip))
                 if carriers:
                     tp["supporting-termination-point"] = [
                         {"network-ref": self.l2_net, "node-ref": n, "tp-ref": t}
                         for n, t in sorted(self.ref(c) for c in carriers)
                     ]
-                tps.setdefault(vrf, []).append(tp)
-                prefixes.setdefault(vrf, []).append({"prefix": str(address.network)})
+                prefixes.setdefault(vrf, set()).add(str(address.network))
                 if address.network.prefixlen < address.max_prefixlen:
-                    subnets.setdefault((vrf, address.network), []).append(
-                        ((self.device_node(me), self.port_tp(rec["ifname"])), carriers)
-                    )
-                    metric_ends.setdefault(
-                        (vrf, address.network, self.device_node(me), self.port_tp(rec["ifname"])),
-                        [],
-                    ).append(
-                        {
-                            "address": key,
-                            "vrf": vrf,
-                            "ifname": rec["ifname"],
-                            "address_ip": str(address.ip),
-                        }
-                    )
-            node_id = self.device_node(me)
+                    ref = (self.l3_node(key, vrf), self.port_tp(rec["ifname"]))
+                    entry = {
+                        "ref": ref,
+                        "key": key,
+                        "vrf": vrf,
+                        "ifname": rec["ifname"],
+                        "ip": str(address.ip),
+                        "network": address.network,
+                        "carriers": carriers,
+                        "vid": self.interface_vlan(facts, rec["ifname"]),
+                    }
+                    endpoints.append(entry)
+                    subnets.setdefault(address.network, {})[ref] = entry
             for vrf in tps:
-                attributes = {"prefix": prefixes[vrf]}
+                node_id = self.l3_node(key, vrf)
+                attributes = {"prefix": [{"prefix": p} for p in sorted(prefixes[vrf])]}
                 router_ids = self.protocol["devices"].get(key, {}).get("router_ids", {}).get(vrf)
                 if router_ids:
                     attributes["router-id"] = router_ids
-                nodes.setdefault(vrf, {})[node_id] = {
+                nodes[node_id] = {
                     "node-id": node_id,
-                    "supporting-node": [{"network-ref": self.l2_net, "node-ref": node_id}],
+                    ST + "name": vrf,
+                    "supporting-node": [
+                        {"network-ref": self.l2_net, "node-ref": self.device_node(me)}
+                    ],
                     L3T + "l3-node-attributes": attributes,
-                    NT + "termination-point": tps[vrf],
+                    NT + "termination-point": list(tps[vrf].values()),
                 }
+        pairs, reasons = {}, {}
+        for endpoint in endpoints:
+            network, ref = endpoint["network"], endpoint["ref"]
+            for other in endpoints:
+                if other["network"] != network or other["ref"] == ref:
+                    continue
+                candidate = (other["key"], other["ifname"], other["vrf"])
+                if candidate in self.neighbour_candidates(
+                    endpoint["key"], endpoint["vrf"], other["ip"], endpoint["ifname"]
+                ):
+                    pair = tuple(sorted((ref, other["ref"])))
+                    pairs.setdefault(network, set()).add(pair)
+                    reasons.setdefault((network, pair), set()).add(
+                        f"{endpoint['key']} NI {endpoint['vrf']} {endpoint['ifname']} "
+                        f"observed neighbour {other['ip']}"
+                    )
         for mac, addresses in sorted(self.host_ips.items()):
             nic = ("nic", mac)
             if nic not in link_of:
                 continue  # no L2 attachment evidence for this host
             node_id = self.host_node(mac)
-            for vrf, ip in sorted(addresses):
+            for key, vrf, observed_if, ip in sorted(addresses):
                 tp_id = self.base + "ip:" + ip
-                node = nodes.setdefault(vrf, {}).setdefault(
+                node = nodes.setdefault(
                     node_id,
                     {
                         "node-id": node_id,
@@ -576,47 +774,100 @@ class _Topology:
                         NT + "termination-point": [],
                     },
                 )
-                node[NT + "termination-point"].append(
+                if not any(tp["tp-id"] == tp_id for tp in node[NT + "termination-point"]):
+                    node[NT + "termination-point"].append(
+                        {
+                            "tp-id": tp_id,
+                            L3T + "l3-termination-point-attributes": {"ip-address": [ip]},
+                            "supporting-termination-point": [
+                                {
+                                    "network-ref": self.l2_net,
+                                    "node-ref": node_id,
+                                    "tp-ref": self.nic_tp(mac),
+                                }
+                            ],
+                        }
+                    )
+                rows = [
+                    row
+                    for row in self.devices[key].get("arp", [])
+                    if row["ifname"] == observed_if
+                    and row["ip"] == ip
+                    and row["mac"] == mac
+                    and row.get("vrf", "default") == vrf
+                ]
+                for endpoint in endpoints:
+                    network = endpoint["network"]
+                    if (
+                        endpoint["key"] != key
+                        or endpoint["vrf"] != vrf
+                        or ipaddress.ip_address(ip) not in network
+                    ):
+                        continue
+                    if not any(
+                        self.arp_interface(self.devices[key], row, endpoint["ifname"])
+                        for row in rows
+                    ):
+                        continue
+                    ref = (node_id, tp_id)
+                    subnets[network][ref] = {"carriers": {nic}, "vid": self.host_vlans.get(mac)}
+                    pair = tuple(sorted((endpoint["ref"], ref)))
+                    pairs.setdefault(network, set()).add(pair)
+                    reasons.setdefault((network, pair), set()).add(
+                        f"{key} NI {vrf} arp {ip} {mac} {observed_if}"
+                    )
+        links = []
+        for network, edges in sorted(pairs.items(), key=lambda item: str(item[0])):
+            components = _components(sorted(edges))
+            groups = {}
+            for ref, representative in components.items():
+                groups.setdefault(representative, set()).add(ref)
+            for refs in sorted(map(sorted, groups.values())):
+                if len(refs) < 2:
+                    continue
+                identity = repr((str(network), refs)).encode()
+                link_id = self.base + "l3-link:" + hashlib.sha256(identity).hexdigest()[:12]
+                link = self.link(self.l3_net, link_id, refs)
+                link[L3T + "l3-link-attributes"] = {"name": str(network)}
+                members = [subnets[network][ref] for ref in refs]
+                terminations = [
                     {
-                        "tp-id": tp_id,
-                        L3T + "l3-termination-point-attributes": {"ip-address": [ip]},
-                        "supporting-termination-point": [
-                            {
-                                "network-ref": self.l2_net,
-                                "node-ref": node_id,
-                                "tp-ref": self.nic_tp(mac),
-                            }
-                        ],
+                        "address": entry["key"],
+                        "vrf": entry["vrf"],
+                        "ifname": entry["ifname"],
+                        "address_ip": entry["ip"],
+                    }
+                    if "key" in entry
+                    else {}
+                    for entry in members
+                ]
+                metric = link_metric(self.protocol, terminations)
+                self.protocol["links"][link_id] = metric
+                if "metric1" in metric:
+                    link[L3T + "l3-link-attributes"]["metric1"] = metric["metric1"]
+                supporting = sorted(
+                    {
+                        link_id
+                        for entry in members
+                        for c in entry["carriers"]
+                        for link_id in link_of.get(c, ())
+                        if self.link_vlans[link_id] is None
+                        or self.link_vlans[link_id] == entry["vid"]
                     }
                 )
-                for (net_vrf, network), members in subnets.items():
-                    if net_vrf == vrf and ipaddress.ip_address(ip) in network:
-                        members.append(((node_id, tp_id), {nic}))
-        links = {}
-        for (vrf, network), members in sorted(subnets.items(), key=lambda s: str(s[0])):
-            refs = sorted({ref for ref, _ in members})
-            if len(refs) < 2:
-                continue
-            # Link IDs keep the VRF: one subnet may exist in several VRFs, evidence is shared.
-            scope = "" if vrf == "default" else _uri(vrf) + ":"
-            link_id = self.base + "l3-link:" + scope + str(network)
-            link = self.link(self.l3_network(vrf), link_id, refs)
-            terminations = []
-            for node_id, tp_id in refs:
-                candidates = metric_ends.get((vrf, network, node_id, tp_id), [])
-                terminations.append(candidates[0] if len(candidates) == 1 else {"vrf": vrf})
-            metric = link_metric(self.protocol, terminations)
-            self.protocol["links"][link_id] = metric
-            if "metric1" in metric:
-                link[L3T + "l3-link-attributes"] = {"metric1": metric["metric1"]}
-            supporting = sorted({link_of[c] for _, cs in members for c in cs if c in link_of})
-            if supporting:
-                link["supporting-link"] = [
-                    {"network-ref": self.l2_net, "link-ref": ref} for ref in supporting
-                ]
-            links.setdefault(vrf, []).append(link)
-            evidence[link_id] = [f"subnet {vrf} {network}"]
-        return {vrf: (dict(sorted(n.items())), links.get(vrf, [])) for vrf, n in nodes.items()}
+                if supporting:
+                    link["supporting-link"] = [
+                        {"network-ref": self.l2_net, "link-ref": ref} for ref in supporting
+                    ]
+                links.append(link)
+                why = {
+                    reason
+                    for pair in edges
+                    if set(pair) <= set(refs)
+                    for reason in reasons[(network, pair)]
+                }
+                evidence[link_id] = [f"observed subnet {network}", *sorted(why)]
+        return dict(sorted(nodes.items())), links
 
     @staticmethod
     def link(network, link_id, refs):

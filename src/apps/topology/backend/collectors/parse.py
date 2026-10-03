@@ -20,6 +20,7 @@ from .tiers import (
     generic_trunk,
     generic_version,
     generic_vlan,
+    generic_vrfs,
     generic_vrrp,
 )
 from .tiers.common import audit_table, table_count
@@ -39,6 +40,7 @@ PARSERS = {
     "switchport": generic_switchport.parse,
     "ospf_interfaces": generic_ospf.parse_interfaces,
     "ospf_process": generic_ospf.parse_process,
+    "vrfs": generic_vrfs.parse,
 }
 EMPTY = {
     "lldp": r"No (?:LLDP )?neighbors?(?: found)?\.?",

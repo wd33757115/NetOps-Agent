@@ -16,7 +16,7 @@ const confirmed: LocateResult = {
 it('shows the access port, VLAN, gateway and the basis of the answer', () => {
   const evidence = vi.fn()
   render(<Located result={confirmed} onEvidence={evidence} onClear={vi.fn()} />)
-  expect(screen.getByText('已确认')).toBeInTheDocument()
+  expect(screen.getByText('已定位观测端口，物理直连未确认')).toBeInTheDocument()
   expect(screen.getByText(/vsr-1 · 10\.10\.1\.1 GigabitEthernet3\/0 · VLAN 200/)).toBeInTheDocument()
   expect(screen.getByText(/依据 MAC 表/)).toBeInTheDocument()
   expect(screen.getByText(/Vlan-interface200 192\.168\.1\.1/)).toBeInTheDocument()
@@ -43,9 +43,20 @@ it('lists every MAC of a conflicting IP and explains an empty answer', () => {
   const conflict: LocateResult = { query: '10.0.0.9', kind: 'ip', status: 'conflict', router_interfaces: [],
     locations: ['00:00:00:00:00:09', '00:00:00:00:00:0a'].map(mac => ({ status: 'confirmed', mac, ports: [port('s', 's')] })) }
   render(<Located result={conflict} onEvidence={vi.fn()} onClear={vi.fn()} />)
-  expect(screen.getByText('同一 IP 对应多个 MAC')).toBeInTheDocument()
+  expect(screen.getByText('地址对应多个身份或作用域')).toBeInTheDocument()
   expect(screen.getByText('MAC 00:00:00:00:00:0a')).toBeInTheDocument()
   cleanup()
   render(<Located result={{ query: '10.0.0.77', kind: 'ip', status: 'not_found', router_interfaces: [], locations: [] }} onEvidence={vi.fn()} onClear={vi.fn()} />)
   expect(screen.getByText(/没有它/)).toBeInTheDocument()
+})
+
+it('shows all device owners and their local instances for an ambiguous address', () => {
+  const result: LocateResult = { query: '10.0.0.1', kind: 'ip', status: 'conflict', router_interfaces: [],
+    locations: ['blue', 'red'].map((vrf, index) => ({ status: 'device', vrf, interface: 'Ethernet0/0', device: { node_id: `dev:${index}`, name: `router-${index}`, address: `10.10.1.${index + 1}`, collected: true } })) }
+  render(<Located result={result} onEvidence={vi.fn()} onClear={vi.fn()} />)
+  expect(screen.getByText('候选 1')).toBeInTheDocument()
+  expect(screen.getByText('候选 2')).toBeInTheDocument()
+  expect(screen.getByText('Ethernet0/0 · NI blue')).toBeInTheDocument()
+  expect(screen.getByText('Ethernet0/0 · NI red')).toBeInTheDocument()
+  expect(highlightIds(result)).toEqual(new Set(['dev:0', 'dev:1']))
 })

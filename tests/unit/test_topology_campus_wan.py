@@ -180,23 +180,27 @@ def test_endpoints_attach_where_the_lab_wired_them(devices, ip):
 
 def test_l3_subnets(l2):
     links = [link for network in l2[1:] for link in network[NT + "link"]]
-    assert {link["link-id"].rsplit("l3-link:", 1)[-1] for link in links} == set(EXPECTED["subnets"])
+    # The local MGMT name is not a second global broadcast/routing domain.
+    assert {link[L3T + "l3-link-attributes"]["name"] for link in links} == {
+        subnet.removeprefix("MGMT:") for subnet in EXPECTED["subnets"]
+    }
 
 
-def test_each_vrf_is_its_own_l3_network_over_l2(l2):
-    # RFC 8345 §3 / RFC 9375 §4.2: a VRF is a separate entry in the network list.
-    default, mgmt = l2[1], l2[2]
-    assert mgmt["network-id"] == default["network-id"] + ":MGMT"
-    assert mgmt[L3T + "l3-topology-attributes"] == {"name": "MGMT"}
-    for network in (default, mgmt):
-        assert network["supporting-network"] == [{"network-ref": l2[0]["network-id"]}]
+def test_local_network_instances_have_distinct_nodes_in_observed_l3_graph(l2):
+    # RFC 8529 NI names are device-local; logical RFC 8345 nodes support the L2 entity.
+    assert len(l2) == 2
+    observed = l2[1]
+    assert observed["supporting-network"] == [{"network-ref": l2[0]["network-id"]}]
     names = {n["node-id"]: n.get(L2T + "l2-node-attributes", {}).get("name") for n in l2[0]["node"]}
-    assert sorted(names[n["node-id"]] for n in mgmt["node"]) == sorted(
+    mgmt_nodes = [n for n in observed["node"] if n.get(ST + "name") == "MGMT"]
+    assert sorted(names[n["supporting-node"][0]["node-ref"]] for n in mgmt_nodes) == sorted(
         d["name"] for d in EXPECTED["devices"].values() if d["platform"] == "ios"
     )
-    assert [link["link-id"].rsplit("l3-link:", 1)[-1] for link in mgmt[NT + "link"]] == [
-        "MGMT:10.10.1.0/24"
-    ]
+    # No same-name NI/prefix inference joins the six unobserved management attachments.
+    management_ids = {n["node-id"] for n in mgmt_nodes}
+    assert not any(
+        tp["node-ref"] in management_ids for link in observed[NT + "link"] for tp in link[ST + "tp"]
+    )
 
 
 def test_ios_route_table_with_an_unknown_line_is_rejected():
@@ -238,13 +242,17 @@ def test_vrrp_virtual_address_locates_as_virtual_router(devices, vip):
 
 
 def test_first_hop_is_the_vrrp_master_of_each_subnet(devices):
-    # PC1 (VLAN10, master DIST1) and PC4 (VLAN20, master DIST2): asymmetric by design.
+    # PC1 and PC4 have different VRRP masters. The candidate device sequences
+    # differ, but DIST1 has no PC4 ARP observation, so delivery is unproven.
     result = trace(devices, BASE, "172.16.10.11", "172.16.20.14")
     forward, reverse = result["forward"], result["reverse"]
     assert (forward["first_hop"], reverse["first_hop"]) == ("vrrp_master", "vrrp_master")
     assert [h["device"]["name"] for h in forward["paths"][0]["hops"]] == ["DIST1.lab.local"]
     assert [h["device"]["name"] for h in reverse["paths"][0]["hops"]] == ["DIST2.lab.local"]
-    assert result["symmetric"] is False
+    assert forward["status"] == "partial"
+    assert forward["paths"][0]["end"]["status"] == "endpoint_unresolved"
+    assert result["symmetric"] is None
+    assert any(gap["status"] == "endpoint_unresolved" for gap in result["gaps"])
 
 
 def test_vrrp_block_without_a_virtual_address_is_rejected():

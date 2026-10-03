@@ -4,16 +4,16 @@ import { Button, Space, Tag } from 'antd'
 interface Place { node_id: string; name: string; address?: string | null; collected: boolean; evidence_id?: string; observed_at?: string }
 interface Port extends Place { port: string; tp_id: string; basis: 'mac' | 'arp'; vlan?: string | null }
 interface RouterInterface extends Place { interface: string; interface_ip: string; subnet: string; vrf: string }
-interface Location { status: string; mac?: string; ips?: string[]; host_node?: string; link_id?: string; ports?: Port[]; inferred?: boolean; evidence?: string[]; arp?: { device: string; ip: string; interface: string }[]; device?: Place; interface?: string }
+interface Location { status: string; mac?: string; ips?: string[]; host_node?: string; link_id?: string; ports?: Port[]; inferred?: boolean; evidence?: string[]; arp?: { device: string; ip: string; interface: string }[]; device?: Place; interface?: string; vrf?: string }
 export interface LocateResult { query: string; kind: 'ip' | 'mac'; status: string; router_interfaces: RouterInterface[]; locations: Location[] }
 
 export const statusLabels: Record<string, [string, string]> = {
-  confirmed: ['已确认', 'green'],
-  shared_segment: ['共享网段：在 Hub 或不可管理设备后面', 'gold'],
+  confirmed: ['已定位观测端口，物理直连未确认', 'green'],
+  shared_segment: ['共享二层关系，物理结构未确认', 'gold'],
   behind_uncollected: ['经过未采集的设备，位置未确定', 'orange'],
   not_found: ['未找到', 'default'],
   device: ['设备自身地址', 'blue'],
-  conflict: ['同一 IP 对应多个 MAC', 'red'],
+  conflict: ['地址对应多个身份或作用域', 'red'],
 }
 
 /** Canvas ids to highlight: the host, its attachment ports' devices and a shared segment. */
@@ -38,13 +38,13 @@ export default function Located({ result, onEvidence, onClear }: { result: Locat
     <dl>
       <dt>查询</dt><dd>{result.query}</dd>
       {result.router_interfaces.map(gateway => <React.Fragment key={gateway.node_id + gateway.interface}>
-        <dt>网段接口</dt><dd>{place(gateway)} {gateway.interface} {gateway.interface_ip}（{gateway.subnet}）</dd>
+        <dt>网段接口</dt><dd>{place(gateway)} {gateway.interface} {gateway.interface_ip}（{gateway.subnet} · NI {gateway.vrf}）</dd>
       </React.Fragment>)}
     </dl>
-    {result.locations.map((location, index) => <section key={location.mac || index}>
-      {result.locations.length > 1 && <h4>MAC {location.mac}</h4>}
+    {result.locations.map((location, index) => <section key={index}>
+      {result.locations.length > 1 && <h4>{location.mac ? `MAC ${location.mac}` : `候选 ${index + 1}`}</h4>}
       <dl>
-        {location.device && <><dt>设备</dt><dd>{place(location.device)}</dd><dt>接口</dt><dd>{location.interface}</dd></>}
+        {location.device && <><dt>设备</dt><dd>{place(location.device)}</dd><dt>接口</dt><dd>{location.interface}{location.vrf ? ` · NI ${location.vrf}` : ''}</dd></>}
         {location.mac && result.locations.length === 1 && <><dt>MAC</dt><dd>{location.mac}</dd></>}
         {!!location.ips?.length && <><dt>IP</dt><dd>{location.ips.join(', ')}</dd></>}
         {location.ports?.map(port => <React.Fragment key={port.node_id + port.port}>
