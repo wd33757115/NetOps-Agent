@@ -1,0 +1,78 @@
+{
+ "ietf-network-inventory:network-inventory": {
+  "network-elements": {
+   "network-element": [
+    {
+     "ne-id": "router-1",
+     "components": {
+      "component": [
+       {
+        "component-id": "chassis-router-1",
+        "class": "iana-hardware:chassis"
+       }
+      ]
+     },
+     "ietf-entitlement-inventory:installed-entitlements": {
+      "entitlement": [
+       {
+        "entitlement-id": "ent-1"
+       }
+      ]
+     },
+     "ietf-entitlement-inventory:capabilities": {
+      "capability-class": [
+       {
+        "capability-class": "basic-capability",
+        "capability": [
+         {
+          "capability-id": "generic-routing-functions",
+          "extended-capability-description": "Basic routing capabilities",
+          "entitlement-state": {
+           "allowed": true,
+           "in-use": true
+          },
+          "supporting-entitlements": {
+           "supporting-entitlement": [
+            {
+             "entitlement-id": "ent-1"
+            }
+           ]
+          }
+         }
+        ]
+       }
+      ]
+     }
+    }
+   ]
+  },
+  "ietf-entitlement-inventory:entitlements": {
+   "entitlement": [
+    {
+     "entitlement-id": "ent-1",
+     "product-id": "prod-1",
+     "state": "active",
+     "renewal-profile": {
+      "activation-date": "2025-01-01T00:00:00Z",
+      "expiration-date": "2026-01-01T00:00:00Z"
+     },
+     "entitlement-attachment": {
+      "universal-access": false,
+      "holders": {
+       "organization": [
+        "org-1"
+       ]
+      },
+      "assets": {
+       "elements": {
+        "network-elements": [
+         "router-1"
+        ]
+       }
+      }
+     }
+    }
+   ]
+  }
+ }
+}

@@ -42,7 +42,11 @@ def parse(text, family):
         }
         if link in {"adm", "*down", "disabled"}:
             record["admin_status"] = "down"
-        # Operational down does not prove administrative state.
+        elif mode in {"route", "bridge", "description"}:
+            # These tables report administrative shutdown in the state column itself
+            # (Comware legend "ADM - administratively down", IOS "admin down"), so any
+            # other state is a port that is administratively up. Other tables say nothing.
+            record["admin_status"] = "up"
         if mode == "bridge":
             try:
                 if len(tokens) < 6 or tokens[4] not in {"A", "T", "H"}:

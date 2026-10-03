@@ -93,6 +93,12 @@
         "conformance-type": "import"
       },
       {
+        "name": "ietf-network-instance",
+        "revision": "2019-01-21",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-network-instance",
+        "conformance-type": "implement"
+      },
+      {
         "name": "ietf-ospf",
         "revision": "2022-10-19",
         "namespace": "urn:ietf:params:xml:ns:yang:ietf-ospf",
@@ -115,6 +121,12 @@
         "revision": "2018-03-13",
         "namespace": "urn:ietf:params:xml:ns:yang:ietf-vrrp",
         "conformance-type": "implement"
+      },
+      {
+        "name": "ietf-yang-schema-mount",
+        "revision": "2019-01-14",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-yang-schema-mount",
+        "conformance-type": "import"
       },
       {
         "name": "ietf-yang-types",

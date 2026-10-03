@@ -37,6 +37,7 @@ IDENTITY = {
 # Builder fact <- fixture file, per platform (the profiles' topology commands).
 FACTS = {
     "comware": {
+        "version": "version",
         "lldp_local": "lldp_local",
         "lldp": "lldp_verbose",
         "interfaces": "interfaces",
@@ -50,6 +51,7 @@ FACTS = {
         "routes": "routes",
     },
     "ios": {
+        "version": "version",
         "lldp": "lldp_verbose",
         "interfaces": "interfaces_description",
         "ip": "ip_interface",
@@ -59,6 +61,7 @@ FACTS = {
         "trunk": "trunk",
         "switchport": "switchport",
         "lag": "lag",
+        "stp": "stp",
         "vrrp": "vrrp",
         "routes": "routes",
     },

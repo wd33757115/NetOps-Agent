@@ -1,0 +1,112 @@
+{
+ "ietf-ni-location:locations": {
+  "location": [
+   {
+    "id": "Foo-DC",
+    "name": "Foo Data Center",
+    "type": "site",
+    "timestamp": "2026-01-15T08:00:00Z"
+   },
+   {
+    "id": "Room-101",
+    "name": "First Floor Telecom Room",
+    "type": "room",
+    "parent": "Foo-DC",
+    "timestamp": "2026-01-15T08:00:00Z",
+    "contained-chassis": []
+   },
+   {
+    "id": "Room-201",
+    "name": "Second Floor Telecom Room",
+    "type": "room",
+    "parent": "Foo-DC",
+    "timestamp": "2026-01-15T08:00:00Z",
+    "contained-chassis": []
+   },
+   {
+    "id": "Room-301",
+    "name": "Third Floor Telecom Room",
+    "type": "room",
+    "parent": "Foo-DC",
+    "timestamp": "2026-01-15T08:00:00Z",
+    "contained-chassis": []
+   }
+  ],
+  "racks": {
+   "rack": [
+    {
+     "id": "Rack-101-A",
+     "uuid": "660e8400-e29b-41d4-a716-446655440010",
+     "name": "Rack A Room 101",
+     "rack-location": {
+      "location-ref": "Room-101",
+      "row-number": 1,
+      "column-number": 1
+     },
+     "height": 2200,
+     "width": 600,
+     "depth": 1200,
+     "max-voltage": 240,
+     "max-allocated-power": 8000,
+     "contained-chassis": [
+      {
+       "relative-position": 10,
+       "ne-ref": "NE-1",
+       "component-ref": "chassis-1"
+      }
+     ],
+     "timestamp": "2026-01-15T10:00:00Z",
+     "valid-until": "2028-01-15T10:00:00Z"
+    },
+    {
+     "id": "Rack-201-B",
+     "uuid": "660e8400-e29b-41d4-a716-446655440011",
+     "name": "Rack B Room 201",
+     "rack-location": {
+      "location-ref": "Room-201",
+      "row-number": 2,
+      "column-number": 1
+     },
+     "height": 2200,
+     "width": 600,
+     "depth": 1200,
+     "max-voltage": 240,
+     "max-allocated-power": 8000,
+     "contained-chassis": [
+      {
+       "relative-position": 15,
+       "ne-ref": "NE-1",
+       "component-ref": "chassis-2"
+      }
+     ],
+     "timestamp": "2026-01-15T10:00:00Z",
+     "valid-until": "2028-01-15T10:00:00Z"
+    },
+    {
+     "id": "Rack-301-C",
+     "uuid": "660e8400-e29b-41d4-a716-446655440012",
+     "name": "Rack C Room 301",
+     "rack-location": {
+      "location-ref": "Room-301",
+      "row-number": 3,
+      "column-number": 1
+     },
+     "height": 2200,
+     "width": 600,
+     "depth": 1200,
+     "max-voltage": 240,
+     "max-allocated-power": 8000,
+     "contained-chassis": [
+      {
+       "relative-position": 20,
+       "ne-ref": "NE-1",
+       "component-ref": "chassis-3"
+      }
+     ],
+     "timestamp": "2026-01-15T10:00:00Z",
+     "valid-until": "2028-01-15T10:00:00Z"
+    }
+   ]
+  }
+ }
+}

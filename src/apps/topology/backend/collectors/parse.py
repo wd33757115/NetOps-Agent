@@ -16,6 +16,7 @@ from .tiers import (
     generic_lldp_local,
     generic_mac,
     generic_ospf,
+    generic_stp,
     generic_switchport,
     generic_trunk,
     generic_version,
@@ -35,6 +36,7 @@ PARSERS = {
     "version": generic_version.parse,
     "vrrp": generic_vrrp.parse,
     "lag": generic_lag.parse,
+    "stp": generic_stp.parse,
     "vlan": generic_vlan.parse,
     "trunk": generic_trunk.parse,
     "switchport": generic_switchport.parse,
@@ -47,6 +49,7 @@ EMPTY = {
     "arp": r"No ARP entries(?: found)?\.?",
     "mac": r"No MAC(?: address)? entries(?: found)?\.?",
     "lag": r"No link aggregation group exists\.",
+    "stp": r"No spanning tree instances? exists?\.?",
     "vrrp": r"VRRP4 is not configured\.",
     "vrfs": (
         r"(?:L3VPN is not configured\.|Total VPN-Instances configured\s*:\s*0"

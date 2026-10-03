@@ -292,6 +292,14 @@
    "affected": false
   },
   {
+   "snapshot": "br1-inventory",
+   "affected": false
+  },
+  {
+   "snapshot": "dist1-inventory",
+   "affected": false
+  },
+  {
    "snapshot": "research-vsr-1-routes",
    "affected": false
   },

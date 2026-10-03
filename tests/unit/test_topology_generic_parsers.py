@@ -88,7 +88,8 @@ def test_real_local_identity_med_and_interface_tables():
     assert interfaces["NULL0"]["type"] == "null"
     assert interfaces["InLoopBack0"]["type"] == "loopback"
     assert interfaces["REG0"]["type"] == "register"
-    assert "admin_status" not in interfaces["GigabitEthernet4/0"]
+    # The Comware table marks shutdown as ADM; a DOWN link is administratively up.
+    assert interfaces["GigabitEthernet4/0"]["admin_status"] == "up"
     ip_rows = run("ip", lab("ip")).records
     assert "GigabitEthernet3/0" not in {r["ifname"] for r in ip_rows}
     assert {r["address"] for r in ip_rows} == {"10.10.1.1", "2.2.2.2", "4.4.4.4", "192.168.1.1"}
@@ -228,7 +229,17 @@ def test_raw_evidence_line_coordinates_and_version():
     for source in result.sources:
         assert lines[source["lines"][0] - 1] == source["raw"]["text"]
     version = run("version", lab("version"))
-    assert version.summary == {"model": "VSR1000", "os_version": "7.1.064, Release 1362P12"}
+    assert version.summary == {
+        "model": "VSR1000",
+        "os_version": "7.1.064, Release 1362P12",
+        # Running images (IVY software-rev) and the hypervisor evidence (IVY ne-virtual).
+        "boot_image": "VSR1000-CMW710-BOOT-R1362P12-X64.bin",
+        "boot_image_version": "7.1.064, Release 1362P12",
+        "system_image": "VSR1000-CMW710-SYSTEM-R1362P12-X64.bin",
+        "system_image_version": "7.1.064, Release 1362P12",
+        "virtual_cpus": "2",
+        "virtio_nic": "VNIC-VIRTIO",
+    }
     assert "hostname" not in version.summary
     assert "serial" not in version.summary  # VSR serial is in LLDP-MED, not version.
 

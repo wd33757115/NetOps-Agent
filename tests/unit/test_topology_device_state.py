@@ -58,7 +58,12 @@ def test_eight_real_campus_devices_keep_observed_interfaces_and_down_ports(
     assert len(rows(projected)) == count
     assert sum(row["oper-status"] == "down" for row in rows(projected)) == down_count
     assert {row["oper-status"] for row in rows(projected)} <= {"up", "down"}
-    assert all(set(row) <= {"name", "type", "oper-status"} for row in rows(projected))
+    assert all(
+        set(row) <= {"name", "type", "oper-status", "enabled", "description"}
+        for row in rows(projected)
+    )
+    # Every port that is down in this lab is shut down ("ADM"/"admin down" in the table).
+    assert sum(row["enabled"] is False for row in rows(projected)) == down_count
     assert projected["metadata"]["completeness"] == "partial"
     assert projected["metadata"]["full_validation"] == "not_performed"
     assert (
@@ -74,6 +79,8 @@ def test_real_aggregate_vlan_and_loopback_types_come_from_facts(device):
         "name": "Port-channel1",
         "type": "iana-if-type:ieee8023adLag",
         "oper-status": "up",
+        "enabled": True,
+        "description": f"to {'DIST2' if device == 'dist1' else 'DIST1'} Po1",
     }
     assert read_interface_state(projected, "Vlan10")["type"] == "iana-if-type:l3ipvlan"
     assert read_interface_state(projected, "Loopback0")["type"] == "iana-if-type:softwareLoopback"
@@ -84,7 +91,11 @@ def test_real_aggregate_vlan_and_loopback_types_come_from_facts(device):
 def test_unmapped_real_internal_interface_types_do_not_become_other_or_ethernet(device):
     projected = project_interfaces(observed_interfaces(device))
     for name in ("NULL0", "REG0"):
-        assert read_interface_state(projected, name) == {"name": name, "oper-status": "up"}
+        assert read_interface_state(projected, name) == {
+            "name": name,
+            "oper-status": "up",
+            "enabled": True,
+        }
         assert "interface_type_unmapped" in gap_codes(projected, name)
     assert read_interface_state(projected, "GigabitEthernet1/0")["type"] == (
         "iana-if-type:ethernetCsmacd"
@@ -99,7 +110,8 @@ def test_all_seven_native_oper_status_values_are_preserved(status):
         [{"ifname": "Ethernet0/1", "type": "ethernet", "oper_status": status}]
     )
     assert read_interface_state(projected, "Ethernet0/1")["oper-status"] == status
-    assert gap_codes(projected) == {"mandatory_statistics_not_observed"}
+    # No admin state in the record: "enabled" (default true) is not implied.
+    assert gap_codes(projected) == {"mandatory_statistics_not_observed", "admin_state_not_observed"}
 
 
 @pytest.mark.parametrize(

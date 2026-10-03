@@ -1,7 +1,8 @@
 """Link aggregation membership: the aggregate and its member ports (RFC 8944 lag).
 
-One record per aggregate: ``ifname``, every listed member and the members bundled into
-it (IOS flag P). Layout from lab samples (campus-wan 20261003-010038), IOS
+One record per aggregate: ``ifname``, every listed member, the members bundled into
+it (IOS flag P) and each member's raw flags (``member_flags``: s suspended, D down,
+I stand-alone, H hot-standby, w waiting). Layout from lab samples (campus-wan 20261003-010038), IOS
 "show etherchannel summary": a "Group  Port-channel  Protocol  Ports" table, members
 wrapping onto indented lines, checked against "Number of channel-groups in use".
 """
@@ -45,6 +46,7 @@ def parse(text, family):
                     "ifname": interface(row[2], family).name,
                     "members": [],
                     "bundled": [],
+                    "member_flags": {},
                 }
                 result.add(current, [number], {"text": line.strip()})
                 members = row[5]
@@ -54,6 +56,7 @@ def parse(text, family):
             for name, flags in MEMBER.findall(members):
                 port = interface(name, family).name
                 current["members"].append(port)
+                current["member_flags"][port] = flags
                 if "P" in flags:
                     current["bundled"].append(port)
         except ValueError as exc:

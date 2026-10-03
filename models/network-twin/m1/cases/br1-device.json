@@ -5,6 +5,8 @@
     "name": "GigabitEthernet1/0",
     "type": "iana-if-type:ethernetCsmacd",
     "oper-status": "up",
+    "enabled": true,
+    "description": "OOB-MGMT",
     "ietf-ip:ipv4": {
      "address": [
       {
@@ -46,6 +48,8 @@
     "name": "GigabitEthernet2/0",
     "type": "iana-if-type:ethernetCsmacd",
     "oper-status": "up",
+    "enabled": true,
+    "description": "to ISP e0/1",
     "ietf-ip:ipv4": {
      "address": [
       {
@@ -66,6 +70,8 @@
     "name": "GigabitEthernet3/0",
     "type": "iana-if-type:ethernetCsmacd",
     "oper-status": "up",
+    "enabled": true,
+    "description": "to CORE1 e0/1",
     "ietf-ip:ipv4": {
      "address": [
       {
@@ -86,6 +92,8 @@
     "name": "GigabitEthernet4/0",
     "type": "iana-if-type:ethernetCsmacd",
     "oper-status": "up",
+    "enabled": true,
+    "description": "to CORE2 e0/2",
     "ietf-ip:ipv4": {
      "address": [
       {
@@ -106,6 +114,8 @@
     "name": "GigabitEthernet5/0",
     "type": "iana-if-type:ethernetCsmacd",
     "oper-status": "up",
+    "enabled": true,
+    "description": "to BR2 GE5/0",
     "ietf-ip:ipv4": {
      "address": [
       {
@@ -125,12 +135,14 @@
    {
     "name": "InLoopBack0",
     "type": "iana-if-type:softwareLoopback",
-    "oper-status": "up"
+    "oper-status": "up",
+    "enabled": true
    },
    {
     "name": "LoopBack0",
     "type": "iana-if-type:softwareLoopback",
     "oper-status": "up",
+    "enabled": true,
     "ietf-ip:ipv4": {
      "address": [
       {
@@ -142,11 +154,13 @@
    },
    {
     "name": "NULL0",
-    "oper-status": "up"
+    "oper-status": "up",
+    "enabled": true
    },
    {
     "name": "REG0",
-    "oper-status": "up"
+    "oper-status": "up",
+    "enabled": true
    }
   ]
  }

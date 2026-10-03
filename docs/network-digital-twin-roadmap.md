@@ -1024,6 +1024,15 @@ P2-9 根据 Q5 取消，不引入 SNMP。P3 及后续仍在进入阶段时展开
 
 ## 14. 进度台账（执行者维护）
 
+### 2026-10-03 M2/M3 设备实例、资源清单与园区二层（topology 0.5.0）
+
+- M2：接口关断状态取自 CLI 状态列图例（Comware `ADM`、IOS `admin down`），输出到 RFC 8343 `enabled`；不用 `admin-status`，因为它需要 if-mib 特性并会让 `if-index` 变成必填。描述照常输出。接口的全部地址属于同一个命名 VRF 时，按 RFC 8529 绑定 `bind-ni-name` 并建 NI；全局表不建 NI。VRF 内路由未采集，空的 `vrf-root` 不满足必选 root-type，因此只记缺口。
+- M2 资源清单：IVY -20 和软件扩展 -04，每台设备一个网元，包含名称、厂商、型号、运行映像及版本。`ne-type` 默认是物理，所以只按版本证据给出：VSR 判为 `ne-virtual`（vCPU 与 virtio 网卡），IOL 判为 `ne-software`（作为 Linux 进程运行）。证据不足就不输出网元；序列号属于取不到 component-id 的组件，不输出。冻结 YANG 新增 RFC 8529/8528、IVY、iana-hardware，均取自 M1 来源锁。草案自带的 JSON 示例离线校验：基础 3/3、许可 7/8 通过；软件 -04 用 `null` 表示时间、位置 -06 的 `locations` 位置错误，属于草案示例缺陷。
+- M3：IOS 拓扑模式新增 `show spanning-tree`，同时记录 LAG 成员标志。新增逐链路逐 VLAN 的转发分析（放行、打标、生成树、聚合成员）和桥域，随快照保存为 `l2_forwarding`。rapid-PVST 的逐 VLAN 状态没有标准 YANG 节点；设备级 PVID、VLAN 成员、FDB 缺桥名或键，仍不导出。
+- 实机只读验收：一次发现 8 台全部成功，11 项核对通过。网元类型正确；IOS 的 OOB 口绑定 MGMT；关断口为 false；4 条接入上联各转发一个 VLAN、阻塞另一个，与配置的生成树根一致；DIST 间聚合成员两个 VLAN 都转发；两个 VLAN 各成一个桥域；16 棵树的 libyang 运行态校验通过。证据在 `.runtime/m2m3-live-proof.json`。
+- M1 产物同步：已导出字段从 21 增至 39，App 输出 102 个路径，全部是标准节点；正反例增至 39 个，全部符合预期。
+- 测试：topology 单元测试 1257 个通过（新增网元、二层转发、NI 用例）。未做：物理网元、堆叠、端口与组件对应、H3C 生成树、MSTP 原生导出、QinQ、界面展示逐 VLAN 结果。
+
 ### 2026-10-03 M1 完整模块基线与语义验收框架
 
 - 范围：实施方案 §8 M1 全部 8 项；产物在 `models/network-twin/m1/`，脚本为 `scripts/topology/m1_*.py`，报告见该目录 README。

@@ -29,10 +29,11 @@ sys.path[:0] = [str(ROOT), str(ROOT / "tests/unit")]
 
 import test_topology_campus_wan as campus  # noqa: E402  fixture loading shared with the tests
 
-from src.apps.topology.backend.model.builder import build_topology  # noqa: E402
+from src.apps.topology.backend.model.builder import build_topology, device_node_ids  # noqa: E402
 from src.apps.topology.backend.model.device_control import project_device_control  # noqa: E402
 from src.apps.topology.backend.model.device_ip import enrich_device_ip  # noqa: E402
 from src.apps.topology.backend.model.device_state import project_device_state  # noqa: E402
+from src.apps.topology.backend.model.inventory import project_inventory  # noqa: E402
 
 M1 = ROOT / "models/network-twin/m1"
 INSTANCES = ROOT / "models/network-twin/instances"
@@ -83,7 +84,7 @@ def emitted(tree: dict) -> dict[str, str]:
 
 
 def app_trees() -> list[tuple[str, dict]]:
-    trees, devices = [], {}
+    trees, devices, observations = [], {}, {}
     for device, spec in campus.EXPECTED["devices"].items():
         identity = campus.IDENTITY[spec["platform"]]
         outcome = campus.topology_observation(
@@ -101,8 +102,10 @@ def app_trees() -> list[tuple[str, dict]]:
                 "facts": outcome["facts"],
                 "capabilities": outcome["capabilities"],
                 "fact_metadata": outcome["fact_metadata"],
+                "platform": outcome["platform"],
             }
         }
+        observations[device] = (spec["management"], observation)
         state = enrich_device_ip(project_device_state(observation), observation)
         trees.append((f"app:device-state:{device}", state["tree"]))
         control = project_device_control(observation)
@@ -111,6 +114,10 @@ def app_trees() -> list[tuple[str, dict]]:
         trees.append((f"app:device-lldp:{device}", control["lldp"]["tree"]))
     tree, _ = build_topology(devices, "urn:netops:topology:campus:")
     trees.append(("app:topology", tree))
+    ids = device_node_ids(devices, "urn:netops:topology:campus:")
+    for device, (address, observation) in observations.items():
+        inventory = project_inventory(observation, ids[address])
+        trees.append((f"app:inventory:{device}", inventory["tree"]))
     return trees
 
 

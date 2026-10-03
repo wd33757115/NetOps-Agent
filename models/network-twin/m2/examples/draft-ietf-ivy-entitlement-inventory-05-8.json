@@ -1,0 +1,36 @@
+{
+ "example-capability-framework:capabilities": {
+  "capability": [
+   {
+    "capability-id": "cap-routing-basic",
+    "description": "Basic routing functionality"
+   },
+   {
+    "capability-id": "cap-routing-advanced",
+    "description": "Advanced routing with BGP and OSPF"
+   }
+  ]
+ },
+ "ietf-network-inventory:network-inventory": {
+  "network-elements": {
+   "network-element": [
+    {
+     "ne-id": "device-1",
+     "ietf-entitlement-inventory:capabilities": {
+      "capability-class": [
+       {
+        "capability-class": "example-capability-extension:example-capability-class",
+        "capability": [
+         {
+          "capability-id": "routing",
+          "example-capability-extension:capability-ref": "cap-routing-basic"
+         }
+        ]
+       }
+      ]
+     }
+    }
+   ]
+  }
+ }
+}

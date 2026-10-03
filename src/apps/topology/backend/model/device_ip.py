@@ -1,10 +1,11 @@
-"""Observed RFC 8344 IP/neighbor and RFC 8347 VRRP data in a partial device tree.
+"""Observed RFC 8344 IP/neighbor, RFC 8347 VRRP and RFC 8529 NI data in a partial tree.
 
-Names, scope, address families and keys require evidence.  Application scope
-metadata stays outside YANG; different VRFs are never folded into one native
-interface.  No interface type, protocol version, configured priority, defaults,
-statistics or time is invented.  Strict full validation must still expose the
-RFC 8343 mandatory gaps and any unobserved mandatory VRRP version.
+Names, scope, address families and keys require evidence.  An interface whose
+addresses all lie in one named VRF is bound to that network instance; different
+VRFs are never folded into one native interface.  No interface type, protocol
+version, configured priority, defaults, statistics or time is invented.  Strict full
+validation must still expose the RFC 8343 mandatory gaps and any unobserved
+mandatory VRRP version.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from copy import deepcopy
 
 IP = "ietf-ip:"
 VRRP = "ietf-vrrp:"
+NI = "ietf-network-instance:"
 
 
 def _text(value):
@@ -397,9 +399,27 @@ def enrich_device_ip(projected, observation):
         result,
         blocked,
     )
+    # RFC 8529: an interface whose addresses all belong to one named VRF is bound to that
+    # network instance; the global table ("default" in the facts) is not an NI entry.
+    # The mandatory root-type case (vrf-root and its mounted routing) needs the VRF's own
+    # data, which is not collected: an empty container would not establish it.
+    tree.pop(NI + "network-instances", None)
+    instances = set()
+    for name, row in interfaces.items():
+        row.pop(NI + "bind-ni-name", None)
+        scopes = {ip["vrf"] for ip in ip_rows if ip["ifname"] == name}
+        if len(scopes) == 1 and (scope := next(iter(scopes))) != "default":
+            row[NI + "bind-ni-name"] = scope
+            instances.add(scope)
+    if instances:
+        tree[NI + "network-instances"] = {
+            "network-instance": [{"name": vrf} for vrf in sorted(instances)]
+        }
+        for vrf in sorted(instances):
+            _gap(result, "network_instance_root_not_observed", network_instance=vrf)
     container["interface"] = [interfaces[name] for name in sorted(interfaces)]
     result["metadata"].update(
-        standards=["RFC 8343", "RFC 8344", "RFC 8347"],
+        standards=["RFC 8343", "RFC 8344", "RFC 8347", "RFC 8529"],
         completeness="partial",
         full_validation="not_performed",
         interface_scopes={row["ifname"]: row["vrf"] for row in ip_rows},

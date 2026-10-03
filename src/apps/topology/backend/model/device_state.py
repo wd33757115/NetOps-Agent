@@ -1,10 +1,11 @@
 """Partial RFC 8343 interface state, kept separate from the SIMAP tree.
 
-Only observed name, type and oper-status are projected.  The native mandatory
-statistics/discontinuity-time remains absent, with a completeness gap: this is
-not a fully validated device instance.  No admin state, timestamps or statistics
-are fabricated.  Snapshot identity/evidence metadata stays outside the YANG tree
-under the application's Q-IETF-1 association policy.
+Only observed name, type, oper-status, enabled (shutdown) and description are projected.
+The native mandatory statistics/discontinuity-time remains absent, with a
+completeness gap: this is not a fully validated device instance.  Nothing that was
+not observed (admin state, timestamps, statistics) is fabricated.  Snapshot
+identity/evidence metadata stays outside the YANG tree under the application's
+Q-IETF-1 association policy.
 """
 
 from __future__ import annotations
@@ -74,6 +75,17 @@ def project_interfaces(records):
                     "field": "oper-status",
                 }
             )
+        # Shutdown is the configured state: RFC 8343 "enabled" (base model). admin-status
+        # needs the if-mib feature, which also makes if-index mandatory. "enabled"
+        # defaults to true, so an unobserved state is stated as a gap.
+        admin = record.get("admin_status")
+        if admin in ("up", "down"):
+            entry["enabled"] = admin == "up"
+        else:
+            gaps.append({"code": "admin_state_not_observed", "interface": name, "field": "enabled"})
+        description = record.get("description")
+        if isinstance(description, str) and description and _name(description):
+            entry["description"] = description
         interfaces[name] = entry
     for name in sorted(duplicates):
         del interfaces[name]

@@ -31,6 +31,7 @@ from .collectors.identify import TopologyDiscoveryPlan as DiscoveryPlan
 from .collectors.tiers.common import valid_mac
 from .logins import DOMAIN
 from .model.builder import build_topology_details, device_node_ids
+from .model.l2_forwarding import analyse as analyse_l2_forwarding
 from .model.locate import locate as locate_in
 from .model.path import trace as trace_in
 from .model.snapshot_state import enrich_snapshot_state
@@ -55,6 +56,7 @@ APP_ID = "topology"
 MODEL_PROFILE = "rfc8345+simap-yang-03:l2-l3:scoped-v2"
 ACTIVE = ("queued", "running", "waiting_for_input")
 TOPOLOGY_FACTS = (
+    "version",
     "lldp_local",
     "lldp",
     "interfaces",
@@ -65,6 +67,7 @@ TOPOLOGY_FACTS = (
     "trunk",
     "switchport",
     "lag",
+    "stp",
     "vrrp",
     "routes",
     "ospf_interfaces",
@@ -300,6 +303,7 @@ def _graph(session, run):
     base = f"urn:netops:topology:{network.id}:"
     devices = {o["address"]: _facts(o["data"]) for o in observations}
     tree, links_evidence, protocols = build_topology_details(devices, base)
+    l2_forwarding = analyse_l2_forwarding(devices, tree, base)
     ids = device_node_ids(devices, base)
     collected = {
         ids[o["address"]]: {
@@ -329,6 +333,7 @@ def _graph(session, run):
         "evidence": links_evidence,
         "state": state,
         "protocols": {"ospf": protocols},
+        "l2_forwarding": l2_forwarding,
     }
     targets = session.scalars(select(Target).where(Target.run_id == run.id)).all()
     addresses = {target.address: target for target in targets}
@@ -863,7 +868,7 @@ def topology_observation(result):
         cap: parsed.fact_summary()
         if cap in {"ospf_interfaces", "ospf_process"}
         else parsed.summary
-        if cap in {"lldp_local", "trunk", "switchport"}
+        if cap in {"version", "lldp_local", "trunk", "switchport"}
         else parsed.records
         for cap, parsed in result.parsed.items()
         if cap in TOPOLOGY_FACTS and parsed.status in {"complete", "partial"}

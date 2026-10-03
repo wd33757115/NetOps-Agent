@@ -1,0 +1,286 @@
+{
+ "ietf-network-inventory:network-inventory": {
+  "network-elements": {
+   "network-element": [
+    {
+     "ne-id": "datacenter-router-1",
+     "components": {
+      "component": [
+       {
+        "component-id": "main-chassis",
+        "class": "iana-hardware:chassis"
+       }
+      ]
+     },
+     "ietf-entitlement-inventory:installed-entitlements": {
+      "entitlement": [
+       {
+        "entitlement-id": "enterprise-license-pool"
+       },
+       {
+        "entitlement-id": "advanced-security-pool"
+       }
+      ]
+     },
+     "ietf-entitlement-inventory:capabilities": {
+      "capability-class": [
+       {
+        "capability-class": "basic-capability",
+        "capability": [
+         {
+          "capability-id": "enterprise-routing",
+          "extended-capability-description": "Enterprise routing protocols",
+          "entitlement-state": {
+           "allowed": true,
+           "in-use": true
+          },
+          "supporting-entitlements": {
+           "supporting-entitlement": [
+            {
+             "entitlement-id": "enterprise-license-pool"
+            }
+           ]
+          },
+          "capability-restrictions": {
+           "capability-restriction": [
+            {
+             "restriction-id": "bgp-peers",
+             "description": "Maximum BGP peers",
+             "resource-name": "bgp-sessions",
+             "units": "peers",
+             "max-value": "500",
+             "current-value": "245"
+            }
+           ]
+          }
+         },
+         {
+          "capability-id": "advanced-firewall",
+          "extended-capability-description": "Enterprise firewall",
+          "entitlement-state": {
+           "allowed": true,
+           "in-use": true
+          },
+          "supporting-entitlements": {
+           "supporting-entitlement": [
+            {
+             "entitlement-id": "advanced-security-pool"
+            }
+           ]
+          },
+          "capability-restrictions": {
+           "capability-restriction": [
+            {
+             "restriction-id": "firewall-throughput",
+             "description": "Maximum firewall throughput",
+             "resource-name": "throughput",
+             "units": "Gbps",
+             "max-value": "40",
+             "current-value": "28"
+            }
+           ]
+          }
+         }
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "ne-id": "datacenter-router-2",
+     "components": {
+      "component": [
+       {
+        "component-id": "main-chassis",
+        "class": "iana-hardware:chassis"
+       }
+      ]
+     },
+     "ietf-entitlement-inventory:installed-entitlements": {
+      "entitlement": [
+       {
+        "entitlement-id": "enterprise-license-pool"
+       }
+      ]
+     },
+     "ietf-entitlement-inventory:capabilities": {
+      "capability-class": [
+       {
+        "capability-class": "basic-capability",
+        "capability": [
+         {
+          "capability-id": "enterprise-routing",
+          "extended-capability-description": "Enterprise routing protocol",
+          "entitlement-state": {
+           "allowed": true,
+           "in-use": true
+          },
+          "supporting-entitlements": {
+           "supporting-entitlement": [
+            {
+             "entitlement-id": "enterprise-license-pool"
+            }
+           ]
+          },
+          "capability-restrictions": {
+           "capability-restriction": [
+            {
+             "restriction-id": "bgp-peers",
+             "description": "Maximum BGP peers",
+             "resource-name": "bgp-sessions",
+             "units": "peers",
+             "max-value": "500",
+             "current-value": "178"
+            }
+           ]
+          }
+         }
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "ne-id": "branch-router-1",
+     "components": {
+      "component": [
+       {
+        "component-id": "main-unit",
+        "class": "iana-hardware:chassis"
+       }
+      ]
+     },
+     "ietf-entitlement-inventory:installed-entitlements": {
+      "entitlement": [
+       {
+        "entitlement-id": "advanced-security-pool"
+       }
+      ]
+     },
+     "ietf-entitlement-inventory:capabilities": {
+      "capability-class": [
+       {
+        "capability-class": "basic-capability",
+        "capability": [
+         {
+          "capability-id": "advanced-firewall",
+          "extended-capability-description": "Enterprise firewall",
+          "entitlement-state": {
+           "allowed": true,
+           "in-use": true
+          },
+          "supporting-entitlements": {
+           "supporting-entitlement": [
+            {
+             "entitlement-id": "advanced-security-pool"
+            }
+           ]
+          },
+          "capability-restrictions": {
+           "capability-restriction": [
+            {
+             "restriction-id": "firewall-throughput",
+             "description": "Maximum firewall throughput",
+             "resource-name": "throughput",
+             "units": "Gbps",
+             "max-value": "10",
+             "current-value": "7"
+            }
+           ]
+          }
+         }
+        ]
+       }
+      ]
+     }
+    }
+   ]
+  },
+  "ietf-entitlement-inventory:entitlements": {
+   "entitlement": [
+    {
+     "entitlement-id": "enterprise-license-pool",
+     "product-id": "ENT-ROUTER-POOL-100",
+     "state": "active",
+     "renewal-profile": {
+      "start-date": "2025-01-01T00:00:00Z",
+      "activation-date": "2025-01-15T00:00:00Z",
+      "expiration-date": "2026-01-15T00:00:00Z"
+     },
+     "restrictions": {
+      "restriction": [
+       {
+        "restriction-id": "license-consumption",
+        "description": "Enterprise router licenses consumed from pool",
+        "units": "licenses",
+        "max-value": "100",
+        "current-value": "87"
+       }
+      ]
+     },
+     "entitlement-attachment": {
+      "universal-access": false,
+      "holders": {
+       "organization": [
+        "Company-A"
+       ]
+      },
+      "assets": {
+       "elements": {
+        "network-elements": [
+         "datacenter-router-1",
+         "datacenter-router-2"
+        ]
+       }
+      }
+     }
+    },
+    {
+     "entitlement-id": "advanced-security-pool",
+     "product-id": "SEC-FIREWALL-POOL-25",
+     "state": "active",
+     "renewal-profile": {
+      "start-date": "2025-03-01T00:00:00Z",
+      "activation-date": "2025-03-01T00:00:00Z",
+      "expiration-date": "2026-03-01T00:00:00Z"
+     },
+     "restrictions": {
+      "restriction": [
+       {
+        "restriction-id": "license-consumption",
+        "description": "Security licenses consumed from pool (high utilization)",
+        "units": "licenses",
+        "max-value": "25",
+        "current-value": "21"
+       },
+       {
+        "restriction-id": "total-throughput",
+        "description": "Aggregate firewall throughput across all devices (real-time snapshot)",
+        "resource-name": "throughput",
+        "units": "Gbps",
+        "max-value": "100",
+        "current-value": "50"
+       }
+      ]
+     },
+     "entitlement-attachment": {
+      "universal-access": false,
+      "holders": {
+       "organization": [
+        "Company-A"
+       ]
+      },
+      "assets": {
+       "elements": {
+        "network-elements": [
+         "datacenter-router-1",
+         "branch-router-1"
+        ]
+       }
+      }
+     }
+    }
+   ]
+  }
+ }
+}

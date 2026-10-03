@@ -1,0 +1,218 @@
+{
+ "ietf-network-inventory:network-inventory": {
+  "network-elements": {
+   "network-element": [
+    {
+     "ne-id": "enterprise-router-5",
+     "components": {
+      "component": [
+       {
+        "component-id": "main-chassis",
+        "class": "iana-hardware:chassis"
+       }
+      ]
+     },
+     "ietf-entitlement-inventory:installed-entitlements": {
+      "entitlement": [
+       {
+        "entitlement-id": "security-suite-ent",
+        "in-use": true
+       },
+       {
+        "entitlement-id": "advanced-routing-ent",
+        "in-use": true
+       },
+       {
+        "entitlement-id": "voice-gateway-ent",
+        "in-use": false
+       }
+      ]
+     },
+     "ietf-entitlement-inventory:capabilities": {
+      "capability-class": [
+       {
+        "capability-class": "basic-capability",
+        "capability": [
+         {
+          "capability-id": "firewall",
+          "extended-capability-description": "firewall",
+          "entitlement-state": {
+           "allowed": true,
+           "in-use": true
+          },
+          "supporting-entitlements": {
+           "supporting-entitlement": [
+            {
+             "entitlement-id": "security-suite-ent"
+            }
+           ]
+          },
+          "capability-restrictions": {
+           "capability-restriction": [
+            {
+             "restriction-id": "concurrent-sessions",
+             "description": "Maximum concurrent firewall sessions",
+             "resource-name": "sessions",
+             "units": "connections",
+             "max-value": "100000",
+             "current-value": "45000"
+            }
+           ]
+          }
+         },
+         {
+          "capability-id": "vpn",
+          "extended-capability-description": "IPsec VPN tunnels",
+          "entitlement-state": {
+           "allowed": true,
+           "in-use": true
+          },
+          "supporting-entitlements": {
+           "supporting-entitlement": [
+            {
+             "entitlement-id": "security-suite-ent"
+            }
+           ]
+          },
+          "capability-restrictions": {
+           "capability-restriction": [
+            {
+             "restriction-id": "tunnel-count",
+             "description": "Maximum VPN tunnels",
+             "resource-name": "tunnels",
+             "units": "count",
+             "max-value": "500",
+             "current-value": "120"
+            }
+           ]
+          }
+         },
+         {
+          "capability-id": "bgp-advanced",
+          "extended-capability-description": "Advanced BGP features including route reflector",
+          "entitlement-state": {
+           "allowed": true,
+           "in-use": true
+          },
+          "supporting-entitlements": {
+           "supporting-entitlement": [
+            {
+             "entitlement-id": "advanced-routing-ent"
+            }
+           ]
+          },
+          "capability-restrictions": {
+           "capability-restriction": [
+            {
+             "restriction-id": "bgp-peers",
+             "description": "Maximum BGP peer sessions",
+             "resource-name": "peers",
+             "units": "sessions",
+             "max-value": "200",
+             "current-value": "75"
+            }
+           ]
+          }
+         }
+        ]
+       }
+      ]
+     }
+    }
+   ]
+  },
+  "ietf-entitlement-inventory:entitlements": {
+   "entitlement": [
+    {
+     "entitlement-id": "security-suite-ent",
+     "product-id": "SEC-SUITE-ENTERPRISE-001",
+     "state": "active",
+     "renewal-profile": {
+      "start-date": "2024-06-01T00:00:00Z",
+      "activation-date": "2024-06-15T00:00:00Z",
+      "expiration-date": "2025-06-15T00:00:00Z"
+     },
+     "entitlement-attachment": {
+      "universal-access": false,
+      "holders": {
+       "organization": [
+        "Enterprise Corp"
+       ]
+      },
+      "assets": {
+       "elements": {
+        "network-elements": [
+         "enterprise-router-5"
+        ]
+       }
+      }
+     }
+    },
+    {
+     "entitlement-id": "advanced-routing-ent",
+     "product-id": "ROUTING-ADVANCED-001",
+     "state": "active",
+     "renewal-profile": {
+      "start-date": "2024-06-01T00:00:00Z",
+      "activation-date": "2024-06-15T00:00:00Z",
+      "expiration-date": "2025-06-15T00:00:00Z"
+     },
+     "entitlement-attachment": {
+      "universal-access": false,
+      "holders": {
+       "organization": [
+        "Enterprise Corp"
+       ]
+      },
+      "assets": {
+       "elements": {
+        "network-elements": [
+         "enterprise-router-5"
+        ]
+       }
+      }
+     }
+    },
+    {
+     "entitlement-id": "voice-gateway-ent",
+     "product-id": "VOICE-GW-PREMIUM-001",
+     "state": "active",
+     "renewal-profile": {
+      "start-date": "2024-12-01T00:00:00Z",
+      "activation-date": "2024-12-15T00:00:00Z",
+      "expiration-date": "2025-12-15T00:00:00Z"
+     },
+     "entitlement-attachment": {
+      "universal-access": false,
+      "holders": {
+       "organization": [
+        "Enterprise Corp"
+       ],
+       "user": [
+        "telecom-admin"
+       ]
+      },
+      "assets": {
+       "elements": {
+        "network-elements": [
+         "enterprise-router-5"
+        ]
+       }
+      }
+     },
+     "restrictions": {
+      "restriction": [
+       {
+        "restriction-id": "voice-channels",
+        "description": "Maximum concurrent voice channels",
+        "units": "channels",
+        "max-value": "100",
+        "current-value": "0"
+       }
+      ]
+     }
+    }
+   ]
+  }
+ }
+}

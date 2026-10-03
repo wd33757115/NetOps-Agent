@@ -34,6 +34,7 @@ MODE_CAPABILITIES = {
         "trunk",
         "switchport",
         "lag",
+        "stp",
         "vrrp",
         "ospf_interfaces",
         "ospf_process",

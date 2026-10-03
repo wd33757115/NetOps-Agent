@@ -161,6 +161,8 @@ IEEE 桥实例、component、FDB/FID、VID、端口为二层查找上下文；�
 
 ### M2：设备实例与资源清单闭合
 
+执行状态（2026-10-03，topology 0.5.0）：已完成可观测部分，见 [models/network-twin/m2](../models/network-twin/m2/README.md)。接口关断状态（`enabled`）与描述、RFC 8529 网络实例、IVY 网元（虚拟/软件类型按版本证据判定，不默认物理，不造序列号）已导出，并通过实机只读验收和 libyang 校验。物理网元、堆叠、端口与组件对应没有样本，VRF 内路由仍是缺口；被动资源、许可、位置和能耗用草案示例离线验收，并发现软件 -04、位置 -06 的示例缺陷。
+
 依赖 M1。完成 interfaces/IP/hardware/system、NI/LNE/schema mount 的完整映射清单和导出；IVY 基础、软件、位置、topology mapping 按当前固定组合核验，随后加入被动资源、许可、能源的标准实例能力。
 
 现有模型模块 `device_state.py`、`device_ip.py`、`device_control.py` 在各自标准范围扩展；不得把 VRRP version、原生 RIB 名称、统计中断时间、LLDP 表键从本机序号或当前时间构造出来。未观测 mandatory 项保留缺口。
@@ -168,6 +170,8 @@ IEEE 桥实例、component、FDB/FID、VID、端口为二层查找上下文；�
 验收：一设备多接口/地址、多 NI、同名接口跨设备、重复管理地址、虚拟/物理/堆叠区别；挂载内 leafref 不串设备；inventory mapping 的端口与组件真实对应。NE 缺项不能通过假序列号通过。当前实验缺物理/被动资源事实时以正式示例和脱敏素材离线验收该范围，明确无实机结论。
 
 ### M3：完整园区二层与接入
+
+执行状态（2026-10-03，topology 0.5.0）：IOS 生成树逐 VLAN 采集、LAG 成员状态，以及逐链路逐 VLAN 的转发分析（放行、打标、生成树、聚合成员）已完成，并有桥域汇总。双上联/阻塞口在实机上验证；聚合成员变化、native 不一致、允许列表无交集用真实数据的单项修改验证。rapid-PVST 的逐 VLAN 状态没有标准 YANG 节点，只作证据；H3C 生成树、MSTP 原生导出、QinQ 没有样本。详见 [models/network-twin/m2](../models/network-twin/m2/README.md)。
 
 依赖 M1/M2。完整纳入适用 IEEE bridge、VLAN、FDB、LLDP、LAG 及生成树模型；RFC 8944 作为网络级 L2 视图。区分物理口、聚合口、成员、子接口和桥端口。接入识别按桥/FDB/VID/接口和当次观测，禁止跨 NI/VLAN 的全局 MAC 合并。
 

@@ -163,7 +163,8 @@ def test_missing_interface_observations_create_name_only_with_mandatory_gaps():
     obs = observation(interfaces=[])
     obs["data"]["capabilities"]["interfaces"] = "failed"
     result = export(obs)
-    assert set(iface(result)) == {"name", "ietf-ip:ipv4"}
+    # The IP fact itself proves the VRF, so the name-only interface is bound to it.
+    assert set(iface(result)) == {"name", "ietf-ip:ipv4", "ietf-network-instance:bind-ni-name"}
     assert {
         "interface_type_unmapped",
         "oper_status_not_observed_or_invalid",
@@ -429,6 +430,9 @@ def explicit_synthetic_control(ipv6=False):
     tree["ietf-interfaces:interfaces"]["interface"][0]["statistics"] = {
         "discontinuity-time": "2000-01-01T00:00:00Z"
     }
+    # Test-only: the NI's root-type case (its own data is never collected).
+    for instance in tree["ietf-network-instance:network-instances"]["network-instance"]:
+        instance["vrf-root"] = {}
     return tree
 
 
@@ -445,6 +449,8 @@ def test_production_partial_parses_but_full_native_validation_reports_missing_st
 def test_native_vrrp_version_mandatory_is_not_hidden_by_partial_label(native_model):
     result = export(observation(vrrp=[virtual()]))
     iface(result)["statistics"] = {"discontinuity-time": "2000-01-01T00:00:00Z"}
+    for instance in result["tree"]["ietf-network-instance:network-instances"]["network-instance"]:
+        instance["vrf-root"] = {}
     native_model.from_raw(result["tree"])
     with pytest.raises(Exception, match="version"):
         validate_native(native_model, result["tree"])
@@ -540,3 +546,33 @@ def test_invalid_observed_version_refuses_vrrp_instance_instead_of_becoming_defa
     result = export(observation(vrrp=[virtual(version=version)]))
     assert "ietf-vrrp:vrrp" not in iface(result)["ietf-ip:ipv4"]
     assert "invalid_vrrp_fact" in codes(result)
+
+
+def test_named_vrf_interfaces_bind_to_rfc8529_network_instances():
+    obs = observation()
+    obs["data"]["facts"]["ip"].append(
+        {"ifname": "Loopback0", "address": "198.51.100.1", "prefix_len": 32, "vrf": "default"}
+    )
+    obs["data"]["facts"]["interfaces"].append(
+        {"ifname": "Loopback0", "type": "loopback", "oper_status": "up"}
+    )
+    result = export(obs)
+    tree = result["tree"]
+    assert iface(result)["ietf-network-instance:bind-ni-name"] == "BLUE"
+    # The global table ("default" in the facts) is not a network-instance entry.
+    assert "ietf-network-instance:bind-ni-name" not in iface(result, "Loopback0")
+    assert tree["ietf-network-instance:network-instances"] == {
+        "network-instance": [{"name": "BLUE"}]
+    }
+    # The VRF's own (mounted) data is not collected, so its root-type case is a gap.
+    assert "network_instance_root_not_observed" in codes(result)
+
+
+def test_interface_with_addresses_in_two_vrfs_is_not_bound():
+    obs = observation()
+    obs["data"]["facts"]["ip"].append(
+        {"ifname": "Vlan20", "address": "203.0.113.2", "prefix_len": 24, "vrf": "RED"}
+    )
+    result = export(obs)
+    assert "ietf-network-instance:network-instances" not in result["tree"]
+    assert "interface_multiple_vrf_scopes" in codes(result)

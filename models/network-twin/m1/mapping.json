@@ -15,12 +15,12 @@
   "topology": 206
  },
  "emitted": {
-  "app": 85,
+  "app": 102,
   "research": 133
  },
  "producers": {
   "app:device-state:br1": {
-   "paths": 21,
+   "paths": 23,
    "not_in_schema": []
   },
   "app:device-routing:br1:default": {
@@ -32,7 +32,7 @@
    "not_in_schema": []
   },
   "app:device-state:br2": {
-   "paths": 21,
+   "paths": 23,
    "not_in_schema": []
   },
   "app:device-routing:br2:default": {
@@ -44,7 +44,7 @@
    "not_in_schema": []
   },
   "app:device-state:core1": {
-   "paths": 12,
+   "paths": 18,
    "not_in_schema": []
   },
   "app:device-routing:core1:default": {
@@ -56,7 +56,7 @@
    "not_in_schema": []
   },
   "app:device-state:core2": {
-   "paths": 12,
+   "paths": 18,
    "not_in_schema": []
   },
   "app:device-routing:core2:default": {
@@ -68,7 +68,7 @@
    "not_in_schema": []
   },
   "app:device-state:dist1": {
-   "paths": 20,
+   "paths": 26,
    "not_in_schema": []
   },
   "app:device-routing:dist1:default": {
@@ -80,7 +80,7 @@
    "not_in_schema": []
   },
   "app:device-state:dist2": {
-   "paths": 20,
+   "paths": 26,
    "not_in_schema": []
   },
   "app:device-routing:dist2:default": {
@@ -92,7 +92,7 @@
    "not_in_schema": []
   },
   "app:device-state:acc1": {
-   "paths": 9,
+   "paths": 15,
    "not_in_schema": []
   },
   "app:device-routing:acc1:None": {
@@ -104,7 +104,7 @@
    "not_in_schema": []
   },
   "app:device-state:acc2": {
-   "paths": 9,
+   "paths": 15,
    "not_in_schema": []
   },
   "app:device-routing:acc2:None": {
@@ -117,6 +117,38 @@
   },
   "app:topology": {
    "paths": 59,
+   "not_in_schema": []
+  },
+  "app:inventory:br1": {
+   "paths": 11,
+   "not_in_schema": []
+  },
+  "app:inventory:br2": {
+   "paths": 11,
+   "not_in_schema": []
+  },
+  "app:inventory:core1": {
+   "paths": 10,
+   "not_in_schema": []
+  },
+  "app:inventory:core2": {
+   "paths": 10,
+   "not_in_schema": []
+  },
+  "app:inventory:dist1": {
+   "paths": 10,
+   "not_in_schema": []
+  },
+  "app:inventory:dist2": {
+   "paths": 10,
+   "not_in_schema": []
+  },
+  "app:inventory:acc1": {
+   "paths": 10,
+   "not_in_schema": []
+  },
+  "app:inventory:acc2": {
+   "paths": 10,
    "not_in_schema": []
   },
   "research:inventory.json": {
@@ -153,11 +185,11 @@
   }
  },
  "fact_verdicts": {
-  "context": 4,
-  "exported": 21,
-  "key-blocked": 13,
-  "mappable-not-exported": 31,
-  "no-native-node": 8
+  "context": 3,
+  "exported": 39,
+  "key-blocked": 14,
+  "mappable-not-exported": 29,
+  "no-native-node": 16
  },
  "facts": {
   "interfaces.ifname": {
@@ -202,9 +234,9 @@
    "verdict": "exported"
   },
   "interfaces.admin_status": {
-   "path": "/ietf-interfaces:interfaces/interface/admin-status",
-   "status": "native",
-   "note": "state value; the configured value is interface/enabled",
+   "path": "/ietf-interfaces:interfaces/interface/enabled",
+   "status": "derived",
+   "note": "shutdown is the configured state (RFC 8343 enabled); admin-status needs the if-mib feature and with it a mandatory if-index",
    "in_schema_sets": [
     "topology",
     "device",
@@ -216,8 +248,10 @@
     "te-transport",
     "nmda-state-compat"
    ],
-   "emitted_by": [],
-   "verdict": "mappable-not-exported"
+   "emitted_by": [
+    "app"
+   ],
+   "verdict": "exported"
   },
   "interfaces.oper_status": {
    "path": "/ietf-interfaces:interfaces/interface/oper-status",
@@ -253,8 +287,10 @@
     "te-transport",
     "nmda-state-compat"
    ],
-   "emitted_by": [],
-   "verdict": "mappable-not-exported"
+   "emitted_by": [
+    "app"
+   ],
+   "verdict": "exported"
   },
   "interfaces.raw_name": {
    "status": "no-native-node",
@@ -312,14 +348,16 @@
   },
   "ip.vrf": {
    "path": "/ietf-interfaces:interfaces/interface/ietf-network-instance:bind-ni-name",
-   "status": "context",
-   "note": "and /ietf-network-instance:network-instances/network-instance/name; 'default' is the global instance, not a named NI",
+   "status": "native",
+   "note": "RFC 8529: interface bound to the named VRF, plus /ietf-network-instance:network-instances/network-instance[name] with vrf-root; 'default' (global table) is no NI entry",
    "in_schema_sets": [
     "device",
     "assurance-oam"
    ],
-   "emitted_by": [],
-   "verdict": "context"
+   "emitted_by": [
+    "app"
+   ],
+   "verdict": "exported"
   },
   "arp.ifname": {
    "path": "/ietf-interfaces:interfaces/interface/name",
@@ -396,7 +434,9 @@
     "device",
     "assurance-oam"
    ],
-   "emitted_by": [],
+   "emitted_by": [
+    "app"
+   ],
    "verdict": "context"
   },
   "mac.mac": {
@@ -761,9 +801,24 @@
    "verdict": "exported"
   },
   "lag.bundled": {
-   "status": "no-native-node",
-   "note": "placeholder until the IEEE 802.1AX aggregation-port state is checked",
-   "verdict": "no-native-node"
+   "path": "/ietf-interfaces:interfaces/interface/ieee802-dot1ax-linkagg:aggport/lacp/actor-oper-state",
+   "status": "derived",
+   "note": "bundled = collecting/distributing; aggport's mandatory key-group-name reference is not observed, so it is not exported",
+   "in_schema_sets": [
+    "ieee-l2"
+   ],
+   "emitted_by": [],
+   "verdict": "mappable-not-exported"
+  },
+  "lag.member_flags": {
+   "path": "/ietf-interfaces:interfaces/interface/ieee802-dot1ax-linkagg:aggport/lacp/actor-oper-state",
+   "status": "derived",
+   "note": "IOS member flags (P bundled, s suspended, D down, I stand-alone, H hot-standby); used by the L2 forwarding analysis",
+   "in_schema_sets": [
+    "ieee-l2"
+   ],
+   "emitted_by": [],
+   "verdict": "mappable-not-exported"
   },
   "lldp.local_if": {
    "path": "/ieee802-dot1ab-lldp:lldp/port/name",
@@ -901,14 +956,16 @@
   },
   "lldp_local.vendor": {
    "path": "/ietf-network-inventory:network-inventory/network-elements/network-element/mfg-name",
-   "status": "native",
+   "status": "derived",
+   "note": "the element's mfg-name comes from the identified platform vendor",
    "in_schema_sets": [
     "inventory"
    ],
    "emitted_by": [
+    "app",
     "research"
    ],
-   "verdict": "mappable-not-exported"
+   "verdict": "exported"
   },
   "lldp_local.model": {
    "path": "/ietf-network-inventory:network-inventory/network-elements/network-element/product-name",
@@ -917,9 +974,10 @@
     "inventory"
    ],
    "emitted_by": [
+    "app",
     "research"
    ],
-   "verdict": "mappable-not-exported"
+   "verdict": "exported"
   },
   "lldp_local.serial": {
    "path": "/ietf-network-inventory:network-inventory/network-elements/network-element/components/component/serial-number",
@@ -1017,7 +1075,9 @@
     "device",
     "assurance-oam"
    ],
-   "emitted_by": [],
+   "emitted_by": [
+    "app"
+   ],
    "verdict": "context"
   },
   "routes.vrf": {
@@ -1028,7 +1088,9 @@
     "device",
     "assurance-oam"
    ],
-   "emitted_by": [],
+   "emitted_by": [
+    "app"
+   ],
    "verdict": "context"
   },
   "vrrp.ifname": {
@@ -1104,6 +1166,229 @@
     "app"
    ],
    "verdict": "exported"
+  },
+  "version.hostname": {
+   "path": "/ietf-network-inventory:network-inventory/network-elements/network-element/name",
+   "status": "native",
+   "in_schema_sets": [
+    "inventory"
+   ],
+   "emitted_by": [
+    "app",
+    "research"
+   ],
+   "verdict": "exported"
+  },
+  "version.model": {
+   "path": "/ietf-network-inventory:network-inventory/network-elements/network-element/product-name",
+   "status": "native",
+   "in_schema_sets": [
+    "inventory"
+   ],
+   "emitted_by": [
+    "app",
+    "research"
+   ],
+   "verdict": "exported"
+  },
+  "version.os_version": {
+   "path": "/ietf-network-inventory:network-inventory/network-elements/network-element/software-rev/revision",
+   "status": "derived",
+   "note": "per-image revisions below are used when present",
+   "in_schema_sets": [
+    "inventory"
+   ],
+   "emitted_by": [
+    "app",
+    "research"
+   ],
+   "verdict": "exported"
+  },
+  "version.boot_image": {
+   "path": "/ietf-network-inventory:network-inventory/network-elements/network-element/software-rev/name",
+   "status": "native",
+   "in_schema_sets": [
+    "inventory"
+   ],
+   "emitted_by": [
+    "app",
+    "research"
+   ],
+   "verdict": "exported"
+  },
+  "version.boot_image_version": {
+   "path": "/ietf-network-inventory:network-inventory/network-elements/network-element/software-rev/revision",
+   "status": "native",
+   "in_schema_sets": [
+    "inventory"
+   ],
+   "emitted_by": [
+    "app",
+    "research"
+   ],
+   "verdict": "exported"
+  },
+  "version.system_image": {
+   "path": "/ietf-network-inventory:network-inventory/network-elements/network-element/software-rev/name",
+   "status": "native",
+   "in_schema_sets": [
+    "inventory"
+   ],
+   "emitted_by": [
+    "app",
+    "research"
+   ],
+   "verdict": "exported"
+  },
+  "version.system_image_version": {
+   "path": "/ietf-network-inventory:network-inventory/network-elements/network-element/software-rev/revision",
+   "status": "native",
+   "in_schema_sets": [
+    "inventory"
+   ],
+   "emitted_by": [
+    "app",
+    "research"
+   ],
+   "verdict": "exported"
+  },
+  "version.image_name": {
+   "path": "/ietf-network-inventory:network-inventory/network-elements/network-element/software-rev/name",
+   "status": "native",
+   "in_schema_sets": [
+    "inventory"
+   ],
+   "emitted_by": [
+    "app",
+    "research"
+   ],
+   "verdict": "exported"
+  },
+  "version.image_version": {
+   "path": "/ietf-network-inventory:network-inventory/network-elements/network-element/software-rev/revision",
+   "status": "native",
+   "in_schema_sets": [
+    "inventory"
+   ],
+   "emitted_by": [
+    "app",
+    "research"
+   ],
+   "verdict": "exported"
+  },
+  "version.virtual_cpus": {
+   "path": "/ietf-network-inventory:network-inventory/network-elements/network-element/ne-type",
+   "status": "derived",
+   "note": "with virtio NICs: ne-virtual (IVY software extension)",
+   "in_schema_sets": [
+    "inventory"
+   ],
+   "emitted_by": [
+    "app",
+    "research"
+   ],
+   "verdict": "exported"
+  },
+  "version.virtio_nic": {
+   "path": "/ietf-network-inventory:network-inventory/network-elements/network-element/ne-type",
+   "status": "derived",
+   "note": "with vCPUs: ne-virtual",
+   "in_schema_sets": [
+    "inventory"
+   ],
+   "emitted_by": [
+    "app",
+    "research"
+   ],
+   "verdict": "exported"
+  },
+  "version.unix_processor": {
+   "path": "/ietf-network-inventory:network-inventory/network-elements/network-element/ne-type",
+   "status": "derived",
+   "note": "IOS running as a Linux process (IOL): ne-software",
+   "in_schema_sets": [
+    "inventory"
+   ],
+   "emitted_by": [
+    "app",
+    "research"
+   ],
+   "verdict": "exported"
+  },
+  "version.serial": {
+   "path": "/ietf-network-inventory:network-inventory/network-elements/network-element/components/component/serial-number",
+   "status": "key-blocked",
+   "note": "belongs to a chassis component whose component-id is not observed; IOL also prints one",
+   "in_schema_sets": [
+    "inventory"
+   ],
+   "emitted_by": [],
+   "verdict": "key-blocked"
+  },
+  "stp.instance": {
+   "status": "no-native-node",
+   "note": "rapid-PVST/PVST keep one tree per VLAN; IEEE 802.1Q YANG holds one port state per bridge (ieee802-dot1q-rstp-bridge) or per MSTI, so per-VLAN state is evidence for the L2 forwarding analysis",
+   "verdict": "no-native-node"
+  },
+  "stp.vlan": {
+   "status": "no-native-node",
+   "note": "rapid-PVST/PVST keep one tree per VLAN; IEEE 802.1Q YANG holds one port state per bridge (ieee802-dot1q-rstp-bridge) or per MSTI, so per-VLAN state is evidence for the L2 forwarding analysis",
+   "verdict": "no-native-node"
+  },
+  "stp.ifname": {
+   "path": "/ietf-interfaces:interfaces/interface/name",
+   "status": "native",
+   "in_schema_sets": [
+    "topology",
+    "device",
+    "ieee-l2",
+    "routing",
+    "services",
+    "policy-security",
+    "assurance-oam",
+    "te-transport",
+    "nmda-state-compat"
+   ],
+   "emitted_by": [
+    "app",
+    "research"
+   ],
+   "verdict": "exported"
+  },
+  "stp.role": {
+   "status": "no-native-node",
+   "note": "rapid-PVST/PVST keep one tree per VLAN; IEEE 802.1Q YANG holds one port state per bridge (ieee802-dot1q-rstp-bridge) or per MSTI, so per-VLAN state is evidence for the L2 forwarding analysis",
+   "verdict": "no-native-node"
+  },
+  "stp.state": {
+   "status": "no-native-node",
+   "note": "rapid-PVST/PVST keep one tree per VLAN; IEEE 802.1Q YANG holds one port state per bridge (ieee802-dot1q-rstp-bridge) or per MSTI, so per-VLAN state is evidence for the L2 forwarding analysis",
+   "verdict": "no-native-node"
+  },
+  "stp.cost": {
+   "status": "no-native-node",
+   "note": "rapid-PVST/PVST keep one tree per VLAN; IEEE 802.1Q YANG holds one port state per bridge (ieee802-dot1q-rstp-bridge) or per MSTI, so per-VLAN state is evidence for the L2 forwarding analysis",
+   "verdict": "no-native-node"
+  },
+  "stp.port_id": {
+   "status": "no-native-node",
+   "note": "rapid-PVST/PVST keep one tree per VLAN; IEEE 802.1Q YANG holds one port state per bridge (ieee802-dot1q-rstp-bridge) or per MSTI, so per-VLAN state is evidence for the L2 forwarding analysis",
+   "verdict": "no-native-node"
+  },
+  "stp.link_type": {
+   "status": "no-native-node",
+   "note": "rapid-PVST/PVST keep one tree per VLAN; IEEE 802.1Q YANG holds one port state per bridge (ieee802-dot1q-rstp-bridge) or per MSTI, so per-VLAN state is evidence for the L2 forwarding analysis",
+   "verdict": "no-native-node"
+  },
+  "stp.edge": {
+   "status": "no-native-node",
+   "note": "rapid-PVST/PVST keep one tree per VLAN; IEEE 802.1Q YANG holds one port state per bridge (ieee802-dot1q-rstp-bridge) or per MSTI, so per-VLAN state is evidence for the L2 forwarding analysis",
+   "verdict": "no-native-node"
+  },
+  "stp.protocol": {
+   "status": "no-native-node",
+   "note": "rapid-PVST/PVST keep one tree per VLAN; IEEE 802.1Q YANG holds one port state per bridge (ieee802-dot1q-rstp-bridge) or per MSTI, so per-VLAN state is evidence for the L2 forwarding analysis",
+   "verdict": "no-native-node"
   }
  },
  "partial_instances": {
@@ -1262,6 +1547,13 @@
    "app": 11,
    "research": 11
   },
+  "ietf-network-inventory": {
+   "nodes": 42,
+   "config": 0,
+   "state": 42,
+   "app": 11,
+   "research": 11
+  },
   "ietf-network-topology": {
    "nodes": 17,
    "config": 17,
@@ -1294,7 +1586,7 @@
    "nodes": 57,
    "config": 7,
    "state": 50,
-   "app": 5,
+   "app": 7,
    "research": 5
   },
   "ieee802-dot1ab-lldp": {
@@ -1303,6 +1595,13 @@
    "state": 56,
    "app": 4,
    "research": 29
+  },
+  "ietf-network-instance": {
+   "nodes": 11,
+   "config": 11,
+   "state": 0,
+   "app": 4,
+   "research": 0
   },
   "ietf-routing": {
    "nodes": 53,
@@ -2199,20 +2498,6 @@
    "state": 3,
    "app": 0,
    "research": 0
-  },
-  "ietf-network-instance": {
-   "nodes": 11,
-   "config": 11,
-   "state": 0,
-   "app": 0,
-   "research": 0
-  },
-  "ietf-network-inventory": {
-   "nodes": 42,
-   "config": 0,
-   "state": 42,
-   "app": 0,
-   "research": 11
   },
   "ietf-network-inventory-sw-ext": {
    "nodes": 12,

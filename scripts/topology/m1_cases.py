@@ -59,7 +59,7 @@ CLASSES = [
     (r"When condition", "semantic", "when"),
     (r"Must condition", "semantic", "must"),
     (r"missing its key", "semantic", "missing-key"),  # an entry without key is malformed
-    (r"Mandatory node|Too few", "collection", "missing-mandatory"),
+    (r"Mandatory node|Mandatory choice|Too few", "collection", "missing-mandatory"),
     (r"range|bounds|does not match|Invalid .*value|Invalid type|length", "semantic", "type"),
 ]
 UNITS = {
@@ -93,12 +93,13 @@ def app_outputs() -> dict[str, dict]:
 
     import test_topology_campus_wan as campus
 
-    from src.apps.topology.backend.model.builder import build_topology
+    from src.apps.topology.backend.model.builder import build_topology, device_node_ids
     from src.apps.topology.backend.model.device_control import project_device_control
     from src.apps.topology.backend.model.device_ip import enrich_device_ip
     from src.apps.topology.backend.model.device_state import project_device_state
+    from src.apps.topology.backend.model.inventory import project_inventory
 
-    out, devices = {}, {}
+    out, devices, observed = {}, {}, {}
     for device, spec in campus.EXPECTED["devices"].items():
         identity = campus.IDENTITY[spec["platform"]]
         outcome = campus.topology_observation(
@@ -118,8 +119,10 @@ def app_outputs() -> dict[str, dict]:
                 "facts": outcome["facts"],
                 "capabilities": outcome["capabilities"],
                 "fact_metadata": outcome["fact_metadata"],
+                "platform": outcome["platform"],
             }
         }
+        observed[device] = (spec["management"], observation)
         out[f"{device}-device"] = enrich_device_ip(project_device_state(observation), observation)[
             "tree"
         ]
@@ -128,6 +131,9 @@ def app_outputs() -> dict[str, dict]:
             out[f"{device}-routing-{rib.get('vrf')}"] = rib["tree"]
         out[f"{device}-lldp"] = control["lldp"]["tree"]
     out["campus-topology"] = build_topology(devices, "urn:netops:topology:campus:")[0]
+    ids = device_node_ids(devices, "urn:netops:topology:campus:")
+    for device, (address, observation) in observed.items():
+        out[f"{device}-inventory"] = project_inventory(observation, ids[address])["tree"]
     return out
 
 

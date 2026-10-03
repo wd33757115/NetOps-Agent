@@ -22,6 +22,7 @@ capabilities:
   trunk: {command: show interfaces trunk, parser: generic_trunk}
   switchport: {command: show interfaces switchport, parser: generic_switchport}
   lag: {command: show etherchannel summary, parser: generic_lag}
+  stp: {command: show spanning-tree, parser: generic_stp}
   routes: {command: show ip route, timeout: 300, parser: template_routes}
   vrfs: {command: show vrf, parser: generic_vrfs}
   vrrp: {command: show vrrp, parser: generic_vrrp}

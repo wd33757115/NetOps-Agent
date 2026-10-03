@@ -9,107 +9,478 @@
  },
  "facts": {
   "interfaces": {
-   "ifname": {"path": "/ietf-interfaces:interfaces/interface/name", "status": "native"},
-   "type": {"path": "/ietf-interfaces:interfaces/interface/type", "status": "derived", "note": "platform interface kind → iana-if-type identity (ethernetCsmacd, ieee8023adLag, l3ipvlan, softwareLoopback)"},
-   "admin_status": {"path": "/ietf-interfaces:interfaces/interface/admin-status", "status": "native", "note": "state value; the configured value is interface/enabled"},
-   "oper_status": {"path": "/ietf-interfaces:interfaces/interface/oper-status", "status": "native"},
-   "description": {"path": "/ietf-interfaces:interfaces/interface/description", "status": "native"},
-   "raw_name": {"status": "no-native-node", "note": "CLI abbreviation (Et0/1) of the full name; presentation evidence only"}
+   "ifname": {
+    "path": "/ietf-interfaces:interfaces/interface/name",
+    "status": "native"
+   },
+   "type": {
+    "path": "/ietf-interfaces:interfaces/interface/type",
+    "status": "derived",
+    "note": "platform interface kind → iana-if-type identity (ethernetCsmacd, ieee8023adLag, l3ipvlan, softwareLoopback)"
+   },
+   "admin_status": {
+    "path": "/ietf-interfaces:interfaces/interface/enabled",
+    "status": "derived",
+    "note": "shutdown is the configured state (RFC 8343 enabled); admin-status needs the if-mib feature and with it a mandatory if-index"
+   },
+   "oper_status": {
+    "path": "/ietf-interfaces:interfaces/interface/oper-status",
+    "status": "native"
+   },
+   "description": {
+    "path": "/ietf-interfaces:interfaces/interface/description",
+    "status": "native"
+   },
+   "raw_name": {
+    "status": "no-native-node",
+    "note": "CLI abbreviation (Et0/1) of the full name; presentation evidence only"
+   }
   },
   "ip": {
-   "ifname": {"path": "/ietf-interfaces:interfaces/interface/name", "status": "native"},
-   "address": {"path": "/ietf-interfaces:interfaces/interface/ietf-ip:ipv4/address/ip", "status": "native", "note": "IPv6 rows go to ietf-ip:ipv6/address/ip"},
-   "prefix_len": {"path": "/ietf-interfaces:interfaces/interface/ietf-ip:ipv4/address/prefix-length", "status": "native"},
-   "vrf": {"path": "/ietf-interfaces:interfaces/interface/ietf-network-instance:bind-ni-name", "status": "context", "note": "and /ietf-network-instance:network-instances/network-instance/name; 'default' is the global instance, not a named NI"}
+   "ifname": {
+    "path": "/ietf-interfaces:interfaces/interface/name",
+    "status": "native"
+   },
+   "address": {
+    "path": "/ietf-interfaces:interfaces/interface/ietf-ip:ipv4/address/ip",
+    "status": "native",
+    "note": "IPv6 rows go to ietf-ip:ipv6/address/ip"
+   },
+   "prefix_len": {
+    "path": "/ietf-interfaces:interfaces/interface/ietf-ip:ipv4/address/prefix-length",
+    "status": "native"
+   },
+   "vrf": {
+    "path": "/ietf-interfaces:interfaces/interface/ietf-network-instance:bind-ni-name",
+    "status": "native",
+    "note": "RFC 8529: interface bound to the named VRF, plus /ietf-network-instance:network-instances/network-instance[name] with vrf-root; 'default' (global table) is no NI entry"
+   }
   },
   "arp": {
-   "ifname": {"path": "/ietf-interfaces:interfaces/interface/name", "status": "native"},
-   "ip": {"path": "/ietf-interfaces:interfaces/interface/ietf-ip:ipv4/neighbor/ip", "status": "native"},
-   "mac": {"path": "/ietf-interfaces:interfaces/interface/ietf-ip:ipv4/neighbor/link-layer-address", "status": "native"},
-   "type": {"path": "/ietf-interfaces:interfaces/interface/ietf-ip:ipv4/neighbor/origin", "status": "derived", "note": "dynamic/static → origin dynamic/static; interface-own entries → other"},
-   "age_s": {"status": "no-native-node", "note": "RFC 8344 neighbor has no age or expiry leaf"},
-   "vrf": {"path": "/ietf-interfaces:interfaces/interface/ietf-network-instance:bind-ni-name", "status": "context"}
+   "ifname": {
+    "path": "/ietf-interfaces:interfaces/interface/name",
+    "status": "native"
+   },
+   "ip": {
+    "path": "/ietf-interfaces:interfaces/interface/ietf-ip:ipv4/neighbor/ip",
+    "status": "native"
+   },
+   "mac": {
+    "path": "/ietf-interfaces:interfaces/interface/ietf-ip:ipv4/neighbor/link-layer-address",
+    "status": "native"
+   },
+   "type": {
+    "path": "/ietf-interfaces:interfaces/interface/ietf-ip:ipv4/neighbor/origin",
+    "status": "derived",
+    "note": "dynamic/static → origin dynamic/static; interface-own entries → other"
+   },
+   "age_s": {
+    "status": "no-native-node",
+    "note": "RFC 8344 neighbor has no age or expiry leaf"
+   },
+   "vrf": {
+    "path": "/ietf-interfaces:interfaces/interface/ietf-network-instance:bind-ni-name",
+    "status": "context"
+   }
   },
   "mac": {
-   "mac": {"path": "/ieee802-dot1q-bridge:bridges/bridge/component/filtering-database/filtering-entry/address", "status": "key-blocked", "note": "list key also needs database-id; not shown by the CLI"},
-   "vlan_or_bd": {"path": "/ieee802-dot1q-bridge:bridges/bridge/component/filtering-database/filtering-entry/vids", "status": "key-blocked"},
-   "port": {"path": "/ieee802-dot1q-bridge:bridges/bridge/component/filtering-database/filtering-entry/port-map/port-ref", "status": "key-blocked", "note": "port-ref is the bridge port number; the CLI gives the interface name and no port number"},
-   "type": {"path": "/ieee802-dot1q-bridge:bridges/bridge/component/filtering-database/filtering-entry/entry-type", "status": "derived", "note": "static/dynamic"}
+   "mac": {
+    "path": "/ieee802-dot1q-bridge:bridges/bridge/component/filtering-database/filtering-entry/address",
+    "status": "key-blocked",
+    "note": "list key also needs database-id; not shown by the CLI"
+   },
+   "vlan_or_bd": {
+    "path": "/ieee802-dot1q-bridge:bridges/bridge/component/filtering-database/filtering-entry/vids",
+    "status": "key-blocked"
+   },
+   "port": {
+    "path": "/ieee802-dot1q-bridge:bridges/bridge/component/filtering-database/filtering-entry/port-map/port-ref",
+    "status": "key-blocked",
+    "note": "port-ref is the bridge port number; the CLI gives the interface name and no port number"
+   },
+   "type": {
+    "path": "/ieee802-dot1q-bridge:bridges/bridge/component/filtering-database/filtering-entry/entry-type",
+    "status": "derived",
+    "note": "static/dynamic"
+   }
   },
   "vlan": {
-   "vlan_id": {"path": "/ieee802-dot1q-bridge:bridges/bridge/component/bridge-vlan/vlan/vid", "status": "native"},
-   "name": {"path": "/ieee802-dot1q-bridge:bridges/bridge/component/bridge-vlan/vlan/name", "status": "native"}
+   "vlan_id": {
+    "path": "/ieee802-dot1q-bridge:bridges/bridge/component/bridge-vlan/vlan/vid",
+    "status": "native"
+   },
+   "name": {
+    "path": "/ieee802-dot1q-bridge:bridges/bridge/component/bridge-vlan/vlan/name",
+    "status": "native"
+   }
   },
   "vlan_members": {
-   "vlan_id": {"path": "/ieee802-dot1q-bridge:bridges/bridge/component/bridge-vlan/vlan/vid", "status": "native"},
-   "ports": {"path": "/ieee802-dot1q-bridge:bridges/bridge/component/bridge-vlan/vlan/egress-ports", "status": "native", "note": "untagged members also in untagged-ports"},
-   "status": {"status": "no-native-node", "note": "VLAN active/suspended has no IEEE 802.1Q YANG leaf"}
+   "vlan_id": {
+    "path": "/ieee802-dot1q-bridge:bridges/bridge/component/bridge-vlan/vlan/vid",
+    "status": "native"
+   },
+   "ports": {
+    "path": "/ieee802-dot1q-bridge:bridges/bridge/component/bridge-vlan/vlan/egress-ports",
+    "status": "native",
+    "note": "untagged members also in untagged-ports"
+   },
+   "status": {
+    "status": "no-native-node",
+    "note": "VLAN active/suspended has no IEEE 802.1Q YANG leaf"
+   }
   },
   "trunk.ports[]": {
-   "ifname": {"path": "/ietf-interfaces:interfaces/interface/name", "status": "native"},
-   "l2_mode": {"path": "/ieee802-dot1q-bridge:bridges/bridge/component/bridge-vlan/vlan/untagged-ports", "status": "derived", "note": "trunk/access is not a leaf in 802.1Q; it is the port's tagged/untagged membership"},
-   "encapsulation": {"path": "/ietf-interfaces:interfaces/interface/ieee802-dot1q-bridge:bridge-port/port-type", "status": "derived", "note": "802.1Q tagging on a customer bridge port → c-vlan-bridge-port"},
-   "native_vlan": {"path": "/ietf-interfaces:interfaces/interface/ieee802-dot1q-bridge:bridge-port/pvid", "status": "native"},
-   "trunk_vlans": {"path": "/ieee802-dot1q-bridge:bridges/bridge/component/bridge-vlan/vlan/egress-ports", "status": "derived", "note": "allowed list → membership of each VLAN"},
-   "forwarding_vlans": {"path": "/ietf-interfaces:interfaces/interface/ieee802-dot1q-bridge:bridge-port/ieee802-dot1q-mstp-bridge:port-mstp/msti", "status": "derived", "note": "VLANs whose spanning-tree instance forwards on the port; needs the VLAN→MSTI map and per-MSTI port state"},
-   "active_vlans": {"path": "/ieee802-dot1q-bridge:bridges/bridge/component/bridge-vlan/vlan/egress-ports", "status": "derived", "note": "allowed and existing VLANs"},
-   "raw_name": {"status": "no-native-node", "note": "CLI abbreviation"}
+   "ifname": {
+    "path": "/ietf-interfaces:interfaces/interface/name",
+    "status": "native"
+   },
+   "l2_mode": {
+    "path": "/ieee802-dot1q-bridge:bridges/bridge/component/bridge-vlan/vlan/untagged-ports",
+    "status": "derived",
+    "note": "trunk/access is not a leaf in 802.1Q; it is the port's tagged/untagged membership"
+   },
+   "encapsulation": {
+    "path": "/ietf-interfaces:interfaces/interface/ieee802-dot1q-bridge:bridge-port/port-type",
+    "status": "derived",
+    "note": "802.1Q tagging on a customer bridge port → c-vlan-bridge-port"
+   },
+   "native_vlan": {
+    "path": "/ietf-interfaces:interfaces/interface/ieee802-dot1q-bridge:bridge-port/pvid",
+    "status": "native"
+   },
+   "trunk_vlans": {
+    "path": "/ieee802-dot1q-bridge:bridges/bridge/component/bridge-vlan/vlan/egress-ports",
+    "status": "derived",
+    "note": "allowed list → membership of each VLAN"
+   },
+   "forwarding_vlans": {
+    "path": "/ietf-interfaces:interfaces/interface/ieee802-dot1q-bridge:bridge-port/ieee802-dot1q-mstp-bridge:port-mstp/msti",
+    "status": "derived",
+    "note": "VLANs whose spanning-tree instance forwards on the port; needs the VLAN→MSTI map and per-MSTI port state"
+   },
+   "active_vlans": {
+    "path": "/ieee802-dot1q-bridge:bridges/bridge/component/bridge-vlan/vlan/egress-ports",
+    "status": "derived",
+    "note": "allowed and existing VLANs"
+   },
+   "raw_name": {
+    "status": "no-native-node",
+    "note": "CLI abbreviation"
+   }
   },
   "switchport.ports[]": {
-   "ifname": {"path": "/ietf-interfaces:interfaces/interface/name", "status": "native"},
-   "admin_mode": {"status": "no-native-node", "note": "Cisco DTP administrative mode (dynamic auto/desirable); no IEEE/IETF node"},
-   "oper_mode": {"status": "no-native-node", "note": "DTP negotiation result; bundle membership goes to the LAG model"},
-   "access_vlan": {"path": "/ietf-interfaces:interfaces/interface/ieee802-dot1q-bridge:bridge-port/pvid", "status": "native", "note": "for an access port"},
-   "native_vlan": {"path": "/ietf-interfaces:interfaces/interface/ieee802-dot1q-bridge:bridge-port/pvid", "status": "native", "note": "for a trunk port"},
-   "pvid": {"path": "/ietf-interfaces:interfaces/interface/ieee802-dot1q-bridge:bridge-port/pvid", "status": "native"},
-   "trunk_vlans": {"path": "/ieee802-dot1q-bridge:bridges/bridge/component/bridge-vlan/vlan/egress-ports", "status": "derived"},
-   "admin_native_tagged": {"path": "/ieee802-dot1q-bridge:bridges/bridge/component/bridge-vlan/vlan/untagged-ports", "status": "derived", "note": "native VLAN tagged = port absent from untagged-ports of the PVID VLAN"},
-   "lag_parent": {"path": "/ieee802-dot1q-bridge:bridges/bridge/component/bridge-vlan/vlan/egress-ports", "status": "derived", "note": "placeholder until the LAG model check below; see lag.members"},
-   "encapsulation": {"path": "/ietf-interfaces:interfaces/interface/ieee802-dot1q-bridge:bridge-port/port-type", "status": "derived"},
-   "l2_mode": {"path": "/ieee802-dot1q-bridge:bridges/bridge/component/bridge-vlan/vlan/untagged-ports", "status": "derived"},
-   "raw_name": {"status": "no-native-node", "note": "CLI abbreviation"}
+   "ifname": {
+    "path": "/ietf-interfaces:interfaces/interface/name",
+    "status": "native"
+   },
+   "admin_mode": {
+    "status": "no-native-node",
+    "note": "Cisco DTP administrative mode (dynamic auto/desirable); no IEEE/IETF node"
+   },
+   "oper_mode": {
+    "status": "no-native-node",
+    "note": "DTP negotiation result; bundle membership goes to the LAG model"
+   },
+   "access_vlan": {
+    "path": "/ietf-interfaces:interfaces/interface/ieee802-dot1q-bridge:bridge-port/pvid",
+    "status": "native",
+    "note": "for an access port"
+   },
+   "native_vlan": {
+    "path": "/ietf-interfaces:interfaces/interface/ieee802-dot1q-bridge:bridge-port/pvid",
+    "status": "native",
+    "note": "for a trunk port"
+   },
+   "pvid": {
+    "path": "/ietf-interfaces:interfaces/interface/ieee802-dot1q-bridge:bridge-port/pvid",
+    "status": "native"
+   },
+   "trunk_vlans": {
+    "path": "/ieee802-dot1q-bridge:bridges/bridge/component/bridge-vlan/vlan/egress-ports",
+    "status": "derived"
+   },
+   "admin_native_tagged": {
+    "path": "/ieee802-dot1q-bridge:bridges/bridge/component/bridge-vlan/vlan/untagged-ports",
+    "status": "derived",
+    "note": "native VLAN tagged = port absent from untagged-ports of the PVID VLAN"
+   },
+   "lag_parent": {
+    "path": "/ieee802-dot1q-bridge:bridges/bridge/component/bridge-vlan/vlan/egress-ports",
+    "status": "derived",
+    "note": "placeholder until the LAG model check below; see lag.members"
+   },
+   "encapsulation": {
+    "path": "/ietf-interfaces:interfaces/interface/ieee802-dot1q-bridge:bridge-port/port-type",
+    "status": "derived"
+   },
+   "l2_mode": {
+    "path": "/ieee802-dot1q-bridge:bridges/bridge/component/bridge-vlan/vlan/untagged-ports",
+    "status": "derived"
+   },
+   "raw_name": {
+    "status": "no-native-node",
+    "note": "CLI abbreviation"
+   }
   },
   "lag": {
-   "ifname": {"path": "/ietf-interfaces:interfaces/interface/name", "status": "native", "note": "the aggregator interface, type ieee8023adLag"},
-   "members": {"path": "/ietf-network:networks/network/node/ietf-network-topology:termination-point/ietf-l2-topology:l2-termination-point-attributes/member-link-tp", "status": "derived", "note": "network view (RFC 8944); the device view is IEEE 802.1AX aggregation-port"},
-   "bundled": {"status": "no-native-node", "note": "placeholder until the IEEE 802.1AX aggregation-port state is checked"}
+   "ifname": {
+    "path": "/ietf-interfaces:interfaces/interface/name",
+    "status": "native",
+    "note": "the aggregator interface, type ieee8023adLag"
+   },
+   "members": {
+    "path": "/ietf-network:networks/network/node/ietf-network-topology:termination-point/ietf-l2-topology:l2-termination-point-attributes/member-link-tp",
+    "status": "derived",
+    "note": "network view (RFC 8944); the device view is IEEE 802.1AX aggregation-port"
+   },
+   "bundled": {
+    "path": "/ietf-interfaces:interfaces/interface/ieee802-dot1ax-linkagg:aggport/lacp/actor-oper-state",
+    "status": "derived",
+    "note": "bundled = collecting/distributing; aggport's mandatory key-group-name reference is not observed, so it is not exported"
+   },
+   "member_flags": {
+    "path": "/ietf-interfaces:interfaces/interface/ieee802-dot1ax-linkagg:aggport/lacp/actor-oper-state",
+    "status": "derived",
+    "note": "IOS member flags (P bundled, s suspended, D down, I stand-alone, H hot-standby); used by the L2 forwarding analysis"
+   }
   },
   "lldp": {
-   "local_if": {"path": "/ieee802-dot1ab-lldp:lldp/port/name", "status": "key-blocked", "note": "port list key also needs dest-mac-address (agent); nearest-bridge is assumed only with evidence"},
-   "remote_chassis_id": {"path": "/ieee802-dot1ab-lldp:lldp/port/remote-systems-data/chassis-id", "status": "key-blocked", "note": "remote-systems-data keys time-mark and remote-index are not collected"},
-   "remote_chassis_subtype": {"path": "/ieee802-dot1ab-lldp:lldp/port/remote-systems-data/chassis-id-subtype", "status": "key-blocked"},
-   "remote_port_id": {"path": "/ieee802-dot1ab-lldp:lldp/port/remote-systems-data/port-id", "status": "key-blocked"},
-   "remote_port_subtype": {"path": "/ieee802-dot1ab-lldp:lldp/port/remote-systems-data/port-id-subtype", "status": "key-blocked"},
-   "remote_sysname": {"path": "/ieee802-dot1ab-lldp:lldp/port/remote-systems-data/system-name", "status": "key-blocked"},
-   "remote_system_description": {"path": "/ieee802-dot1ab-lldp:lldp/port/remote-systems-data/system-description", "status": "key-blocked"},
-   "remote_mgmt_addresses": {"path": "/ieee802-dot1ab-lldp:lldp/port/remote-systems-data/management-address/address", "status": "key-blocked", "note": "hex octet string with address-subtype"}
+   "local_if": {
+    "path": "/ieee802-dot1ab-lldp:lldp/port/name",
+    "status": "key-blocked",
+    "note": "port list key also needs dest-mac-address (agent); nearest-bridge is assumed only with evidence"
+   },
+   "remote_chassis_id": {
+    "path": "/ieee802-dot1ab-lldp:lldp/port/remote-systems-data/chassis-id",
+    "status": "key-blocked",
+    "note": "remote-systems-data keys time-mark and remote-index are not collected"
+   },
+   "remote_chassis_subtype": {
+    "path": "/ieee802-dot1ab-lldp:lldp/port/remote-systems-data/chassis-id-subtype",
+    "status": "key-blocked"
+   },
+   "remote_port_id": {
+    "path": "/ieee802-dot1ab-lldp:lldp/port/remote-systems-data/port-id",
+    "status": "key-blocked"
+   },
+   "remote_port_subtype": {
+    "path": "/ieee802-dot1ab-lldp:lldp/port/remote-systems-data/port-id-subtype",
+    "status": "key-blocked"
+   },
+   "remote_sysname": {
+    "path": "/ieee802-dot1ab-lldp:lldp/port/remote-systems-data/system-name",
+    "status": "key-blocked"
+   },
+   "remote_system_description": {
+    "path": "/ieee802-dot1ab-lldp:lldp/port/remote-systems-data/system-description",
+    "status": "key-blocked"
+   },
+   "remote_mgmt_addresses": {
+    "path": "/ieee802-dot1ab-lldp:lldp/port/remote-systems-data/management-address/address",
+    "status": "key-blocked",
+    "note": "hex octet string with address-subtype"
+   }
   },
   "lldp_local": {
-   "chassis_id": {"path": "/ieee802-dot1ab-lldp:lldp/local-system-data/chassis-id", "status": "native"},
-   "hostname": {"path": "/ieee802-dot1ab-lldp:lldp/local-system-data/system-name", "status": "native", "note": "also /ietf-system:system/hostname"},
-   "system_description": {"path": "/ieee802-dot1ab-lldp:lldp/local-system-data/system-description", "status": "native"},
-   "management_addresses": {"path": "/ieee802-dot1ab-lldp:lldp/port/management-address-tx-port/man-address", "status": "key-blocked", "note": "IEEE 802.1AB keeps local management addresses per transmitting port (port keys name + dest-mac-address), as hex octets with address-subtype"},
-   "vendor": {"path": "/ietf-network-inventory:network-inventory/network-elements/network-element/mfg-name", "status": "native"},
-   "model": {"path": "/ietf-network-inventory:network-inventory/network-elements/network-element/product-name", "status": "native"},
-   "serial": {"path": "/ietf-network-inventory:network-inventory/network-elements/network-element/components/component/serial-number", "status": "key-blocked", "note": "belongs to a chassis component whose component-id is not collected"}
+   "chassis_id": {
+    "path": "/ieee802-dot1ab-lldp:lldp/local-system-data/chassis-id",
+    "status": "native"
+   },
+   "hostname": {
+    "path": "/ieee802-dot1ab-lldp:lldp/local-system-data/system-name",
+    "status": "native",
+    "note": "also /ietf-system:system/hostname"
+   },
+   "system_description": {
+    "path": "/ieee802-dot1ab-lldp:lldp/local-system-data/system-description",
+    "status": "native"
+   },
+   "management_addresses": {
+    "path": "/ieee802-dot1ab-lldp:lldp/port/management-address-tx-port/man-address",
+    "status": "key-blocked",
+    "note": "IEEE 802.1AB keeps local management addresses per transmitting port (port keys name + dest-mac-address), as hex octets with address-subtype"
+   },
+   "vendor": {
+    "path": "/ietf-network-inventory:network-inventory/network-elements/network-element/mfg-name",
+    "status": "derived",
+    "note": "the element's mfg-name comes from the identified platform vendor"
+   },
+   "model": {
+    "path": "/ietf-network-inventory:network-inventory/network-elements/network-element/product-name",
+    "status": "native"
+   },
+   "serial": {
+    "path": "/ietf-network-inventory:network-inventory/network-elements/network-element/components/component/serial-number",
+    "status": "key-blocked",
+    "note": "belongs to a chassis component whose component-id is not collected"
+   }
   },
   "routes": {
-   "prefix": {"path": "/ietf-routing:routing/ribs/rib/routes/route/ietf-ipv4-unicast-routing:destination-prefix", "status": "native"},
-   "protocol": {"path": "/ietf-routing:routing/ribs/rib/routes/route/source-protocol", "status": "derived", "note": "CLI protocol code → routing-protocol identity"},
-   "preference": {"path": "/ietf-routing:routing/ribs/rib/routes/route/route-preference", "status": "native"},
-   "metric": {"path": "/ietf-routing:routing/ribs/rib/routes/route/ietf-ospf:metric", "status": "derived", "note": "only OSPF routes have a metric node (RFC 9129); static/BGP metrics have none in RFC 8349"},
-   "next_hops[].ip": {"path": "/ietf-routing:routing/ribs/rib/routes/route/next-hop/ietf-ipv4-unicast-routing:next-hop-address", "status": "native", "note": "several next hops: next-hop-list/next-hop/ietf-ipv4-unicast-routing:address"},
-   "next_hops[].ifname": {"path": "/ietf-routing:routing/ribs/rib/routes/route/next-hop/outgoing-interface", "status": "native"},
-   "next_hops[].vrf": {"path": "/ietf-network-instance:network-instances/network-instance/name", "status": "context", "note": "next hop resolved in another instance (route leaking)"},
-   "vrf": {"path": "/ietf-network-instance:network-instances/network-instance/name", "status": "context", "note": "each NI holds its own RIB under its schema mount (RFC 8529/8528)"}
+   "prefix": {
+    "path": "/ietf-routing:routing/ribs/rib/routes/route/ietf-ipv4-unicast-routing:destination-prefix",
+    "status": "native"
+   },
+   "protocol": {
+    "path": "/ietf-routing:routing/ribs/rib/routes/route/source-protocol",
+    "status": "derived",
+    "note": "CLI protocol code → routing-protocol identity"
+   },
+   "preference": {
+    "path": "/ietf-routing:routing/ribs/rib/routes/route/route-preference",
+    "status": "native"
+   },
+   "metric": {
+    "path": "/ietf-routing:routing/ribs/rib/routes/route/ietf-ospf:metric",
+    "status": "derived",
+    "note": "only OSPF routes have a metric node (RFC 9129); static/BGP metrics have none in RFC 8349"
+   },
+   "next_hops[].ip": {
+    "path": "/ietf-routing:routing/ribs/rib/routes/route/next-hop/ietf-ipv4-unicast-routing:next-hop-address",
+    "status": "native",
+    "note": "several next hops: next-hop-list/next-hop/ietf-ipv4-unicast-routing:address"
+   },
+   "next_hops[].ifname": {
+    "path": "/ietf-routing:routing/ribs/rib/routes/route/next-hop/outgoing-interface",
+    "status": "native"
+   },
+   "next_hops[].vrf": {
+    "path": "/ietf-network-instance:network-instances/network-instance/name",
+    "status": "context",
+    "note": "next hop resolved in another instance (route leaking)"
+   },
+   "vrf": {
+    "path": "/ietf-network-instance:network-instances/network-instance/name",
+    "status": "context",
+    "note": "each NI holds its own RIB under its schema mount (RFC 8529/8528)"
+   }
   },
   "vrrp": {
-   "ifname": {"path": "/ietf-interfaces:interfaces/interface/name", "status": "native"},
-   "vrid": {"path": "/ietf-interfaces:interfaces/interface/ietf-ip:ipv4/ietf-vrrp:vrrp/vrrp-instance/vrid", "status": "native"},
-   "priority": {"path": "/ietf-interfaces:interfaces/interface/ietf-ip:ipv4/ietf-vrrp:vrrp/vrrp-instance/priority", "status": "native"},
-   "state": {"path": "/ietf-interfaces:interfaces/interface/ietf-ip:ipv4/ietf-vrrp:vrrp/vrrp-instance/state", "status": "derived", "note": "Initialize/Backup/Master → identity"},
-   "virtual_addresses": {"path": "/ietf-interfaces:interfaces/interface/ietf-ip:ipv4/ietf-vrrp:vrrp/vrrp-instance/virtual-ipv4-addresses/virtual-ipv4-address/ipv4-address", "status": "native"},
-   "last_adv_source": {"path": "/ietf-interfaces:interfaces/interface/ietf-ip:ipv4/ietf-vrrp:vrrp/vrrp-instance/last-adv-source", "status": "native"}
+   "ifname": {
+    "path": "/ietf-interfaces:interfaces/interface/name",
+    "status": "native"
+   },
+   "vrid": {
+    "path": "/ietf-interfaces:interfaces/interface/ietf-ip:ipv4/ietf-vrrp:vrrp/vrrp-instance/vrid",
+    "status": "native"
+   },
+   "priority": {
+    "path": "/ietf-interfaces:interfaces/interface/ietf-ip:ipv4/ietf-vrrp:vrrp/vrrp-instance/priority",
+    "status": "native"
+   },
+   "state": {
+    "path": "/ietf-interfaces:interfaces/interface/ietf-ip:ipv4/ietf-vrrp:vrrp/vrrp-instance/state",
+    "status": "derived",
+    "note": "Initialize/Backup/Master → identity"
+   },
+   "virtual_addresses": {
+    "path": "/ietf-interfaces:interfaces/interface/ietf-ip:ipv4/ietf-vrrp:vrrp/vrrp-instance/virtual-ipv4-addresses/virtual-ipv4-address/ipv4-address",
+    "status": "native"
+   },
+   "last_adv_source": {
+    "path": "/ietf-interfaces:interfaces/interface/ietf-ip:ipv4/ietf-vrrp:vrrp/vrrp-instance/last-adv-source",
+    "status": "native"
+   }
+  },
+  "version": {
+   "hostname": {
+    "path": "/ietf-network-inventory:network-inventory/network-elements/network-element/name",
+    "status": "native"
+   },
+   "model": {
+    "path": "/ietf-network-inventory:network-inventory/network-elements/network-element/product-name",
+    "status": "native"
+   },
+   "os_version": {
+    "path": "/ietf-network-inventory:network-inventory/network-elements/network-element/software-rev/revision",
+    "status": "derived",
+    "note": "per-image revisions below are used when present"
+   },
+   "boot_image": {
+    "path": "/ietf-network-inventory:network-inventory/network-elements/network-element/software-rev/name",
+    "status": "native"
+   },
+   "boot_image_version": {
+    "path": "/ietf-network-inventory:network-inventory/network-elements/network-element/software-rev/revision",
+    "status": "native"
+   },
+   "system_image": {
+    "path": "/ietf-network-inventory:network-inventory/network-elements/network-element/software-rev/name",
+    "status": "native"
+   },
+   "system_image_version": {
+    "path": "/ietf-network-inventory:network-inventory/network-elements/network-element/software-rev/revision",
+    "status": "native"
+   },
+   "image_name": {
+    "path": "/ietf-network-inventory:network-inventory/network-elements/network-element/software-rev/name",
+    "status": "native"
+   },
+   "image_version": {
+    "path": "/ietf-network-inventory:network-inventory/network-elements/network-element/software-rev/revision",
+    "status": "native"
+   },
+   "virtual_cpus": {
+    "path": "/ietf-network-inventory:network-inventory/network-elements/network-element/ne-type",
+    "status": "derived",
+    "note": "with virtio NICs: ne-virtual (IVY software extension)"
+   },
+   "virtio_nic": {
+    "path": "/ietf-network-inventory:network-inventory/network-elements/network-element/ne-type",
+    "status": "derived",
+    "note": "with vCPUs: ne-virtual"
+   },
+   "unix_processor": {
+    "path": "/ietf-network-inventory:network-inventory/network-elements/network-element/ne-type",
+    "status": "derived",
+    "note": "IOS running as a Linux process (IOL): ne-software"
+   },
+   "serial": {
+    "path": "/ietf-network-inventory:network-inventory/network-elements/network-element/components/component/serial-number",
+    "status": "key-blocked",
+    "note": "belongs to a chassis component whose component-id is not observed; IOL also prints one"
+   }
+  },
+  "stp": {
+   "instance": {
+    "status": "no-native-node",
+    "note": "rapid-PVST/PVST keep one tree per VLAN; IEEE 802.1Q YANG holds one port state per bridge (ieee802-dot1q-rstp-bridge) or per MSTI, so per-VLAN state is evidence for the L2 forwarding analysis"
+   },
+   "vlan": {
+    "status": "no-native-node",
+    "note": "rapid-PVST/PVST keep one tree per VLAN; IEEE 802.1Q YANG holds one port state per bridge (ieee802-dot1q-rstp-bridge) or per MSTI, so per-VLAN state is evidence for the L2 forwarding analysis"
+   },
+   "ifname": {
+    "path": "/ietf-interfaces:interfaces/interface/name",
+    "status": "native"
+   },
+   "role": {
+    "status": "no-native-node",
+    "note": "rapid-PVST/PVST keep one tree per VLAN; IEEE 802.1Q YANG holds one port state per bridge (ieee802-dot1q-rstp-bridge) or per MSTI, so per-VLAN state is evidence for the L2 forwarding analysis"
+   },
+   "state": {
+    "status": "no-native-node",
+    "note": "rapid-PVST/PVST keep one tree per VLAN; IEEE 802.1Q YANG holds one port state per bridge (ieee802-dot1q-rstp-bridge) or per MSTI, so per-VLAN state is evidence for the L2 forwarding analysis"
+   },
+   "cost": {
+    "status": "no-native-node",
+    "note": "rapid-PVST/PVST keep one tree per VLAN; IEEE 802.1Q YANG holds one port state per bridge (ieee802-dot1q-rstp-bridge) or per MSTI, so per-VLAN state is evidence for the L2 forwarding analysis"
+   },
+   "port_id": {
+    "status": "no-native-node",
+    "note": "rapid-PVST/PVST keep one tree per VLAN; IEEE 802.1Q YANG holds one port state per bridge (ieee802-dot1q-rstp-bridge) or per MSTI, so per-VLAN state is evidence for the L2 forwarding analysis"
+   },
+   "link_type": {
+    "status": "no-native-node",
+    "note": "rapid-PVST/PVST keep one tree per VLAN; IEEE 802.1Q YANG holds one port state per bridge (ieee802-dot1q-rstp-bridge) or per MSTI, so per-VLAN state is evidence for the L2 forwarding analysis"
+   },
+   "edge": {
+    "status": "no-native-node",
+    "note": "rapid-PVST/PVST keep one tree per VLAN; IEEE 802.1Q YANG holds one port state per bridge (ieee802-dot1q-rstp-bridge) or per MSTI, so per-VLAN state is evidence for the L2 forwarding analysis"
+   },
+   "protocol": {
+    "status": "no-native-node",
+    "note": "rapid-PVST/PVST keep one tree per VLAN; IEEE 802.1Q YANG holds one port state per bridge (ieee802-dot1q-rstp-bridge) or per MSTI, so per-VLAN state is evidence for the L2 forwarding analysis"
+   }
   }
  }
 }

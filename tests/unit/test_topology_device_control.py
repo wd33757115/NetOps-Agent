@@ -193,7 +193,7 @@ def test_interface_refs_require_current_identity_and_explicit_same_vrf_ownership
     assert result["tree"]["ietf-interfaces:interfaces"]["interface"] == [
         {"name": "Ethernet0/1", "type": "iana-if-type:ethernetCsmacd", "oper-status": "up"}
     ]
-    assert codes(result) == {"mandatory_statistics_not_observed"}
+    assert codes(result) == {"mandatory_statistics_not_observed", "admin_state_not_observed"}
     for invalid in ("red", None):
         changed = copy.deepcopy(facts)
         changed["ip"][0]["vrf"] = invalid
@@ -631,7 +631,7 @@ def test_device_library_has_complete_sources_and_no_trimming_or_unobserved_featu
     sources = json.loads((YANG / "sources.json").read_text("utf-8"))
     library = json.loads((YANG / "device-library.json").read_text("utf-8"))
     modules = library["ietf-yang-library:modules-state"]["module"]
-    assert len(modules) == 19
+    assert len(modules) == 21
     expected = {
         "ietf-ip",
         "ietf-routing",
@@ -646,6 +646,8 @@ def test_device_library_has_complete_sources_and_no_trimming_or_unobserved_featu
         "ieee802-dot1ab-lldp",
         "ieee802-types",
         "ieee802-dot1ab-types",
+        "ietf-network-instance",
+        "ietf-yang-schema-mount",
     }
     assert expected <= {entry["name"] for entry in modules}
     assert not any(entry.get("feature") for entry in modules)

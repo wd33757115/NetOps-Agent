@@ -17,6 +17,17 @@ PATTERNS = {
         r"^\s*(?:Serial(?: number)?|Processor board ID|System serial number)\s*[:=]?\s+(\S+)\s*$",
     ),
     "hostname": (r"^\s*(\S+)\s+uptime is\b", r"^\s*(?:Hostname|System name)\s*:\s*(\S+)\s*$"),
+    # Running software images: Comware boot/system image files, the IOS image name.
+    "boot_image": (r"^\s*Boot image:\s*(?:\S+?[:/])*([^/\s]+)\s*$",),
+    "boot_image_version": (r"^\s*Boot image version:\s*(.+?)\s*$",),
+    "system_image": (r"^\s*System image:\s*(?:\S+?[:/])*([^/\s]+)\s*$",),
+    "system_image_version": (r"^\s*System image version:\s*(.+?)\s*$",),
+    "image_name": (r"\bSoftware \(([\w.-]+)\), Version\b",),
+    "image_version": (r"\bSoftware \([\w.-]+\), Version ([^,\s]+)",),
+    # Hosting evidence: hypervisor vCPUs and virtio NICs; IOS running as a Linux process.
+    "virtual_cpus": (r"\bvCPUs:\s*Total\s+(\d+)",),
+    "virtio_nic": (r"\b(VNIC-VIRTIO)\b",),
+    "unix_processor": (r"^\s*Linux Unix \(([^)]+)\) processor\b",),
 }
 
 

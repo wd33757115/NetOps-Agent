@@ -1,0 +1,175 @@
+{
+ "ietf-network-inventory:network-inventory": {
+  "ietf-entitlement-inventory:entitlements": {
+   "entitlement": [
+    {
+     "entitlement-id": "security-features",
+     "product-id": "SEC-ADVANCED-1Y",
+     "state": "expired",
+     "renewal-profile": {
+      "start-date": "2023-10-01T00:00:00Z",
+      "activation-date": "2023-10-01T00:00:00Z",
+      "expiration-date": "2024-10-01T00:00:00Z"
+     },
+     "entitlement-attachment": {
+      "universal-access": false,
+      "holders": {
+       "organization": [
+        "org-1"
+       ]
+      },
+      "assets": {
+       "elements": {
+        "network-elements": [
+         "edge-router-12"
+        ]
+       }
+      }
+     }
+    },
+    {
+     "entitlement-id": "basic-routing-active",
+     "product-id": "ROUTING-BASE-3Y",
+     "state": "active",
+     "renewal-profile": {
+      "start-date": "2024-01-01T00:00:00Z",
+      "activation-date": "2024-01-01T00:00:00Z",
+      "expiration-date": "2027-01-01T00:00:00Z"
+     },
+     "entitlement-attachment": {
+      "universal-access": false,
+      "holders": {
+       "organization": [
+        "org-1"
+       ]
+      },
+      "assets": {
+       "elements": {
+        "network-elements": [
+         "edge-router-12"
+        ]
+       }
+      }
+     }
+    }
+   ]
+  },
+  "network-elements": {
+   "network-element": [
+    {
+     "ne-id": "edge-router-12",
+     "components": {
+      "component": [
+       {
+        "component-id": "main-chassis",
+        "class": "iana-hardware:chassis"
+       }
+      ]
+     },
+     "ietf-entitlement-inventory:installed-entitlements": {
+      "entitlement": [
+       {
+        "entitlement-id": "security-features",
+        "in-use": false
+       },
+       {
+        "entitlement-id": "basic-routing-active",
+        "in-use": true
+       }
+      ]
+     },
+     "ietf-entitlement-inventory:capabilities": {
+      "capability-class": [
+       {
+        "capability-class": "basic-capability",
+        "capability": [
+         {
+          "capability-id": "stateful-firewall",
+          "extended-capability-description": "Stateful firewall",
+          "entitlement-state": {
+           "allowed": false,
+           "in-use": false
+          },
+          "supporting-entitlements": {
+           "supporting-entitlement": [
+            {
+             "entitlement-id": "security-features"
+            }
+           ]
+          },
+          "capability-restrictions": {
+           "capability-restriction": [
+            {
+             "restriction-id": "firewall-sessions",
+             "description": "Maximum concurrent firewall sessions",
+             "resource-name": "sessions",
+             "units": "connections",
+             "max-value": "50000",
+             "current-value": "0"
+            }
+           ]
+          }
+         },
+         {
+          "capability-id": "ipsec-vpn",
+          "extended-capability-description": "IPsec VPN tunnels",
+          "entitlement-state": {
+           "allowed": false,
+           "in-use": false
+          },
+          "supporting-entitlements": {
+           "supporting-entitlement": [
+            {
+             "entitlement-id": "security-features"
+            }
+           ]
+          },
+          "capability-restrictions": {
+           "capability-restriction": [
+            {
+             "restriction-id": "vpn-tunnels",
+             "description": "Maximum VPN tunnels",
+             "resource-name": "tunnels",
+             "units": "tunnels",
+             "max-value": "100",
+             "current-value": "0"
+            }
+           ]
+          }
+         },
+         {
+          "capability-id": "ospf-routing",
+          "extended-capability-description": "OSPF",
+          "entitlement-state": {
+           "allowed": true,
+           "in-use": true
+          },
+          "supporting-entitlements": {
+           "supporting-entitlement": [
+            {
+             "entitlement-id": "basic-routing-active"
+            }
+           ]
+          },
+          "capability-restrictions": {
+           "capability-restriction": [
+            {
+             "restriction-id": "ospf-neighbors",
+             "description": "Maximum OSPF neighbor adjacencies",
+             "resource-name": "neighbors",
+             "units": "adjacencies",
+             "max-value": "50",
+             "current-value": "8"
+            }
+           ]
+          }
+         }
+        ]
+       }
+      ]
+     }
+    }
+   ]
+  }
+ }
+}

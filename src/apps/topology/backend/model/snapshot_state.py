@@ -13,6 +13,7 @@ from .builder import L2T, NT, ST
 from .device_control import project_device_control
 from .device_ip import enrich_device_ip
 from .device_state import project_device_state
+from .inventory import project_inventory
 from .retained_links import UNAVAILABLE_OPER_STATUSES, retain_l2_links
 
 
@@ -181,6 +182,7 @@ def enrich_snapshot_state(tree, collected, observations, targets, prior=None):
             "collection_status": status,
             **deepcopy(projected),
             "control": project_device_control(observation),
+            "inventory": project_inventory(observation or {}, node_id),
         }
         if node_id in current_labels:
             device["name"] = current_labels[node_id]

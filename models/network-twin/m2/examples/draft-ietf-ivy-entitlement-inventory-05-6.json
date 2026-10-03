@@ -1,0 +1,332 @@
+{
+ "ietf-network-inventory:network-inventory": {
+  "network-elements": {
+   "network-element": [
+    {
+     "ne-id": "vendor-a-router-hq-1",
+     "components": {
+      "component": [
+       {
+        "component-id": "chassis",
+        "class": "iana-hardware:chassis"
+       }
+      ]
+     },
+     "ietf-entitlement-inventory:installed-entitlements": {
+      "entitlement": [
+       {
+        "entitlement-id": "vendor-a-sdwan-consumption"
+       }
+      ]
+     },
+     "ietf-entitlement-inventory:capabilities": {
+      "capability-class": [
+       {
+        "capability-class": "basic-capability",
+        "capability": [
+         {
+          "capability-id": "sd-wan",
+          "extended-capability-description": "SD-WAN with consumption-based billing",
+          "entitlement-state": {
+           "allowed": true,
+           "in-use": true
+          },
+          "supporting-entitlements": {
+           "supporting-entitlement": [
+            {
+             "entitlement-id": "vendor-a-sdwan-consumption"
+            }
+           ]
+          },
+          "capability-restrictions": {
+           "capability-restriction": [
+            {
+             "restriction-id": "active-tunnels",
+             "description": "Current active SD-WAN tunnels",
+             "resource-name": "tunnels",
+             "units": "count",
+             "max-value": "100",
+             "current-value": "45"
+            }
+           ]
+          }
+         }
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "ne-id": "vendor-b-switch-dc-1",
+     "components": {
+      "component": [
+       {
+        "component-id": "main-unit",
+        "class": "iana-hardware:chassis"
+       }
+      ]
+     },
+     "ietf-entitlement-inventory:installed-entitlements": {
+      "entitlement": [
+       {
+        "entitlement-id": "vendor-b-datacenter-perpetual"
+       },
+       {
+        "entitlement-id": "vendor-b-support-subscription"
+       }
+      ]
+     },
+     "ietf-entitlement-inventory:capabilities": {
+      "capability-class": [
+       {
+        "capability-class": "basic-capability",
+        "capability": [
+         {
+          "capability-id": "evpn-vxlan",
+          "extended-capability-description": "EVPN-VXLAN overlay",
+          "entitlement-state": {
+           "allowed": true,
+           "in-use": true
+          },
+          "supporting-entitlements": {
+           "supporting-entitlement": [
+            {
+             "entitlement-id": "vendor-b-datacenter-perpetual"
+            },
+            {
+             "entitlement-id": "vendor-b-support-subscription"
+            }
+           ]
+          },
+          "capability-restrictions": {
+           "capability-restriction": [
+            {
+             "restriction-id": "vxlan-tunnels",
+             "description": "Maximum VXLAN tunnel endpoints",
+             "resource-name": "vteps",
+             "units": "endpoints",
+             "max-value": "500",
+             "current-value": "234"
+            }
+           ]
+          }
+         }
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "ne-id": "vendor-c-switch-dc-2",
+     "components": {
+      "component": [
+       {
+        "component-id": "chassis",
+        "class": "iana-hardware:chassis"
+       }
+      ]
+     },
+     "ietf-entitlement-inventory:installed-entitlements": {
+      "entitlement": [
+       {
+        "entitlement-id": "vendor-c-telemetry-tier-standard"
+       }
+      ]
+     },
+     "ietf-entitlement-inventory:capabilities": {
+      "capability-class": [
+       {
+        "capability-class": "basic-capability",
+        "capability": [
+         {
+          "capability-id": "streaming-telemetry",
+          "extended-capability-description": "Streaming telemetry tier",
+          "entitlement-state": {
+           "allowed": true,
+           "in-use": true
+          },
+          "supporting-entitlements": {
+           "supporting-entitlement": [
+            {
+             "entitlement-id": "vendor-c-telemetry-tier-standard"
+            }
+           ]
+          },
+          "capability-restrictions": {
+           "capability-restriction": [
+            {
+             "restriction-id": "telemetry-streams",
+             "description": "Maximum concurrent telemetry streams",
+             "resource-name": "streams",
+             "units": "streams",
+             "max-value": "200",
+             "current-value": "87"
+            }
+           ]
+          }
+         }
+        ]
+       }
+      ]
+     }
+    }
+   ]
+  },
+  "ietf-entitlement-inventory:entitlements": {
+   "entitlement": [
+    {
+     "entitlement-id": "vendor-a-sdwan-consumption",
+     "product-id": "SDWAN-CONSUMPTION-BILLING",
+     "sku": "L-SDWAN-CONSUMPTION",
+     "vendor": "Vendor-A",
+     "part-number": "SDWAN-CONSUMPTION-LIC",
+     "state": "active",
+     "renewal-profile": {
+      "start-date": "2025-01-01T00:00:00Z",
+      "activation-date": "2025-01-01T00:00:00Z"
+     },
+     "restrictions": {
+      "restriction": [
+       {
+        "restriction-id": "monthly-bandwidth-consumed",
+        "description": "Total bandwidth consumed this billing period",
+        "resource-name": "bandwidth",
+        "units": "GB",
+        "max-value": "10000",
+        "current-value": "7234"
+       }
+      ]
+     },
+     "entitlement-attachment": {
+      "universal-access": false,
+      "holders": {
+       "organization": [
+        "Enterprise IT Dept"
+       ],
+       "user": [
+        "network-admin"
+       ]
+      },
+      "assets": {
+       "elements": {
+        "network-elements": [
+         "vendor-a-router-hq-1"
+        ]
+       }
+      }
+     }
+    },
+    {
+     "entitlement-id": "vendor-b-datacenter-perpetual",
+     "product-id": "DC-EVPN-VXLAN-PERPETUAL",
+     "sku": "S-EVPN-PERM",
+     "vendor": "Vendor-B",
+     "part-number": "DC-EVPN-PERPETUAL-LIC",
+     "state": "active",
+     "renewal-profile": {
+      "activation-date": "2023-03-15T00:00:00Z"
+     },
+     "entitlement-attachment": {
+      "universal-access": false,
+      "holders": {
+       "organization": [
+        "Enterprise IT Dept"
+       ],
+       "user": [
+        "datacenter-ops"
+       ]
+      },
+      "assets": {
+       "elements": {
+        "network-elements": [
+         "vendor-b-switch-dc-1"
+        ]
+       }
+      }
+     }
+    },
+    {
+     "entitlement-id": "vendor-b-support-subscription",
+     "product-id": "DC-SUPPORT-ANNUAL",
+     "sku": "S-SUPPORT-1Y",
+     "vendor": "Vendor-B",
+     "part-number": "DC-SUPPORT-SUB-1Y",
+     "state": "active",
+     "renewal-profile": {
+      "start-date": "2024-10-01T00:00:00Z",
+      "activation-date": "2024-10-01T00:00:00Z",
+      "expiration-date": "2025-10-01T00:00:00Z"
+     },
+     "entitlement-attachment": {
+      "universal-access": false,
+      "holders": {
+       "organization": [
+        "Enterprise IT Dept"
+       ],
+       "user": [
+        "datacenter-ops"
+       ]
+      },
+      "assets": {
+       "elements": {
+        "network-elements": [
+         "vendor-b-switch-dc-1"
+        ]
+       }
+      }
+     }
+    },
+    {
+     "entitlement-id": "vendor-c-telemetry-tier-standard",
+     "product-id": "TELEMETRY-STD-50DEV-1Y",
+     "sku": "TELEM-STD-50-1Y",
+     "vendor": "Vendor-C",
+     "part-number": "TELEM-STD-TIER-1Y",
+     "state": "active",
+     "renewal-profile": {
+      "start-date": "2025-01-01T00:00:00Z",
+      "activation-date": "2025-01-01T00:00:00Z",
+      "expiration-date": "2026-01-01T00:00:00Z"
+     },
+     "restrictions": {
+      "restriction": [
+       {
+        "restriction-id": "subscribed-device-count",
+        "description": "Device count in subscribed tier",
+        "units": "devices",
+        "max-value": "50",
+        "current-value": "50"
+       },
+       {
+        "restriction-id": "current-device-count",
+        "description": "Actual devices currently managed (may exceed tier for overage billing)",
+        "units": "devices",
+        "max-value": "150",
+        "current-value": "63"
+       }
+      ]
+     },
+     "entitlement-attachment": {
+      "universal-access": false,
+      "holders": {
+       "organization": [
+        "Enterprise IT Dept"
+       ],
+       "user": [
+        "datacenter-ops",
+        "noc-team"
+       ]
+      },
+      "assets": {
+       "elements": {
+        "network-elements": [
+         "vendor-c-switch-dc-2"
+        ]
+       }
+      }
+     }
+    }
+   ]
+  }
+ }
+}

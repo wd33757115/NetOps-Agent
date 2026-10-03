@@ -1,0 +1,362 @@
+{
+ "ietf-network-inventory:network-inventory": {
+  "ietf-entitlement-inventory:entitlements": {
+   "entitlement": [
+    {
+     "entitlement-id": "base-system-license",
+     "product-id": "ROUTER-BASE-2025",
+     "state": "active",
+     "renewal-profile": {
+      "activation-date": "2025-01-01T00:00:00Z",
+      "start-date": "2025-01-01T00:00:00Z",
+      "expiration-date": "2026-01-01T00:00:00Z"
+     },
+     "entitlement-attachment": {
+      "universal-access": false,
+      "holders": {
+       "organization": [
+        "corp-a"
+       ]
+      },
+      "assets": {
+       "elements": {
+        "network-elements": [
+         "modular-router-dc1"
+        ]
+       }
+      }
+     }
+    },
+    {
+     "entitlement-id": "advanced-routing-license",
+     "product-id": "NET-ADV-ROUTE-100",
+     "state": "active",
+     "renewal-profile": {
+      "activation-date": "2025-01-15T00:00:00Z",
+      "start-date": "2025-01-15T00:00:00Z",
+      "expiration-date": "2026-01-15T00:00:00Z"
+     },
+     "entitlement-attachment": {
+      "universal-access": false,
+      "holders": {
+       "organization": [
+        "corp-a"
+       ]
+      },
+      "assets": {
+       "elements": {
+        "network-elements": [
+         "modular-router-dc1"
+        ]
+       }
+      }
+     }
+    },
+    {
+     "entitlement-id": "port-license-100g-slot1",
+     "product-id": "PORT-LIC-100G-8PORT",
+     "state": "active",
+     "renewal-profile": {
+      "activation-date": "2025-02-01T00:00:00Z",
+      "start-date": "2025-02-01T00:00:00Z",
+      "expiration-date": "2026-02-01T00:00:00Z"
+     },
+     "entitlement-attachment": {
+      "universal-access": false,
+      "holders": {
+       "organization": [
+        "corp-a"
+       ],
+       "user": [
+        "admin"
+       ]
+      },
+      "assets": {
+       "components": {
+        "component": [
+         {
+          "network-element": "modular-router-dc1",
+          "component-id": "linecard-slot-1"
+         }
+        ]
+       }
+      }
+     }
+    },
+    {
+     "entitlement-id": "port-license-100g-slot2",
+     "product-id": "PORT-LIC-100G-4PORT",
+     "state": "active",
+     "renewal-profile": {
+      "activation-date": "2025-02-15T00:00:00Z",
+      "start-date": "2025-02-15T00:00:00Z",
+      "expiration-date": "2026-02-15T00:00:00Z"
+     },
+     "entitlement-attachment": {
+      "universal-access": false,
+      "holders": {
+       "organization": [
+        "corp-a"
+       ],
+       "user": [
+        "admin"
+       ]
+      },
+      "assets": {
+       "components": {
+        "component": [
+         {
+          "network-element": "modular-router-dc1",
+          "component-id": "linecard-slot-2"
+         }
+        ]
+       }
+      }
+     }
+    },
+    {
+     "entitlement-id": "crypto-accelerator-license",
+     "product-id": "SEC-CRYPTO-ACC",
+     "state": "active",
+     "renewal-profile": {
+      "activation-date": "2025-03-01T00:00:00Z",
+      "start-date": "2025-03-01T00:00:00Z",
+      "expiration-date": "2026-03-01T00:00:00Z"
+     },
+     "entitlement-attachment": {
+      "universal-access": false,
+      "holders": {
+       "organization": [
+        "corp-a"
+       ],
+       "user": [
+        "security-admin"
+       ]
+      },
+      "assets": {
+       "components": {
+        "component": [
+         {
+          "network-element": "modular-router-dc1",
+          "component-id": "security-module"
+         }
+        ]
+       }
+      }
+     }
+    }
+   ]
+  },
+  "network-elements": {
+   "network-element": [
+    {
+     "ne-id": "modular-router-dc1",
+     "components": {
+      "component": [
+       {
+        "component-id": "chassis-main",
+        "class": "iana-hardware:chassis"
+       },
+       {
+        "component-id": "linecard-slot-1",
+        "class": "iana-hardware:module",
+        "ietf-entitlement-inventory:installed-entitlements": {
+         "entitlement": [
+          {
+           "entitlement-id": "port-license-100g-slot1"
+          }
+         ]
+        },
+        "ietf-entitlement-inventory:capabilities": {
+         "capability-class": [
+          {
+           "capability-class": "basic-capability",
+           "capability": [
+            {
+             "capability-id": "high-speed-ports-1-8",
+             "extended-capability-description": "Enable 100G ports 1-8 on linecard",
+             "entitlement-state": {
+              "allowed": true,
+              "in-use": true
+             },
+             "supporting-entitlements": {
+              "supporting-entitlement": [
+               {
+                "entitlement-id": "port-license-100g-slot1"
+               }
+              ]
+             },
+             "capability-restrictions": {
+              "capability-restriction": [
+               {
+                "restriction-id": "port-count",
+                "description": "Number of active ports",
+                "resource-name": "ports",
+                "units": "count",
+                "max-value": "8",
+                "current-value": "8"
+               }
+              ]
+             }
+            }
+           ]
+          }
+         ]
+        }
+       },
+       {
+        "component-id": "linecard-slot-2",
+        "class": "iana-hardware:module",
+        "ietf-entitlement-inventory:installed-entitlements": {
+         "entitlement": [
+          {
+           "entitlement-id": "port-license-100g-slot2"
+          }
+         ]
+        },
+        "ietf-entitlement-inventory:capabilities": {
+         "capability-class": [
+          {
+           "capability-class": "basic-capability",
+           "capability": [
+            {
+             "capability-id": "high-speed-ports-1-4",
+             "extended-capability-description": "Enable 100G ports 1-4 on linecard",
+             "entitlement-state": {
+              "allowed": true,
+              "in-use": true
+             },
+             "supporting-entitlements": {
+              "supporting-entitlement": [
+               {
+                "entitlement-id": "port-license-100g-slot2"
+               }
+              ]
+             },
+             "capability-restrictions": {
+              "capability-restriction": [
+               {
+                "restriction-id": "port-count",
+                "description": "Number of active ports",
+                "resource-name": "ports",
+                "units": "count",
+                "max-value": "4",
+                "current-value": "4"
+               }
+              ]
+             }
+            }
+           ]
+          }
+         ]
+        }
+       },
+       {
+        "component-id": "security-module",
+        "class": "iana-hardware:module",
+        "ietf-entitlement-inventory:installed-entitlements": {
+         "entitlement": [
+          {
+           "entitlement-id": "crypto-accelerator-license"
+          }
+         ]
+        },
+        "ietf-entitlement-inventory:capabilities": {
+         "capability-class": [
+          {
+           "capability-class": "basic-capability",
+           "capability": [
+            {
+             "capability-id": "hardware-encryption",
+             "extended-capability-description": "Hardware-accelerated encryption",
+             "entitlement-state": {
+              "allowed": true,
+              "in-use": true
+             },
+             "supporting-entitlements": {
+              "supporting-entitlement": [
+               {
+                "entitlement-id": "crypto-accelerator-license"
+               }
+              ]
+             },
+             "capability-restrictions": {
+              "capability-restriction": [
+               {
+                "restriction-id": "crypto-throughput",
+                "description": "Maximum encryption throughput",
+                "resource-name": "throughput",
+                "units": "Gbps",
+                "max-value": "100",
+                "current-value": "65"
+               }
+              ]
+             }
+            }
+           ]
+          }
+         ]
+        }
+       }
+      ]
+     },
+     "ietf-entitlement-inventory:installed-entitlements": {
+      "entitlement": [
+       {
+        "entitlement-id": "base-system-license"
+       },
+       {
+        "entitlement-id": "advanced-routing-license"
+       },
+       {
+        "entitlement-id": "port-license-100g-slot1"
+       },
+       {
+        "entitlement-id": "port-license-100g-slot2"
+       },
+       {
+        "entitlement-id": "crypto-accelerator-license"
+       }
+      ]
+     },
+     "ietf-entitlement-inventory:capabilities": {
+      "capability-class": [
+       {
+        "capability-class": "basic-capability",
+        "capability": [
+         {
+          "capability-id": "routing-protocols",
+          "extended-capability-description": "Advanced routing protocols (BGP, OSPF, IS-IS)",
+          "entitlement-state": {
+           "allowed": true,
+           "in-use": true
+          },
+          "supporting-entitlements": {
+           "supporting-entitlement": [
+            {
+             "entitlement-id": "advanced-routing-license"
+            }
+           ]
+          },
+          "capability-restrictions": {
+           "capability-restriction": [
+            {
+             "restriction-id": "max-routes",
+             "description": "Maximum routing table entries",
+             "resource-name": "routing-table",
+             "units": "entries",
+             "max-value": "1000000",
+             "current-value": "450000"
+            }
+           ]
+          }
+         }
+        ]
+       }
+      ]
+     }
+    }
+   ]
+  }
+ }
+}

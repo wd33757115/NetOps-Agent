@@ -1,0 +1,37 @@
+{
+  "ietf-yang-library:modules-state": {
+    "module-set-id": "netops-topology-inventory",
+    "module": [
+      {
+        "name": "iana-hardware",
+        "revision": "2018-03-13",
+        "namespace": "urn:ietf:params:xml:ns:yang:iana-hardware",
+        "conformance-type": "import"
+      },
+      {
+        "name": "ietf-inet-types",
+        "revision": "2025-12-22",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-inet-types",
+        "conformance-type": "import"
+      },
+      {
+        "name": "ietf-network-inventory",
+        "revision": "2026-09-29",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-network-inventory",
+        "conformance-type": "implement"
+      },
+      {
+        "name": "ietf-network-inventory-sw-ext",
+        "revision": "2026-07-06",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-network-inventory-sw-ext",
+        "conformance-type": "implement"
+      },
+      {
+        "name": "ietf-yang-types",
+        "revision": "2025-12-22",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-yang-types",
+        "conformance-type": "import"
+      }
+    ]
+  }
+}
