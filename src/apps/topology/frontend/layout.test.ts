@@ -1,61 +1,84 @@
 import { describe, expect, it } from 'vitest'
-import { layout, sides } from './layout'
+import { drawing, intersectsNode, layout, NODE_HEIGHT, nodeWidth, sharedLength, type LayoutNode, type Point } from './layout'
+import campus from './fixtures/campus-layout.json'
 
-// The lab: two routers linked directly, a hub segment joining both and a management host,
-// and one PC on an edge port of each router.
-const nodes = [
-  { id: 'r1', identity_status: 'collected' },
-  { id: 'r2', identity_status: 'collected' },
-  { id: 'mgmt', identity_status: 'host' },
-  { id: 'pc1', identity_status: 'host' },
-  { id: 'pc2', identity_status: 'host' },
-  { id: 'hub', identity_status: 'segment' },
-]
-const links = [
-  { id: 'direct', source: 'r1', target: 'r2' },
-  { id: 'hub#0', source: 'r1', target: 'hub' },
-  { id: 'hub#1', source: 'r2', target: 'hub' },
-  { id: 'hub#2', source: 'mgmt', target: 'hub' },
-  { id: 'pc1', source: 'r2', target: 'pc1' },
-  { id: 'pc2', source: 'pc2', target: 'r1' },
-]
+const segments = (points: Point[]) => points.slice(1).map((point, index) => [points[index], point] as const)
+const node = (id: string): LayoutNode => ({ id, identity_status: 'collected' })
+const rects = (nodes: LayoutNode[], at: Map<string, Point>) => nodes.map(n => ({ id: n.id, ...at.get(n.id)!, width: nodeWidth(n), height: NODE_HEIGHT }))
+const overlap = (a: ReturnType<typeof rects>[number], b: ReturnType<typeof rects>[number]) => a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
 
-describe('topology layout', () => {
-  const at = layout(nodes, links)
-  const p = (id: string) => at.get(id)!
+describe('the complete observed 15-node / 24-link canvas', () => {
+  const plan = drawing(campus.nodes, campus.links)
 
-  it('keeps directly linked devices side by side in one row', () => {
-    expect(p('r1').y).toBe(p('r2').y)
-    expect(Math.abs(p('r1').x - p('r2').x)).toBeLessThanOrEqual(480)
+  it('keeps every relationship, including each independent parallel link', () => {
+    expect(plan.positions.size).toBe(15)
+    expect(plan.routes.size).toBe(24)
+    expect(new Set([...plan.routes.values()].map(route => route.path)).size).toBe(24)
+    expect([...plan.ports.values()].flat()).toHaveLength(48)
+    for (const ports of plan.ports.values()) {
+      expect(new Set(ports.map(port => port.id)).size).toBe(ports.length)
+      expect(new Set(ports.map(port => `${port.point.x}:${port.point.y}`)).size).toBe(ports.length)
+    }
   })
 
-  it('puts a segment above its devices and its host above the segment', () => {
-    expect(p('hub').y).toBeLessThan(p('r1').y)
-    expect(p('hub').x).toBeCloseTo((p('r1').x + p('r2').x) / 2)
-    expect(p('mgmt').y).toBeLessThan(p('hub').y)
+  it('never draws a line through another node or stacks node rectangles', () => {
+    const boxes = rects(campus.nodes, plan.positions)
+    for (const [index, a] of boxes.entries()) for (const b of boxes.slice(index + 1)) expect(overlap(a, b), `${a.id}/${b.id}`).toBe(false)
+    for (const link of campus.links) {
+      for (const box of boxes.filter(n => n.id !== link.source && n.id !== link.target)) {
+        for (const [a, b] of segments(plan.routes.get(link.id)!.points)) expect(intersectsNode(a, b, box), `${link.id}/${box.id}`).toBe(false)
+      }
+    }
   })
 
-  it('puts an edge-port host below the device it attaches to', () => {
-    expect(p('pc1').y).toBeGreaterThan(p('r2').y)
-    expect(p('pc1').x).toBe(p('r2').x)
-    expect(p('pc2').x).toBe(p('r1').x)
+  it('has no shared line segment hiding a second relationship', () => {
+    const routes = [...plan.routes.values()]
+    for (const [index, first] of routes.entries()) for (const second of routes.slice(index + 1)) {
+      for (const [a, b] of segments(first.points)) for (const [c, d] of segments(second.points)) expect(sharedLength(a, b, c, d)).toBeLessThan(1)
+    }
   })
 
-  it('never stacks two nodes on the same spot', () => {
-    const spots = [...at.values()].map(q => `${q.x}:${q.y}`)
-    expect(new Set(spots).size).toBe(spots.length)
+  it('does not move devices or routes when API arrays arrive in another order', () => {
+    const reversed = drawing([...campus.nodes].reverse(), [...campus.links].reverse())
+    expect(reversed.positions).toEqual(plan.positions)
+    expect(reversed.routes).toEqual(plan.routes)
   })
 
-  it('connects facing sides', () => {
-    expect(sides(p('r1'), p('r2'))).toEqual(['right', 'left'])
-    expect(sides(p('r2'), p('pc1'))).toEqual(['bottom', 'top'])
-    expect(sides(p('r1'), p('hub'))).toEqual(['top', 'bottom'])
+  it('keeps the focused port label off node rectangles', () => {
+    const boxes = rects(campus.nodes, plan.positions)
+    for (const route of plan.routes.values()) {
+      const label = { id: 'label', x: route.label.x - 180, y: route.label.y - 18, width: 360, height: 36 }
+      expect(boxes.some(box => overlap(label, box))).toBe(false)
+    }
   })
 })
 
-it('positions unidentified endpoints while preserving legacy host snapshots', () => {
-  const oldPositions = layout(nodes, links)
-  const current = layout(nodes.map(node => node.identity_status === 'host' ? { ...node, identity_status: 'endpoint' } : node), links)
-  expect(current).toEqual(oldPositions)
-  expect(current.size).toBe(nodes.length)
+it('routes long same-row edges around intervening devices', () => {
+  const nodes = [node('a'), node('middle'), node('b')]
+  const links = [{ id: 'long', source: 'a', target: 'b' }]
+  const positions = new Map([['a', { x: 0, y: 0 }], ['middle', { x: 400, y: 0 }], ['b', { x: 800, y: 0 }]])
+  const route = drawing(nodes, links, positions).routes.get('long')!
+  expect(route.points.length).toBeGreaterThan(2)
+  for (const [a, b] of segments(route.points)) expect(intersectsNode(a, b, { x: 400, y: 0, width: 192, height: 96 })).toBe(false)
+})
+
+it.each([2, 6, 8])('preserves %i parallel links with separate clickable middle lanes', count => {
+  const nodes = [node('a'), node('b')]
+  const links = Array.from({ length: count }, (_, i) => ({ id: `port-${i}`, source: i % 2 ? 'b' : 'a', target: i % 2 ? 'a' : 'b' }))
+  const routes = [...drawing(nodes, links).routes.values()]
+  expect(routes).toHaveLength(count)
+  for (const [index, first] of routes.entries()) for (const second of routes.slice(index + 1)) {
+    expect(first.source.id).not.toBe(second.source.id)
+    for (const [a, b] of segments(first.points)) for (const [c, d] of segments(second.points)) expect(sharedLength(a, b, c, d)).toBeLessThan(1)
+  }
+})
+
+it('keeps all spokes, isolated nodes, self links and old host identities', () => {
+  const nodes = [node('a'), node('b'), node('isolated'), { id: 'segment', identity_status: 'segment' }, { id: 'endpoint', identity_status: 'endpoint' }]
+  const links = [{ id: 'self', source: 'a', target: 'a' }, ...['a', 'b', 'endpoint'].map(id => ({ id: `shared#${id}`, source: id, target: 'segment' }))]
+  const plan = drawing(nodes, links)
+  expect(plan.positions.size).toBe(nodes.length)
+  expect(plan.routes.size).toBe(links.length)
+  expect(layout(nodes.map(n => n.identity_status === 'endpoint' ? { ...n, identity_status: 'host' } : n), links)).toEqual(plan.positions)
+  expect(drawing([], []).routes.size).toBe(0)
 })

@@ -2,8 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link as RouterLink } from 'react-router-dom'
 import { Alert, Button, Checkbox, ConfigProvider, Drawer, Empty, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography, message } from 'antd'
 import { ArrowLeftOutlined, DownloadOutlined, PlusOutlined } from '@ant-design/icons'
-import { Background, Controls, Handle, MarkerType, Position, ReactFlow, ReactFlowProvider, useReactFlow } from '@xyflow/react'
-import { layout, sides, type Side } from './layout'
+import { Background, BaseEdge, Controls, Handle, MarkerType, Position, ReactFlow, ReactFlowProvider, useReactFlow, useUpdateNodeInternals, type EdgeProps } from '@xyflow/react'
+import { drawing, NODE_HEIGHT, nodeWidth, type Port, type Route, type Side } from './layout'
 import '@xyflow/react/dist/style.css'
 import { api } from '@netops/config/api'
 import { useAuth } from '@netops/context/AuthContext'
@@ -32,42 +32,88 @@ function detailValue(key: string, value: unknown) {
   return labels[String(value)] || (typeof value === 'object' ? JSON.stringify(value) : String(value))
 }
 
-const SIDES: [Side, Position][] = [['top', Position.Top], ['bottom', Position.Bottom], ['left', Position.Left], ['right', Position.Right]]
+const POSITIONS: Record<Side, Position> = { top: Position.Top, bottom: Position.Bottom, left: Position.Left, right: Position.Right }
 
-// Handles on every side so each edge can use the sides that face each other.
-function TopologyNodeView({ data }: { data: { label: React.ReactNode } }) {
-  return <>{SIDES.map(([side, position]) => <React.Fragment key={side}>
-    <Handle type="source" id={`${side}-s`} position={position} isConnectable={false} />
-    <Handle type="target" id={`${side}-t`} position={position} isConnectable={false} />
-  </React.Fragment>)}{data.label}</>
+function TopologyNodeView({ id, data }: { id: string; data: { label: React.ReactNode; ports: Port[] } }) {
+  const updateNodeInternals = useUpdateNodeInternals()
+  const signature = data.ports.map(port => `${port.id}:${port.side}:${port.offset}`).join('|')
+  useEffect(() => { updateNodeInternals(id) }, [id, signature, updateNodeInternals])
+  return <>{data.ports.map(port => <Handle key={port.id} type={port.type} id={port.id} position={POSITIONS[port.side]} isConnectable={false}
+    style={port.side === 'left' || port.side === 'right' ? { top: port.offset } : { left: port.offset }} />)}{data.label}</>
 }
 const nodeTypes = { topology: TopologyNodeView }
 
-function Canvas({ graph, highlight, onNode, onLink }: { graph: Graph; highlight: Set<string>; onNode: (node: TopologyNode) => void; onLink: (link: Link) => void }) {
+function TopologyEdgeView({ id, data, style, markerStart, markerEnd }: EdgeProps) {
+  const { route, title, active } = data as { route: Route; title: string; active: boolean }
+  return <g data-route-id={id}>
+    <title>{title}</title>
+    <path d={route.path} fill="none" stroke="#f7fafc" strokeWidth={7} style={{ opacity: style?.opacity }} pointerEvents="none" />
+    <BaseEdge id={id} path={route.path} style={style} markerStart={markerStart} markerEnd={markerEnd} interactionWidth={18}
+      label={active ? title : undefined} labelX={route.label.x} labelY={route.label.y}
+      labelStyle={{ fontSize: 12, fill: '#174765' }} labelBgStyle={{ fill: '#fff', fillOpacity: 0.96 }} labelBgPadding={[7, 4]} />
+  </g>
+}
+const edgeTypes = { routed: TopologyEdgeView }
+
+function AdjacentLinks({ node, graph, onLink }: { node: TopologyNode; graph: Graph; onLink: (link: Link) => void }) {
+  return <><h3>相邻链路</h3><ul className="tp-adjacencies">{graph.links.filter(link => link.source === node.id || link.target === node.id).map(link => {
+    const source = link.source === node.id
+    const localPort = node.tps.find(tp => tp.id === (source ? link.source_tp : link.target_tp))?.name || '端口未知'
+    const peer = graph.nodes.find(item => item.id === (source ? link.target : link.source))
+    const remotePort = peer?.tps.find(tp => tp.id === (source ? link.target_tp : link.source_tp))?.name || '端口未知'
+    return <li key={link.id}><button type="button" onClick={() => onLink(link)} aria-label={`${localPort} → ${peer?.name || '未知节点'} ${remotePort}`}><strong>{localPort} → {peer?.name || '未知节点'}</strong><span>{remotePort}{link.state ? ` · ${labels[link.state] || link.state}` : ''}</span></button></li>
+  })}</ul></>
+}
+
+export function Canvas({ graph, highlight, selectedId, onNode, onLink, onClear }: { graph: Graph; highlight: Set<string>; selectedId?: string; onNode: (node: TopologyNode) => void; onLink: (link: Link) => void; onClear?: () => void }) {
   const { fitView } = useReactFlow()
-  const positions = useMemo(() => layout(graph.nodes, graph.links), [graph])
-  const nodes = useMemo(() => graph.nodes.map(node => ({ id: node.id, type: 'topology',
-    position: positions.get(node.id) ?? { x: 0, y: 0 },
+  const plan = useMemo(() => drawing(graph.nodes, graph.links), [graph])
+  const geometryKey = JSON.stringify([
+    graph.nodes.map(node => [node.id, nodeWidth(node)]).sort(),
+    graph.links.map(link => [link.id, link.source, link.target]).sort(),
+  ])
+  const [hover, setHover] = useState<{ kind: 'node' | 'edge'; id: string }>()
+  const focus = hover ?? (selectedId ? { kind: graph.nodes.some(node => node.id === selectedId) ? 'node' : 'edge', id: selectedId } : undefined)
+  const focusedEdges = new Set(focus ? graph.links.filter(link => focus.kind === 'edge' ? link.id === focus.id : link.source === focus.id || link.target === focus.id).map(link => link.id) : [])
+  const focusedNodes = new Set(graph.links.filter(link => focusedEdges.has(link.id)).flatMap(link => [link.source, link.target]))
+  const missingRoutes = graph.links.filter(link => !plan.routes.has(link.id))
+  if (focus?.kind === 'node') focusedNodes.add(focus.id)
+  // Hover rebuilds these objects. Without static size and handles React Flow drops the
+  // measured handle bounds of every new node object and hides all edges until it
+  // re-measures, which under the pointer re-triggers hover: the edges flicker.
+  const nodes = graph.nodes.map(node => ({ id: node.id, type: 'topology',
+    position: plan.positions.get(node.id) ?? { x: 0, y: 0 },
+    width: nodeWidth(node), height: NODE_HEIGHT, measured: { width: nodeWidth(node), height: NODE_HEIGHT },
+    handles: (plan.ports.get(node.id) ?? []).map(port => ({ id: port.id, type: port.type, position: POSITIONS[port.side], width: 1, height: 1,
+      x: port.side === 'left' ? 0 : port.side === 'right' ? nodeWidth(node) : port.offset,
+      y: port.side === 'top' ? 0 : port.side === 'bottom' ? NODE_HEIGHT : port.offset })),
+    style: { width: nodeWidth(node), height: NODE_HEIGHT, opacity: focus && !focusedNodes.has(node.id) ? 0.32 : 1 },
     ariaLabel: `${node.name} · ${labels[node.identity_status]}`,
-    data: { label: <><strong>{node.name}</strong><span>{node.address || node.addresses?.join(', ') || '管理地址待确认'}</span><small>{labels[node.identity_status]} · {labels[node.freshness]}</small></> },
-    className: (node.identity_status === 'segment' ? 'topology-node segment' : ['candidate', 'advertised'].includes(node.identity_status) ? 'topology-node candidate' : 'topology-node') + (highlight.has(node.id) ? ' located' : ''),
-  })), [graph.nodes, positions, highlight])
-  const edges = useMemo(() => graph.links.map(link => {
+    data: { ports: plan.ports.get(node.id) ?? [], label: <><strong title={node.name}>{node.name}</strong><span title={node.address || node.addresses?.join(', ')}>{node.address || node.addresses?.join(', ') || '管理地址待确认'}</span><small>{labels[node.identity_status]} · {labels[node.freshness]}</small></> },
+    className: (node.identity_status === 'segment' ? 'topology-node segment' : ['candidate', 'advertised'].includes(node.identity_status) ? 'topology-node candidate' : 'topology-node') + (highlight.has(node.id) || focusedNodes.has(node.id) ? ' located' : ''),
+  }))
+  const edges = graph.links.flatMap(link => {
+    const route = plan.routes.get(link.id)
+    if (!route) return []
     const find = (id: string) => graph.nodes.find(n => n.id === id)
-    const [from, to] = sides(positions.get(link.source) ?? { x: 0, y: 0 }, positions.get(link.target) ?? { x: 0, y: 0 }, find(link.source), find(link.target))
-    return { id: link.id, source: link.source, target: link.target, sourceHandle: `${from}-s`, targetHandle: `${to}-t`,
-      // SIMAP links carry both endpoints; older snapshots only name the source port.
-      label: [link.label ?? find(link.source)?.tps.find(tp => tp.id === link.source_tp)?.name, link.state && labels[link.state]].filter(Boolean).join(' · '),
-      labelBgPadding: [4, 2] as [number, number], labelStyle: { fontSize: 11 },
+    const activeEdge = focusedEdges.has(link.id) || highlight.has(link.source) && highlight.has(link.target)
+    const title = [link.label ?? find(link.source)?.tps.find(tp => tp.id === link.source_tp)?.name, link.state && labels[link.state]].filter(Boolean).join(' · ')
+    return [{ id: link.id, type: 'routed', source: link.source, target: link.target, sourceHandle: route.source.id, targetHandle: route.target.id,
+      ariaLabel: `${find(link.source)?.name} — ${find(link.target)?.name} · ${title}`,
+      data: { route, title, active: focus?.kind === 'edge' && focus.id === link.id }, zIndex: activeEdge ? 10 : 0,
       ...(link.direction === 'bi' && link.link_type === 'p2p' ? { markerStart: { type: MarkerType.ArrowClosed }, markerEnd: { type: MarkerType.ArrowClosed } } : {}),
-      style: { stroke: link.available === false ? '#bc3b42' : highlight.has(link.source) && highlight.has(link.target) ? '#1671e8' : link.state === 'unknown' || link.freshness !== 'observed' ? '#aeb8c3' : '#477b8a', strokeWidth: link.available === false || highlight.has(link.source) && highlight.has(link.target) ? 2.5 : 1, strokeDasharray: link.freshness === 'observed' ? undefined : '5 5' },
-    }
-  }), [graph, positions, highlight])
-  useEffect(() => { const timer = setTimeout(() => void fitView({ padding: 0.3, maxZoom: 1.1 }), 80); return () => clearTimeout(timer) }, [fitView, nodes.length])
-  return <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} nodesDraggable={false} nodesConnectable={false} minZoom={0.15} maxZoom={2}
+      style: { stroke: link.available === false ? '#bc3b42' : activeEdge ? '#1671e8' : link.state === 'unknown' || link.freshness !== 'observed' ? '#8997a7' : '#477b8a', strokeWidth: activeEdge ? 3 : 1.6, opacity: focus && !focusedEdges.has(link.id) ? 0.12 : 1, strokeDasharray: link.freshness === 'observed' ? undefined : '5 5' },
+    }]
+  })
+  useEffect(() => { const timer = setTimeout(() => void fitView({ padding: 0.12, maxZoom: 1.1 }), 80); return () => clearTimeout(timer) }, [fitView, geometryKey])
+  return <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} nodesDraggable={false} nodesConnectable={false} minZoom={0.15} maxZoom={2}
+    onNodeMouseEnter={(_, node) => setHover({ kind: 'node', id: node.id })} onNodeMouseLeave={() => setHover(undefined)}
+    onEdgeMouseEnter={(_, edge) => setHover({ kind: 'edge', id: edge.id })} onEdgeMouseLeave={() => setHover(undefined)}
+    onPaneClick={() => { setHover(undefined); onClear?.() }}
     onNodeClick={(_, node) => onNode(graph.nodes.find(n => n.id === node.id)!)}
-    onEdgeClick={(_, edge) => onLink(graph.links.find(link => link.id === edge.id)!)} fitView fitViewOptions={{ padding: 0.3, maxZoom: 1.1 }}>
+    onEdgeClick={(_, edge) => onLink(graph.links.find(link => link.id === edge.id)!)} fitView fitViewOptions={{ padding: 0.12, maxZoom: 1.1 }}>
     <Background gap={24} color="#dce3e9" /><Controls showInteractive={false} />
+    {missingRoutes.length > 0 && <div className="tp-route-warning" role="status">有 {missingRoutes.length} 条关系暂未绘入画布：{missingRoutes.map(link => <button key={link.id} type="button" onClick={() => onLink(link)}>{link.label || link.id}</button>)}。可点击逐条查看观测。</div>}
   </ReactFlow>
 }
 
@@ -202,10 +248,10 @@ export default function Page() {
       </div>
       {waiting.length > 0 && <Alert className="tp-alert" type="warning" showIcon message={`${waiting.length} 个节点等待人工处理；成功节点的观测已保留`} />}
       <div className="tp-stage"><section className="tp-canvas" aria-label="网络拓扑画布">
-        {run?.graph.nodes.length ? <ReactFlowProvider><Canvas graph={run.graph} highlight={highlight} onNode={node => { setLocated(undefined); setSelected(node) }} onLink={link => { setLocated(undefined); setSelected(link) }} /></ReactFlowProvider> : <div className="tp-empty"><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={run ? '尚无成功的拓扑观测，请查看下方节点状态' : '从一个管理地址开始发现，或导入已有 LLDP 输出'} /><p>每条链路都保留来源与观测时间。未确认的邻居以候选身份展示。</p></div>}
+        {run?.graph.nodes.length ? <ReactFlowProvider><Canvas graph={run.graph} highlight={highlight} selectedId={selected?.id} onClear={() => setSelected(undefined)} onNode={node => { setLocated(undefined); setSelected(node) }} onLink={link => { setLocated(undefined); setSelected(link) }} /></ReactFlowProvider> : <div className="tp-empty"><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={run ? '尚无成功的拓扑观测，请查看下方节点状态' : '从一个管理地址开始发现，或导入已有 LLDP 输出'} /><p>每条链路都保留来源与观测时间。未确认的邻居以候选身份展示。</p></div>}
         {run && <div className="tp-map-caption">{run.graph.nodes.length} 个节点 · {run.graph.links.length} 条邻接记录 · L2/L3 拓扑（RFC 8345 + SIMAP）</div>}
       </section><aside className="tp-inspector"><h2>{located ? '定位结果' : selected ? '观测详情' : '阅读这张拓扑'}</h2>
-        {located ? <Located result={located} onEvidence={id => void readEvidence(id)} onClear={() => setLocated(undefined)} /> : selected ? <><dl>{Object.entries(selected).filter(([key]) => !['tps', 'id', 'source_tp', 'target_tp', 'source', 'target'].includes(key)).map(([key, value]) => <React.Fragment key={key}><dt>{({ name: '名称', address: '管理地址', addresses: '通告地址', identity_status: '身份状态', freshness: '新鲜度', observed_at: '观测时间', evidence_id: '证据编号', members: '端口数', subnets: '三层网段', link_type: '链路类型', evidence: '依据', direction: '方向', ends: '两端端口', label: '端口', ...detailLabels } as Record<string, string>)[key] || key}</dt><dd>{detailValue(key, value)}</dd></React.Fragment>)}</dl>
+        {located ? <Located result={located} onEvidence={id => void readEvidence(id)} onClear={() => setLocated(undefined)} /> : selected ? <>{'tps' in selected && run && <AdjacentLinks node={selected} graph={run.graph} onLink={setSelected} />}<dl>{Object.entries(selected).filter(([key]) => !['tps', 'id', 'source_tp', 'target_tp', 'source', 'target'].includes(key)).map(([key, value]) => <React.Fragment key={key}><dt>{({ name: '名称', address: '管理地址', addresses: '通告地址', identity_status: '身份状态', freshness: '新鲜度', observed_at: '观测时间', evidence_id: '证据编号', members: '端口数', subnets: '三层网段', link_type: '链路类型', evidence: '依据', direction: '方向', ends: '两端端口', label: '端口', ...detailLabels } as Record<string, string>)[key] || key}</dt><dd>{detailValue(key, value)}</dd></React.Fragment>)}</dl>
           {'tps' in selected && <><h3>终结点 / 端口</h3>{selected.tps.map(tp => <div key={tp.id}>{tp.name}</div>)}</>}
           <Space direction="vertical" style={{ marginTop: 16 }}><Button disabled={!selected.evidence_id} onClick={() => void readEvidence(selected.evidence_id)}>查看原始证据</Button>{'address' in selected && selected.address && <Button onClick={() => setTerminal(selected.address)}>打开 SSH 终端</Button>}</Space>
         </> : <><p>链路表示二层邻接，不代表一根实际线缆；共享网段表示同一介质上的多个端口，例如经过 Hub。已知设备失联时保留历史关系，以虚线显示；红色链路表示采样端口不可用，灰色表示状态待确认。</p><p>只被邻居通告、尚未采集的设备用虚线框显示。设备按自身报告的机箱 ID 识别，采集后与通告合并为同一节点。</p><p>点击节点或链路可查看观测时间与命令证据。</p></>}

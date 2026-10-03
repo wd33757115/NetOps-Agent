@@ -1,0 +1,187 @@
+{
+  "description": "2026-10-03 observed canvas: 15 nodes, 24 links; original IDs and parallel-port multiplicity retained for geometric regression.",
+  "nodes": [
+    {
+      "id": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:74-25-8a-e3-cf-e7",
+      "identity_status": "collected"
+    },
+    {
+      "id": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:74-25-8a-e4-03-f3",
+      "identity_status": "collected"
+    },
+    {
+      "id": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:aa-bb-cc-00-02-00",
+      "identity_status": "collected"
+    },
+    {
+      "id": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:aa-bb-cc-00-03-00",
+      "identity_status": "collected"
+    },
+    {
+      "id": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:aa-bb-cc-00-04-00",
+      "identity_status": "collected"
+    },
+    {
+      "id": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:aa-bb-cc-00-05-00",
+      "identity_status": "collected"
+    },
+    {
+      "id": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:aa-bb-cc-00-06-00",
+      "identity_status": "collected"
+    },
+    {
+      "id": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:aa-bb-cc-00-07-00",
+      "identity_status": "collected"
+    },
+    {
+      "id": "urn:netops:topology:d537b0de1fab427683413b81290db718:host:00-50-79-66-68-00",
+      "identity_status": "endpoint"
+    },
+    {
+      "id": "urn:netops:topology:d537b0de1fab427683413b81290db718:host:00-50-79-66-68-01",
+      "identity_status": "endpoint"
+    },
+    {
+      "id": "urn:netops:topology:d537b0de1fab427683413b81290db718:host:00-50-79-66-68-02",
+      "identity_status": "endpoint"
+    },
+    {
+      "id": "urn:netops:topology:d537b0de1fab427683413b81290db718:host:00-50-79-66-68-03",
+      "identity_status": "endpoint"
+    },
+    {
+      "id": "urn:netops:topology:d537b0de1fab427683413b81290db718:host:00-50-79-66-68-04",
+      "identity_status": "endpoint"
+    },
+    {
+      "id": "urn:netops:topology:d537b0de1fab427683413b81290db718:host:aa-bb-cc-00-01-10",
+      "identity_status": "endpoint"
+    },
+    {
+      "id": "urn:netops:topology:d537b0de1fab427683413b81290db718:host:aa-bb-cc-00-01-20",
+      "identity_status": "endpoint"
+    }
+  ],
+  "links": [
+    {
+      "id": "urn:netops:topology:d537b0de1fab427683413b81290db718:l2-link:b77123962d8c",
+      "source": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:aa-bb-cc-00-06-00",
+      "target": "urn:netops:topology:d537b0de1fab427683413b81290db718:host:00-50-79-66-68-00"
+    },
+    {
+      "id": "urn:netops:topology:d537b0de1fab427683413b81290db718:l2-link:64438f1f59bf",
+      "source": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:aa-bb-cc-00-07-00",
+      "target": "urn:netops:topology:d537b0de1fab427683413b81290db718:host:00-50-79-66-68-01"
+    },
+    {
+      "id": "urn:netops:topology:d537b0de1fab427683413b81290db718:l2-link:ba583d3510d0",
+      "source": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:aa-bb-cc-00-06-00",
+      "target": "urn:netops:topology:d537b0de1fab427683413b81290db718:host:00-50-79-66-68-02"
+    },
+    {
+      "id": "urn:netops:topology:d537b0de1fab427683413b81290db718:l2-link:0bde67e73fb5",
+      "source": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:aa-bb-cc-00-07-00",
+      "target": "urn:netops:topology:d537b0de1fab427683413b81290db718:host:00-50-79-66-68-03"
+    },
+    {
+      "id": "urn:netops:topology:d537b0de1fab427683413b81290db718:l2-link:81cf1c0679af",
+      "source": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:aa-bb-cc-00-07-00",
+      "target": "urn:netops:topology:d537b0de1fab427683413b81290db718:host:00-50-79-66-68-04"
+    },
+    {
+      "id": "urn:netops:topology:d537b0de1fab427683413b81290db718:l2-link:fa6ec51e2cfa",
+      "source": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:74-25-8a-e4-03-f3",
+      "target": "urn:netops:topology:d537b0de1fab427683413b81290db718:host:aa-bb-cc-00-01-10"
+    },
+    {
+      "id": "urn:netops:topology:d537b0de1fab427683413b81290db718:l2-link:75c759c151c7",
+      "source": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:74-25-8a-e3-cf-e7",
+      "target": "urn:netops:topology:d537b0de1fab427683413b81290db718:host:aa-bb-cc-00-01-20"
+    },
+    {
+      "id": "urn:netops:topology:d537b0de1fab427683413b81290db718:l2-link:835c013627f0",
+      "source": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:74-25-8a-e3-cf-e7",
+      "target": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:74-25-8a-e4-03-f3"
+    },
+    {
+      "id": "urn:netops:topology:d537b0de1fab427683413b81290db718:l2-link:cc1152aadfd7",
+      "source": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:74-25-8a-e3-cf-e7",
+      "target": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:aa-bb-cc-00-03-00"
+    },
+    {
+      "id": "urn:netops:topology:d537b0de1fab427683413b81290db718:l2-link:e23ff3d2b313",
+      "source": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:74-25-8a-e3-cf-e7",
+      "target": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:aa-bb-cc-00-02-00"
+    },
+    {
+      "id": "urn:netops:topology:d537b0de1fab427683413b81290db718:l2-link:c0373cd166dd",
+      "source": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:74-25-8a-e3-cf-e7",
+      "target": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:74-25-8a-e4-03-f3"
+    },
+    {
+      "id": "urn:netops:topology:d537b0de1fab427683413b81290db718:l2-link:2e281abc1e04",
+      "source": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:74-25-8a-e4-03-f3",
+      "target": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:aa-bb-cc-00-02-00"
+    },
+    {
+      "id": "urn:netops:topology:d537b0de1fab427683413b81290db718:l2-link:e7fa3f39adbc",
+      "source": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:74-25-8a-e4-03-f3",
+      "target": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:aa-bb-cc-00-03-00"
+    },
+    {
+      "id": "urn:netops:topology:d537b0de1fab427683413b81290db718:l2-link:508a0393b49c",
+      "source": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:aa-bb-cc-00-02-00",
+      "target": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:aa-bb-cc-00-03-00"
+    },
+    {
+      "id": "urn:netops:topology:d537b0de1fab427683413b81290db718:l2-link:1c3151cd4bfa",
+      "source": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:aa-bb-cc-00-02-00",
+      "target": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:aa-bb-cc-00-04-00"
+    },
+    {
+      "id": "urn:netops:topology:d537b0de1fab427683413b81290db718:l2-link:73b570a16fb7",
+      "source": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:aa-bb-cc-00-02-00",
+      "target": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:aa-bb-cc-00-05-00"
+    },
+    {
+      "id": "urn:netops:topology:d537b0de1fab427683413b81290db718:l2-link:503e4daa2465",
+      "source": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:aa-bb-cc-00-03-00",
+      "target": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:aa-bb-cc-00-05-00"
+    },
+    {
+      "id": "urn:netops:topology:d537b0de1fab427683413b81290db718:l2-link:7b14e48f7739",
+      "source": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:aa-bb-cc-00-03-00",
+      "target": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:aa-bb-cc-00-04-00"
+    },
+    {
+      "id": "urn:netops:topology:d537b0de1fab427683413b81290db718:l2-link:d94bf827c684",
+      "source": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:aa-bb-cc-00-04-00",
+      "target": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:aa-bb-cc-00-05-00"
+    },
+    {
+      "id": "urn:netops:topology:d537b0de1fab427683413b81290db718:l2-link:4ee3f2b11bdb",
+      "source": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:aa-bb-cc-00-04-00",
+      "target": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:aa-bb-cc-00-05-00"
+    },
+    {
+      "id": "urn:netops:topology:d537b0de1fab427683413b81290db718:l2-link:ae508bbdfc62",
+      "source": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:aa-bb-cc-00-04-00",
+      "target": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:aa-bb-cc-00-06-00"
+    },
+    {
+      "id": "urn:netops:topology:d537b0de1fab427683413b81290db718:l2-link:43870300bcaf",
+      "source": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:aa-bb-cc-00-04-00",
+      "target": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:aa-bb-cc-00-07-00"
+    },
+    {
+      "id": "urn:netops:topology:d537b0de1fab427683413b81290db718:l2-link:44a2287ca66d",
+      "source": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:aa-bb-cc-00-05-00",
+      "target": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:aa-bb-cc-00-07-00"
+    },
+    {
+      "id": "urn:netops:topology:d537b0de1fab427683413b81290db718:l2-link:4e339d459824",
+      "source": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:aa-bb-cc-00-05-00",
+      "target": "urn:netops:topology:d537b0de1fab427683413b81290db718:device:aa-bb-cc-00-06-00"
+    }
+  ]
+}

@@ -1,6 +1,64 @@
 # 网络数字孪生开发交接
 
-本文最前面记录 2026-10-03 的模型审查后修复；其后保留 Claude → GPT 与 2026-09-30 的历史交接。历史工作约束以负责人后续明确指令为准，模型能力与验收范围以最新记录为准。
+本文最前面记录 2026-10-03 的交叉连线修复交接；其后保留模型修复、Claude → GPT 与 2026-09-30 的历史交接。历史工作约束以负责人后续明确指令为准，模型能力与验收范围以最新记录为准。
+
+## 当前交接 2026-10-03 交叉连线修复与剩余验收
+
+**状态（2026-10-03 13:40，Claude）：本节剩余验收已完成，并修复了验收中发现的悬停闪烁回归（topology 0.4.17），见本节末“完成记录”。下一项按完整实施方案 M1。**
+
+负责人要求因 token 将用尽立即写交接。本节是接手入口，**先完成本节剩余验收，再进入完整实施方案 M1**。本轮代码已经冻结，不再扩展功能。主项目 `C:/Users/wangd/PycharmProjects/PythonProject/netops-agent`，分支 `feat/network-twin`；隔离树 `C:/Users/wangd/.codex/worktrees/twin-vlan-trunk/netops-agent`。此前本地提交：`3f09edc`（模型/作用域修复）、`6eef512`（IETF 研究与完整方案），均未推送。本节写入时本轮画布修复尚未提交；后续提交以 Git 日志为准。
+
+### 用户反馈与确切根因
+
+ACC1 的实际 LLDP 为 `Ethernet0/1 → DIST1 Ethernet2/0`、`Ethernet0/2 → DIST2 Ethernet2/1`，用户看到画布像只有 DIST1，其他交叉线也类似。已经独立核对原观察、RFC 7951 L2 树、canvas API 与用户 Edge 当前 DOM：两条都存在，链路尾 ID 是 `ae508bbdfc62`、`4e339d459824`，两端 LLDP 证据完整。当前快照 **`edc1514b188643f0aec13f7913fe940a`**，网络 `d537b0de1fab427683413b81290db718`，15 节点、24 条画布关系。
+
+问题是**画布几何错误及渲染验收遗漏**：BFS 每六设备一排、同侧单连接点、默认曲线让长边穿过中间节点，让平行边完全重合。浏览器实测两组完全重合：BR1/BR2 的 GE1/0 关系与 GE5/0 关系；DIST1/DIST2 的 E1/0 与 E1/1 链路。按实际 DOM 节点尺寸和 SVG 曲线采样，另外发现 6 条边穿过第三方设备节点。上轮 16 对端口验收检查的是 L2 模型，不能据此证明可见画布正确。
+
+### 已完成并冻结的修改
+
+- 通用连通分量布局，不硬编码设备名、角色或 GNS3 坐标；每条边独立两端句柄，并行分道、长边绕节点。
+- 固定节点几何尺寸并更新动态句柄；图结构不变的轮询不会重新缩放。
+- 悬停/选择一条边突出该边和两端；选中节点突出其全部邻接边。侧栏顶部逐条展示本地端口、对端设备/端口，可点击打开原链路详情。长标签只在关注单边时显示。
+- 无法生成路线时明确提示未绘制关系数量及查看入口，不能静默漏线。
+- 后端生产模型、采集、API、标准模块和依赖均未改动；升级仅为 **topology 0.4.16**。
+
+本轮 8 个文件已从隔离树按字节/哈希同步主项目：`src/apps/topology/app.yaml`，`src/apps/topology/frontend/{Page.tsx,layout.ts,layout.test.ts,topology.css,Canvas.test.tsx,fixtures/campus-layout.json}`，`tests/unit/test_topology_canvas_preservation.py`。精确文件清单/同步前后哈希在 `.runtime/topology-crosslink-sync-manifest.json`；原文件备份 `.runtime/topology-crosslink-before-source/`。**不要直接重复运行同步脚本，它会拒绝覆盖已有备份。**
+
+### 已通过与尚未通过的验收
+
+- 前端四个套件 **29 passed**，相关 ESLint 零警告，生产构建通过。后端新增 canvas 完整投影回归与园区回放合计 **33 passed**，Ruff/格式通过。没有因为只改画布重复宣称本轮执行全部 1224 项后端测试。
+- 真实 15 节点/24 边 fixture 的算法检查：24 条路线、48 个独立句柄、无穿节点、无共线重叠，逆序输入稳定。独立复核修复了第六条及以后并行边可能漏画的参数问题，复核至 12 条并行边、6 条自环；多点 segment spokes 也保留。
+- **尚未完成修复后的真实浏览器验收**：算法测试不是浏览器渲染证明。不能将下面“待完成”项目写成已完成，也不要再次仅拿边数或模型校验作为画布正确的依据。
+
+### 部署与运行状态
+
+已确认没有活动发现后，同步文件并执行 `scripts/windows/start.ps1 -SkipLangfuse -UpgradeApps topology -NoBrowser`。日志为 `.runtime/topology-crosslink-deploy.log`。写入本节时部署正在收尾，最终结果见本节末尾运行状态补记；不要因 source version 为 0.4.16 就推断 App 已启用。
+
+运行目录里的只读 helper：`venv/Scripts/python.exe -X utf8 .runtime/topology-fix-live.py preflight` 检查接口、当前快照和活动任务。**不要执行旧 helper 的 submit**：本轮需要同一快照前后对照，无需重采样，更不能重新 shutdown。App 摘要门禁仍有效，部署后改 `src/apps/topology/` 会导致 503；发现问题时回隔离树修复、测试后重新部署。
+
+### 接手后立即完成
+
+1. 核对 `.runtime/topology-crosslink-deploy.log` 最终结果及 0.4.16 状态。若需单独验证，先 PowerShell `. ./scripts/windows/_port_utils.ps1`、`Initialize-WindowsRuntimeEnvironment -ProjectRoot (Get-Location).Path`，再运行 `venv/Scripts/python.exe web/django_backend/manage.py app_packages verify topology --gateway-url http://127.0.0.1:8000 --frontend-url http://localhost:3000 --wait-seconds 60`。不能遗漏运行环境初始化，默认 Redis 环境不同会让命令等待。
+2. 用 `cua_repl` 获取 Edge 的 `http://localhost:3000/apps/topology` 标签页并刷新。交接前 browser id 为 `3`、tab id 为 `1399402181`，但应先重新检查当前清单。浏览器已经登录，用户密码无需重问。保持当前快照，确认 24 条边都在。
+3. 浏览器验收 ACC1 两上联：点击 ACC1，应同时突出到 DIST1、DIST2 的线；侧栏有 `Ethernet0/1 → DIST1 Ethernet2/0` 和 `Ethernet0/2 → DIST2 Ethernet2/1`。逐条点击打开对应详情与两端 LLDP 证据。再检查 DIST1/DIST2 两条并行边可分别选中。
+4. 保存新 SVG 路径和实际 DOM 尺寸，用 `.runtime/topology-crosslink-geometry.py after` 复测 0 完全重合、0 穿第三方节点。该脚本读取 `.runtime/topology-crosslink-after-{routes,geometry}.json`；数据格式看同目录 `before-*`。浏览器 `path.getTotalLength()` 在本工具 DOM 接口不可用，所以已用保存的 M/L/C/Q 路径做离线采样，不能据此报浏览器 API 异常。新路线使用 M/L。
+5. 保存修复后截图 `.runtime/topology-crosslink-after.jpg`；更新此交接与路线图 §14 的真实结果，再按本任务精确路径本地提交。**不要推送。**
+
+### 证据与工作区保护
+
+当前模型和画布证据 `.runtime/topology-crosslink-{proof,graph}.json`。修复前可见证据 `.runtime/topology-crosslink-before.{jpg}`、`topology-crosslink-before-{routes,geometry,collisions}.json`。`proof.json` 保存当前画布规范化 JSON 哈希 `6ef7a48abca8b4a1438498b7ae965a595da5f345dbf624e5b34adb2d8665c57c`，可用于证明同快照数据未变。旧 helper `.runtime/topology-crosslink-live.py` 会覆盖 proof.json，因此读取/复核时先保留已有 before 字段或另存结果，不要无意识覆盖证据。
+
+主工作区另有与本任务无关的暂存改动：`web/react_frontend/src/pages/{ChatPage.test.tsx,ChatPage.tsx,SkillsPage.tsx,StatusPage.tsx,StoragePage.tsx}`；未跟踪 `src/workflows/custom/`；部署会生成 `web/react_frontend/src/apps/generated.{ts,meta.json}`。全部保留，不能 `git add .` 或重置。提交本任务使用精确文件清单以及 `git commit --only`，防止带走别人的暂存改动。隔离树还有上一轮同步过的旧脏文件，不要按该树全部 diff 再覆盖主目录。
+
+本轮未修改实验设备配置、未重新发现、未再次注入故障，也未推送。IETF 优先、不自建 YANG、设备配置与推送需明确授权等约束继续遵守。画布修复收尾后按 [完整实施方案](network-digital-twin-implementation.md) M1 开始，勿把本次 UI 修复当作完整物理拓扑或全转发模型已完成。
+
+### 完成记录（Claude 接手，2026-10-03）
+
+- **部署核对**：`.runtime/topology-crosslink-deploy.log` 中 0.4.16 已启用；13:22 平台另有一次重启（非本线发起），等待前端/API 恢复后才验收。当前快照仍为 `edc1514b188643f0aec13f7913fe940a`，未重新发现、未改设备配置。
+- **浏览器验收方式**：内置浏览器拒绝访问 localhost，改用本机 venv 的 Playwright 1.61 + Chromium 真实渲染同一页面；Chromium 把 `localhost` 解析到 IPv6 而前端只监听 IPv4，脚本用 `http://127.0.0.1:3000`。脚本 `.runtime/topology-crosslink-browser.py`，结果 `.runtime/topology-crosslink-after-browser.json`。
+- **结果（14/14 通过）**：15 节点、24 条边与快照 graph 的 ID 一一对应，无路径重合、无“未绘制”提示；点击 ACC1 时两条上联同时高亮，侧栏列出 `Ethernet0/1 → DIST1.lab.local Ethernet2/0`、`Ethernet0/2 → DIST2.lab.local Ethernet2/1`，逐条打开均有 LLDP 证据；DIST1–DIST2 两条并行边用真实鼠标点中各自中点时只高亮自身。导出的路径与 DOM 尺寸存为 `.runtime/topology-crosslink-after-{routes,geometry}.json`，`topology-crosslink-geometry.py after` 复测 **0 完全重合、0 穿第三方节点**（修复前 2 组、6 条）。截图 `.runtime/topology-crosslink-after.jpg`、`-after-acc1.jpg`。
+- **验收发现的回归并已修复（0.4.17）**：鼠标停在画布的节点或边上时，全部连线周期性消失再出现（每 250 ms 采样在 0 与 24 之间跳）。根因见 `@xyflow/react` 12.10.2 的 `adoptUserNodes`/`parseHandles`：悬停每次重建节点对象，新对象既无 `measured` 也无 `handles` 时连接点边界被清空，所有边在重新测量前不渲染；边消失又改变指针下元素、再触发悬停，形成循环。修复为在 `Page.tsx` 的节点上给出布局已知的固定 `width/height/measured` 与静态 `handles`（连线路径仍由布局给出，连接点只决定能否渲染）。新增 `Canvas.test.tsx` 用例；拓扑前端 4 个套件 **30 通过**，ESLint（`-c web/react_frontend/.eslintrc.cjs`）零警告；后端 canvas/园区 **33 通过**。部署 `start.ps1 -SkipLangfuse -UpgradeApps topology -NoBrowser` 退出 0、topology **0.4.17** 启用，日志 `.runtime/topology-hoverfix-deploy.log`；修复后悬停节点与点中边后连续 3 秒均为 24 条。
+- 早先“每条平行边可分别选中”在旧版能通过，是因为闪烁把悬停状态冲掉；设计上悬停优先于选中，验收须让指针停在被选的边上。
 
 ## 最新修复交接：2026-10-03，topology 0.4.15
 
