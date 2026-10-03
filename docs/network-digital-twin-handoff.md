@@ -1,10 +1,125 @@
-# 网络数字孪生开发交接：GPT → Claude
+# 网络数字孪生开发交接
+
+本文最前面是最新一次交接（2026-10-03，Claude → GPT）；其后保留 2026-09-30（GPT → Claude）的历史交接，第 1～7 节的工作方式、硬约束与工具边界**仍然有效**，先读完本节再读第 2 节。
+
+## 最新交接：2026-10-03，Claude → GPT
+
+项目根目录 `C:\Users\wangd\PycharmProjects\PythonProject\netops-agent`，分支 `feat/network-twin`；`origin`（`https://github.com/wd33757115/net-ops.git`）已推送到 `6855949`，本交接文档的提交在其后，是否推送以 `git status -sb` 为准。Windows + PowerShell；Git Bash 也可用（本轮偶发 Bash 工具退出码 107，换 PowerShell 即可）。
+
+**一句话现状：拓扑建模已在一套 9 台纳管设备的园区 + 双出口实验网（H3C VSR + Cisco IOL 混合）上端到端跑通，平台模型与实际接线一一对应，并按 IETF 标准补了 VRF、VRRP、递归下一跳、聚合与节点管理属性；导出模型通过冻结 YANG 模块校验。负责人倾向继续完善建模，参考 IETF 与成熟产品；下一步建议见“接下来的计划”。**
+
+### 负责人本轮新定的要求（与第 2 节同等优先）
+
+- **“建模时优先采纳 IETF 相关标准”“我们的第一任务就是参考 IETF 完善拓扑建模”**。遇到建模选择先查 IETF/IEEE 原文（RFC、SIMAP 草案、YANG），能从标准得出答案的不要再请负责人二选一；本轮负责人就因为被问 VRF 表示法而要求“再搜搜，IETF 一定有相关标准”。只用标准已有字段，仍然**不加项目自定义 YANG 字段**。
+- 可以参考成熟产品（Batfish、IP Fabric、SuzieQ、NetBox 等）的做法，但落到模型上以 IETF 定义为准。
+- **改实验设备配置要先征得负责人同意**（本轮在 BR1/BR2 加 VRRP 就是先问再做）。只读采样已获授权。
+- **在设备上建账号、往任何地方输入设备密码，只能由负责人自己做**：实验账号用负责人运行的 `lab.py account` 建立；平台“拓扑默认登录”的密码也由负责人在页面上改。负责人在对话里给过密码，也不能记录或代填。
+- 推送 GitHub 要负责人明确说；提交可以照常做（明确路径）。
+
+### 09-30 之后完成的内容（按时间，均已提交并推送）
+
+| 提交 | 内容 |
+|---|---|
+| `c245d4e` … `79eeb72` | 终端按键直通、巡检原文基线与整段文本对比、诊断提示改为能力描述、DeepSeek 对照实验记录（详见路线图 §14 对应条目） |
+| `70f9320` `7a9a652` `9337087` `b75b0ab` | 回放时间线、工具失败原因告知模型、执行视图显示推理、推理与笔记用中文 |
+| `727ed5b` | 一次对比多台设备与基线；诊断提示按 ROLE/DIAGNOSIS/DOCS/EVIDENCE 重写；路径工具注明是“之前的路径” |
+| `9fe5284` | 本地按原样记录每轮发给模型的请求（`runs/requests/`，`trace_timeline.py --requests`） |
+| `bb440f3` | 引用校验接受本会话更早的证据并点名未知引用；全部时间转北京时间 |
+| `5427b3d` | 平台启动与 App 启动解耦（排空、`--force`）；采集数据不再关键词脱敏，保持原文 |
+| `a10c346` | 表格按条目对比、摘要与按需查行（`compare_rows`）；大表改用统计命令 |
+| `422fc89` | 知识问答会话级模型与思考强度（只对当前会话生效，默认关闭思考） |
+| `2cec677` | **园区 + 双出口实验网**与 Cisco 真机建模（见下） |
+| `cd12948` | **每个 VRF 一个三层网络**（RFC 8345 §3、RFC 9375 §4.2、SIMAP REQ-CONTROL-PLANE） |
+| `0bf421b` | **VRRP 按 RFC 8347**：采集、虚拟地址定位为 `virtual_router`、路径第一跳取主设备 |
+| `8e62f84` | 旧格式（SIMAP 前）快照导出改为 URI 标识（另一会话完成） |
+| `ed1dbcf` | **递归下一跳按 RFC 8349** 在本机 RIB 解析，证据 `resolved_via`；新缺口 `unresolved_next_hop` |
+| `6855949` | **聚合按 RFC 8944** `lag`/`member-link-tp`；节点 `management-address`/`management-mac` |
+
+各项的设计理由、实测与测试数字在路线图 §14 台账 2026-10-03 的几条里，以台账为准。
+
+### 实验环境（新）
+
+- **园区 + 双出口实验网 campus-wan**：工具包 `scripts/topology/campus_wan/`（`README.md` 有拓扑图和地址表）。路由参照 Batfish 示例网络，二层参照园区三层组网。BR1/BR2 为 H3C VSR（eBGP 上联、iBGP、OSPF area 0；BR1 本地优先级 200）；CORE1/2 为 Cisco IOL L3（路由反射器、/31 互联）；DIST1/2 为 IOL L2（ABR、VRRP、LACP Po1、rapid-PVST）；ACC1/2 为 IOL L2（双上联 trunk）；ACC2 后接傻瓜 VLAN 交换机（PC4、PC5）；ISP 不纳管、不发 LLDP；Cisco 管理口在 VRF MGMT。管理地址 10.10.1.11–18，主机 10.10.1.254。BR1/BR2 的 GE1/0 另有 VRRP（VRID 1，虚拟地址 10.10.1.10，负责人批准）。
+- GNS3 工程 `~/GNS3/projects/netops-campus-wan/`，跑在 GNS3 VM（Hyper-V，10.10.10.2，10GB）。与旧的两台 VSR 工程（`untitled`）内存不够同时运行，旧工程已关闭，VSR-1/2 配置已保存。
+- `lab.py` 子命令：`project`（生成工程，已生成过就不要再跑）、`push NODE|all`（经控制台推配置并保存，报被拒行）、`console NODE "命令" ...`（VSR 自动走串口 aux）、`type`/`screen`（VSR 的 VNC）、`traffic [--stop]`（PC 持续 ping，保持 ARP/MAC 表有内容；采样前先开）、`account`（只能负责人运行）。
+- 账号：8 台纳管设备的 admin 账号已由负责人建好，密码与 `.env` 的 `NETOPS_LAB_PASSWORD` 一致；脚本从环境变量读取，不要打印、不要写入任何文件。平台的拓扑默认登录已由负责人更新为同一密码。
+- 平台里园区网对应的网络 ID 是 `d537b0de1fab427683413b81290db718`，以 8 个管理地址为种子、`allowed_cidrs` 为 `10.10.1.0/24` 提交发现即可（API `POST /api/apps/topology/runs`，本机开发账号见登录页；请求体含中文时用 UTF-8 发送，Git Bash 下的 curl 会报解析错误）。
+- 采样：`scripts/topology/collect_lab_samples.py <地址...>`（按 SSH 横幅区分 Comware/IOS，只发只读命令）。回归素材：`tests/fixtures/topology/campus-wan/`（批次 `20261003-010038`，`expected.json` 是实际接线、终端位置、三层网段、VRRP 主备），导入用 `scripts/topology/import_lab_fixtures.py --lab campus-wan`（秘密扫描；导入器拒绝覆盖已有且不同的素材，换批次要先删目录）。
+
+### 部署与测试
+
+- 平台当前版本：topology **0.4.12**、assistant **0.8.9**。App 源码改后要升 `app.yaml` 版本并执行 `scripts/windows/start.ps1 -SkipLangfuse -UpgradeApps topology -NoBrowser`；部署会先停用并排空，**进行中的发现任务会被取消**。
+- **代码摘要准入**：部署后工作区里该 App 的源码只要再变（包括其他会话的改动），App 就返回 503“应用不可用”，直到重新部署。本轮就因另一会话在同一工作区改 `normalize.py` 而中断过一次。
+- 测试：`venv/Scripts/python.exe -m pytest -q tests/unit -k "topology or twin" -p no:cacheprovider`（交接时 478 通过）。YANG 校验依赖 yangson，不在 venv 里，放在 `.runtime/p0-2/yang-deps`：加 `PYTHONPATH=.runtime/p0-2/yang-deps` 后 YANG 用例才真正运行，否则跳过。园区网回归 `tests/unit/test_topology_campus_wan.py`（25 项，含导出 YANG 校验）。
+
+### 本轮踩过的坑（照做可避开）
+
+- GNS3 工程文件里**不要写 `startup_config_content` / `startup_script`**：控制器会一直留着它，之后改节点设置都报 400，且每次打开工程都会用它覆盖设备已保存的配置。`lab.py` 已改为全部经控制台推送。
+- IOL 第一次 `write memory` 会问“Overwrite the previous NVRAM configuration?[confirm]”，不回车确认就什么都没保存（重启后配置和 SSH 密钥都丢）；`lab.py` 的 `run()` 已处理，其他 `[confirm]` 一律答否。IOS-XE 17.15 用 `crypto key generate rsa general-keys modulus 2048`（不带 general-keys 是隐藏命令）。
+- VSR 首次启动卡在 DHCP 自动配置，在 VNC 上按 Ctrl+C；串口（aux）默认只读角色且要求认证，已在两台 VSR 上设 `user-role network-admin` 与 `authentication-mode none` 并保存。VSR 不支持 STP，只能当路由器；VSR 默认不回 TTL 超时，traceroute 在它那一跳显示 `*` 是正常的。
+- VPCS 的 MAC 在工程重开后会重新分配，IP 不变；跨重启对比时 MAC 变化不是故障。
+- IOS 在 ARP 表、VRRP 为空时**一个字都不打印**，按 ios 族认作“已确认为空”；`show lldp neighbors detail` 不打印端口 ID 子类型；`show ip route` 的递归 BGP 路由没有出接口。
+- 本机 `python` 是应用商店占位（退出码 49），一律用 `venv/Scripts/python.exe`。连接 GitHub 偶发 TLS 握手失败，重试即可。
+- 工作区与其他会话共享：只按明确路径提交；`web/react_frontend/src/pages/{ChatPage,ChatPage.test,SkillsPage,StatusPage,StoragePage}.tsx` 暂存改动、`generated.ts`/`generated.meta.json` 与未跟踪的 `src/workflows/custom/` 都不是本线的，不要提交。
+
+### 与完整网络模型的差距（2026-10-03 实测统计）
+
+**1. 已导出的拓扑模型：骨架齐，属性约一半。** 用 YANG 模式树枚举冻结模块的全部数据节点，与园区网导出逐项对照（不含通知与 SIMAP 历史树；模型中没有任何字段落在标准之外）：
+
+| 模块 | 已用/定义 | 未用的主要节点 |
+|---|---|---|
+| RFC 8345 `ietf-network` | 11/11 | — |
+| RFC 8345 `ietf-network-topology` | 11/17 | 单向链路的 source/destination（按 SIMAP 用双向链路，有意不用） |
+| RFC 8944 二层 | 11/26 | 链路 rate/duplex/auto-nego/delay；节点 bridge-id、management-vlan；TP port-number、unnumbered-id。**VLAN/QinQ/VXLAN 三个 feature 在 `src/apps/topology/resources/yang/library.json` 未启用**，`outer-tag` 等 VLAN 节点目前不可用 |
+| RFC 8346 三层 | 8/21 | 链路 `metric1/metric2`、节点 `router-id`/`name`、前缀 metric、TP `interface-name`/`unnumbered-id` |
+| SIMAP -03 | 16/36 | name/description/label；`timestamp`、`live-network-ref`（历史/推演）；`subnetwork`（分层分域）；`tp-role` |
+
+**2. 设备级模型：有采集，未按 YANG 导出。** 生产采集的事实（接口、IP、ARP、LLDP、MAC、聚合、VRRP、路由、版本）都对应 RFC 8343/8344、IEEE 802.1AB/802.1Q/802.1AX、RFC 8347/8349 与网络清单草案，但存的是字段名对齐 RFC 的项目 JSON，不是 YANG 实例。`models/network-twin/` 研究包只对旧两台 VSR 做过离线映射，未接入 App。拓扑节点 ↔ 清单 ↔ 设备树的关联**标准本身没有定义**（研究包 `virtual-association` 已记录）。
+
+**3. 尚未涉及的整块：** VLAN/trunk 成员（RFC 8944 VLAN feature + IEEE 802.1Q）；链路/节点状态进模型（SIMAP REQ-STATUS + RFC 8343 oper-status）；路由协议层（RFC 9129 OSPF、BGP 模型草案，SIMAP 把 IGP/EGP 列为图层）；策略（RFC 8519 ACL、RFC 8512 NAT）；SIMAP 历史与推演；服务层（RFC 9182/9291/9408）；清单（序列号、板卡）。STP 端口状态在 RFC 8944/IEEE 802.1Q 拓扑模型中无对应，只能作设备事实。
+
+### 接下来的计划（负责人倾向继续完善建模，可参考成熟产品）
+
+每项先查标准原文、给负责人一段简短设计（落在哪些标准节点、采哪些命令），确认后实现；先用园区网真实回显写解析与测试，再部署、重新发现、实测验收，最后写台账。成熟产品的做法只作对照，模型以 IETF 为准。
+
+1. **VLAN 与 trunk（建议先做）**
+   - 标准：RFC 8944 的 `VLAN` feature（TP 的 `outer-tag`，类型为 VID 范围）；设备侧 IEEE 802.1Q bridge（`bridge-port` 的 `pvid`、`bridge-vlan` 成员）。先读 RFC 8944 原文确认 access 口与 trunk 口在 `outer-tag` 上的语义，再决定只启用 feature 还是同时引入 802.1Q 设备事实；启用 feature 要同步 `library.json` 并跑 YANG 校验。
+   - 成熟产品：Batfish `interfaceProperties` 有 `Switchport_Mode`、`Access_VLAN`、`Allowed_VLANs`、`Native_VLAN`；NetBox 接口有 802.1Q Mode（Access/Tagged/Tagged (all)/Q-in-Q）、Untagged VLAN、Tagged VLANs；IP Fabric 的路径查找在二三层边界用 VLAN+ARP+MAC 关联。
+   - 素材：园区网 dist/acc 的 `vlan.txt`、`trunk.txt` 已入库；Comware 的 access/trunk 回显（`display port trunk`、`display interface brief` 桥模式表）需另采。
+   - 验收：园区网 trunk 口带出 VLAN 10/20，access 口的 VLAN 正确；能对应故障集 v1 的“trunk 未放通 VLAN”“端口 VLAN 配错”。
+2. **状态进模型**
+   - 标准：SIMAP REQ-STATUS 要求宕掉的链路/节点仍出现，状态“在 SIMAP 中实现或可从 SIMAP 访问”；SIMAP -03 冻结版没有状态节点，接口运行状态的标准落点是 RFC 8343 `oper-status`。表达方式需要设计并请负责人确认（不要自定义字段）。
+   - 成熟产品：Batfish `Active`/`Admin_Up`，NetBox `Enabled`，SuzieQ interfaces 表的状态字段。
+   - 验收：注入“接口 shutdown”后，模型与路径中能看出该链路不可用，链路仍保留。
+3. **三层链路度量与 router-id**
+   - 标准：RFC 8346 `l3-link-attributes/metric1`（IGP cost）与节点 `router-id`。需新增 OSPF 接口事实（Comware `display ospf interface`、IOS `show ip ospf interface brief`），先采样。
+   - 成熟产品：Batfish `ospfInterfaceConfiguration` 的 `OSPF_Cost`；SuzieQ 的 ospf 表。
+   - 验收：园区网各三层链路带 cost，能解释等价路径来自 cost 相同。
+4. **设备树按 YANG 导出（底座，量大）**：把已采事实输出为 RFC 8343/8344/8349/8347 与 IEEE 802.1AB 的实例，复用研究包映射经验。拓扑节点与设备树如何关联标准未定义，**动手前须请负责人定方向**。
+5. **其后**：OSPF/BGP 邻接作为协议图层；ACL（RFC 8519）进入路径（对应路线图 M2，Batfish/IP Fabric/Forward 都做策略感知路径）；SIMAP 历史/时间戳对接已有快照；清单。
+
+**待负责人决定的事项**
+- **H3C 聚合真实样本**：两台 BR 之间只有一根线，Comware 非空聚合输出还没有真机回显（解析器遇到会如实失败）。需要负责人在 GNS3 里把 BR1/BR2 网卡从 5 改为 6、加一根 GE6/0↔GE6/0，再由我们配 Route-Aggregation 并采样。
+- STP 端口状态作为设备事实采集与否。
+
+### 先读这些
+
+1. 本节，然后第 2 节的硬约束与 Git 纪律。
+2. 路线图第 0 节原则、§14 台账 2026-10-03 的各条（每条有文件、命令、结果、未完成项）。
+3. `scripts/topology/campus_wan/README.md`、`tests/fixtures/topology/campus-wan/README.md`。
+4. IETF 资料：[IETF 研读记录](network-digital-twin-ietf-study.md)、[原生模型审计](network-digital-twin-model-audit.md)、[验证包](../models/network-twin/README.md)；成熟产品资料：[开源参考](network-digital-twin-open-source-reference.md)（偏采集与解析）。
+
+参考链接：[RFC 8345](https://www.rfc-editor.org/rfc/rfc8345.html)、[RFC 8346](https://www.rfc-editor.org/rfc/rfc8346.html)、[RFC 8944](https://www.rfc-editor.org/rfc/rfc8944.html)、[RFC 8347](https://www.rfc-editor.org/rfc/rfc8347.html)、[RFC 8349](https://www.rfc-editor.org/rfc/rfc8349.html)、[RFC 9375](https://www.rfc-editor.org/rfc/rfc9375.html)、[RFC 8529](https://www.rfc-editor.org/rfc/rfc8529.html)；[Batfish 配置属性](https://pybatfish.readthedocs.io/en/latest/notebooks/configProperties.html)、[NetBox 接口模型](https://netboxlabs.com/docs/netbox/models/dcim/interface/)、[SuzieQ 表](https://suzieq.readthedocs.io/en/latest/tables/)、[IP Fabric 发行说明](https://docs.ipfabric.io/latest/releases/release_notes/previous_releases/nimpee_v2/)、[Batfish 示例网络](https://github.com/batfish/batfish/tree/master/networks/example)。
+
+---
+
+## 历史交接：2026-09-30，GPT → Claude
 
 交接日期：2026-09-30，本文已追加 GPT 接手后的验收与支线记录。项目根目录：`C:\Users\wangd\PycharmProjects\PythonProject\netops-agent`，Windows + PowerShell（也可用 Git Bash），分支 `feat/network-twin`。Claude 原始交接时已推送到 `origin`，止于 `de6a28f`、路线图 v1.19；后续本地提交不代表已经推送。上一份交接（Codex → Claude，2026-09-28，止于 `ec81310`）的内容已并入本文；其第 6 节的工具与标准边界仍然有效，保留在本文第 7 节。
 
 **一句话现状：拓扑发现（SIMAP L2/L3）→ 终端定位 → 双向路径计算 → 知识问答自动登录路径设备取证诊断已打通。D-8 八个场景的首轮盲测已结束，根因命中 6/8，AI 未执行网络配置命令；场景 3 漏判，场景 4 用满预算后没有答案。达到原定数值及安全门槛，但结论质量问题尚未闭合，不能称每句话均有充分证据。负责人已追加授权 GPT 自行注入、测试和恢复实验故障。**
 
-## 最新交接：2026-09-30，原始基线配置对比已实现，待实机验证
+### 2026-09-30 交接内容：原始基线配置对比（历史记录；其后已完成并实测，见路线图 §14 与上文提交表）
 
 负责人因 token 将尽要求本次停止扩展、写好交接。**Claude 下一步先验收下面这项，不要继续旧的巡检变化列表方案，也不要先重跑 D-8 全故障集。** 下文既有记录保留，若描述“生产提示未改”，指此前 D-8 收尾修复阶段；本次配置比较已按确认范围修改 `DIAGNOSIS` 提示。
 
@@ -164,7 +279,7 @@
 
 > **2026-09-30 已被取代**：4.4 本地编辑与 4.5 远端 Tab 已删除，改为按键直通 + 回车拦截白名单（参照 JumpServer），见路线图第 14 节“终端按键直通 + 回车拦截白名单”。以下两节仅作历史记录。
 
-### 4.4 终端内本地编辑命令（2026-09-30 负责人追加要求，已生效）
+### 4.4 终端内本地编辑命令（2026-09-30；**已被 `c245d4e` 按键直通取代，勿恢复浏览器侧行编辑**）
 
 - 共享前端 `DeviceTerminal.tsx` 改为直接在 xterm 内输入，去掉底部独立输入框、执行按钮和旧说明。新增 `LocalCommandLine` 仅处理本地编辑；Enter 仍发送完整 `command` 帧，沿用后端白名单和会话日志，不改变后端协议、App 版本或数据库。
 - 支持插入、左右、Home/End、退格/Delete、↑↓当前会话历史、Unicode 及长命令单行水平滚动。单行粘贴不会自动提交，多行或控制串粘贴拒绝；执行中禁止新提交，被拒绝后恢复草稿。远端回显前擦除本地草稿，避免命令重复显示。
@@ -172,7 +287,7 @@
 - 实机在 VSR-1 浏览器终端直输 `display clocx`，退格修正为 `display clock`，仅按一次 Enter，命令成功且回显仅出现一次；↑↓切换草稿及拒绝多行粘贴均已验证，随后停止连接。直接只读 MinIO 的 `VSR-1_2026-09-30_11-47-33.663235.log`（716 bytes），确认仅有 1 条 `display clock`、成功结果及连接结束，多行粘贴未产生额外执行记录。核验脚本 `.runtime/verify-inline-input.py`、截图 `.runtime/ssh-inline-input-preview.png` 留本地、不提交。
 - 本轮本地编辑未包含远端 Tab；负责人后续确认其独立设计后另行实施，进展见 4.5。
 
-### 4.5 Comware 受控远端 Tab（2026-09-30 负责人确认，已完成部署与本地验收）
+### 4.5 Comware 受控远端 Tab（2026-09-30；**已被 `c245d4e` 取代：按键直通，设备自己做 Tab/?/历史，回车时服务器按白名单检查**）
 
 - 负责人已确认方案，平台、App 协议与共享前端接线已完成。首批仅对 Comware 7 开放，须同时匹配 SSH banner 与 CLI 提示符；首次补全通过原白名单和审计执行 `display hotkey | include (hotkeys|CTRL_[EXR])`，只接受系统保留的 Ctrl+E/X/R 清行与重绘定义，不使用可重绑快捷键或禁分页配置命令。
 - 光标在行末时，Tab 发送独立 `complete` 帧，包含请求 ID、草稿版本和 `tab_count`（默认 1，上限 32，仅作前端轮次与审计）。每个请求只向设备发送一次初始草稿加 Tab，连续请求沿用初始草稿，候选随设备自身状态推进；任何本地编辑重置前端轮次，不假定设备候选索引归零。补全期间冻结本地编辑，过期响应不应用。输入限受支持的单行 ASCII 前缀、最多 256 字符，返回最多 511 字符；不发送换行。完成后清行并核对空提示符，无法确认、超时或日志失败即停止连接。Enter 仍发送完整 `command`，重新检查当前白名单，补全结果不授予执行权限。
