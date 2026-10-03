@@ -270,6 +270,10 @@
    ]
   },
   {
+   "snapshot": "br1-routing-default",
+   "affected": false
+  },
+  {
    "snapshot": "br1-lldp",
    "affected": false
   },
@@ -286,6 +290,10 @@
    "errors": [
     "libyang err : Invalid identityref \"ietf-vrrp:master\" value - identity not found in module \"ietf-vrrp\". (/ietf-interfaces:interfaces/interface[name='Vlan10']/ietf-ip:ipv4/ietf-vrrp:vrrp/vrrp-instance[vrid='10']/state) (line 1)"
    ]
+  },
+  {
+   "snapshot": "dist1-routing-default",
+   "affected": false
   },
   {
    "snapshot": "campus-topology",

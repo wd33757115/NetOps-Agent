@@ -1024,6 +1024,39 @@ P2-9 根据 Q5 取消，不引入 SNMP。P3 及后续仍在进入阶段时展开
 
 ## 14. 进度台账（执行者维护）
 
+### 2026-10-03 M4 三层协议实例、协议邻接与路径推导（topology 0.6.0）
+
+- **采集**：
+  - OSPF 邻居：IOS `show ip ospf neighbor`、Comware `display ospf peer`。
+  - BGP 邻居：IOS `show ip bgp summary`、Comware `display bgp peer ipv4`。
+  - IOS 按 VRF 的路由表 `show ip route vrf <名>`，与按 VRF 的 ARP 共用作用域授权。输出必须带 `Routing Table: <名>` 并且只能是该 VRF，否则拒收。
+  - 真实样本已导入 `campus-wan/protocols` 和 `vrf-routes`，密文扫描命中 0。
+- **协议实例**：在所属 NI 的路由树中导出 RFC 8349 `control-plane-protocol`。
+  - OSPFv2（RFC 9129）以进程号命名，包含 router-id、区域、接口 cost 和每接口的邻居状态。
+  - BGP（draft -21）以本地 AS 命名，包含 as/identifier，以及邻居的地址、AS、类型和会话状态。
+  - 实例引用的接口复制到同一棵树里，不造定时器、LSDB 或统计。
+  - RIB 名称仍不可得，RIB 不导出。
+- **协议邻接**：单独分析并保存在 `protocols.adjacencies`，不并入 L2/L3 图。
+  - OSPF 按邻居地址找到对端，再和对端自己的视图对照。
+  - Router ID 只在协议域内有意义，两台设备声明同一个 RID 时报歧义。
+  - BGP 每个会话只配对一次，集合外的对端单独标出。
+- **路径**：泄漏路由在跳点上记 `next_hop_vrf`。新增用例：跨 VRF 泄漏（含去掉泄漏后不可达）、非对称路径（`symmetric=false`）、基于真实 MGMT 路由表的同前缀隔离。方案列出的其余场景已有用例，对应关系见 `models/network-twin/m4/README.md`。
+- **M1 产物同步**：
+  - 字段映射新增 OSPF/BGP 28 个字段，已导出字段从 39 增至 54。
+  - App 输出路径从 102 增至 133，全部是标准节点。
+  - BR1/DIST1 路由树作为正例，另加 3 个协议反例（树外接口引用、CLI 状态原文、`ibgp`）；正反例共 48 个，全部符合预期。
+  - 升级回放：新路由树不受候选修订影响。
+- **实机只读验收**：一次发现，8 台全部成功，10 项核对通过。
+  - 现场原文全部解析完整。
+  - 6 台 IOS 采到 MGMT 路由表。
+  - 6 台路由器导出 OSPF 1 / BGP 65000。
+  - 10 个 OSPF 邻接都是 full，9 个 iBGP 会话 established，ISP 对端在集合外。
+  - 6 棵路由树通过 libyang 校验。
+  - CORE1→DIST1 的管理地址在 MGMT 中查找。
+  - 证据在 `.runtime/m4-live-proof.json`。
+- **测试**：topology 单元测试 1275 个通过。
+- **未做**（缺样本）：IPv6/ND、unnumbered、BFD、IS-IS、静态路由配置实例、LSDB/TE 邻接、Comware 按 VRF 的路由；界面展示协议邻接。
+
 ### 2026-10-03 M2/M3 设备实例、资源清单与园区二层（topology 0.5.0）
 
 - M2：接口关断状态取自 CLI 状态列图例（Comware `ADM`、IOS `admin down`），输出到 RFC 8343 `enabled`；不用 `admin-status`，因为它需要 if-mib 特性并会让 `if-index` 变成必填。描述照常输出。接口的全部地址属于同一个命名 VRF 时，按 RFC 8529 绑定 `bind-ni-name` 并建 NI；全局表不建 NI。VRF 内路由未采集，空的 `vrf-root` 不满足必选 root-type，因此只记缺口。

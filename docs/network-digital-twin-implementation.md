@@ -181,6 +181,14 @@ IEEE 桥实例、component、FDB/FID、VID、端口为二层查找上下文；�
 
 ### M4：完整三层、协议与路径推导
 
+执行状态（2026-10-03，topology 0.6.0）：已完成可观测部分，详见 [models/network-twin/m4](../models/network-twin/m4/README.md)。
+- 已采集：OSPF 邻居、BGP 邻居，以及 IOS 各 VRF 的路由表。
+- 已导出：RFC 9129 OSPFv2 实例（以进程号命名）和 BGP 实例（draft -21，以本地 AS 命名），通过 libyang 校验。
+- 协议邻接：单独分析，不并入 L2/L3 图；Router ID 只在协议域内有效。
+- 方案列出的路径场景都有用例，新增跨 VRF 泄漏、非对称路径，以及基于真实 MGMT 路由表的同前缀隔离。
+- 实机只读验收：8 台设备、10 项核对全部通过。
+- 未完成：RIB 名称不可得，RIB 仍不导出；IPv6/ND、unnumbered、BFD、IS-IS、LSDB、TE 邻接以及 Comware 的按 VRF 路由都没有样本。
+
 依赖 M2/M3。完成 RFC 8349 RIB 与当前 OSPF/VRRP/BFD 标准实例；按能力拓展 IS-IS、BGP（固定草案）、静态路由及研究目录中的其他协议。L3、LSDB、协议邻居、TE 邻接分别建模，不混入一张“物理图”。
 
 处理 active route、ECMP、递归下一跳、设备本地实例转换、路由泄漏、IPv4/IPv6/ND、unnumbered、虚拟网关、黑洞、环路及采集不足。IP 不是唯一设备标识；协议 RID 的作用域按协议定义。

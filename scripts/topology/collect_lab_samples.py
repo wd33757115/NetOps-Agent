@@ -79,6 +79,7 @@ CISCO_COMMANDS = [
     ("lag", "show etherchannel summary"),
     ("stp", "show spanning-tree"),
     ("routes", "show ip route"),
+    ("routes_mgmt", "show ip route vrf MGMT"),
     ("vrfs", "show vrf"),
     ("vrrp", "show vrrp"),
     ("ospf", "show ip ospf neighbor"),

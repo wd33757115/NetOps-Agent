@@ -260,7 +260,9 @@ def route_records(rows, text):
 
 
 # Fixed IOS "show ip route" text around the routes (lab sample 20261002, IOS-XE 17.15).
+IOS_ROUTE_TABLE = re.compile(r"Routing Table: (\S+)\s*")  # "show ip route vrf X"
 IOS_ROUTE_NOISE = (
+    IOS_ROUTE_TABLE.pattern,
     r"Codes: .*",
     r"\s+\S+ - .*",  # legend continuation lines
     r"Gateway of last resort is .*",
@@ -272,9 +274,14 @@ def ios_route_records(rows, text):
     """One record per prefix/protocol/preference/metric; every line is a route or known text.
 
     A recursive route ("via 10.255.0.1" with no interface) keeps its next hop without one;
-    a connected route has an interface and no next-hop address.
+    a connected route has an interface and no next-hop address. A VRF table names itself
+    ("Routing Table: MGMT"); the global table has no such line.
     """
     lines = text.splitlines()
+    tables = {m[1] for line in lines if (m := IOS_ROUTE_TABLE.fullmatch(line))}
+    if len(tables) > 1:
+        raise ValueError("route_table_header_conflict")
+    table = next(iter(tables), "default")
     groups, sources = {}, {}
     for raw, number in rows:
         line = lines[number - 1]
@@ -290,7 +297,7 @@ def ios_route_records(rows, text):
         record = groups.setdefault(
             key,
             {
-                "vrf": "default",
+                "vrf": table,
                 "prefix": prefix,
                 "protocol": protocol,
                 "preference": preference,
@@ -301,7 +308,7 @@ def ios_route_records(rows, text):
         hop = {
             "ip": ip_address(next_ip) if next_ip else None,
             "ifname": interface(next_if, "ios").name if next_if else None,
-            "vrf": "default",
+            "vrf": table,
         }
         if not hop["ip"] and not hop["ifname"]:
             raise ValueError("route_without_next_hop")

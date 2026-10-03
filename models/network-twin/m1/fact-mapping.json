@@ -354,6 +354,142 @@
     "note": "each NI holds its own RIB under its schema mount (RFC 8529/8528)"
    }
   },
+  "ospf_process": {
+   "processes[].process_id": {
+    "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/name",
+    "status": "derived",
+    "note": "the OSPF process ID the device shows names its RFC 8349 instance (type ietf-ospf:ospfv2)"
+   },
+   "processes[].router_id": {
+    "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/router-id",
+    "status": "native"
+   },
+   "processes[].vrf": {
+    "path": "/ietf-network-instance:network-instances/network-instance/name",
+    "status": "context",
+    "note": "the NI whose routing tree holds the instance; an instance spread over several NIs is not exported"
+   },
+   "interfaces[].ifname": {
+    "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/areas/area/interfaces/interface/name",
+    "status": "native",
+    "note": "references the interface list; the interface is copied into the same tree"
+   },
+   "interfaces[].area": {
+    "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/areas/area/area-id",
+    "status": "derived",
+    "note": "IOS area numbers become dotted-quad area IDs"
+   }
+  },
+  "ospf_interfaces": {
+   "ifname": {
+    "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/areas/area/interfaces/interface/name",
+    "status": "native"
+   },
+   "area": {
+    "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/areas/area/area-id",
+    "status": "derived",
+    "note": "IOS area numbers become dotted-quad area IDs"
+   },
+   "cost": {
+    "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/areas/area/interfaces/interface/cost",
+    "status": "native"
+   },
+   "state": {
+    "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/areas/area/interfaces/interface/state",
+    "status": "derived",
+    "note": "DR/BDR/DROTHER/P2P/LOOP → if-state-type; not exported yet"
+   },
+   "process_id": {
+    "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/name",
+    "status": "context"
+   },
+   "address": {
+    "path": "/ietf-interfaces:interfaces/interface/ietf-ip:ipv4/address/ip",
+    "status": "context",
+    "note": "binds the OSPF row to its interface when the platform shows no name"
+   }
+  },
+  "ospf_neighbors": {
+   "neighbor_router_id": {
+    "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/areas/area/interfaces/interface/neighbors/neighbor/neighbor-router-id",
+    "status": "native",
+    "note": "an OSPF router ID, scoped to the routing domain; never a device identity"
+   },
+   "address": {
+    "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/areas/area/interfaces/interface/neighbors/neighbor/address",
+    "status": "native"
+   },
+   "state": {
+    "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/areas/area/interfaces/interface/neighbors/neighbor/state",
+    "status": "derived",
+    "note": "FULL/2WAY/EXSTART… → nbr-state-type enumeration"
+   },
+   "role": {
+    "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/areas/area/interfaces/interface/neighbors/neighbor/dr-router-id",
+    "status": "derived",
+    "note": "the neighbour's DR/BDR role; needs the DR election view of the interface, not exported"
+   },
+   "dead_time": {
+    "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/areas/area/interfaces/interface/neighbors/neighbor/dead-timer",
+    "status": "derived",
+    "note": "remaining seconds at the observation time; a countdown snapshot, not exported"
+   },
+   "priority": {
+    "status": "no-native-node",
+    "note": "RFC 9129 keeps priority as interface configuration, not per neighbour state"
+   },
+   "ifname": {
+    "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/areas/area/interfaces/interface/name",
+    "status": "context"
+   },
+   "process": {
+    "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/name",
+    "status": "context"
+   },
+   "area": {
+    "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/areas/area/area-id",
+    "status": "context"
+   }
+  },
+  "bgp_peers": {
+   "local_as": {
+    "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-bgp:bgp/global/as",
+    "status": "native",
+    "note": "also names the RFC 8349 instance (type ietf-bgp:bgp): the CLI identifies its one BGP process by the AS"
+   },
+   "router_id": {
+    "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-bgp:bgp/global/identifier",
+    "status": "native"
+   },
+   "peers[].peer": {
+    "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-bgp:bgp/neighbors/neighbor/remote-address",
+    "status": "native",
+    "note": "also the neighbor-key (leafref to remote-address)"
+   },
+   "peers[].peer_as": {
+    "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-bgp:bgp/neighbors/neighbor/peer-as",
+    "status": "native"
+   },
+   "peers[].state": {
+    "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-bgp:bgp/neighbors/neighbor/session-state",
+    "status": "derived",
+    "note": "a prefix count in the State/PfxRcd column means established"
+   },
+   "peers[].up_down": {
+    "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-bgp:bgp/neighbors/neighbor/last-established",
+    "status": "derived",
+    "note": "observation time minus the established duration; not exported"
+   },
+   "peers[].prefixes_received": {
+    "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-bgp:bgp/neighbors/neighbor/afi-safis/afi-safi/prefixes/received",
+    "status": "derived",
+    "note": "in the afi-safi the command shows (IPv4 unicast); not exported"
+   },
+   "peers[].state_detail": {
+    "status": "no-native-node",
+    "note": "platform qualifier of the state, e.g. Idle (Admin)"
+   }
+  },
   "vrrp": {
    "ifname": {
     "path": "/ietf-interfaces:interfaces/interface/name",

@@ -424,3 +424,23 @@ def test_null_needs_no_egress_and_inloop_does_not_invent_a_local_destination():
         "destination": "172.16.11.1",
         "interface": "InLoopBack0",
     }
+
+
+def test_forward_and_reverse_through_different_routers_are_asymmetric():
+    devices = network()
+    r1, r3, r4 = (devices[key] for key in ("10.0.0.1", "10.0.0.3", "10.0.0.4"))
+    # R1 forwards via R2 only; R4 returns via R3. Both directions are fully observed.
+    next(r for r in r1["routes"] if r["prefix"] == "172.16.4.0/24")["next_hops"].pop()
+    r4["routes"].append(route("172.16.1.0/24", ("10.1.34.1", "GigabitEthernet3/0")))
+    r3["routes"].append(route("172.16.1.0/24", ("10.1.13.1", "GigabitEthernet1/0")))
+    for facts, ip, ifname, mac in (
+        (r4, "10.1.34.1", "GigabitEthernet3/0", "00:00:00:00:00:03"),
+        (r3, "10.1.13.1", "GigabitEthernet1/0", "00:00:00:00:00:01"),
+    ):
+        facts["arp"].append({"ip": ip, "ifname": ifname, "mac": mac, "vrf": "default"})
+    result = trace(devices, BASE, "172.16.1.10", "172.16.4.20")
+    assert result["forward"]["status"] == result["reverse"]["status"] == "complete"
+    assert ends(result) == [(["10.0.0.1", "10.0.0.2", "10.0.0.4"], "delivered")]
+    reverse = [h["device"]["address"] for h in result["reverse"]["paths"][0]["hops"]]
+    assert reverse == ["10.0.0.4", "10.0.0.3", "10.0.0.1"]
+    assert result["symmetric"] is False and result["gaps"] == []

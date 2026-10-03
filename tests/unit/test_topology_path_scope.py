@@ -258,3 +258,46 @@ def test_empty_next_hop_list_cannot_produce_vacuous_complete_path():
         "reason": "route_next_hops_missing",
     }
     assert any(gap.get("reason") == "route_next_hops_missing" for gap in result["gaps"])
+
+
+def leaked(*, back=True):
+    """LEFT's loopback sits in "red"; only routes leaked between red and blue reach it."""
+    devices = pair()
+    left = devices["left"]
+    next(row for row in left["ip"] if row["ifname"] == "LoopBack0")["vrf"] = "red"
+    # The red route keeps its blue next hop (an import from blue).
+    left["routes"][0]["vrf"] = "red"
+    if back:
+        # Blue imports red's Direct /32, which Comware shows on InLoop0.
+        left["routes"].append(
+            {
+                "vrf": "blue",
+                "prefix": "198.51.100.1/32",
+                "protocol": "Direct",
+                "preference": 0,
+                "metric": 0,
+                "next_hops": [{"ip": "127.0.0.1", "ifname": "InLoop0", "vrf": "red"}],
+            }
+        )
+    return devices
+
+
+def test_leaked_route_resolves_its_next_hop_in_the_other_local_ni():
+    result = trace(leaked(), BASE, "198.51.100.1", "198.51.100.2")
+    assert result["forward"]["status"] == result["reverse"]["status"] == "complete"
+    forward = result["forward"]["paths"][0]["hops"]
+    assert [hop["vrf"] for hop in forward] == ["red", "green"]
+    assert forward[0]["route"]["next_hop_vrf"] == "blue"
+    reverse = result["reverse"]["paths"][0]
+    assert [hop["vrf"] for hop in reverse["hops"]] == ["green", "blue"]
+    assert reverse["hops"][-1]["route"]["next_hop_vrf"] == "red"
+    assert reverse["end"] == {"status": "delivered", "to": "device", "interface": "LoopBack0"}
+    assert "next_hop_vrf" not in reverse["hops"][0]["route"]
+
+
+def test_without_the_leak_the_other_ni_cannot_reach_the_address():
+    result = trace(leaked(back=False), BASE, "198.51.100.1", "198.51.100.2")
+    assert result["forward"]["status"] == "complete"
+    [path] = result["reverse"]["paths"]
+    assert [hop["vrf"] for hop in path["hops"]] == ["green", "blue"]
+    assert path["end"] == {"status": "no_route"}

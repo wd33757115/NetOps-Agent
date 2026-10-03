@@ -281,10 +281,13 @@ class _Tracer:
                 return
             for next_hop in route["next_hops"]:
                 ip, out = next_hop.get("ip"), next_hop.get("ifname") or ""
+                next_vrf = next_hop.get("vrf") or vrf
+                # A leaked route resolves its next hop in another local NI; say which.
+                leak = {"next_hop_vrf": next_vrf} if next_vrf != vrf else {}
                 current = {
                     **hop,
                     "out_interface": out,
-                    "route": {**matched, "next_hop": ip},
+                    "route": {**matched, "next_hop": ip, **leak},
                     **({"gaps": list(hop["gaps"])} if "gaps" in hop else {}),
                     **(
                         {"interface_states": dict(hop["interface_states"])}
@@ -293,7 +296,6 @@ class _Tracer:
                     ),
                 }
                 here = [*trail, current]
-                next_vrf = next_hop.get("vrf") or vrf
                 own = self.topo.ip_candidates(ip, device=key, vrf=next_vrf) if ip else ()
                 if out.upper().startswith("NULL"):
                     end(here, "blackhole")

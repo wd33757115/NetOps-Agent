@@ -1,4 +1,4 @@
-"""Partial native routing and LLDP instances from one current observation.
+"""Partial native routing (RIBs, OSPF/BGP instances) and LLDP from one observation.
 
 VRF association, collection evidence and preserved facts live outside RFC 7951
 trees.  An observed VRF or an address family is not a native RIB name.  LLDP
@@ -15,6 +15,7 @@ from collections import defaultdict
 from copy import deepcopy
 
 from .device_state import project_device_state
+from .protocols import OSPF, project_protocols
 
 AF = {4: "ietf-ipv4-unicast-routing", 6: "ietf-ipv6-unicast-routing"}
 PROTOCOLS = {
@@ -438,6 +439,54 @@ def project_device_control(observation):
         "routing": _routing(observation, data, facts),
         "lldp": _lldp(observation, data, facts),
     }
+    _protocols(observation, facts, result["routing"])
     if invalid:
         result["gaps"] = [{"code": invalid}]
     return result
+
+
+def _protocols(observation, facts, routing):
+    """Add OSPF/BGP instances (RFC 8349 control-plane-protocols) to their scope's tree.
+
+    An OSPF interface is a reference into the interface list, so the interface is copied
+    from the current interface projection; one that is not there is left out with a gap.
+    """
+    projected = project_protocols(facts)
+    if not projected["instances"]:
+        return
+    state = project_device_state(observation)
+    rows = {row["name"]: row for row in state["tree"]["ietf-interfaces:interfaces"]["interface"]}
+    for scope, instances in sorted(projected["instances"].items()):
+        entry = next((item for item in routing if item.get("vrf") == scope), None)
+        if entry is None:
+            entry = {
+                "vrf": scope,
+                **_section(observation, "RFC 8349", {"ietf-routing:routing": {}}),
+            }
+            routing.append(entry)
+        entry["gaps"].extend(deepcopy(projected["gaps"]))
+        used = set()
+        for instance in instances:
+            for area in instance.get(OSPF + "ospf", {}).get("areas", {}).get("area", []):
+                kept = []
+                for interface in area["interfaces"]["interface"]:
+                    if interface["name"] in rows:
+                        kept.append(interface)
+                        used.add(interface["name"])
+                    else:
+                        _gap(
+                            entry,
+                            "ospf_interface_reference_not_proven",
+                            interface=interface["name"],
+                        )
+                area["interfaces"]["interface"] = kept
+        tree = entry["tree"]["ietf-routing:routing"]
+        tree["control-plane-protocols"] = {"control-plane-protocol": deepcopy(instances)}
+        if used:
+            existing = entry["tree"].setdefault("ietf-interfaces:interfaces", {"interface": []})
+            names = {row["name"] for row in existing["interface"]}
+            existing["interface"] = sorted(
+                existing["interface"] + [deepcopy(rows[name]) for name in used - names],
+                key=lambda row: row["name"],
+            )
+        entry["metadata"]["standards"] = ["RFC 8349", "RFC 9129", "draft-ietf-idr-bgp-model-21"]

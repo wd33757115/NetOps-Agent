@@ -1,0 +1,8 @@
+	 OSPF Process 1 with Router ID 10.255.0.1
+               Neighbor Brief Information
+
+ Area: 0.0.0.0        
+ Router ID       Address         Pri Dead-Time  State             Interface
+ 10.255.0.3      10.0.13.2       1   31         Full/DR           GE3/0
+ 10.255.0.4      10.0.14.2       1   33         Full/DR           GE4/0
+ 10.255.0.2      10.0.12.2       1   32         Full/DR           GE5/0

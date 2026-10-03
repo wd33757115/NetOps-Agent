@@ -28,4 +28,6 @@ capabilities:
   vrrp: {command: show vrrp, parser: generic_vrrp}
   ospf_interfaces: {command: show ip ospf interface brief, parser: generic_ospf_interfaces}
   ospf_process: {command: show ip ospf, parser: generic_ospf_process}
+  ospf_neighbors: {command: show ip ospf neighbor, parser: generic_ospf_neighbors}
+  bgp_peers: {command: show ip bgp summary, parser: generic_bgp_peers}
 verified: []

@@ -1,0 +1,137 @@
+{
+ "ietf-routing:routing": {
+  "control-plane-protocols": {
+   "control-plane-protocol": [
+    {
+     "type": "ietf-ospf:ospfv2",
+     "name": "1",
+     "ietf-ospf:ospf": {
+      "router-id": "10.255.0.5",
+      "areas": {
+       "area": [
+        {
+         "area-id": "0.0.0.0",
+         "interfaces": {
+          "interface": [
+           {
+            "name": "Ethernet0/1",
+            "cost": 10,
+            "neighbors": {
+             "neighbor": [
+              {
+               "neighbor-router-id": "10.255.0.3",
+               "address": "10.0.35.1",
+               "state": "full"
+              }
+             ]
+            }
+           },
+           {
+            "name": "Ethernet0/2",
+            "cost": 10,
+            "neighbors": {
+             "neighbor": [
+              {
+               "neighbor-router-id": "10.255.0.4",
+               "address": "10.0.45.1",
+               "state": "full"
+              }
+             ]
+            }
+           },
+           {
+            "name": "Loopback0",
+            "cost": 1
+           }
+          ]
+         }
+        },
+        {
+         "area-id": "0.0.0.10",
+         "interfaces": {
+          "interface": [
+           {
+            "name": "Vlan10",
+            "cost": 1
+           },
+           {
+            "name": "Vlan20",
+            "cost": 1
+           }
+          ]
+         }
+        }
+       ]
+      }
+     }
+    },
+    {
+     "type": "ietf-bgp:bgp",
+     "name": "65000",
+     "ietf-bgp:bgp": {
+      "global": {
+       "as": 65000,
+       "identifier": "10.255.0.5"
+      },
+      "neighbors": {
+       "neighbor": [
+        {
+         "neighbor-key": "10.255.0.3",
+         "remote-address": "10.255.0.3",
+         "peer-as": 65000,
+         "peer-type": "internal",
+         "session-state": "established"
+        },
+        {
+         "neighbor-key": "10.255.0.4",
+         "remote-address": "10.255.0.4",
+         "peer-as": 65000,
+         "peer-type": "internal",
+         "session-state": "established"
+        }
+       ]
+      }
+     }
+    }
+   ]
+  }
+ },
+ "ietf-interfaces:interfaces": {
+  "interface": [
+   {
+    "name": "Ethernet0/1",
+    "type": "iana-if-type:ethernetCsmacd",
+    "oper-status": "up",
+    "enabled": true,
+    "description": "to CORE1 e1/0"
+   },
+   {
+    "name": "Ethernet0/2",
+    "type": "iana-if-type:ethernetCsmacd",
+    "oper-status": "up",
+    "enabled": true,
+    "description": "to CORE2 e1/1"
+   },
+   {
+    "name": "Loopback0",
+    "type": "iana-if-type:softwareLoopback",
+    "oper-status": "up",
+    "enabled": true
+   },
+   {
+    "name": "Vlan10",
+    "type": "iana-if-type:l3ipvlan",
+    "oper-status": "up",
+    "enabled": true,
+    "description": "USERS-A gateway"
+   },
+   {
+    "name": "Vlan20",
+    "type": "iana-if-type:l3ipvlan",
+    "oper-status": "up",
+    "enabled": true,
+    "description": "USERS-B gateway"
+   }
+  ]
+ }
+}

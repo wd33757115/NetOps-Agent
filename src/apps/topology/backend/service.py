@@ -26,7 +26,7 @@ from src.platform.device_access.drivers.paramiko_driver import ParamikoDriver
 from src.platform.device_access.security import CredentialStore
 
 from . import logins, storage
-from .collectors.collect import collect_node, command_allowlist, scoped_arp_command
+from .collectors.collect import collect_node, command_allowlist, scoped_command
 from .collectors.identify import TopologyDiscoveryPlan as DiscoveryPlan
 from .collectors.tiers.common import valid_mac
 from .logins import DOMAIN
@@ -34,6 +34,7 @@ from .model.builder import build_topology_details, device_node_ids
 from .model.l2_forwarding import analyse as analyse_l2_forwarding
 from .model.locate import locate as locate_in
 from .model.path import trace as trace_in
+from .model.protocols import adjacencies as protocol_adjacencies
 from .model.snapshot_state import enrich_snapshot_state
 from .model.view import canvas
 from .models import (
@@ -72,6 +73,8 @@ TOPOLOGY_FACTS = (
     "routes",
     "ospf_interfaces",
     "ospf_process",
+    "ospf_neighbors",
+    "bgp_peers",
 )
 NODE_BUDGET_SECONDS = 240
 # A lease outlives the node budget, so a live collection is never reclaimed mid-way.
@@ -332,7 +335,7 @@ def _graph(session, run):
         "simap": tree,
         "evidence": links_evidence,
         "state": state,
-        "protocols": {"ospf": protocols},
+        "protocols": {"ospf": protocols, "adjacencies": protocol_adjacencies(devices)},
         "l2_forwarding": l2_forwarding,
     }
     targets = session.scalars(select(Target).where(Target.run_id == run.id)).all()
@@ -827,6 +830,9 @@ def _collect_topology(job, choice):
             scoped_arp_context=lambda scopes: _scoped_arp_context(
                 context, job.target_id, job.target_id, scopes
             ),
+            scoped_route_context=lambda scopes: _scoped_context(
+                context, job.target_id, job.target_id, scopes, "routes"
+            ),
         )
         data = topology_observation(result)
         reason = data.get("failure_code")
@@ -835,22 +841,35 @@ def _collect_topology(job, choice):
     return outputs, command_metadata, data, reason
 
 
-def _scoped_arp_context(context, target_ref, connection_profile_id, scopes):
-    """Issue exact backend grants for a bounded, validated ARP-only expansion.
+# The global command a per-VRF expansion extends; the job must already be allowed it.
+SCOPE_BASE_COMMANDS = {"arp": "show ip arp", "routes": "show ip route"}
 
-    Target and connection come from the already authorized job. Device-provided
-    VRF names cannot introduce command syntax or broaden the target scope.
+
+def _scoped_arp_context(context, target_ref, connection_profile_id, scopes):
+    return _scoped_context(context, target_ref, connection_profile_id, scopes, "arp")
+
+
+def _scoped_context(context, target_ref, connection_profile_id, scopes, capability):
+    """Issue exact backend grants for a bounded, validated per-VRF ARP or route expansion.
+
+    Target and connection come from the already authorized job, which must already be
+    allowed the global command. Device-provided VRF names cannot introduce command
+    syntax or broaden the target scope.
     """
     from src.platform.device_access.contracts import Command
     from src.platform.device_access.policy import authorize
 
     authorize(
         context,
-        BatchRequest(target_ref, connection_profile_id, (Command("arp", "show ip arp"),)),
+        BatchRequest(
+            target_ref,
+            connection_profile_id,
+            (Command(capability, SCOPE_BASE_COMMANDS[capability]),),
+        ),
     )
     if len(scopes) > 64:
         raise ValueError("VRF collection scope exceeds node limit")
-    commands = frozenset(scoped_arp_command(scope) for scope in scopes)
+    commands = frozenset(scoped_command(capability, scope) for scope in scopes)
     return replace(
         context,
         grants=(*context.grants, AccessGrant(target_ref, connection_profile_id, commands)),
@@ -873,6 +892,9 @@ def topology_observation(result):
         for cap, parsed in result.parsed.items()
         if cap in TOPOLOGY_FACTS and parsed.status in {"complete", "partial"}
     }
+    if "bgp_peers" in facts:
+        # The local identity (router ID, AS) and the peer rows belong together.
+        facts["bgp_peers"] = {**result.parsed["bgp_peers"].summary, "peers": facts["bgp_peers"]}
     vlan = result.parsed.get("vlan")
     if vlan is not None and vlan.status in {"complete", "partial"} and "members" in vlan.summary:
         facts["vlan_members"] = vlan.summary["members"]

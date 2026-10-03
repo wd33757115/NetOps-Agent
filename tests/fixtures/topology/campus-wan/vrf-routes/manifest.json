@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "batch": "20261003-202324",
+  "source": "GNS3 authorized lab capture",
+  "raw_format": "UTF-8 text saved by collector before CLI cleanup; original line endings",
+  "limitations": [
+    "Not an arbitrary-encoding wire capture",
+    "No initial login banner saved"
+  ],
+  "secret_scan": {
+    "literal_matches": 0,
+    "sensitive_config_matches": 0,
+    "scanner": "scripts/scan_sensitive_device_data.py + direct byte check"
+  },
+  "observations": [
+    {
+      "device": "core1",
+      "host": "10.10.1.13",
+      "capability": "routes_mgmt",
+      "command": "show ip route vrf MGMT",
+      "observed_at": "2026-10-03T12:23:26.136554+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "core1/routes_mgmt.txt",
+          "sha256": "6b2fbced9e0a225509c7db0aac9cf3f463cdc3037e3409ea46ba9d0f5e620b89",
+          "bytes": 1026
+        },
+        "raw.txt": {
+          "path": "core1/routes_mgmt.raw.txt",
+          "sha256": "a164e1c24deff9577ca7cab7a447b3e494bd60a435cc7edb582cf40f837d1721",
+          "bytes": 1077
+        }
+      }
+    },
+    {
+      "device": "core2",
+      "host": "10.10.1.14",
+      "capability": "routes_mgmt",
+      "command": "show ip route vrf MGMT",
+      "observed_at": "2026-10-03T12:23:28.570965+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "core2/routes_mgmt.txt",
+          "sha256": "ffd92ff178b80a3dd9865153f2997b7d82e8a3d1b581bb99e0b9332a77170e64",
+          "bytes": 1026
+        },
+        "raw.txt": {
+          "path": "core2/routes_mgmt.raw.txt",
+          "sha256": "6eb13bcf368c4c564c77e416e61082abad2595cb3fde5758ce8b69c7e6be8be7",
+          "bytes": 1077
+        }
+      }
+    },
+    {
+      "device": "dist1",
+      "host": "10.10.1.15",
+      "capability": "routes_mgmt",
+      "command": "show ip route vrf MGMT",
+      "observed_at": "2026-10-03T12:23:31.174810+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "dist1/routes_mgmt.txt",
+          "sha256": "b0ab763465036baeb301d9370e77031f26b1932c106c4fe1634d90d9e1d6857d",
+          "bytes": 1026
+        },
+        "raw.txt": {
+          "path": "dist1/routes_mgmt.raw.txt",
+          "sha256": "27033519816ad8f777568e429c8de990abaf2245c47f36ecfd40ba1024cf30e5",
+          "bytes": 1077
+        }
+      }
+    },
+    {
+      "device": "dist2",
+      "host": "10.10.1.16",
+      "capability": "routes_mgmt",
+      "command": "show ip route vrf MGMT",
+      "observed_at": "2026-10-03T12:23:33.675691+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "dist2/routes_mgmt.txt",
+          "sha256": "b0884719a98178a9b54b774f0b499928dd01a1003b8e2f56ebc42ae17e99099d",
+          "bytes": 1026
+        },
+        "raw.txt": {
+          "path": "dist2/routes_mgmt.raw.txt",
+          "sha256": "de0bcb4707290fbd5e0b4756f4cce10b1e5a13428ebfdbc5a88e0d30e119546c",
+          "bytes": 1077
+        }
+      }
+    }
+  ]
+}

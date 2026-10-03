@@ -4,6 +4,7 @@ Real outputs (tests/fixtures/topology/campus-wan) through the platform parsers a
 SIMAP builder, checked against the lab wiring in expected.json.
 """
 
+import copy
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -69,10 +70,28 @@ FACTS = {
 BASE = "urn:test:campus:"
 
 
+# Protocol facts live in their own reviewed fixture directories: neighbours from the
+# same capture, OSPF interface/process tables from the OSPF capture.
+PROTOCOL_FACTS = {
+    "ospf_neighbors": "protocols/{device}/ospf",
+    "bgp_peers": "protocols/{device}/bgp",
+    "ospf_interfaces": "ospf/{device}/ospf_interfaces",
+    "ospf_process": "ospf/{device}/ospf_process",
+}
+
+
 def parsed(device):
     """Routers rejected the aggregation command, so it was not imported for them."""
     platform = EXPECTED["devices"][device]["platform"]
-    return {
+    protocols = {
+        cap: parse(
+            IDENTITY[platform],
+            cap,
+            (FIXTURES / f"{path.format(device=device)}.txt").read_text("utf-8"),
+        )
+        for cap, path in PROTOCOL_FACTS.items()
+    }
+    return protocols | {
         cap: parse(
             IDENTITY[platform],
             cap,
@@ -128,13 +147,21 @@ def ends(network, link):
 
 
 def test_every_modeled_capability_parses_completely():
+    protocol_manifests = [
+        json.loads((FIXTURES / name / "manifest.json").read_text(encoding="utf-8"))
+        for name in ("protocols", "ospf")
+    ]
     expected = {
         (o["device"], o["capability"]): o["expected_status"]
-        for o in [*MANIFEST["observations"], *VLAN_MANIFEST["observations"]]
+        for o in [
+            *MANIFEST["observations"],
+            *VLAN_MANIFEST["observations"],
+            *(o for m in protocol_manifests for o in m["observations"]),
+        ]
     }
     for device, spec in EXPECTED["devices"].items():
         for cap, outcome in parsed(device).items():
-            fixture = FACTS[spec["platform"]][cap]
+            fixture = FACTS[spec["platform"]].get(cap) or PROTOCOL_FACTS[cap].rsplit("/", 1)[1]
             assert outcome.status == expected[(device, fixture)], (device, cap, outcome.warnings)
             assert not outcome.rejected_count, (device, cap, outcome.warnings)
 
@@ -348,3 +375,36 @@ def test_campus_access_pvid_is_retained_without_a_wire_tag(devices, l2, device, 
         if tp[L2T + "l2-termination-point-attributes"]["interface-name"] == port
     )
     assert "outer-tag" not in attrs
+
+
+@pytest.fixture(scope="module")
+def with_mgmt(devices):
+    """Add the IOS devices' "show ip route vrf MGMT" tables, as the scoped collector does."""
+    result = copy.deepcopy(devices)
+    for device, spec in EXPECTED["devices"].items():
+        path = FIXTURES / "vrf-routes" / device / "routes_mgmt.txt"
+        if path.exists():
+            table = parse(IDENTITY["ios"], "routes", path.read_text("utf-8"))
+            assert table.status == "complete" and {r["vrf"] for r in table.records} == {"MGMT"}
+            result[spec["management"]]["routes"] += table.records
+    return result
+
+
+def test_same_prefix_in_the_management_vrf_stays_isolated(with_mgmt):
+    # DIST1 holds 10.10.1.0/24 connected in MGMT only; the global lookup takes the BGP
+    # default to BR1, where the prefix really is global, and no BR1 ARP proves .13.
+    result = trace(with_mgmt, BASE, "172.16.10.11", "10.10.1.13")
+    for path in result["forward"]["paths"]:
+        assert [(h["device"]["name"].split(".")[0], h["vrf"]) for h in path["hops"]][::2] == [
+            ("DIST1", "default"),
+            ("BR1", "default"),
+        ]
+        assert path["hops"][0]["route"]["prefix"] == "0.0.0.0/0"
+        assert path["end"]["status"] == "endpoint_unresolved"
+    # CORE1's management table has no route back to a user subnet.
+    [back] = result["reverse"]["paths"]
+    assert [(h["device"]["name"].split(".")[0], h["vrf"]) for h in back["hops"]] == [
+        ("CORE1", "MGMT")
+    ]
+    assert back["end"] == {"status": "no_route"}
+    assert result["symmetric"] is None

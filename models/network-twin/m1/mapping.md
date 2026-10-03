@@ -1,28 +1,28 @@
 # M1 数据节点映射清单
 
-由 `scripts/topology/m1_mapping.py` 生成，明细见 mapping.json。基线数据节点 21403 个（去重，不含 RPC/通知内容）；当前 App 生产者实际输出 102 个路径，研究实例 133 个。
+由 `scripts/topology/m1_mapping.py` 生成，明细见 mapping.json。基线数据节点 21403 个（去重，不含 RPC/通知内容）；当前 App 生产者实际输出 133 个路径，研究实例 133 个。
 
 ## 生产者输出与 Schema
 
 | 生产者 | 输出路径 | 不在任何基线集中的路径 |
 |---|---|---|
 | app:device-state:br1 | 23 | 无 |
-| app:device-routing:br1:default | 1 | 无 |
+| app:device-routing:br1:default | 37 | 无 |
 | app:device-lldp:br1 | 4 | 无 |
 | app:device-state:br2 | 23 | 无 |
-| app:device-routing:br2:default | 1 | 无 |
+| app:device-routing:br2:default | 37 | 无 |
 | app:device-lldp:br2 | 4 | 无 |
 | app:device-state:core1 | 18 | 无 |
-| app:device-routing:core1:default | 1 | 无 |
+| app:device-routing:core1:default | 37 | 无 |
 | app:device-lldp:core1 | 1 | 无 |
 | app:device-state:core2 | 18 | 无 |
-| app:device-routing:core2:default | 1 | 无 |
+| app:device-routing:core2:default | 37 | 无 |
 | app:device-lldp:core2 | 1 | 无 |
 | app:device-state:dist1 | 26 | 无 |
-| app:device-routing:dist1:default | 1 | 无 |
+| app:device-routing:dist1:default | 37 | 无 |
 | app:device-lldp:dist1 | 1 | 无 |
 | app:device-state:dist2 | 26 | 无 |
-| app:device-routing:dist2:default | 1 | 无 |
+| app:device-routing:dist2:default | 37 | 无 |
 | app:device-lldp:dist2 | 1 | 无 |
 | app:device-state:acc1 | 15 | 无 |
 | app:device-routing:acc1:None | 1 | 无 |
@@ -30,7 +30,7 @@
 | app:device-state:acc2 | 15 | 无 |
 | app:device-routing:acc2:None | 1 | 无 |
 | app:device-lldp:acc2 | 1 | 无 |
-| app:topology | 59 | 无 |
+| app:topology | 61 | 无 |
 | app:inventory:br1 | 11 | 无 |
 | app:inventory:br2 | 11 | 无 |
 | app:inventory:core1 | 10 | 无 |
@@ -52,11 +52,11 @@
 
 | 结论 | 数量 |
 |---|---|
-| context | 3 |
-| exported | 39 |
+| context | 9 |
+| exported | 54 |
 | key-blocked | 14 |
-| mappable-not-exported | 29 |
-| no-native-node | 16 |
+| mappable-not-exported | 34 |
+| no-native-node | 18 |
 
 | 字段 | 结论 | 标准节点 | 说明 |
 |---|---|---|---|
@@ -132,6 +132,34 @@
 | `routes.next_hops[].ifname` | mappable-not-exported | `/ietf-routing:routing/ribs/rib/routes/route/next-hop/outgoing-interface` |  |
 | `routes.next_hops[].vrf` | context | `/ietf-network-instance:network-instances/network-instance/name` | next hop resolved in another instance (route leaking) |
 | `routes.vrf` | context | `/ietf-network-instance:network-instances/network-instance/name` | each NI holds its own RIB under its schema mount (RFC 8529/8528) |
+| `ospf_process.processes[].process_id` | exported | `/ietf-routing:routing/control-plane-protocols/control-plane-protocol/name` | the OSPF process ID the device shows names its RFC 8349 instance (type ietf-ospf:ospfv2) |
+| `ospf_process.processes[].router_id` | exported | `/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/router-id` |  |
+| `ospf_process.processes[].vrf` | context | `/ietf-network-instance:network-instances/network-instance/name` | the NI whose routing tree holds the instance; an instance spread over several NIs is not exported |
+| `ospf_process.interfaces[].ifname` | exported | `/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/areas/area/interfaces/interface/name` | references the interface list; the interface is copied into the same tree |
+| `ospf_process.interfaces[].area` | exported | `/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/areas/area/area-id` | IOS area numbers become dotted-quad area IDs |
+| `ospf_interfaces.ifname` | exported | `/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/areas/area/interfaces/interface/name` |  |
+| `ospf_interfaces.area` | exported | `/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/areas/area/area-id` | IOS area numbers become dotted-quad area IDs |
+| `ospf_interfaces.cost` | exported | `/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/areas/area/interfaces/interface/cost` |  |
+| `ospf_interfaces.state` | mappable-not-exported | `/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/areas/area/interfaces/interface/state` | DR/BDR/DROTHER/P2P/LOOP → if-state-type; not exported yet |
+| `ospf_interfaces.process_id` | context | `/ietf-routing:routing/control-plane-protocols/control-plane-protocol/name` |  |
+| `ospf_interfaces.address` | context | `/ietf-interfaces:interfaces/interface/ietf-ip:ipv4/address/ip` | binds the OSPF row to its interface when the platform shows no name |
+| `ospf_neighbors.neighbor_router_id` | exported | `/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/areas/area/interfaces/interface/neighbors/neighbor/neighbor-router-id` | an OSPF router ID, scoped to the routing domain; never a device identity |
+| `ospf_neighbors.address` | exported | `/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/areas/area/interfaces/interface/neighbors/neighbor/address` |  |
+| `ospf_neighbors.state` | exported | `/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/areas/area/interfaces/interface/neighbors/neighbor/state` | FULL/2WAY/EXSTART… → nbr-state-type enumeration |
+| `ospf_neighbors.role` | mappable-not-exported | `/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/areas/area/interfaces/interface/neighbors/neighbor/dr-router-id` | the neighbour's DR/BDR role; needs the DR election view of the interface, not exported |
+| `ospf_neighbors.dead_time` | mappable-not-exported | `/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/areas/area/interfaces/interface/neighbors/neighbor/dead-timer` | remaining seconds at the observation time; a countdown snapshot, not exported |
+| `ospf_neighbors.priority` | no-native-node | `` | RFC 9129 keeps priority as interface configuration, not per neighbour state |
+| `ospf_neighbors.ifname` | context | `/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/areas/area/interfaces/interface/name` |  |
+| `ospf_neighbors.process` | context | `/ietf-routing:routing/control-plane-protocols/control-plane-protocol/name` |  |
+| `ospf_neighbors.area` | context | `/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/areas/area/area-id` |  |
+| `bgp_peers.local_as` | exported | `/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-bgp:bgp/global/as` | also names the RFC 8349 instance (type ietf-bgp:bgp): the CLI identifies its one BGP process by the AS |
+| `bgp_peers.router_id` | exported | `/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-bgp:bgp/global/identifier` |  |
+| `bgp_peers.peers[].peer` | exported | `/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-bgp:bgp/neighbors/neighbor/remote-address` | also the neighbor-key (leafref to remote-address) |
+| `bgp_peers.peers[].peer_as` | exported | `/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-bgp:bgp/neighbors/neighbor/peer-as` |  |
+| `bgp_peers.peers[].state` | exported | `/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-bgp:bgp/neighbors/neighbor/session-state` | a prefix count in the State/PfxRcd column means established |
+| `bgp_peers.peers[].up_down` | mappable-not-exported | `/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-bgp:bgp/neighbors/neighbor/last-established` | observation time minus the established duration; not exported |
+| `bgp_peers.peers[].prefixes_received` | mappable-not-exported | `/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-bgp:bgp/neighbors/neighbor/afi-safis/afi-safi/prefixes/received` | in the afi-safi the command shows (IPv4 unicast); not exported |
+| `bgp_peers.peers[].state_detail` | no-native-node | `` | platform qualifier of the state, e.g. Idle (Admin) |
 | `vrrp.ifname` | exported | `/ietf-interfaces:interfaces/interface/name` |  |
 | `vrrp.vrid` | exported | `/ietf-interfaces:interfaces/interface/ietf-ip:ipv4/ietf-vrrp:vrrp/vrrp-instance/vrid` |  |
 | `vrrp.priority` | mappable-not-exported | `/ietf-interfaces:interfaces/interface/ietf-ip:ipv4/ietf-vrrp:vrrp/vrrp-instance/priority` |  |
@@ -197,18 +225,20 @@
 | 模块 | 数据节点 | 配置 | 状态 | App 输出 | 研究实例 |
 |---|---|---|---|---|---|
 | `ietf-simap-topology` | 41 | 25 | 16 | 17 | 16 |
+| `ietf-ospf` | 1522 | 176 | 1346 | 14 | 0 |
 | `ietf-l2-topology` | 32 | 32 | 0 | 12 | 7 |
+| `ietf-bgp` | 909 | 459 | 450 | 11 | 0 |
 | `ietf-network` | 11 | 11 | 0 | 11 | 11 |
 | `ietf-network-inventory` | 42 | 0 | 42 | 11 | 11 |
 | `ietf-network-topology` | 17 | 17 | 0 | 11 | 11 |
+| `ietf-l3-unicast-topology` | 21 | 21 | 0 | 10 | 6 |
 | `ietf-ip` | 60 | 27 | 33 | 8 | 8 |
-| `ietf-l3-unicast-topology` | 21 | 21 | 0 | 8 | 6 |
 | `ietf-vrrp` | 94 | 47 | 47 | 8 | 0 |
 | `ietf-interfaces` | 57 | 7 | 50 | 7 | 5 |
+| `ietf-routing` | 53 | 13 | 40 | 5 | 10 |
 | `ieee802-dot1ab-lldp` | 81 | 25 | 56 | 4 | 29 |
 | `ietf-network-instance` | 11 | 11 | 0 | 4 | 0 |
-| `ietf-routing` | 53 | 13 | 40 | 1 | 10 |
 | `ieee802-dot1q-bridge` | 237 | 179 | 58 | 0 | 17 |
 | `ietf-ipv4-unicast-routing` | 19 | 13 | 6 | 0 | 2 |
 
-其余 184 个基线模块尚无 App 输出节点（见 mapping.json 的 modules）。
+其余 182 个基线模块尚无 App 输出节点（见 mapping.json 的 modules）。

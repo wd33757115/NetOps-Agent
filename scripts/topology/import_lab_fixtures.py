@@ -121,11 +121,34 @@ CAMPUS_OSPF = Lab(
     ROOT / "tests/fixtures/topology/campus-wan/ospf",
     frozenset(),
 )
+# Protocol neighbours from the same capture as CAMPUS (OSPF neighbours, BGP peers).
+CAMPUS_PROTOCOLS = Lab(
+    "20261003-010038",
+    CAMPUS_HOSTS,
+    dict.fromkeys(CAMPUS_HOSTS, frozenset({"ospf", "bgp"})),
+    ROOT / "tests/fixtures/topology/campus-wan/protocols",
+    frozenset(),
+)
+# Per-VRF route tables ("show ip route vrf MGMT") from the IOS routers and distribution.
+# ACC1/ACC2 were refused by the sampler (changed SSH host keys) and contribute nothing.
+CAMPUS_VRF_ROUTES = Lab(
+    "20261003-202324",
+    {host: name for host, name in CAMPUS_HOSTS.items() if not name.startswith("br")},
+    {
+        host: frozenset({"routes_mgmt"}) if name.startswith(("core", "dist")) else frozenset()
+        for host, name in CAMPUS_HOSTS.items()
+        if not name.startswith("br")
+    },
+    ROOT / "tests/fixtures/topology/campus-wan/vrf-routes",
+    frozenset(),
+)
 LABS = {
     "vsr1000": VSR,
+    "campus-vrf-routes": CAMPUS_VRF_ROUTES,
     "campus-wan": CAMPUS,
     "campus-vlan": CAMPUS_VLAN,
     "campus-ospf": CAMPUS_OSPF,
+    "campus-protocols": CAMPUS_PROTOCOLS,
 }
 SENSITIVE = re.compile(
     rb"(?im)^\s*(?:password\s+|secret\s+|community\s+|"

@@ -233,6 +233,41 @@ def build() -> None:
         "semantic/reference",
         "outgoing-interface names an interface outside this device tree (DIST1's Ethernet2/0)",
     )
+
+    def protocol(t, kind):
+        cpp = t["ietf-routing:routing"]["control-plane-protocols"]["control-plane-protocol"]
+        return next(p for p in cpp if p["type"] == kind)
+
+    def ospf_interface(t):
+        area = protocol(t, "ietf-ospf:ospfv2")["ietf-ospf:ospf"]["areas"]["area"][0]
+        return next(i for i in area["interfaces"]["interface"] if "neighbors" in i)
+
+    mutate(
+        "br1-routing-default",
+        "ospf-interface-of-other-device",
+        lambda t: ospf_interface(t).update(name="Ethernet2/0"),
+        "data",
+        "semantic/reference",
+        "an RFC 9129 OSPF interface names an interface outside this device tree",
+    )
+    mutate(
+        "br1-routing-default",
+        "ospf-neighbor-state-cli-text",
+        lambda t: ospf_interface(t)["neighbors"]["neighbor"][0].update(state="FULL/DR"),
+        "get",
+        "semantic/type",
+        "the CLI state column is not an RFC 9129 nbr-state-type value",
+    )
+    mutate(
+        "br1-routing-default",
+        "bgp-peer-type-cli-text",
+        lambda t: protocol(t, "ietf-bgp:bgp")["ietf-bgp:bgp"]["neighbors"]["neighbor"][0].update(
+            {"peer-type": "ibgp"}
+        ),
+        "get",
+        "semantic/type",
+        "BGP peer-type is internal/external, not the CLI's iBGP shorthand",
+    )
     mutate(
         "campus-topology",
         "link-to-tp-of-other-network",

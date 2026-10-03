@@ -15,24 +15,42 @@ from .identify import PROBES, Identity, Probe, identify
 from .parse import ParseResult, parse
 from .profiles import MODE_CAPABILITIES, load_profiles, select_profile, verified_driver
 from .tiers.common import vrf_header
+from .tiers.template import IOS_ROUTE_TABLE
 
 MAX_VRF_SCOPES = 64
 
 
-def scoped_arp_command(scope):
+SCOPED_COMMANDS = {"arp": "show ip arp vrf {}", "routes": "show ip route vrf {}"}
+# Platforms whose per-VRF layout is verified: IOS ARP and route tables (campus-wan), NX-OS ARP.
+SCOPED_FAMILIES = {"arp": {"ios", "iosxe", "nxos"}, "routes": {"ios", "iosxe"}}
+
+
+def scoped_command(capability, scope):
     """Only literal VRF tokens, never wildcards, options, separators or CLI filters."""
     if not isinstance(scope, str) or not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.:-]{0,63}", scope):
         raise ValueError("unsafe VRF command token")
     if scope.lower() in {"all", "default"}:
         raise ValueError("reserved VRF command token")
-    command = f"show ip arp vrf {scope}"
+    command = SCOPED_COMMANDS[capability].format(scope)
     decision = classify("ios", command)
     if decision.level != "L1" or decision.normalized != command:
-        raise ValueError("VRF ARP command is not canonical read-only CLI")
+        raise ValueError("VRF command is not canonical read-only CLI")
     return command
 
 
-def _collect_scoped_arp(
+def scoped_arp_command(scope):
+    return scoped_command("arp", scope)
+
+
+def _scope_headers(capability, text):
+    """The table names an output gives itself: ARP context/VRF lines, IOS route tables."""
+    if capability == "routes":
+        return {m[1] for line in text.splitlines() if (m := IOS_ROUTE_TABLE.fullmatch(line))}
+    return {vrf_header(line) for line in text.splitlines() if vrf_header(line)}
+
+
+def _collect_scoped(
+    capability,
     result,
     collector,
     context_factory,
@@ -43,13 +61,17 @@ def _collect_scoped_arp(
     on_result,
 ):
     """Merge only complete scopes and retain a coverage record for every attempt."""
-    if result.identity.os_family not in {"ios", "iosxe", "nxos"} or "arp" not in result.parsed:
+    if (
+        result.identity.os_family not in SCOPED_FAMILIES[capability]
+        or capability not in result.parsed
+        or capability not in result.results
+    ):
         return
-    global_arp = result.parsed["arp"]
-    global_output = result.results["arp"].output
-    if any(vrf_header(line) not in {None, "default"} for line in global_output.splitlines()):
-        global_arp.status = "failed"
-        global_arp.warnings.append("vrf_output_scope_mismatch")
+    global_table = result.parsed[capability]
+    global_output = result.results[capability].output
+    if _scope_headers(capability, global_output) - {"default"}:
+        global_table.status = "failed"
+        global_table.warnings.append("vrf_output_scope_mismatch")
     enumeration = result.parsed.get("vrfs")
     enumeration_status = enumeration.status if enumeration else "missing"
     instances = enumeration.summary.get("instances", []) if enumeration else []
@@ -64,10 +86,10 @@ def _collect_scoped_arp(
     if ip and ip.status == "complete":
         scopes.update(row.get("vrf", "default") for row in ip.records)
     scopes.discard("default")
-    coverage = {"default": {"status": global_arp.status, "command_id": "arp"}}
+    coverage = {"default": {"status": global_table.status, "command_id": capability}}
     combined = ParseResult(
         status="complete",
-        parser_ref="generic:arp:scoped:v1",
+        parser_ref=f"generic:{capability}:scoped:v1",
         summary={"scope_coverage": {"enumeration_status": enumeration_status, "scopes": coverage}},
     )
 
@@ -79,14 +101,18 @@ def _collect_scoped_arp(
         combined.warnings.extend(f"scope:{scope}:{warning}" for warning in parsed.warnings)
         if parsed.status != "complete":
             combined.status = "partial"
-            combined.warnings.append(f"scope:{scope}:arp_not_complete")
+            combined.warnings.append(f"scope:{scope}:{capability}_not_complete")
             return
-        combined.records.extend({**row, "vrf": scope} for row in parsed.records)
+        for row in parsed.records:
+            row = {**row, "vrf": scope}
+            if "next_hops" in row:  # a route's next hops resolve in the same table
+                row["next_hops"] = [{**hop, "vrf": scope} for hop in row["next_hops"]]
+            combined.records.append(row)
         combined.sources.extend(
             {**source, "command_id": command_id, "vrf": scope} for source in parsed.sources
         )
 
-    add_scope("default", global_arp, "arp")
+    add_scope("default", global_table, capability)
     if enumeration_status != "complete":
         combined.status = "partial"
         combined.warnings.append("vrf_enumeration_incomplete")
@@ -94,7 +120,7 @@ def _collect_scoped_arp(
     scope_by_id = {}
     for scope in sorted(scopes):
         try:
-            text = scoped_arp_command(scope)
+            text = scoped_command(capability, scope)
         except ValueError:
             coverage[scope] = {"status": "missing", "reason": "unsafe_or_reserved_vrf_name"}
             combined.status = "partial"
@@ -103,7 +129,7 @@ def _collect_scoped_arp(
             coverage[scope] = {"status": "missing", "reason": "vrf_scope_budget"}
             combined.status = "partial"
             continue
-        command_id = f"arp-vrf-{len(commands)}"
+        command_id = f"{capability}-vrf-{len(commands)}"
         commands.append(Command(command_id, text))
         scope_by_id[command_id] = scope
         coverage[scope] = {"status": "missing", "reason": "not_collected", "command_id": command_id}
@@ -116,14 +142,13 @@ def _collect_scoped_arp(
         result.results[item.command_id] = item
         parsed = parse(
             result.identity,
-            "arp",
+            capability,
             item.output,
             complete=item.output_complete and not item.failure_code,
         )
-        explicit_scopes = {
-            vrf_header(line) for line in item.output.splitlines() if vrf_header(line)
-        }
-        if explicit_scopes - {scope}:
+        explicit_scopes = _scope_headers(capability, item.output)
+        # A VRF route table names itself; one without (or with another) name is refused.
+        if explicit_scopes - {scope} or (capability == "routes" and explicit_scopes != {scope}):
             parsed.status = "failed"
             parsed.warnings.append("vrf_output_scope_mismatch")
         coverage[scope] = {
@@ -162,8 +187,8 @@ def _collect_scoped_arp(
             coverage[scope]["reason"] = "scoped_collection_not_authorized"
     if any(row["status"] != "complete" for row in coverage.values()):
         combined.status = "partial"
-        combined.warnings.append("arp_scope_coverage_incomplete")
-    result.parsed["arp"] = combined
+        combined.warnings.append(f"{capability}_scope_coverage_incomplete")
+    result.parsed[capability] = combined
 
 
 @dataclass
@@ -199,6 +224,7 @@ def collect_node(
     on_result=None,
     known_hosts_provider=None,
     scoped_arp_context=None,
+    scoped_route_context=None,
 ):
     """Backend only. Caller supplies authenticated grants, revocation guard and evidence sink.
 
@@ -353,7 +379,8 @@ def collect_node(
 
     for item in batch.results:
         record(item)
-    _collect_scoped_arp(
+    _collect_scoped(
+        "arp",
         result,
         collector,
         scoped_arp_context,
@@ -385,4 +412,15 @@ def collect_node(
             if exc.failure_code != "budget_exceeded":
                 raise
             result.parsed["routes"] = ParseResult(warnings=[exc.failure_code])
+    _collect_scoped(
+        "routes",
+        result,
+        collector,
+        scoped_route_context,
+        target_ref,
+        connection_profile_id,
+        remaining,
+        should_continue,
+        on_result,
+    )
     return result

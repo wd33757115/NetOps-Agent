@@ -9,6 +9,7 @@ from src.core.parser.output_classifier import UNSUPPORTED_PATTERNS, OutputClassi
 from .normalize import parser_text
 from .tiers import (
     generic_arp,
+    generic_bgp_peers,
     generic_ifbrief,
     generic_ipif,
     generic_lag,
@@ -16,6 +17,7 @@ from .tiers import (
     generic_lldp_local,
     generic_mac,
     generic_ospf,
+    generic_ospf_neighbors,
     generic_stp,
     generic_switchport,
     generic_trunk,
@@ -37,6 +39,8 @@ PARSERS = {
     "vrrp": generic_vrrp.parse,
     "lag": generic_lag.parse,
     "stp": generic_stp.parse,
+    "ospf_neighbors": generic_ospf_neighbors.parse,
+    "bgp_peers": generic_bgp_peers.parse,
     "vlan": generic_vlan.parse,
     "trunk": generic_trunk.parse,
     "switchport": generic_switchport.parse,
@@ -50,6 +54,7 @@ EMPTY = {
     "mac": r"No MAC(?: address)? entries(?: found)?\.?",
     "lag": r"No link aggregation group exists\.",
     "stp": r"No spanning tree instances? exists?\.?",
+    "bgp_peers": r"% BGP not active\.?",
     "vrrp": r"VRRP4 is not configured\.",
     "vrfs": (
         r"(?:L3VPN is not configured\.|Total VPN-Instances configured\s*:\s*0"
@@ -148,10 +153,10 @@ def parse_generic(identity, capability, raw, *, complete=True, command=None, pro
     )
     empty_pattern = EMPTY.get(capability)
     if (
-        (family in {"ios", "iosxe"} and capability in {"arp", "vrrp", "trunk"})
+        (family in {"ios", "iosxe"} and capability in {"arp", "vrrp", "trunk", "ospf_neighbors"})
         or (family == "comware" and capability == "trunk")
     ) and not text.strip():
-        # Verified lab outputs have no header for empty IOS ARP/VRRP/trunks
+        # Verified lab outputs have no header for empty IOS ARP/VRRP/trunks/OSPF neighbours
         # and Comware trunks; transport completeness is still required.
         empty_pattern = ""
     if empty_pattern is not None and re.fullmatch(empty_pattern, text.strip(), re.I):

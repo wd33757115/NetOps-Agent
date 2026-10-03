@@ -15,7 +15,7 @@
   "topology": 206
  },
  "emitted": {
-  "app": 102,
+  "app": 133,
   "research": 133
  },
  "producers": {
@@ -24,7 +24,7 @@
    "not_in_schema": []
   },
   "app:device-routing:br1:default": {
-   "paths": 1,
+   "paths": 37,
    "not_in_schema": []
   },
   "app:device-lldp:br1": {
@@ -36,7 +36,7 @@
    "not_in_schema": []
   },
   "app:device-routing:br2:default": {
-   "paths": 1,
+   "paths": 37,
    "not_in_schema": []
   },
   "app:device-lldp:br2": {
@@ -48,7 +48,7 @@
    "not_in_schema": []
   },
   "app:device-routing:core1:default": {
-   "paths": 1,
+   "paths": 37,
    "not_in_schema": []
   },
   "app:device-lldp:core1": {
@@ -60,7 +60,7 @@
    "not_in_schema": []
   },
   "app:device-routing:core2:default": {
-   "paths": 1,
+   "paths": 37,
    "not_in_schema": []
   },
   "app:device-lldp:core2": {
@@ -72,7 +72,7 @@
    "not_in_schema": []
   },
   "app:device-routing:dist1:default": {
-   "paths": 1,
+   "paths": 37,
    "not_in_schema": []
   },
   "app:device-lldp:dist1": {
@@ -84,7 +84,7 @@
    "not_in_schema": []
   },
   "app:device-routing:dist2:default": {
-   "paths": 1,
+   "paths": 37,
    "not_in_schema": []
   },
   "app:device-lldp:dist2": {
@@ -116,7 +116,7 @@
    "not_in_schema": []
   },
   "app:topology": {
-   "paths": 59,
+   "paths": 61,
    "not_in_schema": []
   },
   "app:inventory:br1": {
@@ -185,11 +185,11 @@
   }
  },
  "fact_verdicts": {
-  "context": 3,
-  "exported": 39,
+  "context": 9,
+  "exported": 54,
   "key-blocked": 14,
-  "mappable-not-exported": 29,
-  "no-native-node": 16
+  "mappable-not-exported": 34,
+  "no-native-node": 18
  },
  "facts": {
   "interfaces.ifname": {
@@ -1093,6 +1093,338 @@
    ],
    "verdict": "context"
   },
+  "ospf_process.processes[].process_id": {
+   "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/name",
+   "status": "derived",
+   "note": "the OSPF process ID the device shows names its RFC 8349 instance (type ietf-ospf:ospfv2)",
+   "in_schema_sets": [
+    "ieee-l2",
+    "routing",
+    "services",
+    "assurance-oam",
+    "te-transport"
+   ],
+   "emitted_by": [
+    "app"
+   ],
+   "verdict": "exported"
+  },
+  "ospf_process.processes[].router_id": {
+   "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/router-id",
+   "status": "native",
+   "in_schema_sets": [
+    "routing",
+    "te-transport"
+   ],
+   "emitted_by": [
+    "app"
+   ],
+   "verdict": "exported"
+  },
+  "ospf_process.processes[].vrf": {
+   "path": "/ietf-network-instance:network-instances/network-instance/name",
+   "status": "context",
+   "note": "the NI whose routing tree holds the instance; an instance spread over several NIs is not exported",
+   "in_schema_sets": [
+    "device",
+    "assurance-oam"
+   ],
+   "emitted_by": [
+    "app"
+   ],
+   "verdict": "context"
+  },
+  "ospf_process.interfaces[].ifname": {
+   "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/areas/area/interfaces/interface/name",
+   "status": "native",
+   "note": "references the interface list; the interface is copied into the same tree",
+   "in_schema_sets": [
+    "routing",
+    "te-transport"
+   ],
+   "emitted_by": [
+    "app"
+   ],
+   "verdict": "exported"
+  },
+  "ospf_process.interfaces[].area": {
+   "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/areas/area/area-id",
+   "status": "derived",
+   "note": "IOS area numbers become dotted-quad area IDs",
+   "in_schema_sets": [
+    "routing",
+    "te-transport"
+   ],
+   "emitted_by": [
+    "app"
+   ],
+   "verdict": "exported"
+  },
+  "ospf_interfaces.ifname": {
+   "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/areas/area/interfaces/interface/name",
+   "status": "native",
+   "in_schema_sets": [
+    "routing",
+    "te-transport"
+   ],
+   "emitted_by": [
+    "app"
+   ],
+   "verdict": "exported"
+  },
+  "ospf_interfaces.area": {
+   "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/areas/area/area-id",
+   "status": "derived",
+   "note": "IOS area numbers become dotted-quad area IDs",
+   "in_schema_sets": [
+    "routing",
+    "te-transport"
+   ],
+   "emitted_by": [
+    "app"
+   ],
+   "verdict": "exported"
+  },
+  "ospf_interfaces.cost": {
+   "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/areas/area/interfaces/interface/cost",
+   "status": "native",
+   "in_schema_sets": [
+    "routing",
+    "te-transport"
+   ],
+   "emitted_by": [
+    "app"
+   ],
+   "verdict": "exported"
+  },
+  "ospf_interfaces.state": {
+   "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/areas/area/interfaces/interface/state",
+   "status": "derived",
+   "note": "DR/BDR/DROTHER/P2P/LOOP → if-state-type; not exported yet",
+   "in_schema_sets": [
+    "routing",
+    "te-transport"
+   ],
+   "emitted_by": [],
+   "verdict": "mappable-not-exported"
+  },
+  "ospf_interfaces.process_id": {
+   "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/name",
+   "status": "context",
+   "in_schema_sets": [
+    "ieee-l2",
+    "routing",
+    "services",
+    "assurance-oam",
+    "te-transport"
+   ],
+   "emitted_by": [
+    "app"
+   ],
+   "verdict": "context"
+  },
+  "ospf_interfaces.address": {
+   "path": "/ietf-interfaces:interfaces/interface/ietf-ip:ipv4/address/ip",
+   "status": "context",
+   "note": "binds the OSPF row to its interface when the platform shows no name",
+   "in_schema_sets": [
+    "device",
+    "routing",
+    "assurance-oam"
+   ],
+   "emitted_by": [
+    "app",
+    "research"
+   ],
+   "verdict": "context"
+  },
+  "ospf_neighbors.neighbor_router_id": {
+   "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/areas/area/interfaces/interface/neighbors/neighbor/neighbor-router-id",
+   "status": "native",
+   "note": "an OSPF router ID, scoped to the routing domain; never a device identity",
+   "in_schema_sets": [
+    "routing",
+    "te-transport"
+   ],
+   "emitted_by": [
+    "app"
+   ],
+   "verdict": "exported"
+  },
+  "ospf_neighbors.address": {
+   "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/areas/area/interfaces/interface/neighbors/neighbor/address",
+   "status": "native",
+   "in_schema_sets": [
+    "routing",
+    "te-transport"
+   ],
+   "emitted_by": [
+    "app"
+   ],
+   "verdict": "exported"
+  },
+  "ospf_neighbors.state": {
+   "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/areas/area/interfaces/interface/neighbors/neighbor/state",
+   "status": "derived",
+   "note": "FULL/2WAY/EXSTART… → nbr-state-type enumeration",
+   "in_schema_sets": [
+    "routing",
+    "te-transport"
+   ],
+   "emitted_by": [
+    "app"
+   ],
+   "verdict": "exported"
+  },
+  "ospf_neighbors.role": {
+   "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/areas/area/interfaces/interface/neighbors/neighbor/dr-router-id",
+   "status": "derived",
+   "note": "the neighbour's DR/BDR role; needs the DR election view of the interface, not exported",
+   "in_schema_sets": [
+    "routing",
+    "te-transport"
+   ],
+   "emitted_by": [],
+   "verdict": "mappable-not-exported"
+  },
+  "ospf_neighbors.dead_time": {
+   "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/areas/area/interfaces/interface/neighbors/neighbor/dead-timer",
+   "status": "derived",
+   "note": "remaining seconds at the observation time; a countdown snapshot, not exported",
+   "in_schema_sets": [
+    "routing",
+    "te-transport"
+   ],
+   "emitted_by": [],
+   "verdict": "mappable-not-exported"
+  },
+  "ospf_neighbors.priority": {
+   "status": "no-native-node",
+   "note": "RFC 9129 keeps priority as interface configuration, not per neighbour state",
+   "verdict": "no-native-node"
+  },
+  "ospf_neighbors.ifname": {
+   "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/areas/area/interfaces/interface/name",
+   "status": "context",
+   "in_schema_sets": [
+    "routing",
+    "te-transport"
+   ],
+   "emitted_by": [
+    "app"
+   ],
+   "verdict": "context"
+  },
+  "ospf_neighbors.process": {
+   "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/name",
+   "status": "context",
+   "in_schema_sets": [
+    "ieee-l2",
+    "routing",
+    "services",
+    "assurance-oam",
+    "te-transport"
+   ],
+   "emitted_by": [
+    "app"
+   ],
+   "verdict": "context"
+  },
+  "ospf_neighbors.area": {
+   "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-ospf:ospf/areas/area/area-id",
+   "status": "context",
+   "in_schema_sets": [
+    "routing",
+    "te-transport"
+   ],
+   "emitted_by": [
+    "app"
+   ],
+   "verdict": "context"
+  },
+  "bgp_peers.local_as": {
+   "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-bgp:bgp/global/as",
+   "status": "native",
+   "note": "also names the RFC 8349 instance (type ietf-bgp:bgp): the CLI identifies its one BGP process by the AS",
+   "in_schema_sets": [
+    "routing"
+   ],
+   "emitted_by": [
+    "app"
+   ],
+   "verdict": "exported"
+  },
+  "bgp_peers.router_id": {
+   "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-bgp:bgp/global/identifier",
+   "status": "native",
+   "in_schema_sets": [
+    "routing"
+   ],
+   "emitted_by": [
+    "app"
+   ],
+   "verdict": "exported"
+  },
+  "bgp_peers.peers[].peer": {
+   "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-bgp:bgp/neighbors/neighbor/remote-address",
+   "status": "native",
+   "note": "also the neighbor-key (leafref to remote-address)",
+   "in_schema_sets": [
+    "routing"
+   ],
+   "emitted_by": [
+    "app"
+   ],
+   "verdict": "exported"
+  },
+  "bgp_peers.peers[].peer_as": {
+   "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-bgp:bgp/neighbors/neighbor/peer-as",
+   "status": "native",
+   "in_schema_sets": [
+    "routing"
+   ],
+   "emitted_by": [
+    "app"
+   ],
+   "verdict": "exported"
+  },
+  "bgp_peers.peers[].state": {
+   "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-bgp:bgp/neighbors/neighbor/session-state",
+   "status": "derived",
+   "note": "a prefix count in the State/PfxRcd column means established",
+   "in_schema_sets": [
+    "routing"
+   ],
+   "emitted_by": [
+    "app"
+   ],
+   "verdict": "exported"
+  },
+  "bgp_peers.peers[].up_down": {
+   "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-bgp:bgp/neighbors/neighbor/last-established",
+   "status": "derived",
+   "note": "observation time minus the established duration; not exported",
+   "in_schema_sets": [
+    "routing"
+   ],
+   "emitted_by": [],
+   "verdict": "mappable-not-exported"
+  },
+  "bgp_peers.peers[].prefixes_received": {
+   "path": "/ietf-routing:routing/control-plane-protocols/control-plane-protocol/ietf-bgp:bgp/neighbors/neighbor/afi-safis/afi-safi/prefixes/received",
+   "status": "derived",
+   "note": "in the afi-safi the command shows (IPv4 unicast); not exported",
+   "in_schema_sets": [
+    "routing"
+   ],
+   "emitted_by": [],
+   "verdict": "mappable-not-exported"
+  },
+  "bgp_peers.peers[].state_detail": {
+   "status": "no-native-node",
+   "note": "platform qualifier of the state, e.g. Idle (Admin)",
+   "verdict": "no-native-node"
+  },
   "vrrp.ifname": {
    "path": "/ietf-interfaces:interfaces/interface/name",
    "status": "native",
@@ -1533,12 +1865,26 @@
    "app": 17,
    "research": 16
   },
+  "ietf-ospf": {
+   "nodes": 1522,
+   "config": 176,
+   "state": 1346,
+   "app": 14,
+   "research": 0
+  },
   "ietf-l2-topology": {
    "nodes": 32,
    "config": 32,
    "state": 0,
    "app": 12,
    "research": 7
+  },
+  "ietf-bgp": {
+   "nodes": 909,
+   "config": 459,
+   "state": 450,
+   "app": 11,
+   "research": 0
   },
   "ietf-network": {
    "nodes": 11,
@@ -1561,19 +1907,19 @@
    "app": 11,
    "research": 11
   },
+  "ietf-l3-unicast-topology": {
+   "nodes": 21,
+   "config": 21,
+   "state": 0,
+   "app": 10,
+   "research": 6
+  },
   "ietf-ip": {
    "nodes": 60,
    "config": 27,
    "state": 33,
    "app": 8,
    "research": 8
-  },
-  "ietf-l3-unicast-topology": {
-   "nodes": 21,
-   "config": 21,
-   "state": 0,
-   "app": 8,
-   "research": 6
   },
   "ietf-vrrp": {
    "nodes": 94,
@@ -1589,6 +1935,13 @@
    "app": 7,
    "research": 5
   },
+  "ietf-routing": {
+   "nodes": 53,
+   "config": 13,
+   "state": 40,
+   "app": 5,
+   "research": 10
+  },
   "ieee802-dot1ab-lldp": {
    "nodes": 81,
    "config": 25,
@@ -1602,13 +1955,6 @@
    "state": 0,
    "app": 4,
    "research": 0
-  },
-  "ietf-routing": {
-   "nodes": 53,
-   "config": 13,
-   "state": 40,
-   "app": 1,
-   "research": 10
   },
   "ieee1588-ptp-tt": {
    "nodes": 334,
@@ -2121,13 +2467,6 @@
    "app": 0,
    "research": 0
   },
-  "ietf-bgp": {
-   "nodes": 909,
-   "config": 459,
-   "state": 450,
-   "app": 0,
-   "research": 0
-  },
   "ietf-bgp-policy": {
    "nodes": 104,
    "config": 104,
@@ -2559,13 +2898,6 @@
    "nodes": 54,
    "config": 0,
    "state": 54,
-   "app": 0,
-   "research": 0
-  },
-  "ietf-ospf": {
-   "nodes": 1522,
-   "config": 176,
-   "state": 1346,
    "app": 0,
    "research": 0
   },

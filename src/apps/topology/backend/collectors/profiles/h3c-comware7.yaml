@@ -27,6 +27,8 @@ capabilities:
   vrrp: {command: display vrrp verbose, parser: generic_vrrp}
   ospf_interfaces: {command: display ospf interface, parser: generic_ospf_interfaces}
   ospf_process: {command: display ospf, parser: generic_ospf_process}
+  ospf_neighbors: {command: display ospf peer, parser: generic_ospf_neighbors}
+  bgp_peers: {command: display bgp peer ipv4, parser: generic_bgp_peers}
 verified:
   - model: VSR1000
     version: 7.1.064 Release 1362P12

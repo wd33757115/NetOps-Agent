@@ -8,7 +8,12 @@ import pytest
 from src.apps.topology.backend.collectors import collect as runtime
 from src.apps.topology.backend.collectors.parse import parse
 from src.apps.topology.backend.model.builder import device_node_ids
-from src.apps.topology.backend.service import _facts, _scoped_arp_context, topology_observation
+from src.apps.topology.backend.service import (
+    _facts,
+    _scoped_arp_context,
+    _scoped_context,
+    topology_observation,
+)
 from src.platform.device_access.contracts import (
     AccessContext,
     AccessGrant,
@@ -249,7 +254,8 @@ def test_budget_expiry_keeps_completed_scope_and_marks_remaining_scope_missing(i
             on_result(blue)
             raise DeviceAccessError("budget_exceeded", "fixture budget expired")
 
-    runtime._collect_scoped_arp(
+    runtime._collect_scoped(
+        "arp",
         result,
         BudgetEnds(),
         lambda scopes: ios.context,
@@ -274,7 +280,8 @@ def test_authorization_and_trust_errors_are_not_swallowed_as_coverage_gaps(ios, 
             raise DeviceAccessError(failure, "fixture rejection")
 
     with pytest.raises(DeviceAccessError) as exc:
-        runtime._collect_scoped_arp(
+        runtime._collect_scoped(
+            "arp",
             result,
             Rejected(),
             lambda scopes: ios.context,
@@ -368,3 +375,64 @@ def test_explicitly_unsuccessful_local_identity_cannot_enter_builder(status):
 def test_historical_local_identity_without_status_or_known_conflict_remains_compatible():
     summary = {"chassis_id": "00:11:22:33:44:01"}
     assert _facts({"facts": {"lldp_local": summary}})["lldp_local"] == summary
+
+
+FIXTURES = (
+    __import__("pathlib").Path(__file__).resolve().parents[1] / "fixtures/topology/campus-wan"
+)
+MGMT_ROUTES = (FIXTURES / "vrf-routes/dist1/routes_mgmt.txt").read_text("utf-8")
+GLOBAL_ROUTES = (FIXTURES / "dist1/routes.txt").read_text("utf-8")
+
+
+def mgmt_only(ios):
+    ios.outputs.update(
+        {
+            "show vrf": VRFS.splitlines()[0]
+            + "\n  MGMT                             <not set>           ipv4        Et0/0\n",
+            "show ip interface": "Ethernet0/0 is up, line protocol is up\n"
+            "  Internet address is 10.10.1.15/24\n"
+            '  VPN Routing/Forwarding "MGMT"\n',
+            "show ip arp vrf MGMT": "",
+            "show ip route": GLOBAL_ROUTES,
+            "show ip route vrf MGMT": MGMT_ROUTES,
+        }
+    )
+    return dict(
+        scoped_route_context=lambda scopes: _scoped_context(
+            ios.context, "node", "connection", scopes, "routes"
+        )
+    )
+
+
+def test_each_vrf_route_table_is_collected_into_its_own_scope(ios):
+    result = ios.collect(**mgmt_only(ios))
+    routes = result.parsed["routes"]
+    assert routes.status == "complete"
+    mgmt = [row for row in routes.records if row["vrf"] == "MGMT"]
+    assert {row["prefix"] for row in mgmt} == {"10.10.1.0/24", "10.10.1.15/32"}
+    # Next hops resolve in the same table, never in the global one.
+    assert {hop["vrf"] for row in mgmt for hop in row["next_hops"]} == {"MGMT"}
+    assert any(row["vrf"] == "default" and row["prefix"] == "0.0.0.0/0" for row in routes.records)
+    coverage = routes.summary["scope_coverage"]["scopes"]
+    assert coverage["MGMT"]["status"] == "complete"
+    assert ios.commands.index("show ip route") < ios.commands.index("show ip route vrf MGMT")
+
+
+def test_a_vrf_route_output_without_its_own_table_name_is_refused(ios):
+    kwargs = mgmt_only(ios)
+    ios.outputs["show ip route vrf MGMT"] = GLOBAL_ROUTES  # no "Routing Table: MGMT" line
+    routes = ios.collect(**kwargs).parsed["routes"]
+    assert routes.status == "partial"
+    assert not any(row["vrf"] == "MGMT" for row in routes.records)
+    scope = routes.summary["scope_coverage"]["scopes"]["MGMT"]
+    assert scope["status"] == "failed" and "vrf_output_scope_mismatch" in scope["warnings"]
+
+
+def test_route_expansion_needs_the_global_route_command_already_granted(ios):
+    granted = _scoped_context(ios.context, "node", "connection", ("MGMT",), "routes")
+    assert any("show ip route vrf MGMT" in grant.commands for grant in granted.grants)
+    narrow = AccessContext(
+        "actor", "topology", (AccessGrant("node", "connection", frozenset({"show ip arp"})),)
+    )
+    with pytest.raises(DeviceAccessError):
+        _scoped_context(narrow, "node", "connection", ("MGMT",), "routes")

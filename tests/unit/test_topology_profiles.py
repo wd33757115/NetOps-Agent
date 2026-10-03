@@ -33,6 +33,7 @@ LAB = Path(__file__).parents[1] / "fixtures/topology/h3c/vsr1000-7.1.064/vsr-1"
 CAMPUS_BR1 = Path(__file__).parents[1] / "fixtures/topology/campus-wan/br1"
 VLAN_BR1 = Path(__file__).parents[1] / "fixtures/topology/campus-wan/vlan-trunk/br1"
 OSPF_BR1 = Path(__file__).parents[1] / "fixtures/topology/campus-wan/ospf/br1"
+PROTOCOLS_BR1 = Path(__file__).parents[1] / "fixtures/topology/campus-wan/protocols/br1"
 
 
 def identity(text=None):
@@ -176,7 +177,12 @@ class Transport:
 @pytest.fixture
 def setup(monkeypatch):
     profiles = load_profiles()
-    mapping = {"lldp": "lldp_verbose", "ip": "ip_interfaces"}
+    mapping = {
+        "lldp": "lldp_verbose",
+        "ip": "ip_interfaces",
+        "ospf_neighbors": "ospf",
+        "bgp_peers": "bgp",
+    }
     outputs = {
         spec.command: next(
             path
@@ -185,6 +191,7 @@ def setup(monkeypatch):
                 CAMPUS_BR1 / f"{cap}.txt",
                 VLAN_BR1 / f"{cap}.txt",
                 OSPF_BR1 / f"{cap}.txt",
+                PROTOCOLS_BR1 / f"{mapping.get(cap, cap)}.txt",
             )
             if path.exists()
         ).read_text()

@@ -1974,6 +1974,9 @@
         {
          "prefix": "100.64.2.0/30"
         }
+       ],
+       "router-id": [
+        "10.255.0.2"
        ]
       },
       "ietf-network-topology:termination-point": [
@@ -2159,6 +2162,9 @@
         {
          "prefix": "100.64.1.0/30"
         }
+       ],
+       "router-id": [
+        "10.255.0.1"
        ]
       },
       "ietf-network-topology:termination-point": [
@@ -2344,6 +2350,9 @@
         {
          "prefix": "10.255.0.3/32"
         }
+       ],
+       "router-id": [
+        "10.255.0.3"
        ]
       },
       "ietf-network-topology:termination-point": [
@@ -2559,6 +2568,9 @@
         {
          "prefix": "10.255.0.4/32"
         }
+       ],
+       "router-id": [
+        "10.255.0.4"
        ]
       },
       "ietf-network-topology:termination-point": [
@@ -2771,6 +2783,9 @@
         {
          "prefix": "172.16.20.0/24"
         }
+       ],
+       "router-id": [
+        "10.255.0.5"
        ]
       },
       "ietf-network-topology:termination-point": [
@@ -2995,6 +3010,9 @@
         {
          "prefix": "172.16.20.0/24"
         }
+       ],
+       "router-id": [
+        "10.255.0.6"
        ]
       },
       "ietf-network-topology:termination-point": [
@@ -3750,7 +3768,8 @@
        }
       ],
       "ietf-l3-unicast-topology:l3-link-attributes": {
-       "name": "10.0.12.0/30"
+       "name": "10.0.12.0/30",
+       "metric1": "1"
       },
       "supporting-link": [
        {
@@ -3890,7 +3909,8 @@
        }
       ],
       "ietf-l3-unicast-topology:l3-link-attributes": {
-       "name": "10.0.34.0/31"
+       "name": "10.0.34.0/31",
+       "metric1": "10"
       },
       "supporting-link": [
        {
@@ -3918,7 +3938,8 @@
        }
       ],
       "ietf-l3-unicast-topology:l3-link-attributes": {
-       "name": "10.0.35.0/30"
+       "name": "10.0.35.0/30",
+       "metric1": "10"
       },
       "supporting-link": [
        {
@@ -3946,7 +3967,8 @@
        }
       ],
       "ietf-l3-unicast-topology:l3-link-attributes": {
-       "name": "10.0.36.0/30"
+       "name": "10.0.36.0/30",
+       "metric1": "10"
       },
       "supporting-link": [
        {
@@ -3974,7 +3996,8 @@
        }
       ],
       "ietf-l3-unicast-topology:l3-link-attributes": {
-       "name": "10.0.45.0/30"
+       "name": "10.0.45.0/30",
+       "metric1": "10"
       },
       "supporting-link": [
        {
@@ -4002,7 +4025,8 @@
        }
       ],
       "ietf-l3-unicast-topology:l3-link-attributes": {
-       "name": "10.0.46.0/30"
+       "name": "10.0.46.0/30",
+       "metric1": "10"
       },
       "supporting-link": [
        {

@@ -1,20 +1,25 @@
 {
  "scope": "M1-6 cases: campus-wan App output, named mutations, real module defects",
  "files": {
+  "bgp-peer-type-cli-text.json": "95518a898882227a1163b18feefee6d1d06eca4f7adce638234ccc9ece72dc3d",
   "br1-device.json": "c94eda9cedbd5c0b8ff6d851e27c17de9f59e50f145a6cff9baa493b7bf2d4f5",
   "br1-inventory.json": "83198bdaff46aa5b08fade18d66a0bf167dc5f185c15b5fd8d72c07ccb6bd2bb",
   "br1-lldp.json": "0dd68d31c6feeef44de26ed2342735c12e5033831296419fa0f34aeffbc0d4ca",
-  "campus-topology.json": "4f06b0cc2350671b099fa8a6d97fe5050e56943deceaa9c34d8d66160fadd6f3",
+  "br1-routing-default.json": "d8db89a62133b816cb83b6f895175e2b603cd2b4eb82daaa6d4c3b624166f76e",
+  "campus-topology.json": "35bd2cac2bf053c9bbb9e8611f95c156f2ca8ffc7dc52ee27358fd613985a4ee",
   "custom-field.json": "e17726c6207e74f27b45644280fba0b37a6b9a5c1eff606f60d87c7c65fcb030",
   "dist1-device.json": "c02eb513cadb4fa992c1c3c4f6b67b82ef476fd35fd84d1d5494ba9005e631dd",
   "dist1-inventory.json": "fffdb308a358a4372a6c6d678bff0211ed9ed72299385bfb3dc419847c4d5468",
-  "link-to-tp-of-other-network.json": "f515bd39640bfdd73e209a971b89df8241feee066ba45793636f4c3da13beaa3",
+  "dist1-routing-default.json": "d4700dd83365e74e3c94ac9427fd49916f7ef64509e2e9a379119b7966a7dbf9",
+  "link-to-tp-of-other-network.json": "9b3ef71b5f65f8acdc363f212d15740e1e6f5954de599d0ba0a97d92d2d7a7ca",
   "netops-br1-device@2026-10-02T17_00_59.735856+00_00.json": "1ffac4b2dc12bddb172344aa34ed548e007337ff73c25d7f80687a69f6451957",
-  "netops-campus-topology@2026-10-02T17_00_59.735856+00_00.json": "2e1c87c8a9a6798d9d751bb3a889511b6e06b058a72a47b3b2374c84a73fcc5b",
+  "netops-campus-topology@2026-10-02T17_00_59.735856+00_00.json": "dfcf922d962a98ddb6eb4e06bf7b2129b6f75e82bc86f95b93d2a6fcb51e69d2",
   "netops-research-vsr-1-l2.partial@2026-10-02T17_00_59.735856+00_00.json": "fd88a5eda0f5e6a81292dc47551b59ea90278f3bc7f817e9ee49f3d5723df74f",
-  "netops-two-revisions@2026-10-02T17_00_59.735856+00_00.json": "7830828839b3136db2845a24c59d71995e8943914abad4129f53d35c30ea09c6",
+  "netops-two-revisions@2026-10-02T17_00_59.735856+00_00.json": "597fd61ae2b59b1dde0a45cf3d2c81f02956b4d314815099298c10db69559999",
   "next-hop-interface-of-other-device.json": "3758d6d48ed7324e164fd7e462fd39c12e727adb40529a4c469743af2732135c",
   "next-hop-two-cases.json": "72a2b288824c03b1ae38fed91c7e1e5efd58a7d5a1e45ae64c25e47be8ab09e5",
+  "ospf-interface-of-other-device.json": "bf5e9c02056d748c2a91244c3fd32530353b411c8fb28f2cd2dabb4adaeb026b",
+  "ospf-neighbor-state-cli-text.json": "2017e4ea9fc1192687ffec37b683b5dcf64af1f397b375ed24517fc5d49d3ba6",
   "research-vsr-1-l2.partial.json": "f7ef9eab4679881b41c53e119343d169ec310be070037fc26bbea22bca799a6b",
   "research-vsr-1-routes.json": "6e16991e3da3d28e569712bcec825d028e55d3ee1a9edaf4b94e1c78147d6e74",
   "unknown-interface-type.json": "eeb07c7aa63d567bb73fcc08fd88f21f233445dbf897d19446e638ca682dc2f4",
@@ -46,6 +51,30 @@
    "note": "complete-datastore check: native complete, or only unobserved nodes missing"
   },
   {
+   "name": "br1-routing-default",
+   "kind": "instance",
+   "data": "br1-routing-default.json",
+   "mode": "get",
+   "expect": "pass",
+   "note": "App output: hierarchy, types, identities"
+  },
+  {
+   "name": "br1-routing-default",
+   "kind": "instance",
+   "data": "br1-routing-default.json",
+   "mode": "data",
+   "expect": "pass",
+   "note": "App output: references resolve (RFC 8342 §5.3)"
+  },
+  {
+   "name": "br1-routing-default",
+   "kind": "instance",
+   "data": "br1-routing-default.json",
+   "mode": "strict",
+   "expect": "complete-or-collection",
+   "note": "complete-datastore check: native complete, or only unobserved nodes missing"
+  },
+  {
    "name": "br1-lldp",
    "kind": "instance",
    "data": "br1-lldp.json",
@@ -89,6 +118,30 @@
    "name": "dist1-device",
    "kind": "instance",
    "data": "dist1-device.json",
+   "mode": "strict",
+   "expect": "complete-or-collection",
+   "note": "complete-datastore check: native complete, or only unobserved nodes missing"
+  },
+  {
+   "name": "dist1-routing-default",
+   "kind": "instance",
+   "data": "dist1-routing-default.json",
+   "mode": "get",
+   "expect": "pass",
+   "note": "App output: hierarchy, types, identities"
+  },
+  {
+   "name": "dist1-routing-default",
+   "kind": "instance",
+   "data": "dist1-routing-default.json",
+   "mode": "data",
+   "expect": "pass",
+   "note": "App output: references resolve (RFC 8342 §5.3)"
+  },
+  {
+   "name": "dist1-routing-default",
+   "kind": "instance",
+   "data": "dist1-routing-default.json",
    "mode": "strict",
    "expect": "complete-or-collection",
    "note": "complete-datastore check: native complete, or only unobserved nodes missing"
@@ -252,6 +305,30 @@
    "mode": "data",
    "expect": "semantic/reference",
    "note": "outgoing-interface names an interface outside this device tree (DIST1's Ethernet2/0)"
+  },
+  {
+   "name": "ospf-interface-of-other-device",
+   "kind": "instance",
+   "data": "ospf-interface-of-other-device.json",
+   "mode": "data",
+   "expect": "semantic/reference",
+   "note": "an RFC 9129 OSPF interface names an interface outside this device tree"
+  },
+  {
+   "name": "ospf-neighbor-state-cli-text",
+   "kind": "instance",
+   "data": "ospf-neighbor-state-cli-text.json",
+   "mode": "get",
+   "expect": "semantic/type",
+   "note": "the CLI state column is not an RFC 9129 nbr-state-type value"
+  },
+  {
+   "name": "bgp-peer-type-cli-text",
+   "kind": "instance",
+   "data": "bgp-peer-type-cli-text.json",
+   "mode": "get",
+   "expect": "semantic/type",
+   "note": "BGP peer-type is internal/external, not the CLI's iBGP shorthand"
   },
   {
    "name": "link-to-tp-of-other-network",

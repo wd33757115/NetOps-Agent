@@ -38,6 +38,8 @@ MODE_CAPABILITIES = {
         "vrrp",
         "ospf_interfaces",
         "ospf_process",
+        "ospf_neighbors",
+        "bgp_peers",
         "routes",
     ),
     "standard": (
