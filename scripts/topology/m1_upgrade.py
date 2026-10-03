@@ -167,7 +167,7 @@ def main() -> int:
         if old == new:
             replay.append({"snapshot": name, "affected": False})
             continue
-        (CASES / "_replay.json").write_text(json.dumps(tree), encoding="utf-8")
+        (CASES / "_replay.json").write_text(json.dumps(tree), encoding="utf-8", newline="\n")
         try:
             run = yanglint(new, "_replay.json", "data")
         finally:
@@ -191,7 +191,9 @@ def main() -> int:
             r["snapshot"] for r in replay if r.get("affected") and not r["passes_after_upgrade"]
         ],
     }
-    REPORT.write_text(json.dumps(report, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    REPORT.write_text(
+        json.dumps(report, ensure_ascii=False, indent=1) + "\n", encoding="utf-8", newline="\n"
+    )
     for m, d in diffs.items():
         print(
             f"{m:28} {d['baseline'][len(m) + 1 : -5]} -> {d['candidate'][len(m) + 1 : -5]} "

@@ -71,6 +71,11 @@ UNITS = {
 }
 
 
+def file_digest(path: Path) -> str:
+    """Digest of a text file independent of the checkout's line endings."""
+    return digest(path.read_bytes().replace(b"\r\n", b"\n"))
+
+
 def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -237,7 +242,7 @@ def build() -> None:
         old.unlink()
     for name, tree in files.items():
         (CASES / name).write_text(
-            json.dumps(tree, ensure_ascii=False, indent=1) + "\n", encoding="utf-8"
+            json.dumps(tree, ensure_ascii=False, indent=1) + "\n", encoding="utf-8", newline="\n"
         )
     # Real catalog modules with real defects; the schema check compiles their closure.
     specs += [
@@ -308,7 +313,9 @@ def build() -> None:
     header["name"] = "netops-two-revisions"
     header["content-schema"]["module"].append("ietf-inet-types@2013-07-15")
     file = f"netops-two-revisions@{stamp.replace(':', '_')}.json"
-    (CASES / file).write_text(json.dumps(bad, ensure_ascii=False, indent=1) + "\n", "utf-8")
+    (CASES / file).write_text(
+        json.dumps(bad, ensure_ascii=False, indent=1) + "\n", encoding="utf-8", newline="\n"
+    )
     files[file] = bad
     specs.append(
         {
@@ -322,11 +329,11 @@ def build() -> None:
     )
     manifest = {
         "scope": "M1-6 cases: campus-wan App output, named mutations, real module defects",
-        "files": {name: digest((CASES / name).read_bytes()) for name in sorted(files)},
+        "files": {name: file_digest(CASES / name) for name in sorted(files)},
         "cases": specs,
     }
     (CASES / "manifest.json").write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=1) + "\n", encoding="utf-8"
+        json.dumps(manifest, ensure_ascii=False, indent=1) + "\n", encoding="utf-8", newline="\n"
     )
 
 
@@ -505,7 +512,9 @@ def instance_data_file(name: str, tree: dict, timestamp: str, inline: bool = Fal
         }
     }
     file = f"{name}@{timestamp.replace(':', '_')}.json"
-    (CASES / file).write_text(json.dumps(document, ensure_ascii=False, indent=1) + "\n", "utf-8")
+    (CASES / file).write_text(
+        json.dumps(document, ensure_ascii=False, indent=1) + "\n", encoding="utf-8", newline="\n"
+    )
     return file
 
 
@@ -542,7 +551,9 @@ def check_instance_data(case: dict, by_name: dict, decided: dict) -> tuple[list[
         ]
         # The inline library must itself be valid RFC 8525 data.
         lib_files = schema_files(schema["inline-yang-library"], by_name, decided)
-        (CASES / "_library.json").write_text(json.dumps(schema["inline-yang-library"]), "utf-8")
+        (CASES / "_library.json").write_text(
+            json.dumps(schema["inline-yang-library"]), encoding="utf-8", newline="\n"
+        )
         try:
             problems += yanglint(lib_files, "_library.json", "data")["errors"]
         finally:
@@ -557,7 +568,9 @@ def check_instance_data(case: dict, by_name: dict, decided: dict) -> tuple[list[
             subs = sorted(e["file"] for e in by_name.get(inc, []) if kind == "include")
             subs = [s for s in subs if not pinned or s == f"{inc}@{pinned}.yang"]
             files += subs[-1:]
-    (CASES / "_content.json").write_text(json.dumps(header["content-data"]), "utf-8")
+    (CASES / "_content.json").write_text(
+        json.dumps(header["content-data"]), encoding="utf-8", newline="\n"
+    )
     try:
         problems += yanglint(sorted(set(files)), "_content.json", case["mode"])["errors"]
     finally:
@@ -618,7 +631,7 @@ def normal_unit(unit: str | None) -> str | None:
 def check() -> dict:
     manifest = json.loads((CASES / "manifest.json").read_text(encoding="utf-8"))
     for name, expected in manifest["files"].items():
-        if digest((CASES / name).read_bytes()) != expected:
+        if file_digest(CASES / name) != expected:
             raise ValueError(f"case bytes changed: {name}; rebuild with --build")
     by_name, decided = revisions()
     nodes = {}
@@ -714,7 +727,9 @@ def check() -> dict:
         "all_met": all(r["met"] for r in results),
     }
     REPORT.parent.mkdir(exist_ok=True)
-    REPORT.write_text(json.dumps(report, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    REPORT.write_text(
+        json.dumps(report, ensure_ascii=False, indent=1) + "\n", encoding="utf-8", newline="\n"
+    )
     return report
 
 

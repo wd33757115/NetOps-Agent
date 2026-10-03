@@ -413,7 +413,7 @@ def build(set_id: str, spec: dict, variant: str, decisions: dict, lock: dict, ie
         )
     errors = [d for d in diagnostics if d["severity"] == "error"]
     lib = library(files, ctx)
-    (work / "library.json").write_text(json.dumps(lib, indent=1), encoding="utf-8")
+    (work / "library.json").write_text(json.dumps(lib, indent=1), encoding="utf-8", newline="\n")
     try:
         model = DataModel(json.dumps(lib), [str(work / "modules")])
         yangson = {"loaded": True, "schema_nodes": yangson_nodes(model.schema)}
@@ -508,6 +508,7 @@ def build(set_id: str, spec: dict, variant: str, decisions: dict, lock: dict, ie
         )
         + "\n",
         encoding="utf-8",
+        newline="\n",
     )
     return report
 

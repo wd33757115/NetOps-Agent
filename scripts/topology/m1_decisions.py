@@ -240,7 +240,9 @@ def main() -> int:
         "revision_counts": dict(sorted(revision_counts.items())),
         "decisions": [decisions[k] for k in sorted(decisions)],
     }
-    OUT.write_text(json.dumps(result, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    OUT.write_text(
+        json.dumps(result, ensure_ascii=False, indent=1) + "\n", encoding="utf-8", newline="\n"
+    )
     lines = [
         "# M1 模块去留判定",
         "",
@@ -272,7 +274,7 @@ def main() -> int:
             reason = d["reason"] + (f"（另有 {'；'.join(extra)}）" if extra else "")
             lines.append(f"| `{d['module']}` | {d['decision']} | {basis} | {reason} |")
         lines.append("")
-    REPORT.write_text("\n".join(lines), encoding="utf-8")
+    REPORT.write_text("\n".join(lines), encoding="utf-8", newline="\n")
     print(json.dumps(result["counts"]), json.dumps(result["revision_counts"]))
     return 0
 

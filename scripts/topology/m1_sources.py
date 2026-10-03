@@ -211,7 +211,9 @@ def apply_patch(block: str, spec: dict) -> str:
         tofile=f"patched/{spec['file']}",
         n=1,
     )
-    (PATCHES / f"{spec['file'][:-5]}.patch").write_text("".join(diff), encoding="utf-8")
+    (PATCHES / f"{spec['file'][:-5]}.patch").write_text(
+        "".join(diff), encoding="utf-8", newline="\n"
+    )
     return patched
 
 
@@ -582,7 +584,9 @@ def main() -> int:
         "source_defects": sorted(source_defects, key=lambda d: (d["document"], d.get("file", ""))),
     }
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(json.dumps(lock, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    OUT.write_text(
+        json.dumps(lock, ensure_ascii=False, indent=1) + "\n", encoding="utf-8", newline="\n"
+    )
     print(json.dumps(lock["counts"]))
     return 0
 

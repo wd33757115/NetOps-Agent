@@ -228,7 +228,7 @@ def main() -> int:
         },
     }
     (M1 / "mapping.json").write_text(
-        json.dumps(result, ensure_ascii=False, indent=1) + "\n", encoding="utf-8"
+        json.dumps(result, ensure_ascii=False, indent=1) + "\n", encoding="utf-8", newline="\n"
     )
     write_report(result)
     print(json.dumps({"emitted": result["emitted"], "facts": result["fact_verdicts"]}))
@@ -295,7 +295,7 @@ def write_report(result: dict) -> None:
         f"其余 {len(untouched)} 个基线模块尚无 App 输出节点（见 mapping.json 的 modules）。",
         "",
     ]
-    (M1 / "mapping.md").write_text("\n".join(lines), encoding="utf-8")
+    (M1 / "mapping.md").write_text("\n".join(lines), encoding="utf-8", newline="\n")
 
 
 if __name__ == "__main__":
