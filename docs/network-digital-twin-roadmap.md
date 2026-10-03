@@ -1024,6 +1024,18 @@ P2-9 根据 Q5 取消，不引入 SNMP。P3 及后续仍在进入阶段时展开
 
 ## 14. 进度台账（执行者维护）
 
+### 2026-10-03 IETF 研究后的建模修复与完整方案（topology 0.4.15）
+
+- **纠正验收口径**：此前“平台模型与实际接线对应”只有 16 对受管设备 LLDP 端口的局部依据；不意味着 GNS3 的 18 节点、34 接线已被全量发现。未受管 ISP 接口和下联 MAC 不得凭 ARP/MAC 确定为 PC，更不能以节点数量相同宣称物理图还原。研究分析、357 项标准/草案目录及范围说明分别保存在 `network-digital-twin-ietf-model-landscape.md`、`network-digital-twin-ietf-model-catalog.{md,json}`；研究不等于全部标准模型已实现。
+- **身份与作用域修复**：IP owner 保存全部设备/NI/接口候选，按当前 ARP、接口和邻接上下文解歧；重复地址及冲突不会后写覆盖。SVI/MAC 附件按观测 VID 关联，物理口 ARP 的显式 VID 同样生效；多候选保留歧义。L3 使用观测网络容器，每设备本地 NI 为独立逻辑节点并支撑于 L2 设备，不以同名 VRF 认定全网域；同前缀不会自动生成邻接。链路 ID 按端点稳定生成，supporting-link 按 VLAN/实际分量取证。非 MAC chassis 编码及 fallback ID 防碰撞，局部 chassis 截断或冲突均不能提供强身份。没有新增自定义 YANG 字段。
+- **定位与路径修复**：入口取源接口所属 NI，跨设备跳转使用对端本地 NI；同地址/同 MAC 歧义不取首项。邻接或终点缺证据、空 next-hops、必要状态缺失使分支保留缺口；明确不可用源/目的接口不得成功，InLoopBack 仅能结束于已证明的本机地址。单凭同前缀不能返回完整成功，方向不完整时不作对称性定论。`complete` 仅说明当前候选推导契约满足；不宣称 ACL/NAT/STP 等全策略数据面验证。路径与工具说明同步更正。新快照版本 `rfc8345+simap-yang-03:l2-l3:scoped-v2`；响应同时返回 `snapshot_model_profile`、`analysis_profile`，旧快照不改写。
+- **采集与显示修复**：IOS/NX-OS 从 `show vrf` 解析实际实例，按当前连接/原目标授权精确只读 `show ip arp vrf NAME`；不硬编码 MGMT。最多 64 个安全名称，逐实例区分成功空表、未采、失败或不完整；失败不跨 NI 借数据。该扩展只覆盖 IPv4 ARP，NX-OS 暂无实机结论。incomplete/conflict LLDP 门禁覆盖本地身份。界面和 API 使用“未识别端点”，旧 `host` 分类兼容显示为相同含义。
+- **回归与部署**：隔离工作树完成修复、独立审查和全量相关回归，30 个任务文件按哈希同步主目录。最终 `pytest -q tests/unit -k "topology or twin" -p no:cacheprovider -rs` 为 **1224 passed、2 skipped**（两个可选本地模板源），Yangson 依赖显式装入并实际执行；相关 Python Ruff/格式检查、前端 ESLint 通过，3 个前端套件 **20 passed**，生产前端构建通过。已用 `scripts/windows/start.ps1 -SkipLangfuse -UpgradeApps topology -NoBrowser` 部署 **0.4.15**，状态/设备树 HTTP 接口均为 200。本机检查证据 `.runtime/topology-fix-verification.json`、`.runtime/topology-fix-final-pytest.log`，部署日志 `.runtime/topology-fix-deploy.log`。
+- **部署复核**：首次全 App 检查与只读发现重叠，solo AI Worker 忙于采集时未及时回复短超时探针，official-documents 被报为无队列消费者。采集完成后，在 Windows 测试运行环境中重跑全部 App verify，**9/9 均通过，topology 0.4.15 enabled**，证据 `.runtime/topology-fix-deployment-reverify.log`；没有为此重启 Worker 或改动其他 App。不要引用首次启动脚本的 `All checks passed` 掩盖其中告警。最终状态/设备接口再次返回 200，活动发现数为 0。修复代码本地提交 **`3f09edc`**。
+- **本轮只读实机验收**：网络 `d537b0de1fab427683413b81290db718`，发现 `43618be6e2a447638ece2f20d3d351cc`，新快照 **`edc1514b188643f0aec13f7913fe940a`**；8 台全部成功且使用本轮观察。六台 IOS 的 default 和 MGMT ARP 均完成枚举与查询，形成六个设备本地 MGMT 节点，OSPF RID 不串入 MGMT。拓扑 RFC 7951 导出通过冻结 Yangson full validation；16 对受管 LLDP 端口逐对等于实际 GNS3 接线集合，7 个未知对象保留未识别端点。BR1 `10.255.0.1` 到 CORE1 `10.255.0.3` 候选路径双向 complete，仅为当前路由/邻接契约验收。本轮没有改变设备配置或重演 shutdown。
+- **实际未完成范围与下一项**：完整桥/FDB、STP、IPv6 ND、各 NI 路由、服务/策略和跨树资源绑定仍未闭合；部分设备树不得宣称完整 datastore 校验通过。完整实施方案见 [network-digital-twin-implementation.md](network-digital-twin-implementation.md)，按 M1 完整模块/映射基线 → M2 设备与资源 → M3 完整园区二层 → M4 三层与路径 → M5 服务与策略 → M6 专业领域执行。每项规定标准版本、输入、前置条件和反例验收；不因目录列出某模型就标记为已支持。
+- **证据可追溯**：`.runtime/topology-fix-live-proof.json` 保存发现、覆盖范围和 GNS3 SHA-256 `ab873f209e5d480f6bdfb9b32b8846ef7de3034c7dcb9e307ffa4826fd3fd17b`；同目录 `topology-fix-{observations,rfc7951,path}.json` 保存原观察、标准导出与分析结果。必要最小反例已进入仓库测试；运行日志保留在本机忽略目录。未推送。
+
 ### 2026-10-03 GPT 后续：状态、OSPF 与独立部分设备树（topology 0.4.14）
 
 - 接手核实网页报告：报告无仓库链接却把假设写成实现结论；“单层、无 TP/支持网络、无标准导出与测试”不符合实际。数据模型、协议服务与 NMDA datastore 不能混为一项合规判断。原文与代码/RFC 的逐项对照见[交接文档的核实记录](network-digital-twin-handoff.md)。

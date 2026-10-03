@@ -1,8 +1,20 @@
 # 网络数字孪生开发交接
 
-本文最前面是最新一次交接（2026-10-03，Claude → GPT）；其后保留 2026-09-30（GPT → Claude）的历史交接，第 1～7 节的工作方式、硬约束与工具边界**仍然有效**，先读完本节再读第 2 节。
+本文最前面记录 2026-10-03 的模型审查后修复；其后保留 Claude → GPT 与 2026-09-30 的历史交接。历史工作约束以负责人后续明确指令为准，模型能力与验收范围以最新记录为准。
 
-## 最新交接：2026-10-03，Claude → GPT
+## 最新修复交接：2026-10-03，topology 0.4.15
+
+负责人要求先研究 IETF 模型、审查当前建模，再修复代码并给出完整实现方案。研究见 [IETF 模型分析](network-digital-twin-ietf-model-landscape.md)与[逐项目录](network-digital-twin-ietf-model-catalog.md)；下一阶段以[完整实现方案](network-digital-twin-implementation.md)的 M1—M6 为准。
+
+**审查发现的是实际实现错误，YANG 校验通过不能替代事实正确。** 本轮已修复多设备/NI 同 IP 的后写覆盖、同 MAC 跨 VLAN 错归属、路径入口固定 default、相同本地 VRF 名被当全网域、缺邻接仍成功、ARP/MAC 被确定标为主机、IOS 非 default ARP 漏采，以及 incomplete/conflict LLDP 参与强身份的问题。新投影版本为 `rfc8345+simap-yang-03:l2-l3:scoped-v2`；历史快照不改写，分析响应标明快照与分析两个版本。
+
+在隔离工作树完成回归后同步 30 个任务文件并升级部署。最终后端 **1224 passed、2 skipped**（可选模板源），前端 **20 passed**；冻结 YANG、相关 Ruff/格式检查、ESLint 与生产构建通过。一次新发现 `43618be6e2a447638ece2f20d3d351cc` 的 8 台设备全部成功，新快照 `edc1514b188643f0aec13f7913fe940a` 通过拓扑 YANG 完整校验；六台 IOS 的 default/MGMT ARP 均完成，MGMT 对应六个设备本地 NI 节点。16 对受管 LLDP 端口与 GNS3 实际接线集合完全相同，7 个未识别端点不再冒称主机。BR1→CORE1 loopback 候选路径双向 complete 仅表示当前路径契约所需证据齐备，不是全策略转发验证。
+
+**更正历史表述：下文“平台模型与实际接线对应”仅有 16 条受管设备间接线的局部验收依据，不成立为完整物理网络等价结论。** GNS3 文件有 18 节点、34 接线；未受管 ISP、无管理交换机、管理设施、被动资源及其全部接线尚未由发现完整还原。设备原生树仍为 partial；完整桥/FDB、STP、IPv6 ND、各 NI 路由及策略转发仍按方案继续实施。本轮动态实例采集只扩展 IPv4 ARP，NX-OS 尚无实机验收。
+
+详细实现、检查与部署记录见路线图 §14 最新条目。修复代码本地提交 **`3f09edc`**；采集完成后全 App 部署复核 **9/9 通过**，状态/设备接口再次返回 200。原始本机证据为 `.runtime/topology-fix-{verification,live-proof}.json`、`.runtime/topology-fix-rfc7951.json`、`.runtime/topology-fix-observations.json` 与 `.runtime/topology-fix-path.json`。本轮没有修改设备配置，也没有重新执行 shutdown；只读发现复用平台已保存登录，未记录或输出设备口令。未推送。
+
+## 历史交接：2026-10-03，Claude → GPT
 
 项目根目录 `C:\Users\wangd\PycharmProjects\PythonProject\netops-agent`，分支 `feat/network-twin`；`origin`（`https://github.com/wd33757115/net-ops.git`）已推送到 `6855949`，本交接文档的提交在其后，是否推送以 `git status -sb` 为准。Windows + PowerShell；Git Bash 也可用（本轮偶发 Bash 工具退出码 107，换 PowerShell 即可）。
 
