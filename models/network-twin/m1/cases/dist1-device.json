@@ -1,0 +1,238 @@
+{
+ "ietf-interfaces:interfaces": {
+  "interface": [
+   {
+    "name": "Ethernet0/0",
+    "type": "iana-if-type:ethernetCsmacd",
+    "oper-status": "up",
+    "ietf-ip:ipv4": {
+     "address": [
+      {
+       "ip": "10.10.1.15",
+       "prefix-length": 24
+      }
+     ]
+    }
+   },
+   {
+    "name": "Ethernet0/1",
+    "type": "iana-if-type:ethernetCsmacd",
+    "oper-status": "up",
+    "ietf-ip:ipv4": {
+     "address": [
+      {
+       "ip": "10.0.35.2",
+       "prefix-length": 30
+      }
+     ],
+     "neighbor": [
+      {
+       "ip": "10.0.35.1",
+       "link-layer-address": "aa:bb:cc:00:02:01"
+      },
+      {
+       "ip": "10.0.35.2",
+       "link-layer-address": "aa:bb:cc:00:04:10"
+      }
+     ]
+    }
+   },
+   {
+    "name": "Ethernet0/2",
+    "type": "iana-if-type:ethernetCsmacd",
+    "oper-status": "up",
+    "ietf-ip:ipv4": {
+     "address": [
+      {
+       "ip": "10.0.45.2",
+       "prefix-length": 30
+      }
+     ],
+     "neighbor": [
+      {
+       "ip": "10.0.45.1",
+       "link-layer-address": "aa:bb:cc:00:03:11"
+      },
+      {
+       "ip": "10.0.45.2",
+       "link-layer-address": "aa:bb:cc:00:04:20"
+      }
+     ]
+    }
+   },
+   {
+    "name": "Ethernet0/3",
+    "type": "iana-if-type:ethernetCsmacd",
+    "oper-status": "down"
+   },
+   {
+    "name": "Ethernet1/0",
+    "type": "iana-if-type:ethernetCsmacd",
+    "oper-status": "up"
+   },
+   {
+    "name": "Ethernet1/1",
+    "type": "iana-if-type:ethernetCsmacd",
+    "oper-status": "up"
+   },
+   {
+    "name": "Ethernet1/2",
+    "type": "iana-if-type:ethernetCsmacd",
+    "oper-status": "down"
+   },
+   {
+    "name": "Ethernet1/3",
+    "type": "iana-if-type:ethernetCsmacd",
+    "oper-status": "down"
+   },
+   {
+    "name": "Ethernet2/0",
+    "type": "iana-if-type:ethernetCsmacd",
+    "oper-status": "up"
+   },
+   {
+    "name": "Ethernet2/1",
+    "type": "iana-if-type:ethernetCsmacd",
+    "oper-status": "up"
+   },
+   {
+    "name": "Ethernet2/2",
+    "type": "iana-if-type:ethernetCsmacd",
+    "oper-status": "down"
+   },
+   {
+    "name": "Ethernet2/3",
+    "type": "iana-if-type:ethernetCsmacd",
+    "oper-status": "down"
+   },
+   {
+    "name": "Ethernet3/0",
+    "type": "iana-if-type:ethernetCsmacd",
+    "oper-status": "down"
+   },
+   {
+    "name": "Ethernet3/1",
+    "type": "iana-if-type:ethernetCsmacd",
+    "oper-status": "down"
+   },
+   {
+    "name": "Ethernet3/2",
+    "type": "iana-if-type:ethernetCsmacd",
+    "oper-status": "down"
+   },
+   {
+    "name": "Ethernet3/3",
+    "type": "iana-if-type:ethernetCsmacd",
+    "oper-status": "down"
+   },
+   {
+    "name": "Loopback0",
+    "type": "iana-if-type:softwareLoopback",
+    "oper-status": "up",
+    "ietf-ip:ipv4": {
+     "address": [
+      {
+       "ip": "10.255.0.5",
+       "prefix-length": 32
+      }
+     ]
+    }
+   },
+   {
+    "name": "Port-channel1",
+    "type": "iana-if-type:ieee8023adLag",
+    "oper-status": "up"
+   },
+   {
+    "name": "Vlan10",
+    "type": "iana-if-type:l3ipvlan",
+    "oper-status": "up",
+    "ietf-ip:ipv4": {
+     "address": [
+      {
+       "ip": "172.16.10.2",
+       "prefix-length": 24
+      }
+     ],
+     "neighbor": [
+      {
+       "ip": "172.16.10.1",
+       "link-layer-address": "00:00:5e:00:01:0a"
+      },
+      {
+       "ip": "172.16.10.11",
+       "link-layer-address": "00:50:79:66:68:01"
+      },
+      {
+       "ip": "172.16.10.13",
+       "link-layer-address": "00:50:79:66:68:04"
+      },
+      {
+       "ip": "172.16.10.15",
+       "link-layer-address": "00:50:79:66:68:00"
+      },
+      {
+       "ip": "172.16.10.2",
+       "link-layer-address": "aa:bb:cc:80:04:00"
+      }
+     ],
+     "ietf-vrrp:vrrp": {
+      "vrrp-instance": [
+       {
+        "vrid": 10,
+        "virtual-ipv4-addresses": {
+         "virtual-ipv4-address": [
+          {
+           "ipv4-address": "172.16.10.1"
+          }
+         ]
+        },
+        "state": "ietf-vrrp:master",
+        "last-adv-source": "172.16.10.2"
+       }
+      ]
+     }
+    }
+   },
+   {
+    "name": "Vlan20",
+    "type": "iana-if-type:l3ipvlan",
+    "oper-status": "up",
+    "ietf-ip:ipv4": {
+     "address": [
+      {
+       "ip": "172.16.20.2",
+       "prefix-length": 24
+      }
+     ],
+     "neighbor": [
+      {
+       "ip": "172.16.20.12",
+       "link-layer-address": "00:50:79:66:68:02"
+      },
+      {
+       "ip": "172.16.20.2",
+       "link-layer-address": "aa:bb:cc:80:04:00"
+      }
+     ],
+     "ietf-vrrp:vrrp": {
+      "vrrp-instance": [
+       {
+        "vrid": 20,
+        "virtual-ipv4-addresses": {
+         "virtual-ipv4-address": [
+          {
+           "ipv4-address": "172.16.20.1"
+          }
+         ]
+        },
+        "state": "ietf-vrrp:backup",
+        "last-adv-source": "172.16.20.3"
+       }
+      ]
+     }
+    }
+   }
+  ]
+ }
+}

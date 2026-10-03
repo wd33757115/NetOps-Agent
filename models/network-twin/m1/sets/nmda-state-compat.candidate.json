@@ -1,0 +1,249 @@
+{
+ "set": "nmda-state-compat",
+ "variant": "candidate",
+ "title": "非 NMDA 兼容的 *-state 模块（仅用于历史数据回放与对照）",
+ "roots": [
+  "ietf-dc-fabric-topology-state",
+  "ietf-hardware-state",
+  "ietf-l2-topology-state",
+  "ietf-l3-te-topology-state",
+  "ietf-l3-unicast-topology-state",
+  "ietf-module-tags-state",
+  "ietf-network-state",
+  "ietf-network-topology-state",
+  "ietf-te-topology-packet-state",
+  "ietf-te-topology-state"
+ ],
+ "modules": [
+  {
+   "file": "iana-hardware@2018-03-13.yang",
+   "sha256": "4feb8d47cf34dac0d25e0f6a1157f45421d508f756b92ad0d7116245de3cf31f",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "iana-if-type@2026-03-17.yang",
+   "sha256": "e7c480fb5c39a3e074605ae76919abfe376d7d82347855ace41c4695ef5e6d77",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ieee802-dot1q-types@2023-10-26.yang",
+   "sha256": "019af9e03c5ac6e3e91eeb5a8ae76249cfd5f1d9435fb59c1514774a3dbf52d3",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-dc-fabric-topology-state@2019-02-25.yang",
+   "sha256": "dd37c056eb04337d18462a8292f5a8773c4f5058a2ae1a3d63e63816d93bd58a",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-dc-fabric-types@2019-02-25.yang",
+   "sha256": "06b806f90c2f9fed01c0a02f996bf164b66dfbabe5395063af72c505cd262a9c",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-hardware-state@2018-03-13.yang",
+   "sha256": "1b914a2914806fb91d4f3628401687fefcb0c1513ebb4eecf23fbfa3475d1be7",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-hardware@2018-03-13.yang",
+   "sha256": "857d8a1e50f98f447b1e9cbe663bb6e3f4f6aa1255860fbc55b7801904d906a4",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-inet-types@2025-12-22.yang",
+   "sha256": "2fb39c45cd28d95f60838e5f74ac509d780d18f3c5bf78db251049a4d022e266",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-interfaces@2018-02-20.yang",
+   "sha256": "742cf4ad04459e1018ea69015adafe0202ade27b85d8350c1845b640ee32da16",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-l2-topology-state@2020-11-15.yang",
+   "sha256": "0a24619b97aa37cbe1c6e032f0528703b6933996f3df6bfbff8d04717588d5a2",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-l2-topology@2020-11-15.yang",
+   "sha256": "9653885e616b8e5096872eda1d46b611d2b2ab654a0e9e35c234b519a793576f",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-l3-te-topology-state@2024-06-08.yang",
+   "sha256": "2547acf9afc9307b1236195d9643a9c610d32f75e5309cf71a746ff04275a651",
+   "decision": "candidate-upgrade",
+   "root": true
+  },
+  {
+   "file": "ietf-l3-te-topology@2024-06-08.yang",
+   "sha256": "9be5efb7dbde2ebe9e83f0f68e1652778f99109eb3d0e05e63f0ae92db6ff3b1",
+   "decision": "candidate-upgrade",
+   "root": false
+  },
+  {
+   "file": "ietf-l3-unicast-topology-state@2018-02-26.yang",
+   "sha256": "d56eac3408b3f351248021d16f266606b95acd389205aa19fb534e438102807a",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-l3-unicast-topology@2018-02-26.yang",
+   "sha256": "c59b45f1fef3e25224c2dec8fb102429da89ae7dc51f3e279197c598e2f290c2",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-module-tags-state@2021-01-04.yang",
+   "sha256": "7583fede7a39b55970bc09a940cd8b5ccb48856b5e73d386b7aaeb77fbb1cee1",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-module-tags@2021-01-04.yang",
+   "sha256": "8491af30876530a06b8d751100ba17ff205aaea9c7bb601228597b67caa38e41",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-network-state@2018-02-26.yang",
+   "sha256": "95261c0f37af5eb693e00764cdd1906d3e76ca2268fcf1f8c3711bf6d4220013",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-network-topology-state@2018-02-26.yang",
+   "sha256": "791c793cb7f8fa8392c4605019d4a90018ba44c861f3a3927901981e3c2ec569",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-network-topology@2018-02-26.yang",
+   "sha256": "e33a8ad51ffdbd5ff4a787e738732604ed8f828bbb5905905ca1befc9f988925",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-network@2018-02-26.yang",
+   "sha256": "6f935f7228ed87c1fa169ba52357a95215e644c3abf11343beb10043bc3934c1",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-routing-types@2017-12-04.yang",
+   "sha256": "45b2207ec63173760e10e1dd5a9d6023ff03a0427904208fe86c0bc747df59a1",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-te-packet-types@2026-06-11.yang",
+   "sha256": "95fe8c30da601eac4a385cb52dd95d71750fed38c879dd7b263824abb0390fd5",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-te-topology-packet-state@2024-06-08.yang",
+   "sha256": "beb0526bc8317c21f123cbceda21fd4ea8bd612c2752a4be6f1cb6f8c73f90dd",
+   "decision": "candidate-upgrade",
+   "root": true
+  },
+  {
+   "file": "ietf-te-topology-packet@2024-06-08.yang",
+   "sha256": "559458ad927405e26395ad67a918603d0427c8259d6d1686b7ae7625fa1673dc",
+   "decision": "candidate-upgrade",
+   "root": false
+  },
+  {
+   "file": "ietf-te-topology-state@2020-08-06.yang",
+   "sha256": "c6d521aca5beda07e12838c4e29e956e322a990982c9b03a068c7c9ef64aa40d",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-te-topology@2020-08-06.yang",
+   "sha256": "7f89c604f6a15d3f0933f7ab1720a17fddae7a3aa646b0f42f8a944ffb99593c",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-te-types@2026-06-11.yang",
+   "sha256": "729c82f991d3aa2fb8e41928302240158a8b98cd1288b0804e12fee8da978568",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-yang-types@2025-12-22.yang",
+   "sha256": "5e4ff4c837f303050fa46369987f11eb909c24dae2d4ec338342a7aa596f7b2b",
+   "decision": "runtime-baseline",
+   "root": false
+  }
+ ],
+ "missing_dependencies": [],
+ "state_compat_leaked": [],
+ "pyang": {
+  "passed": true,
+  "errors_by_category": {},
+  "warnings_by_category": {},
+  "errors": [],
+  "errors_truncated": 0
+ },
+ "yangson": {
+  "loaded": true,
+  "schema_nodes": {
+   "CaseNode": 606,
+   "ChoiceNode": 260,
+   "ContainerNode": 1198,
+   "GroupNode": 97,
+   "LeafListNode": 141,
+   "LeafNode": 3990,
+   "ListNode": 367,
+   "NotificationNode": 20
+  },
+  "paths_only_in_inventory": [],
+  "paths_only_in_yangson": []
+ },
+ "libyang": {
+  "ran": true,
+  "image_id": "sha256:5db3d7d18f7ae37a5422516fd38a2bf7df8ace6ffc352867dca496d2b2c91afe",
+  "exit": 0,
+  "passed": true,
+  "errors": [],
+  "warnings": []
+ },
+ "library_sha256": "79a7bc542c7120dd46fb5e0f264f5fb4e88fcdcc7f45ae1baf4a7e58ec4e4460",
+ "inventory": {
+  "file": "models/network-twin/m1/inventory/nmda-state-compat.candidate.jsonl.gz",
+  "nodes": 5716,
+  "by_kind": {
+   "container": 1198,
+   "leaf": 3990,
+   "leaf-list": 141,
+   "list": 367,
+   "notification": 20
+  },
+  "config": 1480,
+  "state": 4046,
+  "with_when": 219,
+  "with_must": 214,
+  "leafref": 172,
+  "identityref": 297,
+  "mandatory": 150,
+  "deprecated_or_obsolete": 114
+ },
+ "tree": {
+  "lines": 7105,
+  "pyang_exit": 0
+ }
+}

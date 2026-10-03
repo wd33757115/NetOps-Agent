@@ -1,0 +1,8 @@
+{
+ "ieee802-dot1ab-lldp:lldp": {
+  "local-system-data": {
+   "system-name": "BR1",
+   "system-description": "H3C Comware Platform Software, Software Version 7.1.064, Release 1362P12\nH3C VSR1000\nCopyright (c) 2004-2023 New H3C Technologies Co., Ltd. All rights reserved."
+  }
+ }
+}

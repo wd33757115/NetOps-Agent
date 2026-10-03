@@ -1,0 +1,593 @@
+{
+ "set": "assurance-oam",
+ "variant": "candidate",
+ "title": "OAM 与测量、告警与保障、采集与管理协议",
+ "roots": [
+  "iana-ioam-integrity-protection-methods",
+  "ietf-adaptive-subscription",
+  "ietf-alarms",
+  "ietf-alarms-x733",
+  "ietf-bfd",
+  "ietf-bfd-ip-mh",
+  "ietf-bfd-ip-sh",
+  "ietf-bfd-lag",
+  "ietf-bfd-mpls",
+  "ietf-bfd-types",
+  "ietf-connection-oriented-oam",
+  "ietf-connectionless-oam",
+  "ietf-connectionless-oam-methods",
+  "ietf-incident",
+  "ietf-ioam",
+  "ietf-ioam-integrity",
+  "ietf-ipfix-psamp",
+  "ietf-lime-time-types",
+  "ietf-lmap-common",
+  "ietf-lmap-control",
+  "ietf-lmap-report",
+  "ietf-netconf",
+  "ietf-netconf-nmda",
+  "ietf-network-vpn-pm",
+  "ietf-nmda-compare",
+  "ietf-notification-capabilities",
+  "ietf-packet-discard-reporting",
+  "ietf-packet-discard-reporting-common",
+  "ietf-packet-discard-reporting-sx",
+  "ietf-restconf",
+  "ietf-restconf-monitoring",
+  "ietf-restconf-subscribed-notifications",
+  "ietf-service-assurance",
+  "ietf-service-assurance-device",
+  "ietf-service-assurance-interface",
+  "ietf-snmp",
+  "ietf-snmp-common",
+  "ietf-snmp-community",
+  "ietf-snmp-engine",
+  "ietf-snmp-notification",
+  "ietf-snmp-proxy",
+  "ietf-snmp-ssh",
+  "ietf-snmp-target",
+  "ietf-snmp-tls",
+  "ietf-snmp-tsm",
+  "ietf-snmp-usm",
+  "ietf-snmp-vacm",
+  "ietf-subscribed-notifications",
+  "ietf-system-capabilities",
+  "ietf-traffic-analyzer",
+  "ietf-traffic-generator",
+  "ietf-twamp",
+  "ietf-x509-cert-to-name",
+  "ietf-yang-push"
+ ],
+ "modules": [
+  {
+   "file": "iana-bfd-types@2026-07-02.yang",
+   "sha256": "c7180c6ad92200e0771f2391a3d3ae46e6ca7ad63e23a106c9ce33c58f7b32aa",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "iana-ioam-integrity-protection-methods@2026-05-08.yang",
+   "sha256": "860359f90cce73bebc9f9f05ec0fc16c833d39ac6f4e479e7ea829eb2644f2bf",
+   "decision": "candidate-upgrade",
+   "root": true
+  },
+  {
+   "file": "ietf-access-control-list@2019-03-04.yang",
+   "sha256": "d32d1c4c8a4bef34d86295d78aa9aadb888a7a0c38b56048f71fea4b1962d2f1",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-adaptive-subscription@2026-02-27.yang",
+   "sha256": "a2479d67187a5e5f22c62bba7441aa044a038fbf2e7ce7003e4e98a4b1aec8fd",
+   "decision": "candidate-upgrade",
+   "root": true
+  },
+  {
+   "file": "ietf-alarms-x733@2019-09-11.yang",
+   "sha256": "023334520721111b2a25ebc33741ec9b46461f7a5a253b63facbae9ff0bf281d",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-alarms@2022-06-06.yang",
+   "sha256": "d5c92717f44b2ace43d1a59d4d978056ac89df317bf7e3f4b17c678204187a0f",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-bfd-ip-mh@2022-09-22.yang",
+   "sha256": "4ac2133020795b6ae5a47f279f7727d07d03cfc4f6d65dea909fbc692e7d38fa",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-bfd-ip-sh@2022-09-22.yang",
+   "sha256": "80826ab06a7f902ec4b0358b2eef03264067282ac5ca59bede2feecef0bbd7da",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-bfd-lag@2022-09-22.yang",
+   "sha256": "3182bb7d7a75938ff38fcfa904a6ad7085a8bf1fb6e835b32cbdd26da901341f",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-bfd-mpls@2022-09-22.yang",
+   "sha256": "78b1965203c94724ef3efb6dfdb5da5e6615ca82693647a0adf9d77d2f06e42d",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-bfd-types@2022-09-22.yang",
+   "sha256": "65abd568987103be19342cdfb1611970f59577b97cf760455a553a6149c0fb88",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-bfd@2022-09-22.yang",
+   "sha256": "8a3d28f36fd4f192aeb3ac6b303bf72be5fd5b03cbafb101ba04ab189d91946b",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-connection-oriented-oam@2019-04-16.yang",
+   "sha256": "f22f1de5c0b265744b595f13c5a45bb83165a4e800bfaeefa67fd4a849e714c4",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-connectionless-oam-methods@2019-04-16.yang",
+   "sha256": "825f56d17836a9eb6766a93b3661ec8e55744a162c61dd1b9db34d8d4a7a6d36",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-connectionless-oam@2019-04-16.yang",
+   "sha256": "42e781550c21dead295692ee0e92dfbbfffe640265c6f652e6919917736ea7df",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-datastores@2018-02-14.yang",
+   "sha256": "4535a21f70f39fedbe20dd904ff38dcc1f1d9a6391b6a425c979b807af4d151e",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-ethertypes@2019-03-04.yang",
+   "sha256": "952dcb78026852e77ef01a7acdc38aab2bae81f7c4142a2dbd862c640c23cc20",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-incident@2026-07-30.yang",
+   "sha256": "93089fe865f16fc4fab3fa50c17ec3afdb18085ea30c133378e5c3ff196b1a73",
+   "decision": "candidate-upgrade",
+   "root": true
+  },
+  {
+   "file": "ietf-inet-types@2025-12-22.yang",
+   "sha256": "2fb39c45cd28d95f60838e5f74ac509d780d18f3c5bf78db251049a4d022e266",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-interfaces@2018-02-20.yang",
+   "sha256": "742cf4ad04459e1018ea69015adafe0202ade27b85d8350c1845b640ee32da16",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-ioam-integrity@2026-05-08.yang",
+   "sha256": "e86e8a212a7cafae715d493196a12833a97d76ba6fc67cd9d89a27d7e0dcf30f",
+   "decision": "candidate-upgrade",
+   "root": true
+  },
+  {
+   "file": "ietf-ioam@2024-08-27.yang",
+   "sha256": "a318c69d30862f9fddc30c6cb32e5bf65d50151a3eea75fbea531eb8f4fa75f5",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-ip@2018-02-22.yang",
+   "sha256": "00c87aab91d95199927ba109c572eef3bca0fb949cedb3849b883e2d969d04b7",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-ipfix-psamp@2012-09-05.yang",
+   "sha256": "230a3636ba9822f488a8f26ca2030c4e428d45c18e9385bbe7b99b4434add568",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-key-chain@2017-06-15.yang",
+   "sha256": "6250705f59fc9ad786e8d74172ce90d58deec437982cbca7922af40b3ae8107c",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-lime-time-types@2019-04-16.yang",
+   "sha256": "b1c9cb61ff46000aee7739ea722e6ecd03b7b820ad9f3fb889908a1e9db591ac",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-lmap-common@2017-08-08.yang",
+   "sha256": "f9ec1486a9683cc417e9e618654b11830c92d70109e99424f04e2715d264b98a",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-lmap-control@2017-08-08.yang",
+   "sha256": "ac89db6555fea2a344667ea93fb705268af1e6d9d6c6ee347d3718cd8554f0bc",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-lmap-report@2017-08-08.yang",
+   "sha256": "1cba75bef87c07a04f5c82cc441ac044f02ebfa0a5e0f6b073a1bb12fe54103a",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-logical-network-element@2019-01-25.yang",
+   "sha256": "dfde63af7902af4f4f72e2cb744bc108986b35140a47448dfbb0e30cfc433322",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-netconf-acm@2018-02-14.yang",
+   "sha256": "796951c3b64cc602d62a012312cf1a14255c97d12e99a5c5a2c932c2df4cadbf",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-netconf-nmda@2019-01-07.yang",
+   "sha256": "d34594f7a3fa04629a3a15fb73dbbd1b2930285090a238eb5126166339313e45",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-netconf-with-defaults@2011-06-01.yang",
+   "sha256": "f7fd939ad108690ea347b6d26d320b4d003a4809c164c8f56ab7a2e8959a7343",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-netconf@2011-06-01.yang",
+   "sha256": "6c1d0b39e789b53ea13b7ea6703c2dcb199157a7b011ce30af4ca61b8ba9b13f",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-network-instance@2019-01-21.yang",
+   "sha256": "dc2b85fa0d8eefdf411b9c2fb2b032983324371ca6b277fabf939011f97bd2ea",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-network-topology@2018-02-26.yang",
+   "sha256": "e33a8ad51ffdbd5ff4a787e738732604ed8f828bbb5905905ca1befc9f988925",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-network-vpn-pm@2023-03-20.yang",
+   "sha256": "52673fc9bbd4b20e40c4b732ae4cbd02ab181104e3bf0540dc05d70a8f3eb303",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-network@2018-02-26.yang",
+   "sha256": "6f935f7228ed87c1fa169ba52357a95215e644c3abf11343beb10043bc3934c1",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-nmda-compare@2021-12-10.yang",
+   "sha256": "41eb31db4e16fced0c99485c7740145352fd2fbc5930e9a6d9cf398387b0e8f3",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-notification-capabilities@2022-02-17.yang",
+   "sha256": "6f49cebd51d3c15a52d87147295d3099d09f938d1977d9b35097dbf4618710ba",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-origin@2018-02-14.yang",
+   "sha256": "1df790ce58a7dadff8140c750be0660fab7e0036af748da538362ddbcb05558d",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-packet-discard-reporting-common@2026-03-03.yang",
+   "sha256": "10814b47e546172716edb6ae18d23e0de9a4e32d6b5dfeb9f96344f589bf778e",
+   "decision": "candidate-upgrade",
+   "root": true
+  },
+  {
+   "file": "ietf-packet-discard-reporting-sx@2026-03-03.yang",
+   "sha256": "1754062f62421a91801739d4baf92f1d55df02f863447c9ae5cd0e275099bd1b",
+   "decision": "candidate-upgrade",
+   "root": true
+  },
+  {
+   "file": "ietf-packet-discard-reporting@2026-03-03.yang",
+   "sha256": "573dbb90f843bb1ba13534046c8d117ace9c770364edf88253c11a6db0275608",
+   "decision": "candidate-upgrade",
+   "root": true
+  },
+  {
+   "file": "ietf-packet-fields@2019-03-04.yang",
+   "sha256": "312a4b58a55714411ff9a3a36088be3aeaabe720fb663a56fea70fa00b4bcd03",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-restconf-monitoring@2017-01-26.yang",
+   "sha256": "c4e0aed64ee45d17efc72f4f75d32d8e73e0a3efda5bf6360bb25f8daa14f125",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-restconf-subscribed-notifications@2019-11-17.yang",
+   "sha256": "98037011cf1234b2b63e06beec87453a578fe9116eaec7fee86680128af775ea",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-restconf@2017-01-26.yang",
+   "sha256": "e757021148926cc9b39b593598a2bd8f212423c68ea1cbb1ed1b65532d091297",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-routing-types@2017-12-04.yang",
+   "sha256": "45b2207ec63173760e10e1dd5a9d6023ff03a0427904208fe86c0bc747df59a1",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-routing@2018-03-13.yang",
+   "sha256": "8cbcf2d4410fd31621c104fa706bef1cf2c2c33de8defb145bdde289f82c4116",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-service-assurance-device@2023-07-11.yang",
+   "sha256": "998205ad106311effc86de8aaef1a551575c6a221f8b3946f88bb32e9ecfc192",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-service-assurance-interface@2023-07-11.yang",
+   "sha256": "a89a28c090782d6e62f62d37eb7fe8ff29f3e67bbdd4e60b6ab36b408f8bbd93",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-service-assurance@2023-07-11.yang",
+   "sha256": "fdabd38fbcf4669d7f9a2253b3de3a3acfc91c9a60aa3eea0c1353bd4e90fd30",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-snmp-common@2014-12-10.yang",
+   "sha256": "3abaef9ce2cacca9f8f16bfad14a7e9ccdd48558f3c638da620bf503a5880462",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-snmp-community@2014-12-10.yang",
+   "sha256": "f64be9d71c548753ba65728bc68e31ffa09a77673c95eaded8303962f8a20337",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-snmp-engine@2014-12-10.yang",
+   "sha256": "c14eb378059d8da311f6c6200c0958e4552978008f300c30d6492f6aa5ebee6c",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-snmp-notification@2014-12-10.yang",
+   "sha256": "ff7f197a4e92268fa1e1575fc008b3d923df71bb75622c27e254bb1be2b5ab78",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-snmp-proxy@2014-12-10.yang",
+   "sha256": "dbd548f1b7c874a22c46a900e9c1cd64892babd1f88c7871263e0698e14a82c2",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-snmp-ssh@2014-12-10.yang",
+   "sha256": "3d8aa397efde960b02105c79cf711a53600c034d4d5acc8be64166bf17d2a2f4",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-snmp-target@2014-12-10.yang",
+   "sha256": "755c6c637d0380d17d6d185297d68998b14c8a1e00ac340684c786885698ef7c",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-snmp-tls@2014-12-10.yang",
+   "sha256": "e894275fe762f6943a0b4a12b6568801930ddfe2c4f92ca883369014d2130aab",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-snmp-tsm@2014-12-10.yang",
+   "sha256": "cbed6fc59e6396fac0bd946a0592ba68857168ba7fd019f6bd241a7e799759a9",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-snmp-usm@2014-12-10.yang",
+   "sha256": "30397a9024ebc475e9a54405c8198e886e6cef5e4d6ddec5a400dedc8a229d6b",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-snmp-vacm@2014-12-10.yang",
+   "sha256": "12fdc950c35838f894dadf272fa065fd3903d6f55bc3a610d022c89b84b0d9f8",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-snmp@2014-12-10.yang",
+   "sha256": "76cc1fc921d85eb4a0db91cf44c231f55492fcf035ef9179ae16c0931190dd35",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-subscribed-notifications@2019-09-09.yang",
+   "sha256": "bccf35fad3785d25dd6ba4b1ff7e8533670d0fcf2fbe4dd5aa87682a10badced",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-system-capabilities@2022-02-17.yang",
+   "sha256": "142b6a2a8d43cef78456b75794fe161b8d390e38539b74f602a90e986712290e",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-traffic-analyzer@2026-06-26.yang",
+   "sha256": "0ebbb19a8a0f6ba8959fa1c650ad0780fad88b2727ef785fdd9c0357a68bcc8b",
+   "decision": "candidate-upgrade",
+   "root": true
+  },
+  {
+   "file": "ietf-traffic-generator@2026-07-03.yang",
+   "sha256": "a68a9aa1664aef83129310288b648fed7aac94fdcd7b1c865152a2c7516b1d7a",
+   "decision": "candidate-upgrade",
+   "root": true
+  },
+  {
+   "file": "ietf-twamp@2021-11-17.yang",
+   "sha256": "d815e8ba5e879e253d1e798263483d3198041815c28dafd088de4ab7cf3289ef",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-vpn-common@2022-02-11.yang",
+   "sha256": "d5dd75fbda5e32add29a7eeb1964e06a4dde384840b855c57edd5f35b25d3b37",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-x509-cert-to-name@2014-12-10.yang",
+   "sha256": "54440b401a64c6b42d5f07437dc686d4e4c876e69c901e98dce861e4281b5fef",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-yang-library@2019-01-04.yang",
+   "sha256": "ac11fe45ebbe50bd0ea8bf943ad53701e7121c45e8ef1ac5bb2713829ab468ae",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-yang-metadata@2016-08-05.yang",
+   "sha256": "05f8348069daefaf8bbc07af8001711c2347197115b4ccfe38be9ac55d3d6ea1",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-yang-patch@2017-02-22.yang",
+   "sha256": "69cb8502718e0960d068bc2a5ea03daf8b5579b4a08b80146f4c11b875e465e9",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-yang-push@2019-09-09.yang",
+   "sha256": "7ba7d6733a10feba5bf72d0060a0f24f25212b0a3524a21d8e255b9b04f50dc1",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-yang-schema-mount@2019-01-14.yang",
+   "sha256": "805e31a14f2e520f22d498ebb30424955e197c04dad7b9c385a93adb76d6534a",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-yang-structure-ext@2020-06-17.yang",
+   "sha256": "6d2413b1d448792114f7aafa3361930c8235e1d04f0e0dab15397d6a844d51ef",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-yang-types@2025-12-22.yang",
+   "sha256": "5e4ff4c837f303050fa46369987f11eb909c24dae2d4ec338342a7aa596f7b2b",
+   "decision": "runtime-baseline",
+   "root": false
+  }
+ ],
+ "missing_dependencies": [],
+ "state_compat_leaked": [],
+ "pyang": {
+  "passed": true,
+  "errors_by_category": {},
+  "warnings_by_category": {
+   "syntax": 2,
+   "reference": 2
+  },
+  "errors": [],
+  "errors_truncated": 0
+ },
+ "yangson": {
+  "loaded": false,
+  "error": "InvalidArgument: \\S+"
+ },
+ "libyang": {
+  "ran": true,
+  "image_id": "sha256:5db3d7d18f7ae37a5422516fd38a2bf7df8ace6ffc352867dca496d2b2c91afe",
+  "exit": 1,
+  "passed": false,
+  "errors": [
+   "libyang err : Ext plugin \"ly2 schema mount\": Extension \"yangmnt:mount-point\" instance allowed only in container or list statement. (/ietf-connectionless-oam:{grouping='test-point-location-info'}/root/{ext-inst='yangmnt:mount-point'}/root)"
+  ],
+  "warnings": []
+ },
+ "library_sha256": "3030036be6407bee78f8e84e936818d302f7081a8390f4218c82c8d0256e0ca0",
+ "inventory": {
+  "file": "models/network-twin/m1/inventory/assurance-oam.candidate.jsonl.gz",
+  "nodes": 3413,
+  "by_kind": {
+   "action": 8,
+   "anydata": 29,
+   "anyxml": 7,
+   "container": 476,
+   "input": 38,
+   "leaf": 2389,
+   "leaf-list": 133,
+   "list": 241,
+   "notification": 24,
+   "output": 38,
+   "rpc": 30
+  },
+  "config": 1133,
+  "state": 1319,
+  "with_when": 178,
+  "with_must": 10,
+  "leafref": 176,
+  "identityref": 181,
+  "mandatory": 349,
+  "deprecated_or_obsolete": 87
+ },
+ "tree": {
+  "lines": 4125,
+  "pyang_exit": 0
+ }
+}

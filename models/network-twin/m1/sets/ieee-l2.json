@@ -1,0 +1,628 @@
+{
+ "set": "ieee-l2",
+ "variant": "baseline",
+ "title": "IEEE 802.1/802.3/802 已发布模块：网桥、VLAN、生成树、LLDP、链路聚合、CFM、802.1X、MACsec、TSN、以太网接口",
+ "roots": [
+  "ieee1588-ptp-tt",
+  "ieee802-dot1ab-lldp",
+  "ieee802-dot1ab-types",
+  "ieee802-dot1ae-pry",
+  "ieee802-dot1ae-secy",
+  "ieee802-dot1as-ftt",
+  "ieee802-dot1as-gptp",
+  "ieee802-dot1as-hs",
+  "ieee802-dot1ax-drni",
+  "ieee802-dot1ax-linkagg",
+  "ieee802-dot1ax-types",
+  "ieee802-dot1cb-frer",
+  "ieee802-dot1cb-frer-types",
+  "ieee802-dot1cb-mask-and-match",
+  "ieee802-dot1cb-stream-identification",
+  "ieee802-dot1cb-stream-identification-types",
+  "ieee802-dot1cs-lrp",
+  "ieee802-dot1dc-ats-if",
+  "ieee802-dot1dc-cbsa-if",
+  "ieee802-dot1dc-gfqos",
+  "ieee802-dot1dc-preemption-if",
+  "ieee802-dot1dc-psfp-sys",
+  "ieee802-dot1dc-sched-if",
+  "ieee802-dot1q-ats",
+  "ieee802-dot1q-ats-bridge",
+  "ieee802-dot1q-bridge",
+  "ieee802-dot1q-cbsa",
+  "ieee802-dot1q-cbsa-bridge",
+  "ieee802-dot1q-cfm",
+  "ieee802-dot1q-cfm-alarm",
+  "ieee802-dot1q-cfm-bridge",
+  "ieee802-dot1q-cfm-types",
+  "ieee802-dot1q-cnc-config",
+  "ieee802-dot1q-congestion-isolation",
+  "ieee802-dot1q-congestion-isolation-bridge",
+  "ieee802-dot1q-lldp-basic-tlv",
+  "ieee802-dot1q-lldp-ci-tlv",
+  "ieee802-dot1q-lldp-cn-tlv",
+  "ieee802-dot1q-lldp-dcbx-tlv",
+  "ieee802-dot1q-lldp-evb-tlv",
+  "ieee802-dot1q-lldp-pbbn-aa-tlv",
+  "ieee802-dot1q-lldp-tr-tlv",
+  "ieee802-dot1q-mstp",
+  "ieee802-dot1q-mstp-bridge",
+  "ieee802-dot1q-pb",
+  "ieee802-dot1q-preemption",
+  "ieee802-dot1q-preemption-bridge",
+  "ieee802-dot1q-psfp",
+  "ieee802-dot1q-psfp-bridge",
+  "ieee802-dot1q-rstp",
+  "ieee802-dot1q-rstp-bridge",
+  "ieee802-dot1q-sched",
+  "ieee802-dot1q-sched-bridge",
+  "ieee802-dot1q-stream-filters-gates",
+  "ieee802-dot1q-stream-filters-gates-bridge",
+  "ieee802-dot1q-tpmr",
+  "ieee802-dot1q-tsn-types",
+  "ieee802-dot1q-types",
+  "ieee802-dot1q-vlan-bridge",
+  "ieee802-dot1x",
+  "ieee802-dot1x-eapol",
+  "ieee802-dot1x-types",
+  "ieee802-ethernet-interface",
+  "ieee802-ethernet-interface-half-duplex",
+  "ieee802-ethernet-link-oam",
+  "ieee802-ethernet-lldp",
+  "ieee802-ethernet-mac-merge",
+  "ieee802-ethernet-phy",
+  "ieee802-ethernet-phy-type",
+  "ieee802-ethernet-pon",
+  "ieee802-ethernet-pse",
+  "ieee802-ethernet-pse-2",
+  "ieee802-ethertype",
+  "ieee802-types"
+ ],
+ "modules": [
+  {
+   "file": "iana-crypt-hash@2014-08-06.yang",
+   "sha256": "67fc90d30cb6ba3b7697cf95de2ed4fad6eadf36d4bba0ef4f53e60c7719addd",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "iana-if-type@2026-03-17.yang",
+   "sha256": "e7c480fb5c39a3e074605ae76919abfe376d7d82347855ace41c4695ef5e6d77",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ieee1588-ptp-tt@2023-08-14.yang",
+   "sha256": "c2ed3a650ad83a33e32f7bdc83eb14d5ce979f33e0ac7f11635555ce3f1922b2",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1ab-lldp@2022-03-15.yang",
+   "sha256": "a57d47d2ddfa6014d0ee634c947e0f3cd4fd637b1b6cd6e266cbf11573fc85e9",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1ab-types@2022-03-15.yang",
+   "sha256": "f2989e709e186a0f4f25c0b474ea253c77b70dd1ddcfe4ec0eac5d354e5b9009",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1ae-pry@2022-06-17.yang",
+   "sha256": "12074f9c2edd7494a4158c3dcbf05a423fc8fedeaed8c61b0482bea22a436995",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1ae-secy@2022-06-14.yang",
+   "sha256": "3a507abc84ca02a72561189d98cd6a765e05a42d163d99dc49c9201683c7fb34",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1as-ftt@2026-02-11.yang",
+   "sha256": "b39f897a34aae2dad028a35495265e0151fe77b9018bd5d5ad483b8e0a411cd4",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1as-gptp@2025-12-10.yang",
+   "sha256": "b29487a4850307a0516495fe56a44035af93a5a07af5d012c9d361dcb84b5219",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1as-hs@2025-12-10.yang",
+   "sha256": "c8bc1b9c629450127aba130957c6d636aae5622b9f91c45968dac593c6198955",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1ax-drni@2025-09-30.yang",
+   "sha256": "345ff085ef34e5e3f0d88a23ea042856f78752dd730f2e6b90815644f1c0bbf6",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1ax-linkagg@2025-09-30.yang",
+   "sha256": "5de4998108cd2052a73330371d6747ab2a07347f4ba4fcdb44a429e204c295da",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1ax-types@2025-09-30.yang",
+   "sha256": "415b057c381c7aaa9fafc722909a0063255cb3c558a7a8198524b226be44aa17",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1cb-frer-types@2021-12-08.yang",
+   "sha256": "081769be8bf726045adc0aea352dfe155335666a8bdc05085e0f48cee1642f0d",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1cb-frer@2021-12-08.yang",
+   "sha256": "4a2a1c87ea49abcebf4488473e4191dfca0ef638c1377f97b794a817c3ec6076",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1cb-mask-and-match@2021-12-09.yang",
+   "sha256": "0d3138eef143876c1af7cb15ae4329560f4407069d1be6c97fcbba7cc099f718",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1cb-stream-identification-types@2021-12-09.yang",
+   "sha256": "de5c4a56631ab1f63f17cea49ec16c6d2502f3f5e5023073405251ebe472a2b9",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1cb-stream-identification@2021-12-08.yang",
+   "sha256": "a58e6e82b69190a78aa347b585b699c9dbd35f9146fd6bedab66e5929d9134b7",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1cs-lrp@2024-02-15.yang",
+   "sha256": "83dd76bd6c85cb3d22240dcbf152fa863579184ee43967f84701a5df8f85a10d",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1dc-ats-if@2024-09-26.yang",
+   "sha256": "fe5a0ec767529bea2bf9d4ad36d402b861871f37c69e7d2482d43bf5404c85de",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1dc-cbsa-if@2024-09-26.yang",
+   "sha256": "d77ad69e8cdcb2a4dbc24b56e2c55381084e4f3d95e4cc59998fcc39391577c6",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1dc-gfqos@2024-09-26.yang",
+   "sha256": "9cc82d6162c876ef4c87c0af0cae0c1838f293f9b0cfc4b287ecf3f1e7677953",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1dc-preemption-if@2024-09-26.yang",
+   "sha256": "d330f63f5fc2eda46281cafc6080cb8f967358dd28faeeb3a7885baf65d90cdd",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1dc-psfp-sys@2024-09-26.yang",
+   "sha256": "fc8d6d255c71ea669d151d818c26946a2e9dac60a4dee6c9fb1a3a889c80e7ff",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1dc-sched-if@2024-09-26.yang",
+   "sha256": "1983d5802f1fa7e4c95412b5b0e4f41b1bebee4c7d3ff0896c0b66fb5ef2c076",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1q-ats-bridge@2023-07-03.yang",
+   "sha256": "324cc3f0b449290e37a5de21a237e1ede5c02737ab768479a4a3a8652a21a2c4",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1q-ats@2023-07-03.yang",
+   "sha256": "08604e544c4c7a0b32116b6f5b143f51ff0c67558197776ea57a8c99d3aea2db",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1q-bridge@2023-10-26.yang",
+   "sha256": "8a974aa99688b870ae99efd9554db96f3fa5efc81468659b0fac00f3021cfc48",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1q-cbsa-bridge@2024-08-07.yang",
+   "sha256": "aaaf19539a837cad2b192303446d6da83bb26daa39ad8fe4a41100f9ed0f521e",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1q-cbsa@2024-08-07.yang",
+   "sha256": "40b3862925ca3d0af50c57b6f59cecaf7cdd3628838a622b74145587336e86c6",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1q-cfm-alarm@2022-01-19.yang",
+   "sha256": "a822979348f2e238303eb58ce20e5cde1605d60d2ca9263f5dd31b7ea14c9179",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1q-cfm-bridge@2022-01-19.yang",
+   "sha256": "a4f426b80e5517ed9ea5c5f1f1c782ef8166ac3c8302c48cf6af1ae5c0cf5044",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1q-cfm-types@2022-10-29.yang",
+   "sha256": "4705a383a616e1c988afb65a9c5dec84e168ed44278fce09bc2735e9d893edbb",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1q-cfm@2022-01-19.yang",
+   "sha256": "8df3451094670f30949fc0e67431c756b89f969089b91532b9bc9c39eca96af0",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1q-cnc-config@2024-01-31.yang",
+   "sha256": "e8568796d60cdf9e02f9ef959e339095a373b00fac9b7e2b833ec3ee0f16854f",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1q-congestion-isolation-bridge@2023-07-03.yang",
+   "sha256": "627c2aef89594df1e5c8aa4dedc727d8f9bc16dfd688dd4c1c77f9ef863e961a",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1q-congestion-isolation@2023-07-03.yang",
+   "sha256": "5c1f84173c93aacd263acdd3ea18f0aa2739fbab31bb608cf928a4fb7945ab25",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1q-lldp-basic-tlv@2023-07-03.yang",
+   "sha256": "667f5b036c5429d0ab45b2e65bcfcbd4a3c7f0cd7d93793550cc4914b96ba8ac",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1q-lldp-ci-tlv@2023-07-03.yang",
+   "sha256": "81e96f37a0b6b75159b4846c86d77b65e70ef5bbb2104af0457c982eec53206f",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1q-lldp-cn-tlv@2023-07-03.yang",
+   "sha256": "c63bda79fc421304dd23265224bf6e211ed28cf01e91b1d1aca2d4468d5cdbe5",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1q-lldp-dcbx-tlv@2023-07-03.yang",
+   "sha256": "c324a8f2a4bec8d8179cede59c57aa56a09c1913e78530de9bd68933c50cb785",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1q-lldp-evb-tlv@2023-07-03.yang",
+   "sha256": "9aba9bc69e7cc7fdd59629ba1805701d3aee313e47a00bd1162a9bff9dd8fd3d",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1q-lldp-pbbn-aa-tlv@2023-10-26.yang",
+   "sha256": "4f037e8f912af9bb8d4d28467af16899c7257a44f9391d05f5328073f045e879",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1q-lldp-tr-tlv@2023-07-03.yang",
+   "sha256": "36202323739c09eff4ad5276b3bd56c7ee1035510e8f932e2b939e4650955704",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1q-mstp-bridge@2025-02-04.yang",
+   "sha256": "acc1219c304585562afe3e910010829aae47062cd065a891ad02adc862d7e2ac",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1q-mstp@2025-02-04.yang",
+   "sha256": "ca70c26e38c9ade22a06678cc5a0c6e9fb1dd9d2e20514986cbf1600503a4c92",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1q-pb@2023-10-22.yang",
+   "sha256": "fc0fbddc81327c6a0a033e885f2ef5d5bca6f5ae97d81ac2439518fcd86e7ec5",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1q-preemption-bridge@2023-10-26.yang",
+   "sha256": "ee5f837f347aef5ff52f441ec695870af4d6327d7cc6c89328ecfd5893e44e02",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1q-preemption@2023-10-26.yang",
+   "sha256": "b7c36554461dba2ef3ca7568c6c35405ddb699cd52b3d1da13bec5589d80e259",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1q-psfp-bridge@2023-10-26.yang",
+   "sha256": "14587a8404763654333297fa416da3f66163004bf005b8b1015b32e6ba42e6d1",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1q-psfp@2023-10-26.yang",
+   "sha256": "65aacab04194fdaab11f5b724615b3266c0b66962505ef0ed93e63310e7e7dd3",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1q-rstp-bridge@2025-02-04.yang",
+   "sha256": "34a770f5cb6ee91004ff008857f02e1295c9722425266b75d6aca042b63c2504",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1q-rstp@2025-02-04.yang",
+   "sha256": "4835ded1ce20a945ecd6883a3b998c626092ad7eef216e45a2f9de7e40ebd9e9",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1q-sched-bridge@2023-10-26.yang",
+   "sha256": "63bba9b769ac514b2fd5144817eac930d4ff6de456364494a3cf4de5479af4d7",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1q-sched@2023-10-22.yang",
+   "sha256": "ee1434658167e87ce705812628c346c64be22df79c1890a4a0ba4fc893e3ce3f",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1q-stream-filters-gates-bridge@2023-07-03.yang",
+   "sha256": "3c3eedeb3a530423e8470f7c59230ca8afacacabfa96a8506af6c0763b26b986",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1q-stream-filters-gates@2023-07-03.yang",
+   "sha256": "f80fcc85b7b568f23cd2dec6d6107e9ea775145361ea0c2b7f29da819bc6b88f",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1q-tpmr@2022-01-19.yang",
+   "sha256": "6d4ed40d305190b69fe229f6d1598e7dfa7823e13668ba19f439ebb62088fd74",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1q-tsn-types@2022-10-29.yang",
+   "sha256": "3cb2cf6e07b340c56248edffaa03a73efcb4e031d053f43138f1f873a7c86b59",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1q-types@2023-10-26.yang",
+   "sha256": "019af9e03c5ac6e3e91eeb5a8ae76249cfd5f1d9435fb59c1514774a3dbf52d3",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1q-vlan-bridge@2018-03-07.yang",
+   "sha256": "590a0daaa4951daf2bf73ca5f91113ae76c04367c3257dbda19c9eeac0b579db",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1x-eapol@2022-05-25.yang",
+   "sha256": "daec921835e53f3adbce02172ead80a62ed4b317d4135392f648ff254542f472",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1x-types@2020-02-18.yang",
+   "sha256": "7da3fb0b1c33542554a9723ebc9542ac01529f73ff2fb20c938b858702e07773",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1x@2020-02-18.yang",
+   "sha256": "09f35fb727cdb2f6aa75132c8b6a7c8e536885e04df3cc937d5f9f7b7b3ccf42",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-ethernet-interface-half-duplex@2025-09-10.yang",
+   "sha256": "5b0a4c9b8a289afcdf2cf695e480f84d1bd4642bffde76638ed01f8cf18dfb36",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-ethernet-interface@2025-09-10.yang",
+   "sha256": "0e547c6cf101f0e6242a956cab06da2b4f1f72bc3d56f31d594aa8eb056c6dea",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-ethernet-link-oam@2025-09-10.yang",
+   "sha256": "4c48ddad8f668dbb796f43b8b3566a459a3514e1365cd3e753d31c791f79e145",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-ethernet-lldp@2025-09-10.yang",
+   "sha256": "008d2078eb96f7dcc57127465491c435424214d3c2fd62b6b5dde020fde559d7",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-ethernet-mac-merge@2025-09-10.yang",
+   "sha256": "2ed280d00e75aff6a29d214a1e25cee7120a3959c85525d5a51ed245fedebff1",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-ethernet-phy-type@2025-09-10.yang",
+   "sha256": "5ef96caa8145f219eb63d358acb326f8c891cc89743b76a3487966670523cc94",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-ethernet-phy@2025-09-10.yang",
+   "sha256": "1ab4041aec0efd5859da6fc7b3ac1dbec85c19d35c875e9107a674907443487e",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-ethernet-pon@2025-09-10.yang",
+   "sha256": "06d5022ca805e8feea3237fbd0592d5259c8e96d457d72b4f7553b45f61dbcd0",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-ethernet-pse-2@2025-09-10.yang",
+   "sha256": "23d30ce8667cdd681fa57bbaf3164624f621f7ba204f301098bf1f8f31e09ff7",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-ethernet-pse@2025-09-10.yang",
+   "sha256": "71c2f7c19ab80c63873bdfbbf858ec9d701c12a613bef9e11adb310a936b8d26",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-ethertype@2023-04-17.yang",
+   "sha256": "532acd0e503f7f294bbdb20a2f8fc6099839b01f764ae105726979ce90b9103f",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-types@2023-10-22.yang",
+   "sha256": "c88ae16c9c9b2bd58d781f84de8252c7c866b3c65554aba195befd9c6c28d7de",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-inet-types@2025-12-22.yang",
+   "sha256": "2fb39c45cd28d95f60838e5f74ac509d780d18f3c5bf78db251049a4d022e266",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-interfaces@2018-02-20.yang",
+   "sha256": "742cf4ad04459e1018ea69015adafe0202ade27b85d8350c1845b640ee32da16",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-netconf-acm@2018-02-14.yang",
+   "sha256": "796951c3b64cc602d62a012312cf1a14255c97d12e99a5c5a2c932c2df4cadbf",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-routing@2018-03-13.yang",
+   "sha256": "8cbcf2d4410fd31621c104fa706bef1cf2c2c33de8defb145bdde289f82c4116",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-system@2014-08-06.yang",
+   "sha256": "8a692ee2521b4ffe87a88303a61a103879ee26bff050c1b05a2027ae23205d3f",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-yang-types@2025-12-22.yang",
+   "sha256": "5e4ff4c837f303050fa46369987f11eb909c24dae2d4ec338342a7aa596f7b2b",
+   "decision": "runtime-baseline",
+   "root": false
+  }
+ ],
+ "missing_dependencies": [],
+ "state_compat_leaked": [],
+ "pyang": {
+  "passed": true,
+  "errors_by_category": {},
+  "warnings_by_category": {
+   "other": 1
+  },
+  "errors": [],
+  "errors_truncated": 0
+ },
+ "yangson": {
+  "loaded": false,
+  "error": "InvalidLeafrefPath: ieee802-dot1q-cfm-alarm:mep-priority-defect"
+ },
+ "libyang": {
+  "ran": true,
+  "image_id": "sha256:5db3d7d18f7ae37a5422516fd38a2bf7df8ace6ffc352867dca496d2b2c91afe",
+  "exit": 1,
+  "passed": false,
+  "errors": [
+   "libyang err : Regular expression \"[0-9a-fA-F]{2}(-[0-9a-fA-F]{2}){1,1983}\" is not valid (\"\": regular expression is too large). (/ieee802-dot1cb-mask-and-match:{augment='/dot1cb-sid:stream-identity/dot1cb-sid:parameters'}/ieee802-dot1cb-mask-and-match:mask-and-match-stream-identification/mask-and-match-stream-identification/msdu-mask)"
+  ],
+  "warnings": []
+ },
+ "library_sha256": "476d40b37601c7b15cbfdd4ed0505cdf46933b82b4423541e29266c81592d44a",
+ "inventory": {
+  "file": "models/network-twin/m1/inventory/ieee-l2.jsonl.gz",
+  "nodes": 3656,
+  "by_kind": {
+   "action": 12,
+   "container": 490,
+   "input": 20,
+   "leaf": 2814,
+   "leaf-list": 53,
+   "list": 231,
+   "notification": 8,
+   "output": 20,
+   "rpc": 8
+  },
+  "config": 1625,
+  "state": 1850,
+  "with_when": 145,
+  "with_must": 52,
+  "leafref": 97,
+  "identityref": 79,
+  "mandatory": 264,
+  "deprecated_or_obsolete": 94
+ },
+ "tree": {
+  "lines": 3957,
+  "pyang_exit": 0
+ }
+}

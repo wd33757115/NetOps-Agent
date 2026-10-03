@@ -1,0 +1,284 @@
+{
+ "scope": "M1-6 cases: campus-wan App output, named mutations, real module defects",
+ "files": {
+  "br1-device.json": "391a7331236de59ccf716ccc94b02029d51beb8609737465286f8766fb153271",
+  "br1-lldp.json": "b526816b1c501dfb52dea9ea6dffc4720fec9ebf82ddbad44b27004d6a80be40",
+  "campus-topology.json": "4356ccbefb10725bae65fd601a82d1b0b42f05d02ee4f7de4a7f9cc810a410fd",
+  "custom-field.json": "67c1d8902376388c238820b3051c36d660f74b7842f33ad028871109800af939",
+  "dist1-device.json": "8242290854964033fe47a5762fc69a9f0956d21d8bbcfa0364258c3525ed2138",
+  "link-to-tp-of-other-network.json": "818ade559871eb5d44031332fa15de8ba53be784abed91aed61b11ea5160e922",
+  "netops-br1-device@2026-10-02T17_00_59.735856+00_00.json": "e73a0f5b21a6d53f555cbdbd134d8b3eaaff6ddfbcac26fce20fcaf92338a807",
+  "netops-campus-topology@2026-10-02T17_00_59.735856+00_00.json": "c62f4c30b45c9625c266604e3e474a2fa4aec9040ed2de898b748c74723f6498",
+  "netops-research-vsr-1-l2.partial@2026-10-02T17_00_59.735856+00_00.json": "e2e451f1ff5f07511157566b56b2552643c3f2ef9e0076fa0ca32639b78dd17e",
+  "netops-two-revisions@2026-10-02T17_00_59.735856+00_00.json": "16ede4534fd2063bf6090474d91022b13e2c730ce3bbb0ab06482db705bc223b",
+  "next-hop-interface-of-other-device.json": "179a37fcdebbb7581670489708f37945d3fb2467cc01aca31a75b5cb32d1a22b",
+  "next-hop-two-cases.json": "96e4c2ed453e3a065f3b4c3fb2ffb4ff1df9faba791c452a45073153ebb827ee",
+  "research-vsr-1-l2.partial.json": "f7102af97004c56c56699ba95c5a85119d7123d1510c3dad345202de476095b9",
+  "research-vsr-1-routes.json": "a8187d4037e118e89a553670108de9808db17717f06736cb31bd88565a75449e",
+  "unknown-interface-type.json": "7ae2a6f7b15684e2b5ccf038b545d9b30e6ea2b05328c22eae129e571770edc6",
+  "vrrp-priority-out-of-range.json": "5880e23f279bbc3bb7953a1802953d5a158bc261a936febaecb6a943285a7080"
+ },
+ "cases": [
+  {
+   "name": "br1-device",
+   "kind": "instance",
+   "data": "br1-device.json",
+   "mode": "get",
+   "expect": "pass",
+   "note": "App output: hierarchy, types, identities"
+  },
+  {
+   "name": "br1-device",
+   "kind": "instance",
+   "data": "br1-device.json",
+   "mode": "data",
+   "expect": "pass",
+   "note": "App output: references resolve (RFC 8342 §5.3)"
+  },
+  {
+   "name": "br1-device",
+   "kind": "instance",
+   "data": "br1-device.json",
+   "mode": "strict",
+   "expect": "complete-or-collection",
+   "note": "complete-datastore check: native complete, or only unobserved nodes missing"
+  },
+  {
+   "name": "br1-lldp",
+   "kind": "instance",
+   "data": "br1-lldp.json",
+   "mode": "get",
+   "expect": "pass",
+   "note": "App output: hierarchy, types, identities"
+  },
+  {
+   "name": "br1-lldp",
+   "kind": "instance",
+   "data": "br1-lldp.json",
+   "mode": "data",
+   "expect": "pass",
+   "note": "App output: references resolve (RFC 8342 §5.3)"
+  },
+  {
+   "name": "br1-lldp",
+   "kind": "instance",
+   "data": "br1-lldp.json",
+   "mode": "strict",
+   "expect": "complete-or-collection",
+   "note": "complete-datastore check: native complete, or only unobserved nodes missing"
+  },
+  {
+   "name": "dist1-device",
+   "kind": "instance",
+   "data": "dist1-device.json",
+   "mode": "get",
+   "expect": "pass",
+   "note": "App output: hierarchy, types, identities"
+  },
+  {
+   "name": "dist1-device",
+   "kind": "instance",
+   "data": "dist1-device.json",
+   "mode": "data",
+   "expect": "pass",
+   "note": "App output: references resolve (RFC 8342 §5.3)"
+  },
+  {
+   "name": "dist1-device",
+   "kind": "instance",
+   "data": "dist1-device.json",
+   "mode": "strict",
+   "expect": "complete-or-collection",
+   "note": "complete-datastore check: native complete, or only unobserved nodes missing"
+  },
+  {
+   "name": "campus-topology",
+   "kind": "instance",
+   "data": "campus-topology.json",
+   "mode": "get",
+   "expect": "pass",
+   "note": "App output: hierarchy, types, identities"
+  },
+  {
+   "name": "campus-topology",
+   "kind": "instance",
+   "data": "campus-topology.json",
+   "mode": "data",
+   "expect": "pass",
+   "note": "App output: references resolve (RFC 8342 §5.3)"
+  },
+  {
+   "name": "campus-topology",
+   "kind": "instance",
+   "data": "campus-topology.json",
+   "mode": "strict",
+   "expect": "complete-or-collection",
+   "note": "complete-datastore check: native complete, or only unobserved nodes missing"
+  },
+  {
+   "name": "research-vsr-1-routes",
+   "kind": "instance",
+   "data": "research-vsr-1-routes.json",
+   "mode": "get",
+   "expect": "pass",
+   "note": "App output: hierarchy, types, identities"
+  },
+  {
+   "name": "research-vsr-1-routes",
+   "kind": "instance",
+   "data": "research-vsr-1-routes.json",
+   "mode": "data",
+   "expect": "pass",
+   "note": "App output: references resolve (RFC 8342 §5.3)"
+  },
+  {
+   "name": "research-vsr-1-routes",
+   "kind": "instance",
+   "data": "research-vsr-1-routes.json",
+   "mode": "strict",
+   "expect": "complete-or-collection",
+   "note": "complete-datastore check: native complete, or only unobserved nodes missing"
+  },
+  {
+   "name": "research-vsr-1-l2.partial",
+   "kind": "instance",
+   "data": "research-vsr-1-l2.partial.json",
+   "mode": "get",
+   "expect": "pass",
+   "note": "App output: hierarchy, types, identities"
+  },
+  {
+   "name": "research-vsr-1-l2.partial",
+   "kind": "instance",
+   "data": "research-vsr-1-l2.partial.json",
+   "mode": "data",
+   "expect": "pass",
+   "note": "App output: references resolve (RFC 8342 §5.3)"
+  },
+  {
+   "name": "research-vsr-1-l2.partial",
+   "kind": "instance",
+   "data": "research-vsr-1-l2.partial.json",
+   "mode": "strict",
+   "expect": "complete-or-collection",
+   "note": "complete-datastore check: native complete, or only unobserved nodes missing"
+  },
+  {
+   "name": "custom-field",
+   "kind": "instance",
+   "data": "custom-field.json",
+   "mode": "get",
+   "expect": "schema/unknown-node",
+   "note": "a project field next to standard ones is not a model node"
+  },
+  {
+   "name": "unknown-interface-type",
+   "kind": "instance",
+   "data": "unknown-interface-type.json",
+   "mode": "get",
+   "expect": "semantic/unknown-identity",
+   "note": "identity that iana-if-type does not define"
+  },
+  {
+   "name": "vrrp-priority-out-of-range",
+   "kind": "instance",
+   "data": "vrrp-priority-out-of-range.json",
+   "mode": "get",
+   "expect": "semantic/type",
+   "note": "RFC 8347 priority is uint8 1..254"
+  },
+  {
+   "name": "next-hop-two-cases",
+   "kind": "instance",
+   "data": "next-hop-two-cases.json",
+   "mode": "data",
+   "expect": "semantic/choice-conflict",
+   "note": "next-hop-options: simple-next-hop and special-next-hop at once"
+  },
+  {
+   "name": "next-hop-interface-of-other-device",
+   "kind": "instance",
+   "data": "next-hop-interface-of-other-device.json",
+   "mode": "data",
+   "expect": "semantic/reference",
+   "note": "outgoing-interface names an interface outside this device tree (DIST1's Ethernet2/0)"
+  },
+  {
+   "name": "link-to-tp-of-other-network",
+   "kind": "instance",
+   "data": "link-to-tp-of-other-network.json",
+   "mode": "data",
+   "expect": "semantic/reference",
+   "note": "a link end names a node that is not in the link's network"
+  },
+  {
+   "name": "bgp-ls-missing-import",
+   "kind": "schema",
+   "file": "ietf-bgp-ls@2026-06-29.yang",
+   "expect": "schema/missing-dependency",
+   "note": "BGP-LS YANG -04 imports iana-bgp-types; no BGP model version defines it"
+  },
+  {
+   "name": "flexi-grid-pinned-old-te",
+   "kind": "schema",
+   "file": "ietf-flexi-grid-media-channel@2021-02-12.yang",
+   "expect": "schema/wrong-revision",
+   "note": "expired draft pins ietf-te revision-date 2019-02-15, which no source keeps"
+  },
+  {
+   "name": "oam-mount-point-on-anydata",
+   "kind": "schema",
+   "file": "ietf-connectionless-oam@2019-04-16.yang",
+   "expect": "schema/other",
+   "note": "RFC 8532: mount-point on anydata; RFC 8528 §3.1: container/list only"
+  },
+  {
+   "name": "vrrp-interval-seconds-to-centiseconds",
+   "kind": "mapping",
+   "unit": "seconds",
+   "path": "/ietf-interfaces:interfaces/interface/ietf-ip:ipv4/ietf-vrrp:vrrp/vrrp-instance/advertise-interval-centi-sec",
+   "expect": "semantic/unit-mismatch",
+   "note": "a seconds value mapped onto RFC 8347's centisecond node"
+  },
+  {
+   "name": "vrrp-interval-seconds",
+   "kind": "mapping",
+   "unit": "seconds",
+   "path": "/ietf-interfaces:interfaces/interface/ietf-ip:ipv4/ietf-vrrp:vrrp/vrrp-instance/advertise-interval-sec",
+   "expect": "pass",
+   "note": "same value onto the VRRPv2 seconds node"
+  },
+  {
+   "name": "rfc9195-campus-topology",
+   "kind": "instance-data",
+   "data": "netops-campus-topology@2026-10-02T17_00_59.735856+00_00.json",
+   "mode": "data",
+   "expect": "pass",
+   "note": "RFC 9195 file: header rules, content-data against its own content-schema"
+  },
+  {
+   "name": "rfc9195-br1-device",
+   "kind": "instance-data",
+   "data": "netops-br1-device@2026-10-02T17_00_59.735856+00_00.json",
+   "mode": "data",
+   "expect": "pass",
+   "note": "RFC 9195 file: header rules, content-data against its own content-schema"
+  },
+  {
+   "name": "rfc9195-research-vsr-1-l2.partial",
+   "kind": "instance-data",
+   "data": "netops-research-vsr-1-l2.partial@2026-10-02T17_00_59.735856+00_00.json",
+   "mode": "data",
+   "expect": "pass",
+   "note": "RFC 9195 file: header rules, content-data against its own content-schema"
+  },
+  {
+   "name": "rfc9195-two-revisions-simplified-inline",
+   "kind": "instance-data",
+   "data": "netops-two-revisions@2026-10-02T17_00_59.735856+00_00.json",
+   "mode": "data",
+   "expect": "schema/instance-data-header",
+   "note": "RFC 9195 §2.1.2: multiple revisions of one module MUST NOT be listed"
+  }
+ ]
+}

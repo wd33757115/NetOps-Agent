@@ -1,0 +1,161 @@
+{
+ "ietf-routing:routing": {
+  "ribs": {
+   "rib": [
+    {
+     "name": "captured-public-ipv4",
+     "address-family": "ietf-ipv4-unicast-routing:ipv4-unicast",
+     "routes": {
+      "route": [
+       {
+        "ietf-ipv4-unicast-routing:destination-prefix": "0.0.0.0/32",
+        "source-protocol": "ietf-routing:direct",
+        "route-preference": 0,
+        "next-hop": {
+         "ietf-ipv4-unicast-routing:next-hop-address": "127.0.0.1",
+         "outgoing-interface": "Ethernet2/0"
+        }
+       },
+       {
+        "ietf-ipv4-unicast-routing:destination-prefix": "1.1.1.0/24",
+        "source-protocol": "ietf-ospf:ospf",
+        "route-preference": 10,
+        "next-hop": {
+         "ietf-ipv4-unicast-routing:next-hop-address": "2.2.2.1"
+        }
+       },
+       {
+        "ietf-ipv4-unicast-routing:destination-prefix": "2.2.2.0/24",
+        "source-protocol": "ietf-routing:direct",
+        "route-preference": 0,
+        "next-hop": {
+         "ietf-ipv4-unicast-routing:next-hop-address": "2.2.2.2"
+        }
+       },
+       {
+        "ietf-ipv4-unicast-routing:destination-prefix": "2.2.2.2/32",
+        "source-protocol": "ietf-routing:direct",
+        "route-preference": 0,
+        "next-hop": {
+         "ietf-ipv4-unicast-routing:next-hop-address": "127.0.0.1"
+        }
+       },
+       {
+        "ietf-ipv4-unicast-routing:destination-prefix": "2.2.2.255/32",
+        "source-protocol": "ietf-routing:direct",
+        "route-preference": 0,
+        "next-hop": {
+         "ietf-ipv4-unicast-routing:next-hop-address": "2.2.2.2"
+        }
+       },
+       {
+        "ietf-ipv4-unicast-routing:destination-prefix": "4.4.4.4/32",
+        "source-protocol": "ietf-routing:direct",
+        "route-preference": 0,
+        "next-hop": {
+         "ietf-ipv4-unicast-routing:next-hop-address": "127.0.0.1"
+        }
+       },
+       {
+        "ietf-ipv4-unicast-routing:destination-prefix": "10.10.1.0/24",
+        "source-protocol": "ietf-routing:direct",
+        "route-preference": 0,
+        "next-hop": {
+         "ietf-ipv4-unicast-routing:next-hop-address": "10.10.1.1"
+        }
+       },
+       {
+        "ietf-ipv4-unicast-routing:destination-prefix": "10.10.1.1/32",
+        "source-protocol": "ietf-routing:direct",
+        "route-preference": 0,
+        "next-hop": {
+         "ietf-ipv4-unicast-routing:next-hop-address": "127.0.0.1"
+        }
+       },
+       {
+        "ietf-ipv4-unicast-routing:destination-prefix": "10.10.1.255/32",
+        "source-protocol": "ietf-routing:direct",
+        "route-preference": 0,
+        "next-hop": {
+         "ietf-ipv4-unicast-routing:next-hop-address": "10.10.1.1"
+        }
+       },
+       {
+        "ietf-ipv4-unicast-routing:destination-prefix": "127.0.0.0/8",
+        "source-protocol": "ietf-routing:direct",
+        "route-preference": 0,
+        "next-hop": {
+         "ietf-ipv4-unicast-routing:next-hop-address": "127.0.0.1"
+        }
+       },
+       {
+        "ietf-ipv4-unicast-routing:destination-prefix": "127.0.0.1/32",
+        "source-protocol": "ietf-routing:direct",
+        "route-preference": 0,
+        "next-hop": {
+         "ietf-ipv4-unicast-routing:next-hop-address": "127.0.0.1"
+        }
+       },
+       {
+        "ietf-ipv4-unicast-routing:destination-prefix": "127.255.255.255/32",
+        "source-protocol": "ietf-routing:direct",
+        "route-preference": 0,
+        "next-hop": {
+         "ietf-ipv4-unicast-routing:next-hop-address": "127.0.0.1"
+        }
+       },
+       {
+        "ietf-ipv4-unicast-routing:destination-prefix": "192.168.1.0/24",
+        "source-protocol": "ietf-routing:direct",
+        "route-preference": 0,
+        "next-hop": {
+         "ietf-ipv4-unicast-routing:next-hop-address": "192.168.1.1"
+        }
+       },
+       {
+        "ietf-ipv4-unicast-routing:destination-prefix": "192.168.1.1/32",
+        "source-protocol": "ietf-routing:direct",
+        "route-preference": 0,
+        "next-hop": {
+         "ietf-ipv4-unicast-routing:next-hop-address": "127.0.0.1"
+        }
+       },
+       {
+        "ietf-ipv4-unicast-routing:destination-prefix": "192.168.1.255/32",
+        "source-protocol": "ietf-routing:direct",
+        "route-preference": 0,
+        "next-hop": {
+         "ietf-ipv4-unicast-routing:next-hop-address": "192.168.1.1"
+        }
+       },
+       {
+        "ietf-ipv4-unicast-routing:destination-prefix": "224.0.0.0/4",
+        "source-protocol": "ietf-routing:direct",
+        "route-preference": 0,
+        "next-hop": {
+         "ietf-ipv4-unicast-routing:next-hop-address": "0.0.0.0"
+        }
+       },
+       {
+        "ietf-ipv4-unicast-routing:destination-prefix": "224.0.0.0/24",
+        "source-protocol": "ietf-routing:direct",
+        "route-preference": 0,
+        "next-hop": {
+         "ietf-ipv4-unicast-routing:next-hop-address": "0.0.0.0"
+        }
+       },
+       {
+        "ietf-ipv4-unicast-routing:destination-prefix": "255.255.255.255/32",
+        "source-protocol": "ietf-routing:direct",
+        "route-preference": 0,
+        "next-hop": {
+         "ietf-ipv4-unicast-routing:next-hop-address": "127.0.0.1"
+        }
+       }
+      ]
+     }
+    }
+   ]
+  }
+ }
+}

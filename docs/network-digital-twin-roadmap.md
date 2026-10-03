@@ -1024,6 +1024,16 @@ P2-9 根据 Q5 取消，不引入 SNMP。P3 及后续仍在进入阶段时展开
 
 ## 14. 进度台账（执行者维护）
 
+### 2026-10-03 M1 完整模块基线与语义验收框架
+
+- 范围：实施方案 §8 M1 全部 8 项；产物在 `models/network-twin/m1/`，脚本为 `scripts/topology/m1_*.py`，报告见该目录 README。
+- 来源锁：目录 376 个模块名中锁定 343 个（另 33 个为 MIB），连同依赖、IEEE 已发布模块和现行更新修订共 464 个文件；目录给出的原文摘要全部一致。TE -44 原文缺模块头且引号未转义，用带摘要的补丁修复；SIMAP -03 复用已审查补丁。8 个未决依赖逐项写明原因（如 BGP-LS -04 导入的 `iana-bgp-types` 在 BGP 模型中不存在）。
+- 判定与编译：按修订判定，基线 309、候选 105、参考 61、不适用 2 个模块。11 个能力集的基线组合 pyang 全部 0 错；yangson、libyang 5.8.6 的未通过项均已归因为工具边界或原文问题（RFC 8532 mount-point 用在 anydata 上，与 RFC 8528 §3.1 冲突）。节点清单路径与 yangson `data_path()` 完全一致。
+- 映射：基线 21403 个数据节点；App 对 campus-wan 样本输出的 85 个路径与研究实例的 133 个路径全部是标准节点。已采集的 77 个字段中，已导出 21、可映射未导出 31、键不可得 13、无原生节点 8、作用域 4。
+- 校验：33 个正反例全部符合预期，能区分 schema、语义、采集三类缺口，覆盖缺依赖、错 revision、choice 冲突、未知 identity、越 scope 引用和单位错误。快照可封装为 RFC 9195 实例文件（simplified-inline 和 inline 两种）。
+- 升级回放：te-types、te-packet-types、layer0-types 的候选修订只新增 identity；VRRP 8347bis 把 master 改为 active，3 个旧快照失败，采用前需要转换。
+- 测试：新增 `tests/unit/test_topology_m1_mapping.py`（App 输出只含标准节点、映射路径有效、所有锁定模块都有判定）；topology 单元测试共 1236 个通过。未改动 App 运行代码，无需部署。
+
 ### 2026-10-03 交叉与并行连线的画布修复（topology 0.4.16）
 
 - 负责人提供 ACC1 LLDP：`Ethernet0/1 → DIST1 Ethernet2/0`、`Ethernet0/2 → DIST2 Ethernet2/1`，但画布看起来只有 DIST1。逐层核对当前快照 `edc1514b188643f0aec13f7913fe940a` 后，两条链路都存在于原观察、RFC 7951 L2 模型、canvas API 及浏览器 DOM；链路尾 ID 分别为 `ae508bbdfc62`、`4e339d459824`，各有两端 LLDP 证据。不是以原始 LLDP 行数代替模型验收。

@@ -1,0 +1,176 @@
+{
+ "ietf-yang-instance-data:instance-data-set": {
+  "name": "netops-br1-device",
+  "format-version": "2022-02-17",
+  "includes-defaults": "explicit",
+  "content-schema": {
+   "module": [
+    "iana-if-type@2026-03-17",
+    "ietf-inet-types@2025-12-22",
+    "ietf-interfaces@2018-02-20",
+    "ietf-ip@2018-02-22",
+    "ietf-vrrp@2018-03-13",
+    "ietf-yang-types@2025-12-22"
+   ]
+  },
+  "description": [
+   "Partial operational instance data (RFC 9195 §2): only observed values, no defaults inserted; mandatory/key nodes that were not observed are absent.",
+   "Produced by the netops topology App from the campus-wan lab fixtures."
+  ],
+  "datastore": "ietf-datastores:operational",
+  "timestamp": "2026-10-02T17:00:59.735856+00:00",
+  "content-data": {
+   "ietf-interfaces:interfaces": {
+    "interface": [
+     {
+      "name": "GigabitEthernet1/0",
+      "type": "iana-if-type:ethernetCsmacd",
+      "oper-status": "up",
+      "ietf-ip:ipv4": {
+       "address": [
+        {
+         "ip": "10.10.1.11",
+         "prefix-length": 24
+        }
+       ],
+       "neighbor": [
+        {
+         "ip": "10.10.1.12",
+         "link-layer-address": "0c:b2:00:00:00:00",
+         "origin": "dynamic"
+        },
+        {
+         "ip": "10.10.1.254",
+         "link-layer-address": "00:15:5d:01:03:14",
+         "origin": "dynamic"
+        }
+       ],
+       "ietf-vrrp:vrrp": {
+        "vrrp-instance": [
+         {
+          "vrid": 1,
+          "virtual-ipv4-addresses": {
+           "virtual-ipv4-address": [
+            {
+             "ipv4-address": "10.10.1.10"
+            }
+           ]
+          },
+          "state": "ietf-vrrp:master",
+          "last-adv-source": "10.10.1.11"
+         }
+        ]
+       }
+      }
+     },
+     {
+      "name": "GigabitEthernet2/0",
+      "type": "iana-if-type:ethernetCsmacd",
+      "oper-status": "up",
+      "ietf-ip:ipv4": {
+       "address": [
+        {
+         "ip": "100.64.1.2",
+         "prefix-length": 30
+        }
+       ],
+       "neighbor": [
+        {
+         "ip": "100.64.1.1",
+         "link-layer-address": "aa:bb:cc:00:01:10",
+         "origin": "dynamic"
+        }
+       ]
+      }
+     },
+     {
+      "name": "GigabitEthernet3/0",
+      "type": "iana-if-type:ethernetCsmacd",
+      "oper-status": "up",
+      "ietf-ip:ipv4": {
+       "address": [
+        {
+         "ip": "10.0.13.1",
+         "prefix-length": 30
+        }
+       ],
+       "neighbor": [
+        {
+         "ip": "10.0.13.2",
+         "link-layer-address": "aa:bb:cc:00:02:10",
+         "origin": "dynamic"
+        }
+       ]
+      }
+     },
+     {
+      "name": "GigabitEthernet4/0",
+      "type": "iana-if-type:ethernetCsmacd",
+      "oper-status": "up",
+      "ietf-ip:ipv4": {
+       "address": [
+        {
+         "ip": "10.0.14.1",
+         "prefix-length": 30
+        }
+       ],
+       "neighbor": [
+        {
+         "ip": "10.0.14.2",
+         "link-layer-address": "aa:bb:cc:00:03:20",
+         "origin": "dynamic"
+        }
+       ]
+      }
+     },
+     {
+      "name": "GigabitEthernet5/0",
+      "type": "iana-if-type:ethernetCsmacd",
+      "oper-status": "up",
+      "ietf-ip:ipv4": {
+       "address": [
+        {
+         "ip": "10.0.12.1",
+         "prefix-length": 30
+        }
+       ],
+       "neighbor": [
+        {
+         "ip": "10.0.12.2",
+         "link-layer-address": "0c:b2:00:00:00:04",
+         "origin": "dynamic"
+        }
+       ]
+      }
+     },
+     {
+      "name": "InLoopBack0",
+      "type": "iana-if-type:softwareLoopback",
+      "oper-status": "up"
+     },
+     {
+      "name": "LoopBack0",
+      "type": "iana-if-type:softwareLoopback",
+      "oper-status": "up",
+      "ietf-ip:ipv4": {
+       "address": [
+        {
+         "ip": "10.255.0.1",
+         "prefix-length": 32
+        }
+       ]
+      }
+     },
+     {
+      "name": "NULL0",
+      "oper-status": "up"
+     },
+     {
+      "name": "REG0",
+      "oper-status": "up"
+     }
+    ]
+   }
+  }
+ }
+}

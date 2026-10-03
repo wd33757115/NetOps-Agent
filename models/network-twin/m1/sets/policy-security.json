@@ -1,0 +1,289 @@
+{
+ "set": "policy-security",
+ "variant": "baseline",
+ "title": "ACL、NAT、QoS、DOTS、I2NSF、IPsec、MUD",
+ "roots": [
+  "iana-dots-signal-channel",
+  "iana-icmpv4-types",
+  "iana-icmpv6-types",
+  "iana-ipv6-ext-types",
+  "iana-tls-profile",
+  "ietf-access-control-list",
+  "ietf-acl-enh",
+  "ietf-acl-tls",
+  "ietf-acldns",
+  "ietf-dots-data-channel",
+  "ietf-dots-signal-channel",
+  "ietf-ethertypes",
+  "ietf-i2nsf-ike",
+  "ietf-i2nsf-ikec",
+  "ietf-i2nsf-ikeless",
+  "ietf-ipsec-iptfs",
+  "ietf-mud",
+  "ietf-mud-tls",
+  "ietf-mud-transparency",
+  "ietf-nat",
+  "ietf-packet-fields"
+ ],
+ "modules": [
+  {
+   "file": "iana-dots-signal-channel@2021-09-02.yang",
+   "sha256": "5ef1548a1bb3ca3b56896ef4ac483a2c770bd0ecf96bf0dbbee9dc73eb5155b2",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "iana-icmpv4-types@2025-12-22.yang",
+   "sha256": "c8b28631ce52dbbea64dc3ac5cc41c852464b29bc0e67ab9924460d4bb57cc54",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "iana-icmpv6-types@2025-12-22.yang",
+   "sha256": "3716065cbe4d8910ccd2ded3027c9a8f3135752e713bb747f86cbf8786fe4de7",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "iana-ipv6-ext-types@2025-12-22.yang",
+   "sha256": "de14e27dcef41353f1522f6b6c6929a18084d8ae5fb109f2929717eb18a2de71",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "iana-tls-profile@2025-04-18.yang",
+   "sha256": "5f52478a18dc149e79be76d5646d4194bf7dec8cb6e6aed1e1ab915b707df814",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-access-control-list@2019-03-04.yang",
+   "sha256": "d32d1c4c8a4bef34d86295d78aa9aadb888a7a0c38b56048f71fea4b1962d2f1",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-acl-enh@2025-12-22.yang",
+   "sha256": "0ce15f871cd5c5d666eee48265313ffff1f6fb8f4a5729ee0b5082cf1f32bcbb",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-acl-tls@2025-04-18.yang",
+   "sha256": "d0bfcf7d258d5afeee65065d656fc10e7d006157af67c3235c952a7aa04bccb1",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-acldns@2019-01-28.yang",
+   "sha256": "46285adb81a700e6d99f637a059e3d73859f4668f772e2a8681d3c638a6f34de",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-crypto-types@2024-10-10.yang",
+   "sha256": "c29757116529a3fe4c9359ef64060e59c00ec5cccb97e8aa639e669a20c17355",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-dots-data-channel@2020-05-28.yang",
+   "sha256": "6d9f5c2830303ad77b9735fddf7c3f736f3fcdbd33094f617e835c859530ba13",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-dots-signal-channel@2021-09-02.yang",
+   "sha256": "4cd2156c787f0a9c02ea47f8105a4e575d3bdd28ef58bed839cd420a1ae6e1df",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-ethertypes@2019-03-04.yang",
+   "sha256": "952dcb78026852e77ef01a7acdc38aab2bae81f7c4142a2dbd862c640c23cc20",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-i2nsf-ike@2021-07-14.yang",
+   "sha256": "2b300af4fdbb33facf1f76f23474b749fab875ef864de808c9d7955fe1c5d30d",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-i2nsf-ikec@2021-07-14.yang",
+   "sha256": "725768ff3598472f96221fae0d8694cbc0a8afbd716344a58bead7b5988e2c38",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-i2nsf-ikeless@2021-07-14.yang",
+   "sha256": "9fc587c6833dcfb6dc826ce9643f7231075a33004da5fc6e6905abb80469f53c",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-inet-types@2025-12-22.yang",
+   "sha256": "2fb39c45cd28d95f60838e5f74ac509d780d18f3c5bf78db251049a4d022e266",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-interfaces@2018-02-20.yang",
+   "sha256": "742cf4ad04459e1018ea69015adafe0202ade27b85d8350c1845b640ee32da16",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-ipsec-iptfs@2023-01-31.yang",
+   "sha256": "7bda7c4c60274e08683fff01b456b6c668217799fe701f11f4b1edaf38e6a2aa",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-mud-tls@2025-04-18.yang",
+   "sha256": "9dcebbea61b70a727cd41b520144384148e5a692d3b847498fe7511394b8b77f",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-mud-transparency@2023-10-10.yang",
+   "sha256": "37757aba48a7461b35de815d42e0dc2ce1f4b5035d9b7cdc1682d63f8a3e58f3",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-mud@2019-01-28.yang",
+   "sha256": "49242152c8231e4ae5e0ddf6086cbd1cab0f895b2f09317de5eea11fdd53ef6d",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-nat@2019-01-10.yang",
+   "sha256": "0869af3613c175c58cd254d58d250f4d8891e3d99a218e5f1d76c5540dcc8458",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-netconf-acm@2018-02-14.yang",
+   "sha256": "796951c3b64cc602d62a012312cf1a14255c97d12e99a5c5a2c932c2df4cadbf",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-packet-fields@2019-03-04.yang",
+   "sha256": "312a4b58a55714411ff9a3a36088be3aeaabe720fb663a56fea70fa00b4bcd03",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-routing-types@2017-12-04.yang",
+   "sha256": "45b2207ec63173760e10e1dd5a9d6023ff03a0427904208fe86c0bc747df59a1",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-yang-structure-ext@2020-06-17.yang",
+   "sha256": "6d2413b1d448792114f7aafa3361930c8235e1d04f0e0dab15397d6a844d51ef",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-yang-types@2025-12-22.yang",
+   "sha256": "5e4ff4c837f303050fa46369987f11eb909c24dae2d4ec338342a7aa596f7b2b",
+   "decision": "runtime-baseline",
+   "root": false
+  }
+ ],
+ "missing_dependencies": [],
+ "state_compat_leaked": [],
+ "pyang": {
+  "passed": true,
+  "errors_by_category": {},
+  "warnings_by_category": {},
+  "errors": [],
+  "errors_truncated": 0
+ },
+ "yangson": {
+  "loaded": true,
+  "schema_nodes": {
+   "CaseNode": 86,
+   "ChoiceNode": 48,
+   "ContainerNode": 166,
+   "LeafListNode": 51,
+   "LeafNode": 761,
+   "ListNode": 73,
+   "NotificationNode": 6
+  },
+  "paths_only_in_inventory": [],
+  "paths_only_in_yangson": []
+ },
+ "libyang": {
+  "ran": true,
+  "image_id": "sha256:5db3d7d18f7ae37a5422516fd38a2bf7df8ace6ffc352867dca496d2b2c91afe",
+  "exit": 0,
+  "passed": true,
+  "errors": [],
+  "warnings": [
+   "libyang warn: Schema node \"dots-signal\" for parent \"<root>\" not found; in expr \"/dots-signal\" with context node \"/ietf-dots-signal-channel:dots-signal/message-type/mitigation-scope/scope/direction/server-to-client-only/conflict-information/conflict-scope\".",
+   "libyang warn: Schema node \"dots-signal\" for parent \"<root>\" not found; in expr \"/dots-signal\" with context node \"/ietf-dots-signal-channel:dots-signal/message-type/mitigation-scope/scope/direction/server-to-client-only/conflict-information/conflict-scope\".",
+   "libyang warn: Schema node \"dots-signal\" for parent \"<root>\" not found; in expr \"/dots-signal\" with context node \"/ietf-dots-signal-channel:dots-signal/message-type/mitigation-scope/scope/direction/server-to-client-only/conflict-information/conflict-scope\".",
+   "libyang warn: Schema node \"dots-signal\" for parent \"<root>\" not found; in expr \"/dots-signal\" with context node \"/ietf-dots-signal-channel:dots-signal/message-type/mitigation-scope/scope/direction/server-to-client-only/conflict-information/conflict-scope\".",
+   "libyang warn: Schema node \"dots-signal\" for parent \"<root>\" not found; in expr \"/dots-signal\" with context node \"/ietf-dots-signal-channel:dots-signal/message-type/mitigation-scope/scope/direction/server-to-client-only/conflict-information/conflict-scope\".",
+   "libyang warn: Schema node \"dots-signal\" for parent \"<root>\" not found; in expr \"/dots-signal\" with context node \"/ietf-dots-signal-channel:dots-signal/message-type/mitigation-scope/scope/direction/server-to-client-only/conflict-information/conflict-scope\".",
+   "libyang warn: Schema node \"dots-signal\" for parent \"<root>\" not found; in expr \"/dots-signal\" with context node \"/ietf-dots-signal-channel:dots-signal/message-type/mitigation-scope/scope/direction/server-to-client-only/conflict-information/conflict-scope\".",
+   "libyang warn: Schema node \"dots-signal\" for parent \"<root>\" not found; in expr \"/dots-signal\" with context node \"/ietf-dots-signal-channel:dots-signal/message-type/mitigation-scope/scope/direction/server-to-client-only/conflict-information/conflict-scope\".",
+   "libyang warn: Schema node \"dots-signal\" for parent \"<root>\" not found; in expr \"/dots-signal\" with context node \"/ietf-dots-signal-channel:dots-signal/message-type/mitigation-scope/scope/direction/server-to-client-only/conflict-information/conflict-scope\".",
+   "libyang warn: Schema node \"dots-signal\" for parent \"<root>\" not found; in expr \"/dots-signal\" with context node \"/ietf-dots-signal-channel:dots-signal/message-type/mitigation-scope/scope/direction/server-to-client-only/conflict-information/conflict-scope\".",
+   "libyang warn: Schema node \"dots-signal\" for parent \"<root>\" not found; in expr \"/dots-signal\" with context node \"/ietf-dots-signal-channel:dots-signal/message-type/mitigation-scope/scope/direction/server-to-client-only/conflict-information/conflict-scope\".",
+   "libyang warn: Schema node \"dots-signal\" for parent \"<root>\" not found; in expr \"/dots-signal\" with context node \"/ietf-dots-signal-channel:dots-signal/message-type/mitigation-scope/scope/direction/server-to-client-only/conflict-information/conflict-scope\".",
+   "libyang warn: Schema node \"dots-signal\" for parent \"<root>\" not found; in expr \"/dots-signal\" with context node \"/ietf-dots-signal-channel:dots-signal/message-type/mitigation-scope/scope/direction/server-to-client-only/conflict-information/conflict-scope\".",
+   "libyang warn: Schema node \"dots-signal\" for parent \"<root>\" not found; in expr \"/dots-signal\" with context node \"/ietf-dots-signal-channel:dots-signal/message-type/mitigation-scope/scope/direction/server-to-client-only/conflict-information/conflict-scope\".",
+   "libyang warn: Schema node \"dots-signal\" for parent \"<root>\" not found; in expr \"/dots-signal\" with context node \"/ietf-dots-signal-channel:dots-signal/message-type/mitigation-scope/scope/direction/server-to-client-only/conflict-information/conflict-scope\".",
+   "libyang warn: Schema node \"dots-signal\" for parent \"<root>\" not found; in expr \"/dots-signal\" with context node \"/ietf-dots-signal-channel:dots-signal/message-type/mitigation-scope/scope/direction/server-to-client-only/conflict-information/conflict-scope\".",
+   "libyang warn: Schema node \"dots-signal\" for parent \"<root>\" not found; in expr \"/dots-signal\" with context node \"/ietf-dots-signal-channel:dots-signal/message-type/mitigation-scope/scope/direction/server-to-client-only/conflict-information/conflict-scope\".",
+   "libyang warn: Schema node \"dots-signal\" for parent \"<root>\" not found; in expr \"/dots-signal\" with context node \"/ietf-dots-signal-channel:dots-signal/message-type/mitigation-scope/scope/direction/server-to-client-only/conflict-information/conflict-scope\".",
+   "libyang warn: Schema node \"dots-signal\" for parent \"<root>\" not found; in expr \"/dots-signal\" with context node \"/ietf-dots-signal-channel:dots-signal/message-type/mitigation-scope/scope/direction/server-to-client-only/conflict-information/conflict-scope\".",
+   "libyang warn: Schema node \"dots-signal\" for parent \"<root>\" not found; in expr \"/dots-signal\" with context node \"/ietf-dots-signal-channel:dots-signal/message-type/mitigation-scope/scope/direction/server-to-client-only/conflict-information/conflict-scope\".",
+   "libyang warn: Schema node \"dots-signal\" for parent \"<root>\" not found; in expr \"/dots-signal\" with context node \"/ietf-dots-signal-channel:dots-signal/message-type/mitigation-scope/scope/direction/server-to-client-only/conflict-information/conflict-scope\".",
+   "libyang warn: Schema node \"dots-signal\" for parent \"<root>\" not found; in expr \"/dots-signal\" with context node \"/ietf-dots-signal-channel:dots-signal/message-type/mitigation-scope/scope/direction/server-to-client-only/conflict-information/conflict-scope\".",
+   "libyang warn: Schema node \"dots-signal\" for parent \"<root>\" not found; in expr \"/dots-signal\" with context node \"/ietf-dots-signal-channel:dots-signal/message-type/mitigation-scope/scope/direction/server-to-client-only/conflict-information/conflict-scope\".",
+   "libyang warn: Schema node \"dots-signal\" for parent \"<root>\" not found; in expr \"/dots-signal\" with context node \"/ietf-dots-signal-channel:dots-signal/message-type/mitigation-scope/scope/direction/server-to-client-only/conflict-information/conflict-scope\".",
+   "libyang warn: Schema node \"dots-signal\" for parent \"<root>\" not found; in expr \"/dots-signal\" with context node \"/ietf-dots-signal-channel:dots-signal/message-type/mitigation-scope/scope/direction/server-to-client-only/conflict-information/conflict-scope\".",
+   "libyang warn: Schema node \"dots-signal\" for parent \"<root>\" not found; in expr \"/dots-signal\" with context node \"/ietf-dots-signal-channel:dots-signal/message-type/mitigation-scope/scope/direction/server-to-client-only/conflict-information/conflict-scope\".",
+   "libyang warn: Schema node \"dots-signal\" for parent \"<root>\" not found; in expr \"/dots-signal\" with context node \"/ietf-dots-signal-channel:dots-signal/message-type/mitigation-scope/scope/direction/server-to-client-only/conflict-information/conflict-scope\".",
+   "libyang warn: Schema node \"dots-signal\" for parent \"<root>\" not found; in expr \"/dots-signal\" with context node \"/ietf-dots-signal-channel:dots-signal/message-type/mitigation-scope/scope/direction/server-to-client-only/conflict-information/conflict-scope\".",
+   "libyang warn: Schema node \"dots-signal\" for parent \"<root>\" not found; in expr \"/dots-signal\" with context node \"/ietf-dots-signal-channel:dots-signal/message-type/mitigation-scope/scope/direction/server-to-client-only/conflict-information/conflict-scope\".",
+   "libyang warn: Schema node \"dots-signal\" for parent \"<root>\" not found; in expr \"/dots-signal\" with context node \"/ietf-dots-signal-channel:dots-signal/message-type/mitigation-scope/scope/direction/server-to-client-only/conflict-information/conflict-scope\".",
+   "libyang warn: Schema node \"dots-signal\" for parent \"<root>\" not found; in expr \"/dots-signal\" with context node \"/ietf-dots-signal-channel:dots-signal/message-type/mitigation-scope/scope/direction/server-to-client-only/conflict-information/conflict-scope\".",
+   "libyang warn: Schema node \"dots-signal\" for parent \"<root>\" not found; in expr \"/dots-signal\" with context node \"/ietf-dots-signal-channel:dots-signal/message-type/mitigation-scope/scope/direction/server-to-client-only/conflict-information/conflict-scope\".",
+   "libyang warn: Schema node \"dots-signal\" for parent \"<root>\" not found; in expr \"/dots-signal\" with context node \"/ietf-dots-signal-channel:dots-signal/message-type/mitigation-scope/scope/direction/server-to-client-only/conflict-information/conflict-scope\".",
+   "libyang warn: Schema node \"dots-signal\" for parent \"<root>\" not found; in expr \"/dots-signal\" with context node \"/ietf-dots-signal-channel:dots-signal/message-type/mitigation-scope/scope/direction/server-to-client-only/conflict-information/conflict-scope\".",
+   "libyang warn: Schema node \"dots-signal\" for parent \"<root>\" not found; in expr \"/dots-signal\" with context node \"/ietf-dots-signal-channel:dots-signal/message-type/mitigation-scope/scope/direction/server-to-client-only/conflict-information/conflict-scope\"."
+  ]
+ },
+ "library_sha256": "66fa50edab6fb24b59433ad7e564d81b97d806cb643f8248542a4bc675597707",
+ "inventory": {
+  "file": "models/network-twin/m1/inventory/policy-security.jsonl.gz",
+  "nodes": 1057,
+  "by_kind": {
+   "container": 166,
+   "leaf": 761,
+   "leaf-list": 51,
+   "list": 73,
+   "notification": 6
+  },
+  "config": 737,
+  "state": 286,
+  "with_when": 24,
+  "with_must": 36,
+  "leafref": 31,
+  "identityref": 16,
+  "mandatory": 104,
+  "deprecated_or_obsolete": 27
+ },
+ "tree": {
+  "lines": 1229,
+  "pyang_exit": 0
+ }
+}

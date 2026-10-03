@@ -1,0 +1,2617 @@
+{
+ "scope": "M1-5 mapping inventory: baseline data nodes x collected fields x emitted paths",
+ "baseline_data_nodes": 21403,
+ "baseline_data_nodes_by_set": {
+  "assurance-oam": 2051,
+  "device": 1545,
+  "ieee-l2": 3474,
+  "inventory": 360,
+  "language-datastore": 64,
+  "nmda-state-compat": 3770,
+  "policy-security": 1023,
+  "routing": 6684,
+  "services": 4951,
+  "te-transport": 5458,
+  "topology": 206
+ },
+ "emitted": {
+  "app": 85,
+  "research": 133
+ },
+ "producers": {
+  "app:device-state:br1": {
+   "paths": 21,
+   "not_in_schema": []
+  },
+  "app:device-routing:br1:default": {
+   "paths": 1,
+   "not_in_schema": []
+  },
+  "app:device-lldp:br1": {
+   "paths": 4,
+   "not_in_schema": []
+  },
+  "app:device-state:br2": {
+   "paths": 21,
+   "not_in_schema": []
+  },
+  "app:device-routing:br2:default": {
+   "paths": 1,
+   "not_in_schema": []
+  },
+  "app:device-lldp:br2": {
+   "paths": 4,
+   "not_in_schema": []
+  },
+  "app:device-state:core1": {
+   "paths": 12,
+   "not_in_schema": []
+  },
+  "app:device-routing:core1:default": {
+   "paths": 1,
+   "not_in_schema": []
+  },
+  "app:device-lldp:core1": {
+   "paths": 1,
+   "not_in_schema": []
+  },
+  "app:device-state:core2": {
+   "paths": 12,
+   "not_in_schema": []
+  },
+  "app:device-routing:core2:default": {
+   "paths": 1,
+   "not_in_schema": []
+  },
+  "app:device-lldp:core2": {
+   "paths": 1,
+   "not_in_schema": []
+  },
+  "app:device-state:dist1": {
+   "paths": 20,
+   "not_in_schema": []
+  },
+  "app:device-routing:dist1:default": {
+   "paths": 1,
+   "not_in_schema": []
+  },
+  "app:device-lldp:dist1": {
+   "paths": 1,
+   "not_in_schema": []
+  },
+  "app:device-state:dist2": {
+   "paths": 20,
+   "not_in_schema": []
+  },
+  "app:device-routing:dist2:default": {
+   "paths": 1,
+   "not_in_schema": []
+  },
+  "app:device-lldp:dist2": {
+   "paths": 1,
+   "not_in_schema": []
+  },
+  "app:device-state:acc1": {
+   "paths": 9,
+   "not_in_schema": []
+  },
+  "app:device-routing:acc1:None": {
+   "paths": 1,
+   "not_in_schema": []
+  },
+  "app:device-lldp:acc1": {
+   "paths": 1,
+   "not_in_schema": []
+  },
+  "app:device-state:acc2": {
+   "paths": 9,
+   "not_in_schema": []
+  },
+  "app:device-routing:acc2:None": {
+   "paths": 1,
+   "not_in_schema": []
+  },
+  "app:device-lldp:acc2": {
+   "paths": 1,
+   "not_in_schema": []
+  },
+  "app:topology": {
+   "paths": 59,
+   "not_in_schema": []
+  },
+  "research:inventory.json": {
+   "paths": 11,
+   "not_in_schema": []
+  },
+  "research:topology.json": {
+   "paths": 51,
+   "not_in_schema": []
+  },
+  "research:vsr-1-interfaces.partial.json": {
+   "paths": 9,
+   "not_in_schema": []
+  },
+  "research:vsr-1-l2.partial.json": {
+   "paths": 59,
+   "not_in_schema": []
+  },
+  "research:vsr-1-routes.json": {
+   "paths": 12,
+   "not_in_schema": []
+  },
+  "research:vsr-2-interfaces.partial.json": {
+   "paths": 9,
+   "not_in_schema": []
+  },
+  "research:vsr-2-l2.partial.json": {
+   "paths": 59,
+   "not_in_schema": []
+  },
+  "research:vsr-2-routes.json": {
+   "paths": 12,
+   "not_in_schema": []
+  }
+ },
+ "fact_verdicts": {
+  "context": 4,
+  "exported": 21,
+  "key-blocked": 13,
+  "mappable-not-exported": 31,
+  "no-native-node": 8
+ },
+ "facts": {
+  "interfaces.ifname": {
+   "path": "/ietf-interfaces:interfaces/interface/name",
+   "status": "native",
+   "in_schema_sets": [
+    "topology",
+    "device",
+    "ieee-l2",
+    "routing",
+    "services",
+    "policy-security",
+    "assurance-oam",
+    "te-transport",
+    "nmda-state-compat"
+   ],
+   "emitted_by": [
+    "app",
+    "research"
+   ],
+   "verdict": "exported"
+  },
+  "interfaces.type": {
+   "path": "/ietf-interfaces:interfaces/interface/type",
+   "status": "derived",
+   "note": "platform interface kind → iana-if-type identity (ethernetCsmacd, ieee8023adLag, l3ipvlan, softwareLoopback)",
+   "in_schema_sets": [
+    "topology",
+    "device",
+    "ieee-l2",
+    "routing",
+    "services",
+    "policy-security",
+    "assurance-oam",
+    "te-transport",
+    "nmda-state-compat"
+   ],
+   "emitted_by": [
+    "app",
+    "research"
+   ],
+   "verdict": "exported"
+  },
+  "interfaces.admin_status": {
+   "path": "/ietf-interfaces:interfaces/interface/admin-status",
+   "status": "native",
+   "note": "state value; the configured value is interface/enabled",
+   "in_schema_sets": [
+    "topology",
+    "device",
+    "ieee-l2",
+    "routing",
+    "services",
+    "policy-security",
+    "assurance-oam",
+    "te-transport",
+    "nmda-state-compat"
+   ],
+   "emitted_by": [],
+   "verdict": "mappable-not-exported"
+  },
+  "interfaces.oper_status": {
+   "path": "/ietf-interfaces:interfaces/interface/oper-status",
+   "status": "native",
+   "in_schema_sets": [
+    "topology",
+    "device",
+    "ieee-l2",
+    "routing",
+    "services",
+    "policy-security",
+    "assurance-oam",
+    "te-transport",
+    "nmda-state-compat"
+   ],
+   "emitted_by": [
+    "app",
+    "research"
+   ],
+   "verdict": "exported"
+  },
+  "interfaces.description": {
+   "path": "/ietf-interfaces:interfaces/interface/description",
+   "status": "native",
+   "in_schema_sets": [
+    "topology",
+    "device",
+    "ieee-l2",
+    "routing",
+    "services",
+    "policy-security",
+    "assurance-oam",
+    "te-transport",
+    "nmda-state-compat"
+   ],
+   "emitted_by": [],
+   "verdict": "mappable-not-exported"
+  },
+  "interfaces.raw_name": {
+   "status": "no-native-node",
+   "note": "CLI abbreviation (Et0/1) of the full name; presentation evidence only",
+   "verdict": "no-native-node"
+  },
+  "ip.ifname": {
+   "path": "/ietf-interfaces:interfaces/interface/name",
+   "status": "native",
+   "in_schema_sets": [
+    "topology",
+    "device",
+    "ieee-l2",
+    "routing",
+    "services",
+    "policy-security",
+    "assurance-oam",
+    "te-transport",
+    "nmda-state-compat"
+   ],
+   "emitted_by": [
+    "app",
+    "research"
+   ],
+   "verdict": "exported"
+  },
+  "ip.address": {
+   "path": "/ietf-interfaces:interfaces/interface/ietf-ip:ipv4/address/ip",
+   "status": "native",
+   "note": "IPv6 rows go to ietf-ip:ipv6/address/ip",
+   "in_schema_sets": [
+    "device",
+    "routing",
+    "assurance-oam"
+   ],
+   "emitted_by": [
+    "app",
+    "research"
+   ],
+   "verdict": "exported"
+  },
+  "ip.prefix_len": {
+   "path": "/ietf-interfaces:interfaces/interface/ietf-ip:ipv4/address/prefix-length",
+   "status": "native",
+   "in_schema_sets": [
+    "device",
+    "routing",
+    "assurance-oam"
+   ],
+   "emitted_by": [
+    "app",
+    "research"
+   ],
+   "verdict": "exported"
+  },
+  "ip.vrf": {
+   "path": "/ietf-interfaces:interfaces/interface/ietf-network-instance:bind-ni-name",
+   "status": "context",
+   "note": "and /ietf-network-instance:network-instances/network-instance/name; 'default' is the global instance, not a named NI",
+   "in_schema_sets": [
+    "device",
+    "assurance-oam"
+   ],
+   "emitted_by": [],
+   "verdict": "context"
+  },
+  "arp.ifname": {
+   "path": "/ietf-interfaces:interfaces/interface/name",
+   "status": "native",
+   "in_schema_sets": [
+    "topology",
+    "device",
+    "ieee-l2",
+    "routing",
+    "services",
+    "policy-security",
+    "assurance-oam",
+    "te-transport",
+    "nmda-state-compat"
+   ],
+   "emitted_by": [
+    "app",
+    "research"
+   ],
+   "verdict": "exported"
+  },
+  "arp.ip": {
+   "path": "/ietf-interfaces:interfaces/interface/ietf-ip:ipv4/neighbor/ip",
+   "status": "native",
+   "in_schema_sets": [
+    "device",
+    "routing",
+    "assurance-oam"
+   ],
+   "emitted_by": [
+    "app",
+    "research"
+   ],
+   "verdict": "exported"
+  },
+  "arp.mac": {
+   "path": "/ietf-interfaces:interfaces/interface/ietf-ip:ipv4/neighbor/link-layer-address",
+   "status": "native",
+   "in_schema_sets": [
+    "device",
+    "routing",
+    "assurance-oam"
+   ],
+   "emitted_by": [
+    "app",
+    "research"
+   ],
+   "verdict": "exported"
+  },
+  "arp.type": {
+   "path": "/ietf-interfaces:interfaces/interface/ietf-ip:ipv4/neighbor/origin",
+   "status": "derived",
+   "note": "dynamic/static → origin dynamic/static; interface-own entries → other",
+   "in_schema_sets": [
+    "device",
+    "routing",
+    "assurance-oam"
+   ],
+   "emitted_by": [
+    "app",
+    "research"
+   ],
+   "verdict": "exported"
+  },
+  "arp.age_s": {
+   "status": "no-native-node",
+   "note": "RFC 8344 neighbor has no age or expiry leaf",
+   "verdict": "no-native-node"
+  },
+  "arp.vrf": {
+   "path": "/ietf-interfaces:interfaces/interface/ietf-network-instance:bind-ni-name",
+   "status": "context",
+   "in_schema_sets": [
+    "device",
+    "assurance-oam"
+   ],
+   "emitted_by": [],
+   "verdict": "context"
+  },
+  "mac.mac": {
+   "path": "/ieee802-dot1q-bridge:bridges/bridge/component/filtering-database/filtering-entry/address",
+   "status": "key-blocked",
+   "note": "list key also needs database-id; not shown by the CLI",
+   "in_schema_sets": [
+    "ieee-l2",
+    "routing"
+   ],
+   "emitted_by": [],
+   "verdict": "key-blocked"
+  },
+  "mac.vlan_or_bd": {
+   "path": "/ieee802-dot1q-bridge:bridges/bridge/component/filtering-database/filtering-entry/vids",
+   "status": "key-blocked",
+   "in_schema_sets": [
+    "ieee-l2",
+    "routing"
+   ],
+   "emitted_by": [],
+   "verdict": "key-blocked"
+  },
+  "mac.port": {
+   "path": "/ieee802-dot1q-bridge:bridges/bridge/component/filtering-database/filtering-entry/port-map/port-ref",
+   "status": "key-blocked",
+   "note": "port-ref is the bridge port number; the CLI gives the interface name and no port number",
+   "in_schema_sets": [
+    "ieee-l2",
+    "routing"
+   ],
+   "emitted_by": [],
+   "verdict": "key-blocked"
+  },
+  "mac.type": {
+   "path": "/ieee802-dot1q-bridge:bridges/bridge/component/filtering-database/filtering-entry/entry-type",
+   "status": "derived",
+   "note": "static/dynamic",
+   "in_schema_sets": [
+    "ieee-l2",
+    "routing"
+   ],
+   "emitted_by": [],
+   "verdict": "mappable-not-exported"
+  },
+  "vlan.vlan_id": {
+   "path": "/ieee802-dot1q-bridge:bridges/bridge/component/bridge-vlan/vlan/vid",
+   "status": "native",
+   "in_schema_sets": [
+    "ieee-l2",
+    "routing"
+   ],
+   "emitted_by": [
+    "research"
+   ],
+   "verdict": "mappable-not-exported"
+  },
+  "vlan.name": {
+   "path": "/ieee802-dot1q-bridge:bridges/bridge/component/bridge-vlan/vlan/name",
+   "status": "native",
+   "in_schema_sets": [
+    "ieee-l2",
+    "routing"
+   ],
+   "emitted_by": [
+    "research"
+   ],
+   "verdict": "mappable-not-exported"
+  },
+  "vlan_members.vlan_id": {
+   "path": "/ieee802-dot1q-bridge:bridges/bridge/component/bridge-vlan/vlan/vid",
+   "status": "native",
+   "in_schema_sets": [
+    "ieee-l2",
+    "routing"
+   ],
+   "emitted_by": [
+    "research"
+   ],
+   "verdict": "mappable-not-exported"
+  },
+  "vlan_members.ports": {
+   "path": "/ieee802-dot1q-bridge:bridges/bridge/component/bridge-vlan/vlan/egress-ports",
+   "status": "native",
+   "note": "untagged members also in untagged-ports",
+   "in_schema_sets": [
+    "ieee-l2",
+    "routing"
+   ],
+   "emitted_by": [
+    "research"
+   ],
+   "verdict": "mappable-not-exported"
+  },
+  "vlan_members.status": {
+   "status": "no-native-node",
+   "note": "VLAN active/suspended has no IEEE 802.1Q YANG leaf",
+   "verdict": "no-native-node"
+  },
+  "trunk.ports[].ifname": {
+   "path": "/ietf-interfaces:interfaces/interface/name",
+   "status": "native",
+   "in_schema_sets": [
+    "topology",
+    "device",
+    "ieee-l2",
+    "routing",
+    "services",
+    "policy-security",
+    "assurance-oam",
+    "te-transport",
+    "nmda-state-compat"
+   ],
+   "emitted_by": [
+    "app",
+    "research"
+   ],
+   "verdict": "exported"
+  },
+  "trunk.ports[].l2_mode": {
+   "path": "/ieee802-dot1q-bridge:bridges/bridge/component/bridge-vlan/vlan/untagged-ports",
+   "status": "derived",
+   "note": "trunk/access is not a leaf in 802.1Q; it is the port's tagged/untagged membership",
+   "in_schema_sets": [
+    "ieee-l2",
+    "routing"
+   ],
+   "emitted_by": [
+    "research"
+   ],
+   "verdict": "mappable-not-exported"
+  },
+  "trunk.ports[].encapsulation": {
+   "path": "/ietf-interfaces:interfaces/interface/ieee802-dot1q-bridge:bridge-port/port-type",
+   "status": "derived",
+   "note": "802.1Q tagging on a customer bridge port → c-vlan-bridge-port",
+   "in_schema_sets": [
+    "ieee-l2",
+    "routing"
+   ],
+   "emitted_by": [],
+   "verdict": "mappable-not-exported"
+  },
+  "trunk.ports[].native_vlan": {
+   "path": "/ietf-interfaces:interfaces/interface/ieee802-dot1q-bridge:bridge-port/pvid",
+   "status": "native",
+   "in_schema_sets": [
+    "ieee-l2",
+    "routing"
+   ],
+   "emitted_by": [
+    "research"
+   ],
+   "verdict": "mappable-not-exported"
+  },
+  "trunk.ports[].trunk_vlans": {
+   "path": "/ieee802-dot1q-bridge:bridges/bridge/component/bridge-vlan/vlan/egress-ports",
+   "status": "derived",
+   "note": "allowed list → membership of each VLAN",
+   "in_schema_sets": [
+    "ieee-l2",
+    "routing"
+   ],
+   "emitted_by": [
+    "research"
+   ],
+   "verdict": "mappable-not-exported"
+  },
+  "trunk.ports[].forwarding_vlans": {
+   "path": "/ietf-interfaces:interfaces/interface/ieee802-dot1q-bridge:bridge-port/ieee802-dot1q-mstp-bridge:port-mstp/msti",
+   "status": "derived",
+   "note": "VLANs whose spanning-tree instance forwards on the port; needs the VLAN→MSTI map and per-MSTI port state",
+   "in_schema_sets": [
+    "ieee-l2"
+   ],
+   "emitted_by": [],
+   "verdict": "mappable-not-exported"
+  },
+  "trunk.ports[].active_vlans": {
+   "path": "/ieee802-dot1q-bridge:bridges/bridge/component/bridge-vlan/vlan/egress-ports",
+   "status": "derived",
+   "note": "allowed and existing VLANs",
+   "in_schema_sets": [
+    "ieee-l2",
+    "routing"
+   ],
+   "emitted_by": [
+    "research"
+   ],
+   "verdict": "mappable-not-exported"
+  },
+  "trunk.ports[].raw_name": {
+   "status": "no-native-node",
+   "note": "CLI abbreviation",
+   "verdict": "no-native-node"
+  },
+  "switchport.ports[].ifname": {
+   "path": "/ietf-interfaces:interfaces/interface/name",
+   "status": "native",
+   "in_schema_sets": [
+    "topology",
+    "device",
+    "ieee-l2",
+    "routing",
+    "services",
+    "policy-security",
+    "assurance-oam",
+    "te-transport",
+    "nmda-state-compat"
+   ],
+   "emitted_by": [
+    "app",
+    "research"
+   ],
+   "verdict": "exported"
+  },
+  "switchport.ports[].admin_mode": {
+   "status": "no-native-node",
+   "note": "Cisco DTP administrative mode (dynamic auto/desirable); no IEEE/IETF node",
+   "verdict": "no-native-node"
+  },
+  "switchport.ports[].oper_mode": {
+   "status": "no-native-node",
+   "note": "DTP negotiation result; bundle membership goes to the LAG model",
+   "verdict": "no-native-node"
+  },
+  "switchport.ports[].access_vlan": {
+   "path": "/ietf-interfaces:interfaces/interface/ieee802-dot1q-bridge:bridge-port/pvid",
+   "status": "native",
+   "note": "for an access port",
+   "in_schema_sets": [
+    "ieee-l2",
+    "routing"
+   ],
+   "emitted_by": [
+    "research"
+   ],
+   "verdict": "mappable-not-exported"
+  },
+  "switchport.ports[].native_vlan": {
+   "path": "/ietf-interfaces:interfaces/interface/ieee802-dot1q-bridge:bridge-port/pvid",
+   "status": "native",
+   "note": "for a trunk port",
+   "in_schema_sets": [
+    "ieee-l2",
+    "routing"
+   ],
+   "emitted_by": [
+    "research"
+   ],
+   "verdict": "mappable-not-exported"
+  },
+  "switchport.ports[].pvid": {
+   "path": "/ietf-interfaces:interfaces/interface/ieee802-dot1q-bridge:bridge-port/pvid",
+   "status": "native",
+   "in_schema_sets": [
+    "ieee-l2",
+    "routing"
+   ],
+   "emitted_by": [
+    "research"
+   ],
+   "verdict": "mappable-not-exported"
+  },
+  "switchport.ports[].trunk_vlans": {
+   "path": "/ieee802-dot1q-bridge:bridges/bridge/component/bridge-vlan/vlan/egress-ports",
+   "status": "derived",
+   "in_schema_sets": [
+    "ieee-l2",
+    "routing"
+   ],
+   "emitted_by": [
+    "research"
+   ],
+   "verdict": "mappable-not-exported"
+  },
+  "switchport.ports[].admin_native_tagged": {
+   "path": "/ieee802-dot1q-bridge:bridges/bridge/component/bridge-vlan/vlan/untagged-ports",
+   "status": "derived",
+   "note": "native VLAN tagged = port absent from untagged-ports of the PVID VLAN",
+   "in_schema_sets": [
+    "ieee-l2",
+    "routing"
+   ],
+   "emitted_by": [
+    "research"
+   ],
+   "verdict": "mappable-not-exported"
+  },
+  "switchport.ports[].lag_parent": {
+   "path": "/ieee802-dot1q-bridge:bridges/bridge/component/bridge-vlan/vlan/egress-ports",
+   "status": "derived",
+   "note": "placeholder until the LAG model check below; see lag.members",
+   "in_schema_sets": [
+    "ieee-l2",
+    "routing"
+   ],
+   "emitted_by": [
+    "research"
+   ],
+   "verdict": "mappable-not-exported"
+  },
+  "switchport.ports[].encapsulation": {
+   "path": "/ietf-interfaces:interfaces/interface/ieee802-dot1q-bridge:bridge-port/port-type",
+   "status": "derived",
+   "in_schema_sets": [
+    "ieee-l2",
+    "routing"
+   ],
+   "emitted_by": [],
+   "verdict": "mappable-not-exported"
+  },
+  "switchport.ports[].l2_mode": {
+   "path": "/ieee802-dot1q-bridge:bridges/bridge/component/bridge-vlan/vlan/untagged-ports",
+   "status": "derived",
+   "in_schema_sets": [
+    "ieee-l2",
+    "routing"
+   ],
+   "emitted_by": [
+    "research"
+   ],
+   "verdict": "mappable-not-exported"
+  },
+  "switchport.ports[].raw_name": {
+   "status": "no-native-node",
+   "note": "CLI abbreviation",
+   "verdict": "no-native-node"
+  },
+  "lag.ifname": {
+   "path": "/ietf-interfaces:interfaces/interface/name",
+   "status": "native",
+   "note": "the aggregator interface, type ieee8023adLag",
+   "in_schema_sets": [
+    "topology",
+    "device",
+    "ieee-l2",
+    "routing",
+    "services",
+    "policy-security",
+    "assurance-oam",
+    "te-transport",
+    "nmda-state-compat"
+   ],
+   "emitted_by": [
+    "app",
+    "research"
+   ],
+   "verdict": "exported"
+  },
+  "lag.members": {
+   "path": "/ietf-network:networks/network/node/ietf-network-topology:termination-point/ietf-l2-topology:l2-termination-point-attributes/member-link-tp",
+   "status": "derived",
+   "note": "network view (RFC 8944); the device view is IEEE 802.1AX aggregation-port",
+   "in_schema_sets": [
+    "topology",
+    "nmda-state-compat"
+   ],
+   "emitted_by": [
+    "app"
+   ],
+   "verdict": "exported"
+  },
+  "lag.bundled": {
+   "status": "no-native-node",
+   "note": "placeholder until the IEEE 802.1AX aggregation-port state is checked",
+   "verdict": "no-native-node"
+  },
+  "lldp.local_if": {
+   "path": "/ieee802-dot1ab-lldp:lldp/port/name",
+   "status": "key-blocked",
+   "note": "port list key also needs dest-mac-address (agent); nearest-bridge is assumed only with evidence",
+   "in_schema_sets": [
+    "ieee-l2"
+   ],
+   "emitted_by": [
+    "research"
+   ],
+   "verdict": "key-blocked"
+  },
+  "lldp.remote_chassis_id": {
+   "path": "/ieee802-dot1ab-lldp:lldp/port/remote-systems-data/chassis-id",
+   "status": "key-blocked",
+   "note": "remote-systems-data keys time-mark and remote-index are not collected",
+   "in_schema_sets": [
+    "ieee-l2"
+   ],
+   "emitted_by": [
+    "research"
+   ],
+   "verdict": "key-blocked"
+  },
+  "lldp.remote_chassis_subtype": {
+   "path": "/ieee802-dot1ab-lldp:lldp/port/remote-systems-data/chassis-id-subtype",
+   "status": "key-blocked",
+   "in_schema_sets": [
+    "ieee-l2"
+   ],
+   "emitted_by": [
+    "research"
+   ],
+   "verdict": "key-blocked"
+  },
+  "lldp.remote_port_id": {
+   "path": "/ieee802-dot1ab-lldp:lldp/port/remote-systems-data/port-id",
+   "status": "key-blocked",
+   "in_schema_sets": [
+    "ieee-l2"
+   ],
+   "emitted_by": [
+    "research"
+   ],
+   "verdict": "key-blocked"
+  },
+  "lldp.remote_port_subtype": {
+   "path": "/ieee802-dot1ab-lldp:lldp/port/remote-systems-data/port-id-subtype",
+   "status": "key-blocked",
+   "in_schema_sets": [
+    "ieee-l2"
+   ],
+   "emitted_by": [
+    "research"
+   ],
+   "verdict": "key-blocked"
+  },
+  "lldp.remote_sysname": {
+   "path": "/ieee802-dot1ab-lldp:lldp/port/remote-systems-data/system-name",
+   "status": "key-blocked",
+   "in_schema_sets": [
+    "ieee-l2"
+   ],
+   "emitted_by": [
+    "research"
+   ],
+   "verdict": "key-blocked"
+  },
+  "lldp.remote_system_description": {
+   "path": "/ieee802-dot1ab-lldp:lldp/port/remote-systems-data/system-description",
+   "status": "key-blocked",
+   "in_schema_sets": [
+    "ieee-l2"
+   ],
+   "emitted_by": [],
+   "verdict": "key-blocked"
+  },
+  "lldp.remote_mgmt_addresses": {
+   "path": "/ieee802-dot1ab-lldp:lldp/port/remote-systems-data/management-address/address",
+   "status": "key-blocked",
+   "note": "hex octet string with address-subtype",
+   "in_schema_sets": [
+    "ieee-l2"
+   ],
+   "emitted_by": [
+    "research"
+   ],
+   "verdict": "key-blocked"
+  },
+  "lldp_local.chassis_id": {
+   "path": "/ieee802-dot1ab-lldp:lldp/local-system-data/chassis-id",
+   "status": "native",
+   "in_schema_sets": [
+    "ieee-l2"
+   ],
+   "emitted_by": [
+    "research"
+   ],
+   "verdict": "mappable-not-exported"
+  },
+  "lldp_local.hostname": {
+   "path": "/ieee802-dot1ab-lldp:lldp/local-system-data/system-name",
+   "status": "native",
+   "note": "also /ietf-system:system/hostname",
+   "in_schema_sets": [
+    "ieee-l2"
+   ],
+   "emitted_by": [
+    "app",
+    "research"
+   ],
+   "verdict": "exported"
+  },
+  "lldp_local.system_description": {
+   "path": "/ieee802-dot1ab-lldp:lldp/local-system-data/system-description",
+   "status": "native",
+   "in_schema_sets": [
+    "ieee-l2"
+   ],
+   "emitted_by": [
+    "app"
+   ],
+   "verdict": "exported"
+  },
+  "lldp_local.management_addresses": {
+   "path": "/ieee802-dot1ab-lldp:lldp/port/management-address-tx-port/man-address",
+   "status": "key-blocked",
+   "note": "IEEE 802.1AB keeps local management addresses per transmitting port (port keys name + dest-mac-address), as hex octets with address-subtype",
+   "in_schema_sets": [
+    "ieee-l2"
+   ],
+   "emitted_by": [],
+   "verdict": "key-blocked"
+  },
+  "lldp_local.vendor": {
+   "path": "/ietf-network-inventory:network-inventory/network-elements/network-element/mfg-name",
+   "status": "native",
+   "in_schema_sets": [
+    "inventory"
+   ],
+   "emitted_by": [
+    "research"
+   ],
+   "verdict": "mappable-not-exported"
+  },
+  "lldp_local.model": {
+   "path": "/ietf-network-inventory:network-inventory/network-elements/network-element/product-name",
+   "status": "native",
+   "in_schema_sets": [
+    "inventory"
+   ],
+   "emitted_by": [
+    "research"
+   ],
+   "verdict": "mappable-not-exported"
+  },
+  "lldp_local.serial": {
+   "path": "/ietf-network-inventory:network-inventory/network-elements/network-element/components/component/serial-number",
+   "status": "key-blocked",
+   "note": "belongs to a chassis component whose component-id is not collected",
+   "in_schema_sets": [
+    "inventory"
+   ],
+   "emitted_by": [],
+   "verdict": "key-blocked"
+  },
+  "routes.prefix": {
+   "path": "/ietf-routing:routing/ribs/rib/routes/route/ietf-ipv4-unicast-routing:destination-prefix",
+   "status": "native",
+   "in_schema_sets": [
+    "routing"
+   ],
+   "emitted_by": [
+    "research"
+   ],
+   "verdict": "mappable-not-exported"
+  },
+  "routes.protocol": {
+   "path": "/ietf-routing:routing/ribs/rib/routes/route/source-protocol",
+   "status": "derived",
+   "note": "CLI protocol code → routing-protocol identity",
+   "in_schema_sets": [
+    "ieee-l2",
+    "routing",
+    "services",
+    "assurance-oam",
+    "te-transport"
+   ],
+   "emitted_by": [
+    "research"
+   ],
+   "verdict": "mappable-not-exported"
+  },
+  "routes.preference": {
+   "path": "/ietf-routing:routing/ribs/rib/routes/route/route-preference",
+   "status": "native",
+   "in_schema_sets": [
+    "ieee-l2",
+    "routing",
+    "services",
+    "assurance-oam",
+    "te-transport"
+   ],
+   "emitted_by": [
+    "research"
+   ],
+   "verdict": "mappable-not-exported"
+  },
+  "routes.metric": {
+   "path": "/ietf-routing:routing/ribs/rib/routes/route/ietf-ospf:metric",
+   "status": "derived",
+   "note": "only OSPF routes have a metric node (RFC 9129); static/BGP metrics have none in RFC 8349",
+   "in_schema_sets": [
+    "routing",
+    "te-transport"
+   ],
+   "emitted_by": [],
+   "verdict": "mappable-not-exported"
+  },
+  "routes.next_hops[].ip": {
+   "path": "/ietf-routing:routing/ribs/rib/routes/route/next-hop/ietf-ipv4-unicast-routing:next-hop-address",
+   "status": "native",
+   "note": "several next hops: next-hop-list/next-hop/ietf-ipv4-unicast-routing:address",
+   "in_schema_sets": [
+    "routing"
+   ],
+   "emitted_by": [
+    "research"
+   ],
+   "verdict": "mappable-not-exported"
+  },
+  "routes.next_hops[].ifname": {
+   "path": "/ietf-routing:routing/ribs/rib/routes/route/next-hop/outgoing-interface",
+   "status": "native",
+   "in_schema_sets": [
+    "ieee-l2",
+    "routing",
+    "services",
+    "assurance-oam",
+    "te-transport"
+   ],
+   "emitted_by": [],
+   "verdict": "mappable-not-exported"
+  },
+  "routes.next_hops[].vrf": {
+   "path": "/ietf-network-instance:network-instances/network-instance/name",
+   "status": "context",
+   "note": "next hop resolved in another instance (route leaking)",
+   "in_schema_sets": [
+    "device",
+    "assurance-oam"
+   ],
+   "emitted_by": [],
+   "verdict": "context"
+  },
+  "routes.vrf": {
+   "path": "/ietf-network-instance:network-instances/network-instance/name",
+   "status": "context",
+   "note": "each NI holds its own RIB under its schema mount (RFC 8529/8528)",
+   "in_schema_sets": [
+    "device",
+    "assurance-oam"
+   ],
+   "emitted_by": [],
+   "verdict": "context"
+  },
+  "vrrp.ifname": {
+   "path": "/ietf-interfaces:interfaces/interface/name",
+   "status": "native",
+   "in_schema_sets": [
+    "topology",
+    "device",
+    "ieee-l2",
+    "routing",
+    "services",
+    "policy-security",
+    "assurance-oam",
+    "te-transport",
+    "nmda-state-compat"
+   ],
+   "emitted_by": [
+    "app",
+    "research"
+   ],
+   "verdict": "exported"
+  },
+  "vrrp.vrid": {
+   "path": "/ietf-interfaces:interfaces/interface/ietf-ip:ipv4/ietf-vrrp:vrrp/vrrp-instance/vrid",
+   "status": "native",
+   "in_schema_sets": [
+    "routing"
+   ],
+   "emitted_by": [
+    "app"
+   ],
+   "verdict": "exported"
+  },
+  "vrrp.priority": {
+   "path": "/ietf-interfaces:interfaces/interface/ietf-ip:ipv4/ietf-vrrp:vrrp/vrrp-instance/priority",
+   "status": "native",
+   "in_schema_sets": [
+    "routing"
+   ],
+   "emitted_by": [],
+   "verdict": "mappable-not-exported"
+  },
+  "vrrp.state": {
+   "path": "/ietf-interfaces:interfaces/interface/ietf-ip:ipv4/ietf-vrrp:vrrp/vrrp-instance/state",
+   "status": "derived",
+   "note": "Initialize/Backup/Master → identity",
+   "in_schema_sets": [
+    "routing"
+   ],
+   "emitted_by": [
+    "app"
+   ],
+   "verdict": "exported"
+  },
+  "vrrp.virtual_addresses": {
+   "path": "/ietf-interfaces:interfaces/interface/ietf-ip:ipv4/ietf-vrrp:vrrp/vrrp-instance/virtual-ipv4-addresses/virtual-ipv4-address/ipv4-address",
+   "status": "native",
+   "in_schema_sets": [
+    "routing"
+   ],
+   "emitted_by": [
+    "app"
+   ],
+   "verdict": "exported"
+  },
+  "vrrp.last_adv_source": {
+   "path": "/ietf-interfaces:interfaces/interface/ietf-ip:ipv4/ietf-vrrp:vrrp/vrrp-instance/last-adv-source",
+   "status": "native",
+   "in_schema_sets": [
+    "routing"
+   ],
+   "emitted_by": [
+    "app"
+   ],
+   "verdict": "exported"
+  }
+ },
+ "partial_instances": {
+  "app": {
+   "/ietf-interfaces:interfaces/interface": [
+    {
+     "path": "/ietf-interfaces:interfaces/interface/admin-status",
+     "why": "mandatory",
+     "if-feature": [
+      "if-mib"
+     ],
+     "state": true
+    },
+    {
+     "path": "/ietf-interfaces:interfaces/interface/if-index",
+     "why": "mandatory",
+     "if-feature": [
+      "if-mib"
+     ],
+     "state": true
+    },
+    {
+     "path": "/ietf-interfaces:interfaces/interface/statistics/discontinuity-time",
+     "why": "mandatory",
+     "state": true
+    },
+    {
+     "path": "/ietf-interfaces:interfaces/interface/ieee802-dot1ax-linkagg:lag/key-group-name",
+     "why": "mandatory",
+     "when": [
+      "derived-from-or-self(if:type,'ianaif:ieee8023adLag')"
+     ]
+    },
+    {
+     "path": "/ietf-interfaces:interfaces/interface/ietf-microwave-radio-link:mode",
+     "why": "mandatory",
+     "when": [
+      "derived-from-or-self(if:type,'ianaift:microwaveRadioLinkTerminal')"
+     ]
+    },
+    {
+     "path": "/ietf-interfaces:interfaces/interface/ietf-microwave-radio-link:carrier-terminations",
+     "why": "mandatory",
+     "when": [
+      "derived-from-or-self(if:type,'ianaift:microwaveRadioLinkTerminal')"
+     ]
+    },
+    {
+     "path": "/ietf-interfaces:interfaces/interface/ietf-microwave-radio-link:tx-frequency",
+     "why": "mandatory",
+     "when": [
+      "derived-from-or-self(if:type,'ianaift:microwaveCarrierTermination')"
+     ]
+    },
+    {
+     "path": "/ietf-interfaces:interfaces/interface/ietf-microwave-radio-link:channel-separation",
+     "why": "mandatory",
+     "when": [
+      "derived-from-or-self(if:type,'ianaift:microwaveCarrierTermination')"
+     ]
+    }
+   ],
+   "/ietf-interfaces:interfaces/interface/ietf-ip:ipv4/ietf-vrrp:vrrp/vrrp-instance": [
+    {
+     "path": "/ietf-interfaces:interfaces/interface/ietf-ip:ipv4/ietf-vrrp:vrrp/vrrp-instance/version",
+     "why": "mandatory"
+    }
+   ]
+  },
+  "research": {
+   "/ieee802-dot1q-bridge:bridges/bridge": [
+    {
+     "path": "/ieee802-dot1q-bridge:bridges/bridge/address",
+     "why": "mandatory"
+    }
+   ],
+   "/ietf-interfaces:interfaces/interface": [
+    {
+     "path": "/ietf-interfaces:interfaces/interface/admin-status",
+     "why": "mandatory",
+     "if-feature": [
+      "if-mib"
+     ],
+     "state": true
+    },
+    {
+     "path": "/ietf-interfaces:interfaces/interface/if-index",
+     "why": "mandatory",
+     "if-feature": [
+      "if-mib"
+     ],
+     "state": true
+    },
+    {
+     "path": "/ietf-interfaces:interfaces/interface/statistics/discontinuity-time",
+     "why": "mandatory",
+     "state": true
+    },
+    {
+     "path": "/ietf-interfaces:interfaces/interface/ieee802-dot1ax-linkagg:lag/key-group-name",
+     "why": "mandatory",
+     "when": [
+      "derived-from-or-self(if:type,'ianaif:ieee8023adLag')"
+     ]
+    },
+    {
+     "path": "/ietf-interfaces:interfaces/interface/ietf-microwave-radio-link:mode",
+     "why": "mandatory",
+     "when": [
+      "derived-from-or-self(if:type,'ianaift:microwaveRadioLinkTerminal')"
+     ]
+    },
+    {
+     "path": "/ietf-interfaces:interfaces/interface/ietf-microwave-radio-link:carrier-terminations",
+     "why": "mandatory",
+     "when": [
+      "derived-from-or-self(if:type,'ianaift:microwaveRadioLinkTerminal')"
+     ]
+    },
+    {
+     "path": "/ietf-interfaces:interfaces/interface/ietf-microwave-radio-link:tx-frequency",
+     "why": "mandatory",
+     "when": [
+      "derived-from-or-self(if:type,'ianaift:microwaveCarrierTermination')"
+     ]
+    },
+    {
+     "path": "/ietf-interfaces:interfaces/interface/ietf-microwave-radio-link:channel-separation",
+     "why": "mandatory",
+     "when": [
+      "derived-from-or-self(if:type,'ianaift:microwaveCarrierTermination')"
+     ]
+    }
+   ]
+  }
+ },
+ "modules": {
+  "ietf-simap-topology": {
+   "nodes": 41,
+   "config": 25,
+   "state": 16,
+   "app": 17,
+   "research": 16
+  },
+  "ietf-l2-topology": {
+   "nodes": 32,
+   "config": 32,
+   "state": 0,
+   "app": 12,
+   "research": 7
+  },
+  "ietf-network": {
+   "nodes": 11,
+   "config": 11,
+   "state": 0,
+   "app": 11,
+   "research": 11
+  },
+  "ietf-network-topology": {
+   "nodes": 17,
+   "config": 17,
+   "state": 0,
+   "app": 11,
+   "research": 11
+  },
+  "ietf-ip": {
+   "nodes": 60,
+   "config": 27,
+   "state": 33,
+   "app": 8,
+   "research": 8
+  },
+  "ietf-l3-unicast-topology": {
+   "nodes": 21,
+   "config": 21,
+   "state": 0,
+   "app": 8,
+   "research": 6
+  },
+  "ietf-vrrp": {
+   "nodes": 94,
+   "config": 47,
+   "state": 47,
+   "app": 8,
+   "research": 0
+  },
+  "ietf-interfaces": {
+   "nodes": 57,
+   "config": 7,
+   "state": 50,
+   "app": 5,
+   "research": 5
+  },
+  "ieee802-dot1ab-lldp": {
+   "nodes": 81,
+   "config": 25,
+   "state": 56,
+   "app": 4,
+   "research": 29
+  },
+  "ietf-routing": {
+   "nodes": 53,
+   "config": 13,
+   "state": 40,
+   "app": 1,
+   "research": 10
+  },
+  "ieee1588-ptp-tt": {
+   "nodes": 334,
+   "config": 160,
+   "state": 174,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1ae-pry": {
+   "nodes": 57,
+   "config": 25,
+   "state": 32,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1ae-secy": {
+   "nodes": 104,
+   "config": 32,
+   "state": 72,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1as-ftt": {
+   "nodes": 48,
+   "config": 33,
+   "state": 15,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1as-gptp": {
+   "nodes": 112,
+   "config": 46,
+   "state": 66,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1as-hs": {
+   "nodes": 32,
+   "config": 21,
+   "state": 11,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1ax-drni": {
+   "nodes": 51,
+   "config": 21,
+   "state": 30,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1ax-linkagg": {
+   "nodes": 84,
+   "config": 41,
+   "state": 43,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1cb-frer": {
+   "nodes": 133,
+   "config": 87,
+   "state": 46,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1cb-mask-and-match": {
+   "nodes": 14,
+   "config": 10,
+   "state": 4,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1cb-stream-identification": {
+   "nodes": 63,
+   "config": 42,
+   "state": 21,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1cs-lrp": {
+   "nodes": 42,
+   "config": 2,
+   "state": 40,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1dc-ats-if": {
+   "nodes": 43,
+   "config": 30,
+   "state": 13,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1dc-cbsa-if": {
+   "nodes": 5,
+   "config": 4,
+   "state": 1,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1dc-gfqos": {
+   "nodes": 21,
+   "config": 7,
+   "state": 14,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1dc-preemption-if": {
+   "nodes": 14,
+   "config": 10,
+   "state": 4,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1dc-psfp-sys": {
+   "nodes": 90,
+   "config": 57,
+   "state": 33,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1dc-sched-if": {
+   "nodes": 49,
+   "config": 25,
+   "state": 24,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1q-ats": {
+   "nodes": 42,
+   "config": 30,
+   "state": 12,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1q-ats-bridge": {
+   "nodes": 43,
+   "config": 30,
+   "state": 13,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1q-bridge": {
+   "nodes": 237,
+   "config": 179,
+   "state": 58,
+   "app": 0,
+   "research": 17
+  },
+  "ieee802-dot1q-cbsa-bridge": {
+   "nodes": 5,
+   "config": 4,
+   "state": 1,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1q-cfm": {
+   "nodes": 113,
+   "config": 44,
+   "state": 69,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1q-cfm-bridge": {
+   "nodes": 46,
+   "config": 28,
+   "state": 18,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1q-cnc-config": {
+   "nodes": 130,
+   "config": 66,
+   "state": 64,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1q-congestion-isolation": {
+   "nodes": 19,
+   "config": 17,
+   "state": 2,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1q-congestion-isolation-bridge": {
+   "nodes": 53,
+   "config": 33,
+   "state": 20,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1q-lldp-basic-tlv": {
+   "nodes": 35,
+   "config": 17,
+   "state": 18,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1q-lldp-ci-tlv": {
+   "nodes": 17,
+   "config": 6,
+   "state": 11,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1q-lldp-cn-tlv": {
+   "nodes": 7,
+   "config": 4,
+   "state": 3,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1q-lldp-dcbx-tlv": {
+   "nodes": 79,
+   "config": 40,
+   "state": 39,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1q-lldp-evb-tlv": {
+   "nodes": 9,
+   "config": 3,
+   "state": 6,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1q-lldp-pbbn-aa-tlv": {
+   "nodes": 23,
+   "config": 2,
+   "state": 21,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1q-lldp-tr-tlv": {
+   "nodes": 10,
+   "config": 5,
+   "state": 5,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1q-mstp-bridge": {
+   "nodes": 64,
+   "config": 17,
+   "state": 47,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1q-pb": {
+   "nodes": 22,
+   "config": 22,
+   "state": 0,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1q-preemption-bridge": {
+   "nodes": 14,
+   "config": 10,
+   "state": 4,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1q-psfp-bridge": {
+   "nodes": 90,
+   "config": 57,
+   "state": 33,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1q-rstp-bridge": {
+   "nodes": 54,
+   "config": 16,
+   "state": 38,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1q-sched-bridge": {
+   "nodes": 49,
+   "config": 25,
+   "state": 24,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1q-stream-filters-gates-bridge": {
+   "nodes": 18,
+   "config": 16,
+   "state": 2,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1q-tpmr": {
+   "nodes": 21,
+   "config": 8,
+   "state": 13,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1x": {
+   "nodes": 178,
+   "config": 78,
+   "state": 100,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-dot1x-eapol": {
+   "nodes": 1,
+   "config": 1,
+   "state": 0,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-ethernet-interface": {
+   "nodes": 60,
+   "config": 15,
+   "state": 45,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-ethernet-interface-half-duplex": {
+   "nodes": 13,
+   "config": 1,
+   "state": 12,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-ethernet-link-oam": {
+   "nodes": 73,
+   "config": 16,
+   "state": 57,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-ethernet-lldp": {
+   "nodes": 157,
+   "config": 19,
+   "state": 138,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-ethernet-mac-merge": {
+   "nodes": 17,
+   "config": 6,
+   "state": 11,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-ethernet-phy": {
+   "nodes": 53,
+   "config": 11,
+   "state": 42,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-ethernet-pon": {
+   "nodes": 89,
+   "config": 20,
+   "state": 69,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-ethernet-pse": {
+   "nodes": 32,
+   "config": 6,
+   "state": 26,
+   "app": 0,
+   "research": 0
+  },
+  "ieee802-ethernet-pse-2": {
+   "nodes": 33,
+   "config": 6,
+   "state": 27,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-ac-glue": {
+   "nodes": 24,
+   "config": 24,
+   "state": 0,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-ac-ntw": {
+   "nodes": 493,
+   "config": 453,
+   "state": 40,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-ac-svc": {
+   "nodes": 612,
+   "config": 533,
+   "state": 79,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-access-control-list": {
+   "nodes": 97,
+   "config": 86,
+   "state": 11,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-acl-enh": {
+   "nodes": 104,
+   "config": 104,
+   "state": 0,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-acl-tls": {
+   "nodes": 15,
+   "config": 15,
+   "state": 0,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-acldns": {
+   "nodes": 4,
+   "config": 4,
+   "state": 0,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-alarms": {
+   "nodes": 97,
+   "config": 20,
+   "state": 77,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-alarms-x733": {
+   "nodes": 59,
+   "config": 6,
+   "state": 53,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-babel": {
+   "nodes": 73,
+   "config": 39,
+   "state": 34,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-bearer-svc": {
+   "nodes": 74,
+   "config": 55,
+   "state": 19,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-bfd": {
+   "nodes": 6,
+   "config": 1,
+   "state": 5,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-bfd-ip-mh": {
+   "nodes": 53,
+   "config": 16,
+   "state": 37,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-bfd-ip-sh": {
+   "nodes": 56,
+   "config": 20,
+   "state": 36,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-bfd-lag": {
+   "nodes": 95,
+   "config": 19,
+   "state": 76,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-bfd-large": {
+   "nodes": 4,
+   "config": 4,
+   "state": 0,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-bfd-mpls": {
+   "nodes": 60,
+   "config": 22,
+   "state": 38,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-bfd-opt-auth": {
+   "nodes": 4,
+   "config": 4,
+   "state": 0,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-bfd-stability": {
+   "nodes": 9,
+   "config": 4,
+   "state": 5,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-bfd-unsolicited": {
+   "nodes": 12,
+   "config": 11,
+   "state": 1,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-bgp": {
+   "nodes": 909,
+   "config": 459,
+   "state": 450,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-bgp-policy": {
+   "nodes": 104,
+   "config": 104,
+   "state": 0,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-connection-oriented-oam": {
+   "nodes": 37,
+   "config": 37,
+   "state": 0,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-connectionless-oam": {
+   "nodes": 105,
+   "config": 90,
+   "state": 15,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-dc-fabric-topology": {
+   "nodes": 27,
+   "config": 22,
+   "state": 5,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-dc-fabric-topology-state": {
+   "nodes": 22,
+   "config": 0,
+   "state": 22,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-detnet": {
+   "nodes": 279,
+   "config": 272,
+   "state": 7,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-dhcpv6-client": {
+   "nodes": 86,
+   "config": 40,
+   "state": 46,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-dhcpv6-relay": {
+   "nodes": 47,
+   "config": 21,
+   "state": 26,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-dhcpv6-server": {
+   "nodes": 145,
+   "config": 101,
+   "state": 44,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-dots-data-channel": {
+   "nodes": 146,
+   "config": 91,
+   "state": 55,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-dslite": {
+   "nodes": 18,
+   "config": 17,
+   "state": 1,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-entitlement-inventory": {
+   "nodes": 81,
+   "config": 0,
+   "state": 81,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-ethernet-segment": {
+   "nodes": 20,
+   "config": 19,
+   "state": 1,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-hardware": {
+   "nodes": 38,
+   "config": 11,
+   "state": 27,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-hardware-state": {
+   "nodes": 38,
+   "config": 0,
+   "state": 38,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-i2nsf-ike": {
+   "nodes": 129,
+   "config": 111,
+   "state": 18,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-i2nsf-ikeless": {
+   "nodes": 112,
+   "config": 98,
+   "state": 14,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-i2rs-rib": {
+   "nodes": 143,
+   "config": 140,
+   "state": 3,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-igmp-mld": {
+   "nodes": 152,
+   "config": 74,
+   "state": 78,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-igmp-mld-proxy": {
+   "nodes": 32,
+   "config": 14,
+   "state": 18,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-igmp-mld-snooping": {
+   "nodes": 116,
+   "config": 44,
+   "state": 72,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-ioam": {
+   "nodes": 42,
+   "config": 38,
+   "state": 4,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-ipfix-psamp": {
+   "nodes": 440,
+   "config": 202,
+   "state": 238,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-ipsec-iptfs": {
+   "nodes": 96,
+   "config": 24,
+   "state": 72,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-ipv4-unicast-routing": {
+   "nodes": 19,
+   "config": 13,
+   "state": 6,
+   "app": 0,
+   "research": 2
+  },
+  "ietf-ipv6-unicast-routing": {
+   "nodes": 56,
+   "config": 32,
+   "state": 24,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-isis": {
+   "nodes": 608,
+   "config": 180,
+   "state": 428,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-isis-reverse-metric": {
+   "nodes": 26,
+   "config": 20,
+   "state": 6,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-isis-sr-mpls": {
+   "nodes": 143,
+   "config": 33,
+   "state": 110,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-key-chain": {
+   "nodes": 36,
+   "config": 33,
+   "state": 3,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-keystore": {
+   "nodes": 31,
+   "config": 31,
+   "state": 0,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-l2-topology-state": {
+   "nodes": 32,
+   "config": 0,
+   "state": 32,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-l2vpn-ntw": {
+   "nodes": 396,
+   "config": 380,
+   "state": 16,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-l2vpn-svc": {
+   "nodes": 338,
+   "config": 336,
+   "state": 2,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-l3-unicast-topology-state": {
+   "nodes": 21,
+   "config": 0,
+   "state": 21,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-l3vpn-ntw": {
+   "nodes": 607,
+   "config": 555,
+   "state": 52,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-l3vpn-svc": {
+   "nodes": 352,
+   "config": 350,
+   "state": 2,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-lmap-control": {
+   "nodes": 106,
+   "config": 73,
+   "state": 33,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-logical-network-element": {
+   "nodes": 7,
+   "config": 7,
+   "state": 0,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-microwave-radio-link": {
+   "nodes": 80,
+   "config": 52,
+   "state": 28,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-microwave-topology": {
+   "nodes": 18,
+   "config": 13,
+   "state": 5,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-module-tags": {
+   "nodes": 5,
+   "config": 5,
+   "state": 0,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-module-tags-state": {
+   "nodes": 4,
+   "config": 0,
+   "state": 4,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-mpls": {
+   "nodes": 34,
+   "config": 13,
+   "state": 21,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-mpls-ldp": {
+   "nodes": 170,
+   "config": 46,
+   "state": 124,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-mpls-ldp-extended": {
+   "nodes": 147,
+   "config": 83,
+   "state": 64,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-mpls-msd": {
+   "nodes": 8,
+   "config": 0,
+   "state": 8,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-msdp": {
+   "nodes": 76,
+   "config": 34,
+   "state": 42,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-mud": {
+   "nodes": 30,
+   "config": 30,
+   "state": 0,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-mud-tls": {
+   "nodes": 1,
+   "config": 1,
+   "state": 0,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-mud-transparency": {
+   "nodes": 9,
+   "config": 9,
+   "state": 0,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-nat": {
+   "nodes": 198,
+   "config": 135,
+   "state": 63,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-netconf-acm": {
+   "nodes": 25,
+   "config": 22,
+   "state": 3,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-network-instance": {
+   "nodes": 11,
+   "config": 11,
+   "state": 0,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-network-inventory": {
+   "nodes": 42,
+   "config": 0,
+   "state": 42,
+   "app": 0,
+   "research": 11
+  },
+  "ietf-network-inventory-sw-ext": {
+   "nodes": 12,
+   "config": 0,
+   "state": 12,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-network-inventory-topology": {
+   "nodes": 11,
+   "config": 8,
+   "state": 3,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-network-state": {
+   "nodes": 11,
+   "config": 0,
+   "state": 11,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-network-topology-state": {
+   "nodes": 17,
+   "config": 0,
+   "state": 17,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-network-vpn-pm": {
+   "nodes": 100,
+   "config": 15,
+   "state": 85,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-ni-location": {
+   "nodes": 64,
+   "config": 0,
+   "state": 64,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-notification-capabilities": {
+   "nodes": 16,
+   "config": 0,
+   "state": 16,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-ntp": {
+   "nodes": 120,
+   "config": 68,
+   "state": 52,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-nwi-passive-inventory": {
+   "nodes": 54,
+   "config": 0,
+   "state": 54,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-ospf": {
+   "nodes": 1522,
+   "config": 176,
+   "state": 1346,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-ospf-admin-tags": {
+   "nodes": 22,
+   "config": 7,
+   "state": 15,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-ospf-anycast-flag": {
+   "nodes": 1,
+   "config": 1,
+   "state": 0,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-ospf-functional-capability": {
+   "nodes": 12,
+   "config": 0,
+   "state": 12,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-ospf-sr-mpls": {
+   "nodes": 287,
+   "config": 30,
+   "state": 257,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-ospf-unreachable-links": {
+   "nodes": 3,
+   "config": 3,
+   "state": 0,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-ospfv3-extended-lsa": {
+   "nodes": 165,
+   "config": 2,
+   "state": 163,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-pcep": {
+   "nodes": 586,
+   "config": 471,
+   "state": 115,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-pcep-stats": {
+   "nodes": 146,
+   "config": 0,
+   "state": 146,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-pim-base": {
+   "nodes": 141,
+   "config": 29,
+   "state": 112,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-pim-bidir": {
+   "nodes": 37,
+   "config": 12,
+   "state": 25,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-pim-dm": {
+   "nodes": 2,
+   "config": 2,
+   "state": 0,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-pim-rp": {
+   "nodes": 65,
+   "config": 26,
+   "state": 39,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-pim-sm": {
+   "nodes": 22,
+   "config": 22,
+   "state": 0,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-power-and-energy": {
+   "nodes": 30,
+   "config": 7,
+   "state": 23,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-ptp": {
+   "nodes": 64,
+   "config": 62,
+   "state": 2,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-restconf-monitoring": {
+   "nodes": 12,
+   "config": 0,
+   "state": 12,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-restconf-subscribed-notifications": {
+   "nodes": 1,
+   "config": 0,
+   "state": 1,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-rib-extension": {
+   "nodes": 28,
+   "config": 8,
+   "state": 20,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-rift": {
+   "nodes": 308,
+   "config": 63,
+   "state": 245,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-rip": {
+   "nodes": 150,
+   "config": 92,
+   "state": 58,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-routing-policy": {
+   "nodes": 53,
+   "config": 52,
+   "state": 1,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-sap-ntw": {
+   "nodes": 24,
+   "config": 18,
+   "state": 6,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-segment-routing": {
+   "nodes": 1,
+   "config": 1,
+   "state": 0,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-segment-routing-mpls": {
+   "nodes": 52,
+   "config": 35,
+   "state": 17,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-service-assurance": {
+   "nodes": 40,
+   "config": 14,
+   "state": 26,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-service-assurance-device": {
+   "nodes": 2,
+   "config": 2,
+   "state": 0,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-service-assurance-interface": {
+   "nodes": 3,
+   "config": 3,
+   "state": 0,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-snmp": {
+   "nodes": 141,
+   "config": 141,
+   "state": 0,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-softwire-br": {
+   "nodes": 94,
+   "config": 45,
+   "state": 49,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-softwire-ce": {
+   "nodes": 37,
+   "config": 17,
+   "state": 20,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-subscribed-notifications": {
+   "nodes": 38,
+   "config": 26,
+   "state": 12,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-syslog": {
+   "nodes": 160,
+   "config": 160,
+   "state": 0,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-system": {
+   "nodes": 56,
+   "config": 47,
+   "state": 9,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-system-capabilities": {
+   "nodes": 5,
+   "config": 0,
+   "state": 5,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-system-tacacs-plus": {
+   "nodes": 165,
+   "config": 152,
+   "state": 13,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-tcp": {
+   "nodes": 39,
+   "config": 21,
+   "state": 18,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-te-topology": {
+   "nodes": 1722,
+   "config": 960,
+   "state": 762,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-te-topology-state": {
+   "nodes": 1722,
+   "config": 0,
+   "state": 1722,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-tls-common": {
+   "nodes": 2,
+   "config": 0,
+   "state": 2,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-truststore": {
+   "nodes": 16,
+   "config": 16,
+   "state": 0,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-twamp": {
+   "nodes": 98,
+   "config": 54,
+   "state": 44,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-vn": {
+   "nodes": 37,
+   "config": 33,
+   "state": 4,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-wson-topology": {
+   "nodes": 193,
+   "config": 119,
+   "state": 74,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-yang-library": {
+   "nodes": 46,
+   "config": 0,
+   "state": 46,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-yang-library-augmentedby": {
+   "nodes": 2,
+   "config": 0,
+   "state": 2,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-yang-push": {
+   "nodes": 15,
+   "config": 15,
+   "state": 0,
+   "app": 0,
+   "research": 0
+  },
+  "ietf-yang-schema-mount": {
+   "nodes": 11,
+   "config": 0,
+   "state": 11,
+   "app": 0,
+   "research": 0
+  }
+ }
+}

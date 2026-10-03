@@ -1,0 +1,265 @@
+{
+ "set": "services",
+ "variant": "baseline",
+ "title": "VPN、覆盖网络、SAP/AC、切片与服务映射、服务链",
+ "roots": [
+  "iana-bgp-l2-encaps",
+  "iana-pseudowire-types",
+  "ietf-ac-common",
+  "ietf-ac-glue",
+  "ietf-ac-ntw",
+  "ietf-ac-svc",
+  "ietf-bearer-svc",
+  "ietf-ethernet-segment",
+  "ietf-l2vpn-ntw",
+  "ietf-l2vpn-svc",
+  "ietf-l3vpn-ntw",
+  "ietf-l3vpn-svc",
+  "ietf-sap-ntw",
+  "ietf-vn",
+  "ietf-vpn-common"
+ ],
+ "modules": [
+  {
+   "file": "iana-bgp-l2-encaps@2022-09-20.yang",
+   "sha256": "9150b06f153b67778edbf40e70981056185d9b172e56542151218709817e2216",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "iana-pseudowire-types@2022-09-20.yang",
+   "sha256": "afc7c495f90ae902b55345d10c8553e49d0d770e012900ec7cc638a79b294286",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ieee802-dot1q-types@2023-10-26.yang",
+   "sha256": "019af9e03c5ac6e3e91eeb5a8ae76249cfd5f1d9435fb59c1514774a3dbf52d3",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-ac-common@2025-09-29.yang",
+   "sha256": "855936e3c8c8c392f6e141c48a263983b1c83cbdd8cfd51433f4566fe447eed0",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-ac-glue@2025-09-29.yang",
+   "sha256": "ee076f70c4c1339beb35264bfe014af49d6c1997f5ea678292ae80b57a3545a3",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-ac-ntw@2025-09-29.yang",
+   "sha256": "18aefbc10327592c59202a84902f294aed01344a9b08562b6dc9c3687f4379c6",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-ac-svc@2025-09-29.yang",
+   "sha256": "7bd82d20cbde2f3ec1294ea4ecf60a4a3bc278101c63e42bc241f2c393eab976",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-bearer-svc@2025-09-29.yang",
+   "sha256": "b75b2e6b644f97d1f113659f31d26c318a4e3e73613f35d07ef331857edf85b3",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-ethernet-segment@2022-09-20.yang",
+   "sha256": "ca32fd1007c50b71a40bc773c2b677fe4bb550c8df3e9909acc0d250b2c78a3b",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-ethertypes@2019-03-04.yang",
+   "sha256": "952dcb78026852e77ef01a7acdc38aab2bae81f7c4142a2dbd862c640c23cc20",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-inet-types@2025-12-22.yang",
+   "sha256": "2fb39c45cd28d95f60838e5f74ac509d780d18f3c5bf78db251049a4d022e266",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-interfaces@2018-02-20.yang",
+   "sha256": "742cf4ad04459e1018ea69015adafe0202ade27b85d8350c1845b640ee32da16",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-key-chain@2017-06-15.yang",
+   "sha256": "6250705f59fc9ad786e8d74172ce90d58deec437982cbca7922af40b3ae8107c",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-l2vpn-ntw@2022-09-20.yang",
+   "sha256": "232a098ea05eed7952bad9ab52d9e8e9d7ee25a10f4fb2e7df924c2897161879",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-l2vpn-svc@2018-10-09.yang",
+   "sha256": "a5de03a6bfe7cdd20abc84307182838460768f4bce4a1ded65e5a9f6eb1af5b6",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-l3vpn-ntw@2022-02-14.yang",
+   "sha256": "0aee4b1225e6da17cc87a495518a72bec001759bb016584dd684c76ad22c7a02",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-l3vpn-svc@2018-01-19.yang",
+   "sha256": "794df2987ef870c8c80fac7247dcc473799604ad104c7be8eff5995e050e310c",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-netconf-acm@2018-02-14.yang",
+   "sha256": "796951c3b64cc602d62a012312cf1a14255c97d12e99a5c5a2c932c2df4cadbf",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-network-topology@2018-02-26.yang",
+   "sha256": "e33a8ad51ffdbd5ff4a787e738732604ed8f828bbb5905905ca1befc9f988925",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-network@2018-02-26.yang",
+   "sha256": "6f935f7228ed87c1fa169ba52357a95215e644c3abf11343beb10043bc3934c1",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-packet-fields@2019-03-04.yang",
+   "sha256": "312a4b58a55714411ff9a3a36088be3aeaabe720fb663a56fea70fa00b4bcd03",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-routing-policy@2021-10-11.yang",
+   "sha256": "1d564627887b119def4b346caa412a8a2ec1130ebc93e687d8f5f056fc338be9",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-routing-types@2017-12-04.yang",
+   "sha256": "45b2207ec63173760e10e1dd5a9d6023ff03a0427904208fe86c0bc747df59a1",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-routing@2018-03-13.yang",
+   "sha256": "8cbcf2d4410fd31621c104fa706bef1cf2c2c33de8defb145bdde289f82c4116",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-sap-ntw@2023-06-20.yang",
+   "sha256": "e27f1e6731540bb30270212380fc4e959cea24a73ab1d8abe8afccc5bb255a89",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-te-topology@2020-08-06.yang",
+   "sha256": "7f89c604f6a15d3f0933f7ab1720a17fddae7a3aa646b0f42f8a944ffb99593c",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-te-types@2020-06-10.yang",
+   "sha256": "b5997060332f7357c98567cccbe9ca6bcf7d707687ae3d710972fa2fa1041215",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-vn@2025-03-27.yang",
+   "sha256": "ddf278250a4ebfd0ec8557233acf1660f4160487bf868fbd859bf493939f118e",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-vpn-common@2022-02-11.yang",
+   "sha256": "d5dd75fbda5e32add29a7eeb1964e06a4dde384840b855c57edd5f35b25d3b37",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-yang-types@2025-12-22.yang",
+   "sha256": "5e4ff4c837f303050fa46369987f11eb909c24dae2d4ec338342a7aa596f7b2b",
+   "decision": "runtime-baseline",
+   "root": false
+  }
+ ],
+ "missing_dependencies": [],
+ "state_compat_leaked": [],
+ "pyang": {
+  "passed": true,
+  "errors_by_category": {},
+  "warnings_by_category": {},
+  "errors": [],
+  "errors_truncated": 0
+ },
+ "yangson": {
+  "loaded": true,
+  "schema_nodes": {
+   "CaseNode": 658,
+   "ChoiceNode": 307,
+   "ContainerNode": 1304,
+   "GroupNode": 11,
+   "InputNode": 3,
+   "LeafListNode": 138,
+   "LeafNode": 3277,
+   "ListNode": 463,
+   "OutputNode": 3,
+   "RpcActionNode": 3
+  },
+  "paths_only_in_inventory": [],
+  "paths_only_in_yangson": []
+ },
+ "libyang": {
+  "ran": true,
+  "image_id": "sha256:5db3d7d18f7ae37a5422516fd38a2bf7df8ace6ffc352867dca496d2b2c91afe",
+  "exit": 0,
+  "passed": true,
+  "errors": [],
+  "warnings": []
+ },
+ "library_sha256": "d10b04075e5cfa0a869c3f53b393b13c242688b3bde9b761eef1540780bf7d84",
+ "inventory": {
+  "file": "models/network-twin/m1/inventory/services.jsonl.gz",
+  "nodes": 5191,
+  "by_kind": {
+   "action": 2,
+   "container": 1304,
+   "input": 3,
+   "leaf": 3277,
+   "leaf-list": 138,
+   "list": 463,
+   "output": 3,
+   "rpc": 1
+  },
+  "config": 3871,
+  "state": 1080,
+  "with_when": 208,
+  "with_must": 51,
+  "leafref": 256,
+  "identityref": 505,
+  "mandatory": 300,
+  "deprecated_or_obsolete": 45
+ },
+ "tree": {
+  "lines": 6265,
+  "pyang_exit": 0
+ }
+}

@@ -1,0 +1,482 @@
+{
+ "scope": "M1-6 validator results; gap kinds per plan §8 M1",
+ "engine": {
+  "libyang_image": "netops-ietf-mount-verify:5.8.6",
+  "image_id": "sha256:5db3d7d18f7ae37a5422516fd38a2bf7df8ace6ffc352867dca496d2b2c91afe"
+ },
+ "cases": [
+  {
+   "name": "br1-device",
+   "kind": "instance",
+   "mode": "get",
+   "expect": "pass",
+   "found": [],
+   "met": true,
+   "errors": [],
+   "warnings": 0,
+   "modules": 6
+  },
+  {
+   "name": "br1-device",
+   "kind": "instance",
+   "mode": "data",
+   "expect": "pass",
+   "found": [],
+   "met": true,
+   "errors": [],
+   "warnings": 30,
+   "modules": 6
+  },
+  {
+   "name": "br1-device",
+   "kind": "instance",
+   "mode": "strict",
+   "expect": "complete-or-collection",
+   "found": [
+    "collection/missing-mandatory"
+   ],
+   "met": true,
+   "errors": [
+    "libyang err : Mandatory node \"admin-status\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='GigabitEthernet1/0'])",
+    "libyang err : Mandatory node \"if-index\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='GigabitEthernet1/0'])",
+    "libyang err : Mandatory node \"discontinuity-time\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='GigabitEthernet1/0']/statistics)",
+    "libyang err : Mandatory node \"version\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='GigabitEthernet1/0']/ietf-ip:ipv4/ietf-vrrp:vrrp/vrrp-instance[vrid='1'])",
+    "libyang err : Mandatory node \"admin-status\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='GigabitEthernet2/0'])",
+    "libyang err : Mandatory node \"if-index\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='GigabitEthernet2/0'])",
+    "libyang err : Mandatory node \"discontinuity-time\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='GigabitEthernet2/0']/statistics)",
+    "libyang err : Mandatory node \"admin-status\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='GigabitEthernet3/0'])",
+    "libyang err : Mandatory node \"if-index\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='GigabitEthernet3/0'])",
+    "libyang err : Mandatory node \"discontinuity-time\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='GigabitEthernet3/0']/statistics)",
+    "libyang err : Mandatory node \"admin-status\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='GigabitEthernet4/0'])",
+    "libyang err : Mandatory node \"if-index\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='GigabitEthernet4/0'])",
+    "libyang err : Mandatory node \"discontinuity-time\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='GigabitEthernet4/0']/statistics)",
+    "libyang err : Mandatory node \"admin-status\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='GigabitEthernet5/0'])",
+    "libyang err : Mandatory node \"if-index\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='GigabitEthernet5/0'])",
+    "libyang err : Mandatory node \"discontinuity-time\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='GigabitEthernet5/0']/statistics)",
+    "libyang err : Mandatory node \"admin-status\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='InLoopBack0'])",
+    "libyang err : Mandatory node \"if-index\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='InLoopBack0'])",
+    "libyang err : Mandatory node \"discontinuity-time\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='InLoopBack0']/statistics)",
+    "libyang err : Mandatory node \"admin-status\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='LoopBack0'])"
+   ],
+   "warnings": 0,
+   "modules": 6
+  },
+  {
+   "name": "br1-lldp",
+   "kind": "instance",
+   "mode": "get",
+   "expect": "pass",
+   "found": [],
+   "met": true,
+   "errors": [],
+   "warnings": 0,
+   "modules": 6
+  },
+  {
+   "name": "br1-lldp",
+   "kind": "instance",
+   "mode": "data",
+   "expect": "pass",
+   "found": [],
+   "met": true,
+   "errors": [],
+   "warnings": 0,
+   "modules": 6
+  },
+  {
+   "name": "br1-lldp",
+   "kind": "instance",
+   "mode": "strict",
+   "expect": "complete-or-collection",
+   "found": [],
+   "met": true,
+   "errors": [],
+   "warnings": 0,
+   "modules": 6
+  },
+  {
+   "name": "dist1-device",
+   "kind": "instance",
+   "mode": "get",
+   "expect": "pass",
+   "found": [],
+   "met": true,
+   "errors": [],
+   "warnings": 0,
+   "modules": 6
+  },
+  {
+   "name": "dist1-device",
+   "kind": "instance",
+   "mode": "data",
+   "expect": "pass",
+   "found": [],
+   "met": true,
+   "errors": [],
+   "warnings": 62,
+   "modules": 6
+  },
+  {
+   "name": "dist1-device",
+   "kind": "instance",
+   "mode": "strict",
+   "expect": "complete-or-collection",
+   "found": [
+    "collection/missing-mandatory"
+   ],
+   "met": true,
+   "errors": [
+    "libyang err : Mandatory node \"admin-status\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Ethernet0/0'])",
+    "libyang err : Mandatory node \"if-index\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Ethernet0/0'])",
+    "libyang err : Mandatory node \"discontinuity-time\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Ethernet0/0']/statistics)",
+    "libyang err : Mandatory node \"admin-status\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Ethernet0/1'])",
+    "libyang err : Mandatory node \"if-index\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Ethernet0/1'])",
+    "libyang err : Mandatory node \"discontinuity-time\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Ethernet0/1']/statistics)",
+    "libyang err : Mandatory node \"admin-status\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Ethernet0/2'])",
+    "libyang err : Mandatory node \"if-index\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Ethernet0/2'])",
+    "libyang err : Mandatory node \"discontinuity-time\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Ethernet0/2']/statistics)",
+    "libyang err : Mandatory node \"admin-status\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Ethernet0/3'])",
+    "libyang err : Mandatory node \"if-index\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Ethernet0/3'])",
+    "libyang err : Mandatory node \"discontinuity-time\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Ethernet0/3']/statistics)",
+    "libyang err : Mandatory node \"admin-status\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Ethernet1/0'])",
+    "libyang err : Mandatory node \"if-index\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Ethernet1/0'])",
+    "libyang err : Mandatory node \"discontinuity-time\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Ethernet1/0']/statistics)",
+    "libyang err : Mandatory node \"admin-status\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Ethernet1/1'])",
+    "libyang err : Mandatory node \"if-index\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Ethernet1/1'])",
+    "libyang err : Mandatory node \"discontinuity-time\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Ethernet1/1']/statistics)",
+    "libyang err : Mandatory node \"admin-status\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Ethernet1/2'])",
+    "libyang err : Mandatory node \"if-index\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Ethernet1/2'])"
+   ],
+   "warnings": 0,
+   "modules": 6
+  },
+  {
+   "name": "campus-topology",
+   "kind": "instance",
+   "mode": "get",
+   "expect": "pass",
+   "found": [],
+   "met": true,
+   "errors": [],
+   "warnings": 0,
+   "modules": 11
+  },
+  {
+   "name": "campus-topology",
+   "kind": "instance",
+   "mode": "data",
+   "expect": "pass",
+   "found": [],
+   "met": true,
+   "errors": [],
+   "warnings": 0,
+   "modules": 11
+  },
+  {
+   "name": "campus-topology",
+   "kind": "instance",
+   "mode": "strict",
+   "expect": "complete-or-collection",
+   "found": [],
+   "met": true,
+   "errors": [],
+   "warnings": 0,
+   "modules": 11
+  },
+  {
+   "name": "research-vsr-1-routes",
+   "kind": "instance",
+   "mode": "get",
+   "expect": "pass",
+   "found": [],
+   "met": true,
+   "errors": [],
+   "warnings": 0,
+   "modules": 12
+  },
+  {
+   "name": "research-vsr-1-routes",
+   "kind": "instance",
+   "mode": "data",
+   "expect": "pass",
+   "found": [],
+   "met": true,
+   "errors": [],
+   "warnings": 3,
+   "modules": 12
+  },
+  {
+   "name": "research-vsr-1-routes",
+   "kind": "instance",
+   "mode": "strict",
+   "expect": "complete-or-collection",
+   "found": [],
+   "met": true,
+   "errors": [],
+   "warnings": 0,
+   "modules": 12
+  },
+  {
+   "name": "research-vsr-1-l2.partial",
+   "kind": "instance",
+   "mode": "get",
+   "expect": "pass",
+   "found": [],
+   "met": true,
+   "errors": [],
+   "warnings": 0,
+   "modules": 11
+  },
+  {
+   "name": "research-vsr-1-l2.partial",
+   "kind": "instance",
+   "mode": "data",
+   "expect": "pass",
+   "found": [],
+   "met": true,
+   "errors": [],
+   "warnings": 13,
+   "modules": 11
+  },
+  {
+   "name": "research-vsr-1-l2.partial",
+   "kind": "instance",
+   "mode": "strict",
+   "expect": "complete-or-collection",
+   "found": [
+    "collection/missing-mandatory"
+   ],
+   "met": true,
+   "errors": [
+    "libyang err : Mandatory node \"address\" instance does not exist. (/ieee802-dot1q-bridge:bridges/bridge[name='captured-bridge'])",
+    "libyang err : Mandatory node \"admin-status\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='GE1/0'])",
+    "libyang err : Mandatory node \"if-index\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='GE1/0'])",
+    "libyang err : Mandatory node \"discontinuity-time\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='GE1/0']/statistics)",
+    "libyang err : Mandatory node \"admin-status\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='GE2/0'])",
+    "libyang err : Mandatory node \"if-index\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='GE2/0'])",
+    "libyang err : Mandatory node \"discontinuity-time\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='GE2/0']/statistics)",
+    "libyang err : Mandatory node \"admin-status\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='GE3/0'])",
+    "libyang err : Mandatory node \"if-index\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='GE3/0'])",
+    "libyang err : Mandatory node \"discontinuity-time\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='GE3/0']/statistics)",
+    "libyang err : Mandatory node \"admin-status\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Vlan200'])",
+    "libyang err : Mandatory node \"if-index\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Vlan200'])",
+    "libyang err : Mandatory node \"discontinuity-time\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Vlan200']/statistics)"
+   ],
+   "warnings": 0,
+   "modules": 11
+  },
+  {
+   "name": "custom-field",
+   "kind": "instance",
+   "mode": "get",
+   "expect": "schema/unknown-node",
+   "found": [
+    "schema/unknown-node"
+   ],
+   "met": true,
+   "errors": [
+    "libyang err : Node \"collected-at\" not found as a child of \"interface\" node. (/ietf-interfaces:interfaces/interface[name='GigabitEthernet1/0']) (line 44)"
+   ],
+   "warnings": 0,
+   "modules": 6
+  },
+  {
+   "name": "unknown-interface-type",
+   "kind": "instance",
+   "mode": "get",
+   "expect": "semantic/unknown-identity",
+   "found": [
+    "semantic/unknown-identity"
+   ],
+   "met": true,
+   "errors": [
+    "libyang err : Invalid identityref \"iana-if-type:notAnInterfaceType\" value - identity not found in module \"iana-if-type\". (/ietf-interfaces:interfaces/interface[name='GigabitEthernet1/0']/type) (line 6)"
+   ],
+   "warnings": 0,
+   "modules": 6
+  },
+  {
+   "name": "vrrp-priority-out-of-range",
+   "kind": "instance",
+   "mode": "get",
+   "expect": "semantic/type",
+   "found": [
+    "semantic/type"
+   ],
+   "met": true,
+   "errors": [
+    "libyang err : Value \"300\" is out of type uint8 min/max bounds. (/ietf-interfaces:interfaces/interface[name='GigabitEthernet1/0']/ietf-ip:ipv4/ietf-vrrp:vrrp/vrrp-instance[vrid='1']/priority) (line 41)"
+   ],
+   "warnings": 0,
+   "modules": 6
+  },
+  {
+   "name": "next-hop-two-cases",
+   "kind": "instance",
+   "mode": "data",
+   "expect": "semantic/choice-conflict",
+   "found": [
+    "semantic/choice-conflict"
+   ],
+   "met": true,
+   "errors": [
+    "libyang err : Data for both cases \"simple-next-hop\" and \"special-next-hop\" exist. (/ietf-routing:routing/ribs/rib/routes/route/next-hop/next-hop-options) (line 18)"
+   ],
+   "warnings": 3,
+   "modules": 12
+  },
+  {
+   "name": "next-hop-interface-of-other-device",
+   "kind": "instance",
+   "mode": "data",
+   "expect": "semantic/reference",
+   "found": [
+    "semantic/reference"
+   ],
+   "met": true,
+   "errors": [
+    "libyang err : Invalid leafref value \"Ethernet2/0\" - no target instance \"/if:interfaces/if:interface/if:name\" with the same value. (/ietf-routing:routing/ribs/rib[name='captured-public-ipv4']/routes/route[1]/next-hop/outgoing-interface)"
+   ],
+   "warnings": 3,
+   "modules": 12
+  },
+  {
+   "name": "link-to-tp-of-other-network",
+   "kind": "instance",
+   "mode": "data",
+   "expect": "semantic/reference",
+   "found": [
+    "semantic/reference"
+   ],
+   "met": true,
+   "errors": [
+    "Invalid leafref (rule, require-instance false in RFC 8345): simap tp ('urn:netops:topology:campus:l2', 'urn:netops:topology:campus:device:not-in-this-network', 'urn:netops:topology:campus:if:GigabitEthernet1%2F0')"
+   ],
+   "warnings": 0,
+   "modules": 11
+  },
+  {
+   "name": "bgp-ls-missing-import",
+   "kind": "schema",
+   "mode": null,
+   "expect": "schema/missing-dependency",
+   "found": [
+    "schema/missing-dependency"
+   ],
+   "met": true,
+   "errors": [
+    "libyang err : Loading \"iana-bgp-types@<any>\" module failed, not found.",
+    "libyang err : Parsing module \"ietf-bgp-ls\" failed."
+   ],
+   "warnings": 5,
+   "modules": 38
+  },
+  {
+   "name": "flexi-grid-pinned-old-te",
+   "kind": "schema",
+   "mode": null,
+   "expect": "schema/wrong-revision",
+   "found": [
+    "schema/wrong-revision"
+   ],
+   "met": true,
+   "errors": [
+    "libyang err : Loading \"ietf-te@2019-02-15\" module failed, not found.",
+    "libyang err : Parsing module \"ietf-flexi-grid-media-channel\" failed."
+   ],
+   "warnings": 0,
+   "modules": 2
+  },
+  {
+   "name": "oam-mount-point-on-anydata",
+   "kind": "schema",
+   "mode": null,
+   "expect": "schema/other",
+   "found": [
+    "schema/other"
+   ],
+   "met": true,
+   "errors": [
+    "libyang err : Ext plugin \"ly2 schema mount\": Extension \"yangmnt:mount-point\" instance allowed only in container or list statement. (/ietf-connectionless-oam:{grouping='test-point-location-info'}/root/{ext-inst='yangmnt:mount-point'}/root)"
+   ],
+   "warnings": 0,
+   "modules": 10
+  },
+  {
+   "name": "vrrp-interval-seconds-to-centiseconds",
+   "kind": "mapping",
+   "mode": null,
+   "expect": "semantic/unit-mismatch",
+   "found": [
+    "semantic/unit-mismatch"
+   ],
+   "met": true,
+   "errors": [
+    "unit 'seconds' mapped to a node in 'centiseconds'"
+   ],
+   "warnings": 0,
+   "node_units": "centiseconds"
+  },
+  {
+   "name": "vrrp-interval-seconds",
+   "kind": "mapping",
+   "mode": null,
+   "expect": "pass",
+   "found": [],
+   "met": true,
+   "errors": [],
+   "warnings": 0,
+   "node_units": "seconds"
+  },
+  {
+   "name": "rfc9195-campus-topology",
+   "kind": "instance-data",
+   "mode": "data",
+   "expect": "pass",
+   "found": [],
+   "met": true,
+   "errors": [],
+   "warnings": 0,
+   "modules": 11
+  },
+  {
+   "name": "rfc9195-br1-device",
+   "kind": "instance-data",
+   "mode": "data",
+   "expect": "pass",
+   "found": [],
+   "met": true,
+   "errors": [],
+   "warnings": 0,
+   "modules": 6
+  },
+  {
+   "name": "rfc9195-research-vsr-1-l2.partial",
+   "kind": "instance-data",
+   "mode": "data",
+   "expect": "pass",
+   "found": [],
+   "met": true,
+   "errors": [],
+   "warnings": 0,
+   "modules": 11
+  },
+  {
+   "name": "rfc9195-two-revisions-simplified-inline",
+   "kind": "instance-data",
+   "mode": "data",
+   "expect": "schema/instance-data-header",
+   "found": [
+    "schema/instance-data-header"
+   ],
+   "met": true,
+   "errors": [
+    "RFC 9195 §2.1.2: one revision per module in simplified-inline",
+    "libyang err : Module \"ietf-inet-types@2013-07-15\" is already implemented in revision \"2025-12-22\"."
+   ],
+   "warnings": 0,
+   "modules": 12
+  }
+ ],
+ "all_met": true
+}

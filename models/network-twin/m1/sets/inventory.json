@@ -1,0 +1,164 @@
+{
+ "set": "inventory",
+ "variant": "baseline",
+ "title": "资源清单、位置、被动资源、许可与能耗",
+ "roots": [
+  "iana-power-and-energy",
+  "ietf-entitlement-inventory",
+  "ietf-geo-location",
+  "ietf-network-inventory",
+  "ietf-network-inventory-sw-ext",
+  "ietf-network-inventory-topology",
+  "ietf-ni-location",
+  "ietf-nwi-passive-inventory",
+  "ietf-power-and-energy"
+ ],
+ "modules": [
+  {
+   "file": "iana-hardware@2018-03-13.yang",
+   "sha256": "4feb8d47cf34dac0d25e0f6a1157f45421d508f756b92ad0d7116245de3cf31f",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "iana-power-and-energy@2026-07-02.yang",
+   "sha256": "b2164c31f07a58324edd74e43a26d62f7e4aed2486d6684ed5f71cce3f162c50",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-entitlement-inventory@2026-09-02.yang",
+   "sha256": "fefefdd7fef505ec5e1392b56d88e30c0a9c0f403f32623c340945e9935076ff",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-geo-location@2022-02-11.yang",
+   "sha256": "71ba138c2237182dd5a29bec8e81ddef5cb76fa1c778cc2d67d2f9df45c4d59c",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-hardware@2018-03-13.yang",
+   "sha256": "857d8a1e50f98f447b1e9cbe663bb6e3f4f6aa1255860fbc55b7801904d906a4",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-inet-types@2025-12-22.yang",
+   "sha256": "2fb39c45cd28d95f60838e5f74ac509d780d18f3c5bf78db251049a4d022e266",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-network-inventory-sw-ext@2026-07-06.yang",
+   "sha256": "8a99c41a760c4b4c9364f743a689005aa53dc82a28daa11da41561454ceb1cdd",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-network-inventory-topology@2026-09-11.yang",
+   "sha256": "aa3d34499ed55a17bc91e5566e2d542e313f3748e7c431388a3290a8d13301b7",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-network-inventory@2026-09-29.yang",
+   "sha256": "f132e67d3287d381b8ff83a1e41589a1a0fa86f77877ab8133a00ac0b9151d00",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-network-topology@2018-02-26.yang",
+   "sha256": "e33a8ad51ffdbd5ff4a787e738732604ed8f828bbb5905905ca1befc9f988925",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-network@2018-02-26.yang",
+   "sha256": "6f935f7228ed87c1fa169ba52357a95215e644c3abf11343beb10043bc3934c1",
+   "decision": "runtime-baseline",
+   "root": false
+  },
+  {
+   "file": "ietf-ni-location@2026-07-06.yang",
+   "sha256": "e25f17fe97c8050598d20b0c7008a62c6d8ff26061d7eb32e8222c556c938bdc",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-nwi-passive-inventory@2026-03-19.yang",
+   "sha256": "76ddd56c0eaa4e0b928e9595ee47f4bf456db35117133d30e0603aed78220985",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-power-and-energy@2026-07-02.yang",
+   "sha256": "a4109fb47940b476763e2a8038fc49badd5ab58ca12cee3059fb204ff084e333",
+   "decision": "runtime-baseline",
+   "root": true
+  },
+  {
+   "file": "ietf-yang-types@2025-12-22.yang",
+   "sha256": "5e4ff4c837f303050fa46369987f11eb909c24dae2d4ec338342a7aa596f7b2b",
+   "decision": "runtime-baseline",
+   "root": false
+  }
+ ],
+ "missing_dependencies": [],
+ "state_compat_leaked": [],
+ "pyang": {
+  "passed": true,
+  "errors_by_category": {},
+  "warnings_by_category": {},
+  "errors": [],
+  "errors_truncated": 0
+ },
+ "yangson": {
+  "loaded": true,
+  "schema_nodes": {
+   "CaseNode": 10,
+   "ChoiceNode": 5,
+   "ContainerNode": 53,
+   "GroupNode": 3,
+   "LeafListNode": 9,
+   "LeafNode": 263,
+   "ListNode": 41,
+   "NotificationNode": 3
+  },
+  "paths_only_in_inventory": [],
+  "paths_only_in_yangson": []
+ },
+ "libyang": {
+  "ran": true,
+  "image_id": "sha256:5db3d7d18f7ae37a5422516fd38a2bf7df8ace6ffc352867dca496d2b2c91afe",
+  "exit": 0,
+  "passed": true,
+  "errors": [],
+  "warnings": []
+ },
+ "library_sha256": "64de1e0566f34ac28b02c3ca7c5d7e500a08c8cf8cb3056a85d9c3d7f12f36f2",
+ "inventory": {
+  "file": "models/network-twin/m1/inventory/inventory.jsonl.gz",
+  "nodes": 369,
+  "by_kind": {
+   "container": 53,
+   "leaf": 263,
+   "leaf-list": 9,
+   "list": 41,
+   "notification": 3
+  },
+  "config": 54,
+  "state": 306,
+  "with_when": 8,
+  "with_must": 14,
+  "leafref": 50,
+  "identityref": 25,
+  "mandatory": 2,
+  "deprecated_or_obsolete": 0
+ },
+ "tree": {
+  "lines": 406,
+  "pyang_exit": 0
+ }
+}
