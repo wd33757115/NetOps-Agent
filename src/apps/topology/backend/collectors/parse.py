@@ -15,7 +15,10 @@ from .tiers import (
     generic_lldp,
     generic_lldp_local,
     generic_mac,
+    generic_switchport,
+    generic_trunk,
     generic_version,
+    generic_vlan,
     generic_vrrp,
 )
 from .tiers.common import audit_table, table_count
@@ -30,6 +33,9 @@ PARSERS = {
     "version": generic_version.parse,
     "vrrp": generic_vrrp.parse,
     "lag": generic_lag.parse,
+    "vlan": generic_vlan.parse,
+    "trunk": generic_trunk.parse,
+    "switchport": generic_switchport.parse,
 }
 EMPTY = {
     "lldp": r"No (?:LLDP )?neighbors?(?: found)?\.?",
@@ -133,8 +139,12 @@ def parse_generic(identity, capability, raw, *, complete=True, command=None, pro
         else getattr(identity, "os_family", "unknown")
     )
     empty_pattern = EMPTY.get(capability)
-    if family in {"ios", "iosxe"} and capability in {"arp", "vrrp"} and not text.strip():
-        # IOS prints nothing at all, not even a header, for an empty ARP or VRRP table.
+    if (
+        (family in {"ios", "iosxe"} and capability in {"arp", "vrrp", "trunk"})
+        or (family == "comware" and capability == "trunk")
+    ) and not text.strip():
+        # Verified lab outputs have no header for empty IOS ARP/VRRP/trunks
+        # and Comware trunks; transport completeness is still required.
         empty_pattern = ""
     if empty_pattern is not None and re.fullmatch(empty_pattern, text.strip(), re.I):
         result.status = "failed" if incomplete else "complete"

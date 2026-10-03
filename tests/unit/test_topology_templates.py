@@ -108,7 +108,7 @@ def test_digest_mismatch_does_not_execute_changed_template(monkeypatch, cap):
     monkeypatch.setitem(template.ASSETS, ("comware", cap), (replace(asset, sha256="0" * 64),))
     result = run(cap, lab(cap))
     assert result.tier == "generic"
-    assert result.status == ("complete" if cap in {"arp", "mac"} else "failed")
+    assert result.status == ("complete" if cap in {"arp", "mac", "vlan"} else "failed")
 
 
 def test_changed_template_package_falls_back(monkeypatch):
@@ -170,9 +170,13 @@ def test_empty_routes_requires_known_header_and_counts():
 def test_vlan_full_names_and_wrapped_uncovered_lines():
     text = lab("vlan")
     assert run("vlan", text).records[1]["name"] == "VLAN 0200"
-    assert run("vlan", text + "\n          wrapped-ports GE4/0\n").status == "failed"
-    assert run("vlan", text.replace("200       VLAN", "4095      VLAN")).status == "failed"
-    assert run("vlan", "UNKNOWN HEADER\n" + text).status == "failed"
+    malformed = run("vlan", text + "\n          wrapped-ports GE4/0\n")
+    assert malformed.status == "partial" and malformed.rejected_count
+    invalid = run("vlan", text.replace("200       VLAN", "4095      VLAN"))
+    assert invalid.status == "partial" and invalid.rejected_count
+    assert all(row["vlan_id"] != 4095 for row in invalid.records)
+    unknown_header = run("vlan", "UNKNOWN HEADER\n" + text)
+    assert unknown_header.status == "partial" and unknown_header.rejected_count
 
 
 def test_template_zero_rows_not_treated_as_empty(monkeypatch):

@@ -1,6 +1,6 @@
 {
   "ietf-yang-library:modules-state": {
-    "module-set-id": "netops-topology-simap-l2-l3",
+    "module-set-id": "netops-topology-simap-l2-l3-vlan",
     "module": [
       {
         "name": "iana-if-type",
@@ -30,7 +30,8 @@
         "name": "ietf-l2-topology",
         "revision": "2020-11-15",
         "namespace": "urn:ietf:params:xml:ns:yang:ietf-l2-topology",
-        "conformance-type": "implement"
+        "conformance-type": "implement",
+        "feature": ["VLAN"]
       },
       {
         "name": "ietf-l3-unicast-topology",

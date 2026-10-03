@@ -1024,6 +1024,17 @@ P2-9 根据 Q5 取消，不引入 SNMP。P3 及后续仍在进入阶段时展开
 
 ## 14. 进度台账（执行者维护）
 
+### 2026-10-03 GPT 接手：VLAN/trunk 进入 RFC 8944（topology 0.4.13）
+
+- 依据 [RFC 8944 §5.2](https://www.rfc-editor.org/rfc/rfc8944.html#section-5.2) 启用冻结模块的 `VLAN` feature，并更新 YANG library 的 module-set-id。`outer-tag` 只表示同口观测支持的 802.1Q 标签范围；access VLAN/PVID 是 IEEE 802.1Q bridge-port 的设备事实，不能写成拓扑标签。没有增加自定义 YANG 字段、设备树关联或新 UI。
+- 新能力 `vlan`/`trunk`/`switchport` 进入发现：IOS `show vlan brief`、`show interfaces trunk`、`show interfaces switchport`；Comware 保留 VLAN 模板并采 `display port trunk`。typed VLAN 行仍为 ID/name；成员列及 trunk/switchport 观察进入已有 FactSet summary 和发现 Observation，无数据库迁移。允许/active/STP-forwarding 范围、administrative/operational mode、行政/运行 native-tagging 分开。未知或冲突口否决本口标签，无法归属的未知格式否决整台标签，否决标记经过 `partial` 和服务转换仍保留。
+- native VLAN 不在 allowed 范围时按已观察 allowed 集合输出；native 在 allowed 中时，仅明确 operational native-tagging 决定包含/排除，否则省略 `outer-tag`。真实 IOL 仅打印 administrative native-tagging，不能当运行证据。DIST 的 `trunk (member of bundle Po1)` 保留原文并严格识别；只消费 trunk 表，不从聚合口或邻居向未观察到的口继承标签。
+- 真实只读素材批次 `20261003-014006`：8 台、24 条命令，49 份输出/manifest 加 README，存于 `tests/fixtures/topology/campus-wan/vlan-trunk/`，导入选项 `--lab campus-vlan`。秘密扫描 0 命中。CORE 的交换命令为 unsupported；BR 的 trunk 真为空，非空 Comware trunk 仍无真实样本，不能声称支持。ACC1/ACC2 更换密钥后由负责人明确确认新指纹，按精确值更新平台和采样 pins；只读采样未改设备配置。
+- 隔离开发，避免运行中的主项目因 App 摘要变动返回 503。最终回归 `pytest -q tests/unit -k "topology or twin" -p no:cacheprovider -rs`：**636 passed、2 skipped**（两个可选本地模板源在隔离工作目录缺失；YANG 用例实际运行，依赖 `.runtime/p0-2/yang-deps`）。其中新增 parser 70 项、VLAN 模型 82 项、园区回放 32 项，均包含在总数内，不另累加。修改的后端/导入器/测试 Ruff 通过；采样脚本新增两条命令，其原有 11 条 Ruff 提示在 HEAD 上同样存在，未顺手改写脚本。
+- 已执行 `scripts/windows/start.ps1 -SkipLangfuse -UpgradeApps topology -NoBrowser`，topology **0.4.13** 启用，平台健康检查通过。首次全 App 检查曾提示 firewall-policy 的 Worker inspection/code mismatch；同 App 单独只读 verify 重查通过，不把初次输出宣称为 9/9。拓扑单项部署检查通过。
+- 平台真实发现 `63b80f119bc74386923a3405100a9924`，新快照 **`894ad28d1fdc415cb942fafa9247786c`**：8 台全成功、11 个观测 trunk TP 的 `outer-tag="10,20"`，ACC1 e1/0=10、e1/1=20，ACC2 e1/0=10 的 access/PVID 正确且不导出标签；下载的 RFC 7951 树通过冻结 YANG 完整校验。16 条设备间接线都有新 LLDP 证据并与 GNS3 对应；另外保留 BR1/BR2 GE1/0 在共享管理网中的 ARP 逻辑邻接，不能当第 17 根物理网线。证明与导出在忽略目录 `.runtime/vlan-live-proof.json`、`.runtime/vlan-live-rfc7951.json`。未注入 VLAN/STP/接口故障，尚不声称 VLAN 感知路径或故障集 v1 已验收。
+- 下一项状态：冻结 SIMAP -03 无通用 status，REQ-STATUS 允许从 SIMAP 访问状态；按既定 Q-IETF-1 在应用层用快照身份访问独立 RFC 8343 接口实例，不往模型补外键。保留同网络已知设备间 L2 结构并注明历史证据，当前失败/缺观察为 unknown；明确 down 才标 down。接口 brief 缺 `statistics/discontinuity-time` 时必须保留严格校验缺项，不造时间。实际 shutdown/恢复仍要负责人授权。OSPF 下一批只读素材 `20261003-015834` 已准备（8 台 16 条，扫描 0 命中）；metric1/metric2 的原文仅为 Link Metric 1/2，不能擅自把它们解释成双向两端 cost。
+
 ### 2026-10-03 交接给 GPT
 
 负责人要求 GPT 接手，方向为继续完善建模（IETF 优先，可参考成熟产品）。现状、实验网与部署、与完整网络模型的差距统计、下一步计划（VLAN/trunk → 状态 → 三层度量 → 设备树导出）和待决事项见[交接文档](network-digital-twin-handoff.md)最前一节。

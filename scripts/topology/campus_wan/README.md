@@ -35,7 +35,7 @@ VRRP 虚地址：172.16.10.1、172.16.20.1。终端：PC1 172.16.10.11、PC2 172
 ## 搭建
 
 1. GNS3 首选项 → IOS on UNIX：关闭 IOU license 检查（IOL 17.x 来自 CML，不需要 iourc）。
-2. `lab.py project` 生成工程；在 GNS3 中关闭当前工程（旧实验网会断电，先确认已 `save`），打开 `~/GNS3/projects/netops-campus-wan/netops-campus-wan.gns3`，全部启动。IOL 带着 `configs/*.cfg` 启动。
+2. `lab.py project` 生成工程；在 GNS3 中关闭当前工程（旧实验网会断电，先确认已 `save`），打开 `~/GNS3/projects/netops-campus-wan/netops-campus-wan.gns3`，全部启动。IOL 用 `lab.py push NODE` 经控制台加载 `configs/*.cfg` 并保存；工程文件不嵌入启动配置。
 3. VSR：`lab.py type BR1` 在 VNC 控制台给 aux 口授 network-admin，`lab.py push BR1` 经串口推送 `configs/BR1.txt` 并保存；BR2 同理。`lab.py screen BR1 --out x.png` 截 VNC 屏幕。
 4. 负责人运行 `lab.py account`：从 `NETOPS_LAB_PASSWORD` 在 8 台纳管设备上建实验账号（密码不进配置文件、不打印）。
 5. `lab.py traffic` 让每台 PC 持续 ping，ARP/MAC 表保持有内容；`--stop` 停止。

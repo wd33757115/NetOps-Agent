@@ -52,7 +52,10 @@ from .repository import owned, sessions
 
 APP_ID = "topology"
 ACTIVE = ("queued", "running", "waiting_for_input")
-TOPOLOGY_FACTS = ("lldp_local", "lldp", "interfaces", "ip", "arp", "mac", "lag", "vrrp", "routes")
+TOPOLOGY_FACTS = (
+    "lldp_local", "lldp", "interfaces", "ip", "arp", "mac", "vlan", "trunk", "switchport",
+    "lag", "vrrp", "routes",
+)
 NODE_BUDGET_SECONDS = 240
 # A lease outlives the node budget, so a live collection is never reclaimed mid-way.
 LEASE_SECONDS = NODE_BUDGET_SECONDS + 60
@@ -710,10 +713,13 @@ def topology_observation(result):
     """
     status = {cap: parsed.status for cap, parsed in result.parsed.items()}
     facts = {
-        cap: parsed.summary if cap == "lldp_local" else parsed.records
+        cap: parsed.summary if cap in {"lldp_local", "trunk", "switchport"} else parsed.records
         for cap, parsed in result.parsed.items()
         if cap in TOPOLOGY_FACTS and parsed.status in {"complete", "partial"}
     }
+    vlan = result.parsed.get("vlan")
+    if vlan is not None and vlan.status in {"complete", "partial"} and "members" in vlan.summary:
+        facts["vlan_members"] = vlan.summary["members"]
     lldp = result.parsed.get("lldp")
     complete = lldp is not None and lldp.status == "complete"
     neighbors = [

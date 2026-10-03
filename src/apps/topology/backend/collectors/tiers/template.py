@@ -416,6 +416,7 @@ def apply(identity, capability, text, fallback, *, complete, model=None):
                     if w not in {"no_generic_parser", "unparsed_output"}
                 ],
                 summary={
+                    **fallback.summary,
                     "template_sha256": asset.sha256,
                     "template_package": "ntc-templates==9.1.0"
                     if asset.source == "ntc"

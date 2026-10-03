@@ -64,6 +64,114 @@ def _dash(mac):
     return mac.replace(":", "-")
 
 
+def _vlan_ids(value):
+    """IEEE 802.1Q vid-range-type: ascending, nonoverlapping VIDs in 1..4094."""
+    if not isinstance(value, str):
+        return None
+    if value == "":
+        return set()
+    if not re.fullmatch(
+        r"[1-9][0-9]{0,3}(?:-[1-9][0-9]{0,3})?"
+        r"(?:,[1-9][0-9]{0,3}(?:-[1-9][0-9]{0,3})?)*",
+        value,
+    ):
+        return None
+    result, previous = set(), 0
+    for part in value.split(","):
+        bounds = list(map(int, part.split("-")))
+        first, last = bounds[0], bounds[-1]
+        if first <= previous or last < first or last > 4094:
+            return None
+        result.update(range(first, last + 1))
+        previous = last
+    return result
+
+
+def _vlan_ranges(vids):
+    """Serialize a known tagged set as the standard VID range string."""
+    ranges = []
+    for vid in sorted(vids):
+        if ranges and vid == ranges[-1][1] + 1:
+            ranges[-1][1] = vid
+        else:
+            ranges.append([vid, vid])
+    return ",".join(str(first) if first == last else f"{first}-{last}" for first, last in ranges)
+
+
+def _ports(summary):
+    """Only unambiguous parsed port observations; malformed facts add no attributes."""
+    if summary is None:
+        return {}
+    if not isinstance(summary, dict) or not isinstance(summary.get("ports", []), list):
+        return None
+    if summary.get("invalid_structure", False) is not False:
+        return None
+    invalid = summary.get("invalid_ports", [])
+    if not isinstance(invalid, list) or any(
+        not isinstance(name, str) or not name for name in invalid
+    ):
+        return None
+    ports, duplicates = {}, set(invalid)
+    for port in summary.get("ports", []):
+        if not isinstance(port, dict) or not isinstance(port.get("ifname"), str):
+            return None
+        name = port["ifname"]
+        if not name:
+            return None
+        if name in ports:
+            duplicates.add(name)
+        ports[name] = port
+    return {**ports, **dict.fromkeys(duplicates)}
+
+
+def _operational_trunk(port):
+    """Accept the verified IOS operational trunk and aggregate-member forms."""
+    if "oper_mode" not in port or port["oper_mode"] == "trunk":
+        return True
+    mode = port["oper_mode"]
+    if not isinstance(mode, str):
+        return False
+    member = re.fullmatch(r"trunk \(member of bundle Po([1-9][0-9]*)\)", mode)
+    return bool(member) and port.get("lag_parent", f"Port-channel{member[1]}") == (
+        f"Port-channel{member[1]}"
+    )
+
+
+def _outer_tag(trunk, switchport=None):
+    """RFC 8944 outer-tag is tagged traffic, not access VLAN, PVID or STP state.
+
+    Ordinary non-native 802.1Q trunk VLANs are tagged. If the native VLAN is allowed,
+    its operational tagging must be observed before the complete tag set can be stated.
+    Administrative native-tagging settings alone do not establish operational tagging.
+    Disagreement between same-port observations keeps the tag set unknown.
+    """
+    if trunk.get("l2_mode") != "trunk" or trunk.get("encapsulation") != "dot1q":
+        return None
+    if not _operational_trunk(trunk):
+        return None
+    allowed = _vlan_ids(trunk.get("trunk_vlans"))
+    native = trunk.get("native_vlan")
+    if not allowed or type(native) is not int or not 1 <= native <= 4094:
+        return None
+    if switchport is not None:
+        if switchport.get("l2_mode") != "trunk":
+            return None
+        if not _operational_trunk(switchport):
+            return None
+        if "native_vlan" in switchport:
+            if type(switchport["native_vlan"]) is not int or switchport["native_vlan"] != native:
+                return None
+        if "trunk_vlans" in switchport and _vlan_ids(switchport["trunk_vlans"]) != allowed:
+            return None
+    if native in allowed:
+        tagged = (switchport or {}).get("native_tagged")
+        if type(tagged) is not bool:
+            return None
+        if not tagged:
+            allowed.remove(native)
+    return _vlan_ranges(allowed) if allowed else None
+
+
 class _Topology:
     def __init__(self, devices, base):
         self.devices = devices
@@ -296,6 +404,30 @@ class _Topology:
         key = self.by_chassis.get(chassis)
         return self.devices[key].get("platform", "") if key else ""
 
+    def vlan_attributes(self):
+        """Expose observed 802.1Q tags on the collected TP, never on inferred peers."""
+        for key, facts in self.devices.items():
+            switchports = _ports(facts.get("switchport"))
+            trunks = _ports(facts.get("trunk"))
+            if switchports is None or trunks is None:
+                continue
+            chassis = self.chassis[key]
+            for ifname, trunk in trunks.items():
+                if trunk is None or (ifname in switchports and switchports[ifname] is None):
+                    continue
+                if normalize_ifname(ifname, facts.get("platform", "")).kind not in L2_PORT_TYPES:
+                    continue
+                outer = _outer_tag(trunk, switchports.get(ifname))
+                if outer is None:
+                    continue
+                self.l2_port(chassis, ifname)
+                tp_id = self.port_tp(ifname)
+                tps = self.l2_node(chassis)[NT + "termination-point"]
+                tp = next(t for t in tps if t["tp-id"] == tp_id)
+                attrs = tp[L2T + "l2-termination-point-attributes"]
+                attrs["encapsulation-type"] = L2T + "vlan"
+                attrs["outer-tag"] = outer
+
     # assembly ------------------------------------------------------------------
     def build(self):
         for key, facts in self.devices.items():
@@ -339,6 +471,7 @@ class _Topology:
             for m in members:
                 link_of[m] = link_id
         self.management_attributes()
+        self.vlan_attributes()
         l2_nodes = dict(sorted(self.l2_nodes.items()))
         self.navigation(self.l2_net, l2_nodes, l2_links)
         networks = [self.network(self.l2_net, L2T + "l2-topology", l2_nodes, l2_links)]

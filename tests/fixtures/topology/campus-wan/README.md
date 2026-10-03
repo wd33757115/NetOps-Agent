@@ -19,3 +19,7 @@ data scanner and direct byte checks, then copies the approved files.
 `expected.json` is the lab wiring, not something the CLI proves by itself: what is
 checked against the model is listed there, including what cannot be observed.
 Replay checks live in `tests/unit/test_topology_campus_wan.py`.
+
+The separately timed [VLAN/trunk batch](vlan-trunk/README.md) adds switchport
+observations without replacing this original batch. Replay tests use the newer
+VLAN/trunk/switchport captures and retain the original other capabilities.

@@ -6,7 +6,13 @@
 
 项目根目录 `C:\Users\wangd\PycharmProjects\PythonProject\netops-agent`，分支 `feat/network-twin`；`origin`（`https://github.com/wd33757115/net-ops.git`）已推送到 `6855949`，本交接文档的提交在其后，是否推送以 `git status -sb` 为准。Windows + PowerShell；Git Bash 也可用（本轮偶发 Bash 工具退出码 107，换 PowerShell 即可）。
 
-**一句话现状：拓扑建模已在一套 9 台纳管设备的园区 + 双出口实验网（H3C VSR + Cisco IOL 混合）上端到端跑通，平台模型与实际接线一一对应，并按 IETF 标准补了 VRF、VRRP、递归下一跳、聚合与节点管理属性；导出模型通过冻结 YANG 模块校验。负责人倾向继续完善建模，参考 IETF 与成熟产品；下一步建议见“接下来的计划”。**
+**一句话现状：拓扑建模已在一套 8 台纳管设备的园区 + 双出口实验网（H3C VSR + Cisco IOL 混合，ISP 不纳管）上端到端跑通，平台模型与实际接线对应，并按 IETF 标准补了 VRF、VRRP、递归下一跳、聚合与节点管理属性；导出模型通过冻结 YANG 模块校验。负责人倾向继续完善建模，参考 IETF 与成熟产品；下一步建议见“接下来的计划”。**
+
+### GPT 接手更新：2026-10-03
+
+负责人已授权按计划开始，并确认 ACC1/ACC2 两条新 SSH 指纹；使用平台已保存的默认登录完成只读采样，未记录口令、未修改设备配置。第一项 VLAN/trunk 已部署为 **topology 0.4.13**：真实发现 8 台全成功，快照 `894ad28d1fdc415cb942fafa9247786c`，11 个 trunk TP 导出 `outer-tag="10,20"`，access/PVID 留在设备事实中，导出通过冻结 YANG 完整校验。16 条设备间接线按 LLDP 验收；额外管理网 ARP 逻辑邻接不当物理网线。最终相关回归 636 通过、2 个可选模板源用例跳过；详情、限制与证据路径见路线图 §14 新台账。
+
+下一步状态的标准选择已有答案：冻结 SIMAP 无通用状态 leaf，按既定 Q-IETF-1 通过应用层快照身份访问独立 RFC 8343 接口状态，不补自定义 YANG 外键；接口部分树缺 mandatory 统计时间须如实诊断。下一批 OSPF 真样本已只读采集，BR cost=1/Cisco cost=10 的方向差异不能用 `metric1/metric2` 的名字冒充标准方向语义。下文 Claude 原始统计及计划保留为接手时的基线。
 
 ### 负责人本轮新定的要求（与第 2 节同等优先）
 

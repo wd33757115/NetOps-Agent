@@ -6,6 +6,7 @@ SIMAP builder, checked against the lab wiring in expected.json.
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -22,9 +23,12 @@ from src.apps.topology.backend.model.builder import (
 )
 from src.apps.topology.backend.model.locate import locate
 from src.apps.topology.backend.model.path import trace
+from src.apps.topology.backend.service import topology_observation
 
 FIXTURES = Path(__file__).resolve().parents[2] / "tests/fixtures/topology/campus-wan"
 MANIFEST = json.loads((FIXTURES / "manifest.json").read_text(encoding="utf-8"))
+VLAN_FIXTURES = FIXTURES / "vlan-trunk"
+VLAN_MANIFEST = json.loads((VLAN_FIXTURES / "manifest.json").read_text(encoding="utf-8"))
 EXPECTED = json.loads((FIXTURES / "expected.json").read_text(encoding="utf-8"))
 IDENTITY = {
     "comware": Identity("H3C", "comware", "h3c-comware7", "display", "high", "identified"),
@@ -39,6 +43,8 @@ FACTS = {
         "ip": "ip_interfaces",
         "arp": "arp",
         "mac": "mac",
+        "vlan": "vlan",
+        "trunk": "trunk",
         "lag": "lag",
         "vrrp": "vrrp",
         "routes": "routes",
@@ -49,6 +55,9 @@ FACTS = {
         "ip": "ip_interface",
         "arp": "arp",
         "mac": "mac",
+        "vlan": "vlan",
+        "trunk": "trunk",
+        "switchport": "switchport",
         "lag": "lag",
         "vrrp": "vrrp",
         "routes": "routes",
@@ -61,9 +70,21 @@ def parsed(device):
     """Routers rejected the aggregation command, so it was not imported for them."""
     platform = EXPECTED["devices"][device]["platform"]
     return {
-        cap: parse(IDENTITY[platform], cap, (FIXTURES / device / f"{name}.txt").read_text("utf-8"))
+        cap: parse(
+            IDENTITY[platform],
+            cap,
+            (
+                (VLAN_FIXTURES if cap in {"vlan", "trunk", "switchport"} else FIXTURES)
+                / device
+                / f"{name}.txt"
+            ).read_text("utf-8"),
+        )
         for cap, name in FACTS[platform].items()
-        if (FIXTURES / device / f"{name}.txt").exists()
+        if (
+            (VLAN_FIXTURES if cap in {"vlan", "trunk", "switchport"} else FIXTURES)
+            / device
+            / f"{name}.txt"
+        ).exists()
     }
 
 
@@ -71,11 +92,17 @@ def parsed(device):
 def devices():
     result = {}
     for device, spec in EXPECTED["devices"].items():
-        facts = {"platform": spec["platform"]}
-        for cap, outcome in parsed(device).items():
-            if outcome.status in {"complete", "partial"}:
-                facts[cap] = outcome.summary if cap == "lldp_local" else outcome.records
-        result[spec["management"]] = facts
+        outcome = topology_observation(
+            SimpleNamespace(
+                parsed=parsed(device),
+                identity=IDENTITY[spec["platform"]],
+                profile_id=IDENTITY[spec["platform"]].profile_id,
+                mode="topology",
+                driver="paramiko",
+            )
+        )
+        assert outcome["complete"] and outcome["failure_code"] is None
+        result[spec["management"]] = {**outcome["facts"], "platform": spec["platform"]}
     return result
 
 
@@ -99,7 +126,8 @@ def ends(network, link):
 
 def test_every_modeled_capability_parses_completely():
     expected = {
-        (o["device"], o["capability"]): o["expected_status"] for o in MANIFEST["observations"]
+        (o["device"], o["capability"]): o["expected_status"]
+        for o in [*MANIFEST["observations"], *VLAN_MANIFEST["observations"]]
     }
     for device, spec in EXPECTED["devices"].items():
         for cap, outcome in parsed(device).items():
@@ -264,3 +292,48 @@ def test_nodes_carry_rfc8944_management_attributes(l2):
     assert {"10.10.1.13", "10.0.13.2", "10.0.35.1"} <= set(core1["management-address"])
     br1 = nodes["BR1"][L2T + "l2-node-attributes"]
     assert "10.10.1.11" in br1["management-address"] and br1["management-mac"]
+
+
+@pytest.mark.parametrize("device", ["dist1", "dist2", "acc1", "acc2"])
+def test_campus_trunk_tags_use_allowed_vlans_not_stp_subset(devices, l2, device):
+    spec = EXPECTED["devices"][device]
+    facts = devices[spec["management"]]
+    node = next(
+        n
+        for n in l2[0]["node"]
+        if n.get(L2T + "l2-node-attributes", {}).get("name") == spec["name"]
+    )
+    attrs = {
+        tp[L2T + "l2-termination-point-attributes"]["interface-name"]: tp[
+            L2T + "l2-termination-point-attributes"
+        ]
+        for tp in node[NT + "termination-point"]
+    }
+    for port in facts["trunk"]["ports"]:
+        assert port["trunk_vlans"] == "10,20"
+        assert attrs[port["ifname"]]["outer-tag"] == "10,20"
+        assert attrs[port["ifname"]]["encapsulation-type"] == L2T + "vlan"
+    if device.startswith("acc"):
+        assert any(p["forwarding_vlans"] != "10,20" for p in facts["trunk"]["ports"])
+
+
+@pytest.mark.parametrize(
+    "device,port,vid",
+    [("acc1", "Ethernet1/0", 10), ("acc1", "Ethernet1/1", 20), ("acc2", "Ethernet1/0", 10)],
+)
+def test_campus_access_pvid_is_retained_without_a_wire_tag(devices, l2, device, port, vid):
+    spec = EXPECTED["devices"][device]
+    rows = devices[spec["management"]]["switchport"]["ports"]
+    record = next(p for p in rows if p["ifname"] == port)
+    assert (record["l2_mode"], record["access_vlan"], record["pvid"]) == ("access", vid, vid)
+    node = next(
+        n
+        for n in l2[0]["node"]
+        if n.get(L2T + "l2-node-attributes", {}).get("name") == spec["name"]
+    )
+    attrs = next(
+        tp[L2T + "l2-termination-point-attributes"]
+        for tp in node[NT + "termination-point"]
+        if tp[L2T + "l2-termination-point-attributes"]["interface-name"] == port
+    )
+    assert "outer-tag" not in attrs

@@ -102,7 +102,19 @@ CAMPUS = Lab(
     ROOT / "tests/fixtures/topology/campus-wan",
     frozenset(),
 )
-LABS = {"vsr1000": VSR, "campus-wan": CAMPUS}
+CAMPUS_VLAN = Lab(
+    "20261003-014006",
+    CAMPUS_HOSTS,
+    {
+        host: frozenset({"interfaces", "vlan", "trunk"})
+        if name.startswith("br")
+        else frozenset({"switchport", "vlan", "trunk"})
+        for host, name in CAMPUS_HOSTS.items()
+    },
+    ROOT / "tests/fixtures/topology/campus-wan/vlan-trunk",
+    frozenset(),
+)
+LABS = {"vsr1000": VSR, "campus-wan": CAMPUS, "campus-vlan": CAMPUS_VLAN}
 SENSITIVE = re.compile(
     rb"(?im)^\s*(?:password\s+|secret\s+|community\s+|"
     rb"snmp-agent\s+community\b|-----BEGIN .*PRIVATE KEY-----)"

@@ -29,6 +29,8 @@ Capability = Literal[
     "routes",
     "vrfs",
     "vlan",
+    "trunk",
+    "switchport",
     "lag",
     "irf",
     "mlag",

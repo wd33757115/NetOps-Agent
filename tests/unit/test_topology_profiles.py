@@ -31,6 +31,7 @@ from src.platform.device_access.service import DeviceAccessService
 LAB = Path(__file__).parents[1] / "fixtures/topology/h3c/vsr1000-7.1.064/vsr-1"
 # Capabilities the first lab never captured (VRRP) come from the same Comware release there.
 CAMPUS_BR1 = Path(__file__).parents[1] / "fixtures/topology/campus-wan/br1"
+VLAN_BR1 = Path(__file__).parents[1] / "fixtures/topology/campus-wan/vlan-trunk/br1"
 
 
 def identity(text=None):
@@ -41,7 +42,7 @@ def test_profiles_modes_identity_and_verification():
     profiles = load_profiles()
     assert set(profiles) == {"h3c-comware7", "cisco-nxos", "cisco-ios"}
     profile = select_profile(identity(), profiles)
-    assert [len(profile.selected(mode)) for mode in ("fast", "standard", "full")] == [4, 10, 13]
+    assert [len(profile.selected(mode)) for mode in ("fast", "standard", "full")] == [4, 11, 14]
     assert profile.verified[0].unsupported == ["inventory", "irf"]
     assert profiles["cisco-ios"].verified == [] and profiles["cisco-nxos"].verified == []
     iosxe = identify([Probe("show version", "Cisco IOS XE Software, Version 17.9")])
@@ -178,7 +179,11 @@ def setup(monkeypatch):
     outputs = {
         spec.command: next(
             path
-            for path in (LAB / f"{mapping.get(cap, cap)}.txt", CAMPUS_BR1 / f"{cap}.txt")
+            for path in (
+                LAB / f"{mapping.get(cap, cap)}.txt",
+                CAMPUS_BR1 / f"{cap}.txt",
+                VLAN_BR1 / f"{cap}.txt",
+            )
             if path.exists()
         ).read_text()
         for cap, spec in profiles["h3c-comware7"].capabilities.items()
@@ -243,7 +248,7 @@ def setup(monkeypatch):
     )
 
 
-@pytest.mark.parametrize("mode,count", [("fast", 4), ("standard", 10), ("full", 13)])
+@pytest.mark.parametrize("mode,count", [("fast", 4), ("standard", 11), ("full", 14)])
 def test_real_fixtures_through_public_batch_pipeline(setup, mode, count):
     result = setup.collect(mode=mode)
     trace = setup.trace

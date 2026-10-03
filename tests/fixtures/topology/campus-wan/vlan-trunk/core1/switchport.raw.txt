@@ -1,0 +1,5 @@
+show interfaces switchport
+                       ^
+% Invalid input detected at '^' marker.
+
+CORE1#
