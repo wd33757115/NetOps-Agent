@@ -6,8 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from src.apps.topology.backend.collectors.parse import parse_generic
-from src.apps.topology.backend.collectors.tiers import generic_ospf
+from src.apps.topology.backend.collectors.parse import parse
 from src.apps.topology.backend.model.ospf import link_metric, project_ospf
 
 CAPTURES = Path(__file__).resolve().parents[2] / "tests/fixtures/topology/campus-wan"
@@ -144,10 +143,10 @@ def test_synthetic_comware_parser_outputs_join_brief_to_full_interface_proof():
  Cost: 1 State: DR Type: Broadcast MTU: 1500
 """
     b, p = (
-        generic_ospf.parse_interfaces(brief, "comware"),
-        generic_ospf.parse_process(full, "comware"),
+        parse({"os_family": "comware"}, "ospf_interfaces", brief),
+        parse({"os_family": "comware"}, "ospf_process", full),
     )
-    assert not b.rejected and not p.rejected
+    assert not b.rejected_count and not p.rejected_count
     rows = facts(1, name="GigabitEthernet3/0")
     rows.update(ospf_interfaces={"summary": b.summary}, ospf_process={"summary": p.summary})
     result = device(project_ospf({"a": rows}))
@@ -420,14 +419,17 @@ def test_malformed_projection_device_interfaces_do_not_crash_link_lookup():
 def test_real_campus_helper_keeps_costs_and_original_observations(name, expected_costs, raw_count):
     family = "comware" if name.startswith("br") else "ios"
     ip_file = "ip_interfaces.txt" if family == "comware" else "ip_interface.txt"
-    ip = parse_generic({"os_family": family}, "ip", (CAPTURES / name / ip_file).read_text("utf-8"))
-    brief = generic_ospf.parse_interfaces(
-        (CAPTURES / "ospf" / name / "ospf_interfaces.txt").read_text("utf-8"), family
+    ip = parse({"os_family": family}, "ip", (CAPTURES / name / ip_file).read_text("utf-8"))
+    identity = {"os_family": family}
+    brief = parse(
+        identity,
+        "ospf_interfaces",
+        (CAPTURES / "ospf" / name / "ospf_interfaces.txt").read_text("utf-8"),
     )
-    full = generic_ospf.parse_process(
-        (CAPTURES / "ospf" / name / "ospf_process.txt").read_text("utf-8"), family
+    full = parse(
+        identity, "ospf_process", (CAPTURES / "ospf" / name / "ospf_process.txt").read_text("utf-8")
     )
-    assert ip.status == "complete" and not brief.rejected and not full.rejected
+    assert ip.status == "complete" and not brief.rejected_count and not full.rejected_count
     facts = {"ip": ip.records, "ospf_interfaces": brief.summary, "ospf_process": full.summary}
     original = deepcopy(facts)
     projected = device(project_ospf({"a": facts}))
@@ -465,14 +467,11 @@ def test_incomplete_collection_is_not_unique_scope_or_cost_evidence(capability, 
     assert result["observations"][0]["record"]["cost"] == 10
 
 
-def test_public_incomplete_transport_veto_survives_fact_summary(monkeypatch):
-    from src.apps.topology.backend.collectors.parse import PARSERS
-
-    monkeypatch.setitem(PARSERS, "ospf_interfaces", generic_ospf.parse_interfaces)
+def test_public_incomplete_transport_veto_survives_fact_summary():
     captured = """Interface PID Area IP Address/Mask Cost State Nbrs F/C
 Et0/1 1 0 10.0.0.1/30 10 DR 1/1
 """
-    parsed = parse_generic({"os_family": "ios"}, "ospf_interfaces", captured, complete=False)
+    parsed = parse({"os_family": "ios"}, "ospf_interfaces", captured, complete=False)
     assert parsed.status == "partial" and parsed.summary["interfaces"]
     rows = facts()
     rows["ospf_interfaces"] = parsed.fact_summary()

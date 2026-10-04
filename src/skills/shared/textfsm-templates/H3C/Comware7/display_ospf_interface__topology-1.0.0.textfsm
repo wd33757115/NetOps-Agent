@@ -1,0 +1,27 @@
+Value PROCESS_ID (\S+)
+Value ROUTER_ID (\S+)
+Value LABEL (Interfaces)
+Value AREA (\S+)
+Value TABLE (IP Address)
+Value ADDRESS (\S+)
+Value TYPE (\S+)
+Value STATE (\S+)
+Value COST (\S+)
+Value PRIORITY (\S+)
+Value DR (\S+)
+Value BDR (\S+)
+Value BAD_ROW (\S.*?)
+
+# One record per line of "display ospf interface" (campus-wan and vpn-fabric labs,
+# Comware 7.1): a process header, the "Interfaces" label, an area, the table header
+# (TABLE), an interface row, or another line led by a token (BAD_ROW). Topology checks
+# the order and the values (rules_tables.ospf_interfaces).
+Start
+  ^\s*OSPF Process ${PROCESS_ID} with Router ID ${ROUTER_ID}\s*$$ -> Record
+  ^\s*${LABEL}\s*$$ -> Record
+  ^\s*Area:\s*${AREA}(?:\s+\(MPLS TE not enabled\))?\s*$$ -> Record
+  ^\s*${TABLE}\s+Type\s+State\s+Cost\s+Pri\s+DR\s+BDR\s*$$ -> Record
+  ^\s*${ADDRESS}\s+${TYPE}\s+${STATE}\s+${COST}\s+${PRIORITY}\s+${DR}\s+${BDR}\s*$$ -> Record
+  ^\s*${ADDRESS}\s+${BAD_ROW}\s*$$ -> Record
+  ^\s*$$
+  ^. -> Error "unrecognized ospf interface line"

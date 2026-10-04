@@ -1,0 +1,59 @@
+Value PROCESS_ID (\S+)
+Value ROUTER_ID (\S+)
+Value VRF_EVIDENCE (Multi-VPN-Instance is not enabled)
+Value CONFIRMED_ROUTER_ID (\S+)
+Value AREA (\S+)
+Value ADDRESS (\S+)
+Value INTERFACE (\S+)
+Value COST (\S+)
+Value STATE (\S+)
+
+# One record per scope or interface line of "display ospf" (campus-wan and vpn-fabric
+# labs, Comware 7.1): a process header, its default-instance evidence, the router ID it
+# confirms, an area, an interface (address and name) or its cost line. The known detail
+# lines carry nothing modeled; any other line is unrecognized scope or syntax.
+Start
+  ^\s*OSPF Process ${PROCESS_ID} with Router ID ${ROUTER_ID}\s*$$ -> Record
+  ^\s*${VRF_EVIDENCE}\s*$$ -> Record
+  ^\s*RouterID:\s*${CONFIRMED_ROUTER_ID}\s+Router type:\s*$$ -> Record
+  ^\s*Area:\s*${AREA}(?:\s+\(MPLS TE not enabled\))?\s*$$ -> Record
+  ^\s*Interface:\s*${ADDRESS}\s+\(${INTERFACE}\)(?:\s+-->\s+\S+)?\s*$$ -> Record
+  ^\s*Cost:\s*${COST}\s+State:\s*${STATE}\s+Type:\s*\S+\s+MTU:\s*\d+\s*$$ -> Record
+  ^\s*OSPF Protocol Information\s*$$
+  ^\s*Route tag: \d+\s*$$
+  ^\s*Ext-community type: Domain ID 0x[0-9a-fA-F]+, Route Type 0x[0-9a-fA-F]+, Router ID 0x[0-9a-fA-F]+\s*$$
+  ^\s*Domain ID: \d+\.\d+\.\d+\.\d+\s*$$
+  ^\s*Opaque capable\s*$$
+  ^\s*Isolation: Disabled\s*$$
+  ^\s*ISPF is enabled\s*$$
+  ^\s*SPF-schedule-interval: \d+ \d+ \d+\s*$$
+  ^\s*LSA generation interval: \d+ \d+ \d+\s*$$
+  ^\s*LSA arrival interval: \d+\s*$$
+  ^\s*Transmit pacing: Interval: \d+ Count: \d+\s*$$
+  ^\s*Default ASE parameters: Metric: \d+ Tag: \d+ Type: \d+\s*$$
+  ^\s*(?:ASE )?Route preference: \d+\s*$$
+  ^\s*ASE route preference: \d+\s*$$
+  ^\s*SPF calculation count: \d+\s*$$
+  ^\s*RFC 1583 compatible\s*$$
+  ^\s*Fast-reroute: Remote-lfa Disabled\s*$$
+  ^\s*Maximum-cost: \d+\s*$$
+  ^\s*Node-Protecing Preference: \d+\s*$$
+  ^\s*Lowest-cost Preference: \d+\s*$$
+  ^\s*Graceful restart interval: \d+\s*$$
+  ^\s*SNMP trap rate limit interval: \d+\s+Count: \d+\s*$$
+  ^\s*Area count: \d+\s+NSSA area count: \d+\s*$$
+  ^\s*ExChange/Loading neighbors: \d+\s*$$
+  ^\s*MPLS segment routing: Disabled\s*$$
+  ^\s*Segment routing adjacency\s*: Disabled\s*$$
+  ^\s*Effective SRGB\s*: \d+\s+\d+\s*$$
+  ^\s*Segment routing local block\s*: \d+\s+\d+\s*$$
+  ^\s*Segment routing tunnel count: \d+\s*$$
+  ^\s*Authentication type: None\s+Area flag: Normal\s*$$
+  ^\s*SPF scheduled count: \d+\s*$$
+  ^\s*Priority: \d+\s*$$
+  ^\s*(?:Designated|Backup designated) router: \d+\.\d+\.\d+\.\d+\s*$$
+  ^\s*Timers: Hello \d+, Dead \d+, Poll \d+, Retransmit \d+, Transmit Delay \d+\s*$$
+  ^\s*FRR (?:backup|TI-LFA|remote-lfa): Enabled\s*$$
+  ^\s*Enabled by interface configuration \(including secondary IP addresses\)\s*$$
+  ^\s*$$
+  ^. -> Error "unrecognized ospf process line"

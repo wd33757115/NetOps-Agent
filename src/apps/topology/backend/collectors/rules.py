@@ -65,6 +65,8 @@ CHECK_ITEMS = {
     "lldp_local": "topology.lldp_local",
     "trunk": "topology.trunks",
     "switchport": "topology.switchports",
+    "ospf_interfaces": "topology.ospf_interfaces",
+    "ospf_process": "topology.ospf_process",
 }
 # Families whose CLI output rule governance parses for the capabilities above.
 FAMILIES = frozenset({"ios", "iosxe", "comware"})

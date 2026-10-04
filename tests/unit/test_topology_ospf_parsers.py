@@ -7,7 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from src.apps.topology.backend.collectors.tiers import generic_ospf
+from src.apps.topology.backend.collectors import rules
+from src.apps.topology.backend.collectors.parse import parse
 from src.apps.topology.backend.facts.repository import FactInput, validate_records
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures/topology/campus-wan/ospf"
@@ -53,14 +54,23 @@ IOS_PROCESS = """ Routing Process "ospf 1" with ID 10.255.0.3
 """
 
 
+def interfaces(text, family):
+    """OSPF facts are read through the rule-governance check items topology.ospf_*."""
+    return parse({"os_family": family}, "ospf_interfaces", text)
+
+
+def process(text, family):
+    return parse({"os_family": family}, "ospf_process", text)
+
+
 def rows(parsed):
     assert parsed.records == []
     return parsed.summary.get("interfaces", [])
 
 
 def test_ios_brief_preserves_actual_interface_cost_address_and_area():
-    parsed = generic_ospf.parse_interfaces(IOS_BRIEF + DIST_BRIEF.split("\n", 1)[1], "ios")
-    assert not parsed.rejected, parsed.warnings
+    parsed = interfaces(IOS_BRIEF + DIST_BRIEF.split("\n", 1)[1], "ios")
+    assert not parsed.rejected_count, parsed.warnings
     by_name = {row["ifname"]: row for row in rows(parsed)}
     assert by_name["Loopback0"] == {
         "process_id": "1",
@@ -78,8 +88,8 @@ def test_ios_brief_preserves_actual_interface_cost_address_and_area():
 
 
 def test_comware_brief_has_no_invented_ifname_or_prefix_or_vrf():
-    parsed = generic_ospf.parse_interfaces(COMWARE_BRIEF, "comware")
-    assert not parsed.rejected, parsed.warnings
+    parsed = interfaces(COMWARE_BRIEF, "comware")
+    assert not parsed.rejected_count, parsed.warnings
     assert rows(parsed)[1]["cost"] == 0
     assert rows(parsed)[1]["state"] == "Loopback"
     assert rows(parsed)[0]["router_id"] == "10.255.0.1"
@@ -91,8 +101,8 @@ def test_comware_brief_has_no_invented_ifname_or_prefix_or_vrf():
 
 
 def test_comware_process_proves_scope_and_address_interface_mapping():
-    parsed = generic_ospf.parse_process(COMWARE_PROCESS, "comware")
-    assert not parsed.rejected, parsed.warnings
+    parsed = process(COMWARE_PROCESS, "comware")
+    assert not parsed.rejected_count, parsed.warnings
     assert parsed.summary["processes"] == [
         {
             "process_id": "1",
@@ -109,35 +119,31 @@ def test_comware_process_proves_scope_and_address_interface_mapping():
 
 
 def test_ios_process_header_proves_router_id_without_assuming_vrf():
-    parsed = generic_ospf.parse_process(IOS_PROCESS, "ios")
-    assert not parsed.rejected, parsed.warnings
+    parsed = process(IOS_PROCESS, "ios")
+    assert not parsed.rejected_count, parsed.warnings
     assert parsed.summary == {"processes": [{"process_id": "1", "router_id": "10.255.0.3"}]}
 
 
 def test_comware_default_scope_requires_explicit_output_evidence():
-    parsed = generic_ospf.parse_process(
-        COMWARE_PROCESS.replace(" Multi-VPN-Instance is not enabled\n", ""), "comware"
-    )
-    assert not parsed.rejected
+    parsed = process(COMWARE_PROCESS.replace(" Multi-VPN-Instance is not enabled\n", ""), "comware")
+    assert not parsed.rejected_count
     assert "vrf" not in parsed.summary["processes"][0]
     assert "vrf_evidence" not in parsed.summary["processes"][0]
 
 
 @pytest.mark.parametrize("family", ["ios", "iosxe"])
-@pytest.mark.parametrize("parser", [generic_ospf.parse_interfaces, generic_ospf.parse_process])
+@pytest.mark.parametrize("parser", [interfaces, process])
 def test_actual_empty_ios_access_outputs_are_verified(parser, family):
     parsed = parser("\n", family)
-    assert (
-        parsed.empty_verified and not parsed.summary and not parsed.records and not parsed.rejected
-    )
+    assert parsed.status == "complete"
+    assert not parsed.summary and not parsed.records and not parsed.rejected_count
 
 
-@pytest.mark.parametrize("parser", [generic_ospf.parse_interfaces, generic_ospf.parse_process])
+@pytest.mark.parametrize("parser", [interfaces, process])
 @pytest.mark.parametrize("family", ["comware", "unknown"])
 def test_empty_unverified_family_never_creates_a_process_or_cost(parser, family):
     parsed = parser("", family)
-    assert not parsed.empty_verified and not rows(parsed)
-    assert parsed.summary["invalid_structure"]
+    assert parsed.status == "failed" and not parsed.summary and not parsed.records
 
 
 @pytest.mark.parametrize("extra", ["Unknown global OSPF syntax\n", "VPN instance: MGMT\n"])
@@ -145,22 +151,22 @@ def test_empty_unverified_family_never_creates_a_process_or_cost(parser, family)
 @pytest.mark.parametrize(
     "parser,sample,family",
     [
-        (generic_ospf.parse_interfaces, IOS_BRIEF, "ios"),
-        (generic_ospf.parse_interfaces, COMWARE_BRIEF, "comware"),
-        (generic_ospf.parse_process, IOS_PROCESS, "ios"),
-        (generic_ospf.parse_process, COMWARE_PROCESS, "comware"),
+        (interfaces, IOS_BRIEF, "ios"),
+        (interfaces, COMWARE_BRIEF, "comware"),
+        (process, IOS_PROCESS, "ios"),
+        (process, COMWARE_PROCESS, "comware"),
     ],
 )
 def test_unknown_scope_or_syntax_carries_global_veto(parser, sample, family, prepend, extra):
     parsed = parser(extra + sample if prepend else sample + extra, family)
-    assert parsed.rejected
+    assert parsed.rejected_count
     assert parsed.summary["invalid_structure"]
 
 
 @pytest.mark.parametrize("cost", ["-1", "65536", "bad"])
 def test_invalid_ios_cost_removes_known_interface_and_keeps_good_loopback(cost):
-    parsed = generic_ospf.parse_interfaces(IOS_BRIEF.replace("10    DR", f"{cost}    DR"), "ios")
-    assert parsed.rejected
+    parsed = interfaces(IOS_BRIEF.replace("10    DR", f"{cost}    DR"), "ios")
+    assert parsed.rejected_count
     assert [row["ifname"] for row in rows(parsed)] == ["Loopback0"]
     assert parsed.summary["invalid_interfaces"] == [
         {"process_id": "1", "ifname": "Ethernet0/1", "address": "10.0.13.2"}
@@ -169,10 +175,8 @@ def test_invalid_ios_cost_removes_known_interface_and_keeps_good_loopback(cost):
 
 @pytest.mark.parametrize("cost", ["-1", "65536", "bad"])
 def test_invalid_comware_cost_removes_known_interface(cost):
-    parsed = generic_ospf.parse_process(
-        COMWARE_PROCESS.replace("Cost: 1", f"Cost: {cost}"), "comware"
-    )
-    assert parsed.rejected
+    parsed = process(COMWARE_PROCESS.replace("Cost: 1", f"Cost: {cost}"), "comware")
+    assert parsed.rejected_count
     assert [row["ifname"] for row in rows(parsed)] == ["LoopBack0"]
     assert parsed.summary["invalid_interfaces"][0]["address"] == "10.0.13.1"
 
@@ -180,33 +184,33 @@ def test_invalid_comware_cost_removes_known_interface(cost):
 @pytest.mark.parametrize("sample,family", [(IOS_BRIEF, "ios"), (COMWARE_BRIEF, "comware")])
 def test_duplicate_brief_row_invalidates_original_observation(sample, family):
     line = next(line for line in sample.splitlines() if "10.0.13." in line)
-    parsed = generic_ospf.parse_interfaces(sample + line + "\n", family)
-    assert parsed.rejected
+    parsed = interfaces(sample + line + "\n", family)
+    assert parsed.rejected_count
     assert len(rows(parsed)) == 1
     assert parsed.summary["invalid_interfaces"]
 
 
 def test_duplicate_table_header_is_global_veto():
-    parsed = generic_ospf.parse_interfaces(IOS_BRIEF + IOS_BRIEF.splitlines()[0] + "\n", "ios")
+    parsed = interfaces(IOS_BRIEF + IOS_BRIEF.splitlines()[0] + "\n", "ios")
     assert parsed.summary["invalid_structure"]
-    assert parsed.rejected
+    assert parsed.rejected_count
 
 
 def test_duplicate_comware_brief_area_vetoes_process_interfaces():
-    parsed = generic_ospf.parse_interfaces(COMWARE_BRIEF + " Area: 0.0.0.0\n", "comware")
-    assert parsed.rejected and parsed.summary["invalid_processes"] == ["1"]
+    parsed = interfaces(COMWARE_BRIEF + " Area: 0.0.0.0\n", "comware")
+    assert parsed.rejected_count and parsed.summary["invalid_processes"] == ["1"]
     assert not rows(parsed)
 
 
 def test_duplicate_comware_interface_label_vetoes_process_interfaces():
-    parsed = generic_ospf.parse_interfaces(COMWARE_BRIEF + " Interfaces\n", "comware")
-    assert parsed.rejected and parsed.summary["invalid_processes"] == ["1"]
+    parsed = interfaces(COMWARE_BRIEF + " Interfaces\n", "comware")
+    assert parsed.rejected_count and parsed.summary["invalid_processes"] == ["1"]
     assert not rows(parsed)
 
 
 def test_duplicate_full_process_area_vetoes_observations():
-    parsed = generic_ospf.parse_process(COMWARE_PROCESS + " Area: 0.0.0.0\n", "comware")
-    assert parsed.rejected and parsed.summary["invalid_processes"] == ["1"]
+    parsed = process(COMWARE_PROCESS + " Area: 0.0.0.0\n", "comware")
+    assert parsed.rejected_count and parsed.summary["invalid_processes"] == ["1"]
     assert not rows(parsed) and not parsed.summary.get("processes")
 
 
@@ -225,25 +229,25 @@ def test_duplicate_full_process_area_vetoes_observations():
     ],
 )
 def test_missing_duplicate_or_conflicting_comware_interface_observation_has_no_fake_cost(change):
-    parsed = generic_ospf.parse_process(change(COMWARE_PROCESS), "comware")
-    assert parsed.rejected
+    parsed = process(change(COMWARE_PROCESS), "comware")
+    assert parsed.rejected_count
     assert all(row["address"] != "10.0.13.1" for row in rows(parsed))
     assert parsed.summary["invalid_interfaces"]
 
 
 @pytest.mark.parametrize("sample,family", [(COMWARE_PROCESS, "comware"), (IOS_PROCESS, "ios")])
 def test_duplicate_process_header_vetoes_process_and_its_interfaces(sample, family):
-    parsed = generic_ospf.parse_process(sample + sample.splitlines()[0] + "\n", family)
-    assert parsed.rejected
+    parsed = process(sample + sample.splitlines()[0] + "\n", family)
+    assert parsed.rejected_count
     assert parsed.summary["invalid_processes"] == ["1"]
     assert not parsed.summary.get("processes") and not rows(parsed)
 
 
 def test_conflicting_router_id_vetoes_comware_process():
-    parsed = generic_ospf.parse_process(
+    parsed = process(
         COMWARE_PROCESS.replace("RouterID: 10.255.0.1", "RouterID: 10.255.0.99"), "comware"
     )
-    assert parsed.rejected
+    assert parsed.rejected_count
     assert parsed.summary["invalid_processes"] == ["1"]
     assert not parsed.summary.get("processes") and not rows(parsed)
 
@@ -251,16 +255,16 @@ def test_conflicting_router_id_vetoes_comware_process():
 @pytest.mark.parametrize(
     "capability,parser,sample,family",
     [
-        ("ospf_interfaces", generic_ospf.parse_interfaces, IOS_BRIEF, "ios"),
-        ("ospf_process", generic_ospf.parse_process, COMWARE_PROCESS, "comware"),
+        ("ospf_interfaces", interfaces, IOS_BRIEF, "ios"),
+        ("ospf_process", process, COMWARE_PROCESS, "comware"),
     ],
 )
 def test_summary_sentinel_survives_public_parse_as_partial(capability, parser, sample, family):
     module = importlib.import_module("src.apps.topology.backend.collectors.parse")
-    assert module.PARSERS[capability] is parser
     parsed = module.parse(
         {"os_family": family}, capability, "Unknown OSPF syntax\n" + sample, use_templates=False
     )
+    assert parsed.tier == "rules"
     assert parsed.status == "partial" and parsed.summary["invalid_structure"]
     assert parsed.fact_summary()["invalid_structure"]
 
@@ -278,15 +282,14 @@ def test_entirely_bad_known_interface_survives_public_parse_as_partial():
 @pytest.mark.parametrize(
     "capability,parser",
     [
-        ("ospf_interfaces", generic_ospf.parse_interfaces),
-        ("ospf_process", generic_ospf.parse_process),
+        ("ospf_interfaces", interfaces),
+        ("ospf_process", process),
     ],
 )
 def test_empty_incomplete_transport_is_not_verified_and_unsupported_is_not_empty(
     capability, parser
 ):
     module = importlib.import_module("src.apps.topology.backend.collectors.parse")
-    assert module.PARSERS[capability] is parser
     incomplete = module.parse(
         {"os_family": "ios"}, capability, "", complete=False, use_templates=False
     )
@@ -382,13 +385,15 @@ def test_ospf_profiles_modes_import_contract_and_summary_only_storage():
         },
     }.items():
         profile = load_profiles()[profile_id]
+        family = profile.os_family
         for mode in ("topology", "standard", "full"):
-            selected = profile.selected(mode)
-            assert {cap: selected[cap].command for cap in commands} == commands
+            assert commands.keys() <= profile.selected(mode).keys()
         assert not commands.keys() & profile.selected("fast").keys()
         for cap, command in commands.items():
+            # Rule governance publishes the command; the profile only selects the fact.
+            assert rules.selection({"os_family": family}, cap).command == command
             assert command_of(cap, command)
-            assert profile.capabilities[cap].parser == f"generic_{cap}"
+            assert profile.capabilities[cap].parser == "rules"
             assert cap not in RECORD_MODELS
 
 

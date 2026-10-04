@@ -13,7 +13,6 @@ from .tiers import (
     generic_ipif,
     generic_lldp,
     generic_mac,
-    generic_ospf,
     generic_version,
     generic_vrfs,
 )
@@ -26,8 +25,6 @@ PARSERS = {
     "interfaces": generic_ifbrief.parse,
     "ip": generic_ipif.parse,
     "version": generic_version.parse,
-    "ospf_interfaces": generic_ospf.parse_interfaces,
-    "ospf_process": generic_ospf.parse_process,
     "vrfs": generic_vrfs.parse,
 }
 EMPTY = {

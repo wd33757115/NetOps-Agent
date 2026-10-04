@@ -1,0 +1,61 @@
+Value PROCESS_ID (\S+)
+Value ROUTER_ID (\S+)
+Value AREA (\S+)
+
+# One record per scope line of "show ip ospf" (campus-wan lab, IOS-XE 17): a process
+# header or an area. The known process and area detail lines carry nothing modeled;
+# any other line is unrecognized scope or syntax.
+Start
+  ^\s*Routing Process "ospf ${PROCESS_ID}" with ID ${ROUTER_ID}\s*$$ -> Record
+  ^\s*Area BACKBONE\(${AREA}\)\s*$$ -> Record
+  ^\s*Area ${AREA}\s*$$ -> Record
+  ^\s*Start time: [0-9:.]+, Time elapsed: [0-9:.]+\s*$$
+  ^\s*Supports only single TOS\(TOS0\) routes\s*$$
+  ^\s*Supports opaque LSA\s*$$
+  ^\s*Supports Link-local Signaling \(LLS\)\s*$$
+  ^\s*Supports area transit capability\s*$$
+  ^\s*Supports NSSA \(compatible with RFC 3101\)\s*$$
+  ^\s*Supports Database Exchange Summary List Optimization \(RFC 5243\)\s*$$
+  ^\s*Maximum number of non self-generated LSA allowed \d+\s*$$
+  ^\s*Current number of non self-generated LSA \d+\s*$$
+  ^\s*Threshold for warning message \d+%\s*$$
+  ^\s*Ignore-time \d+ minutes, reset-time \d+ minutes\s*$$
+  ^\s*Ignore-count allowed \d+, current ignore-count \d+\s*$$
+  ^\s*Event-log enabled, Maximum number of events: \d+, Mode: cyclic\s*$$
+  ^\s*It is an area border router\s*$$
+  ^\s*Router is not originating router-LSAs with maximum metric\s*$$
+  ^\s*Initial SPF schedule delay \d+ msecs\s*$$
+  ^\s*Minimum hold time between two consecutive SPFs \d+ msecs\s*$$
+  ^\s*Maximum wait time between two consecutive SPFs \d+ msecs\s*$$
+  ^\s*Incremental-SPF disabled\s*$$
+  ^\s*Per-prefix-distribution disabled\s*$$
+  ^\s*Initial LSA throttle delay \d+ msecs\s*$$
+  ^\s*Minimum hold time for LSA throttle \d+ msecs\s*$$
+  ^\s*Maximum wait time for LSA throttle \d+ msecs\s*$$
+  ^\s*Minimum LSA arrival \d+ msecs\s*$$
+  ^\s*LSA group pacing timer \d+ secs\s*$$
+  ^\s*Interface flood pacing timer \d+ msecs\s*$$
+  ^\s*Retransmission pacing timer \d+ msecs\s*$$
+  ^\s*EXCHANGE/LOADING adjacency limit: initial \d+, process maximum \d+\s*$$
+  ^\s*Number of (?:external|opaque AS) LSA \d+\. Checksum Sum 0x[0-9a-fA-F]+\s*$$
+  ^\s*Number of (?:DCbitless external and opaque AS|DoNotAge external and opaque AS) LSA \d+\s*$$
+  ^\s*Number of areas in this router is \d+\. \d+ normal \d+ stub \d+ nssa\s*$$
+  ^\s*Number of areas transit capable is \d+\s*$$
+  ^\s*External flood list length \d+\s*$$
+  ^\s*(?:IETF|Cisco) NSF helper support enabled\s*$$
+  ^\s*Reference bandwidth unit is \d+ mbps\s*$$
+  ^\s*Number of interfaces in this area is \d+(?: \(\d+ loopback\))?\s*$$
+  ^\s*Area has no authentication\s*$$
+  ^\s*SPF algorithm last executed [0-9:.]+ ago\s*$$
+  ^\s*SPF algorithm executed \d+ times\s*$$
+  ^\s*Area ranges are\s*$$
+  ^\s*Number of LSA \d+\. Checksum Sum 0x[0-9a-fA-F]+\s*$$
+  ^\s*Number of opaque link LSA \d+\. Checksum Sum 0x[0-9a-fA-F]+\s*$$
+  ^\s*Number of (?:opaque link|DCbitless|indication|DoNotAge) LSA \d+\s*$$
+  ^\s*Flood list length \d+\s*$$
+  ^\s*Maintenance Mode ID:\s*\d+\s*$$
+  ^\s*Maintenance Mode:\s*disabled\s*$$
+  ^\s*Maintenance Mode Timer:\s*stopped \(0\)\s*$$
+  ^\s*Graceful Reload FSU Global status : None \(global: None\)\s*$$
+  ^\s*$$
+  ^. -> Error "unrecognized ospf process line"

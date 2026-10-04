@@ -416,6 +416,41 @@ check_items:
       OPER_NATIVE_TAGGING: [text, false, 运行中的 Native VLAN 打标]
       TRUNK_VLANS: [text, false, Trunk 允许的 VLAN 原文]
       BAD_FIELD: [text, false, 该端口无法识别的字段或取值]
+  topology.ospf_interfaces:
+    name: 拓扑发现：OSPF 接口开销（简表，按行）
+    entity_type: ospf_interface_line
+    keys: [ADDRESS]
+    values:
+      ADDRESS: [text, true, 接口地址（IOS 带掩码）]
+      TABLE: [text, false, 表头行]
+      INTERFACE: [text, false, IOS 的接口原文]
+      PROCESS_ID: [text, false, 进程号]
+      ROUTER_ID: [text, false, Comware 进程头的路由器 ID]
+      LABEL: [text, false, Comware 的 Interfaces 标签行]
+      AREA: [text, false, 区域]
+      TYPE: [text, false, Comware 的网络类型]
+      STATE: [text, false, 接口状态原文]
+      COST: [text, false, 开销原文]
+      PRIORITY: [text, false, Comware 的优先级]
+      DR: [text, false, Comware 的 DR]
+      BDR: [text, false, Comware 的 BDR]
+      NEIGHBORS: [text, false, IOS 的邻居数（全毗邻/总数）]
+      BAD_ROW: [text, false, 无法识别的行余下部分]
+
+  topology.ospf_process:
+    name: 拓扑发现：OSPF 进程与接口映射（按行）
+    entity_type: ospf_process_line
+    keys: [PROCESS_ID]
+    values:
+      PROCESS_ID: [text, true, 进程号]
+      ROUTER_ID: [text, false, 进程头的路由器 ID]
+      AREA: [text, false, 区域]
+      VRF_EVIDENCE: [text, false, Comware 未启用多 VPN 实例的输出证据]
+      CONFIRMED_ROUTER_ID: [text, false, Comware 再次给出的路由器 ID]
+      ADDRESS: [text, false, Comware 的接口地址]
+      INTERFACE: [text, false, Comware 的接口名]
+      COST: [text, false, Comware 的接口开销原文]
+      STATE: [text, false, Comware 的接口状态原文]
 
 implementations:
   - check_item: topology.arp
@@ -750,6 +785,28 @@ implementations:
     command: show interfaces switchport
     template: Cisco/IOS/show_interfaces_switchport__topology-1.0.0.textfsm
     sha256: 14186c2842798c90ae3df70678053239ceb2ed8846e718f28db0bbb4131a7459
+  - check_item: topology.ospf_interfaces
+    platform: ios
+    command: show ip ospf interface brief
+    template: Cisco/IOS/show_ip_ospf_interface_brief__topology-1.0.0.textfsm
+    sha256: 724b377e870021093ebc56634abaafa1dfb503e6580a1ac03b34b495e0df364d
+    valid_empty: [BLANK]
+  - check_item: topology.ospf_interfaces
+    platform: comware
+    command: display ospf interface
+    template: H3C/Comware7/display_ospf_interface__topology-1.0.0.textfsm
+    sha256: 47ce58c6f8ec942508cdec14eb9424361b81aafd851e667dfff1b8690a3fe9cc
+  - check_item: topology.ospf_process
+    platform: ios
+    command: show ip ospf
+    template: Cisco/IOS/show_ip_ospf__topology-1.0.0.textfsm
+    sha256: 235c6c4d41bd0dd52653f695ff31e9f1d280ec4435bd83c33486c379b90f7eae
+    valid_empty: [BLANK]
+  - check_item: topology.ospf_process
+    platform: comware
+    command: display ospf
+    template: H3C/Comware7/display_ospf__topology-1.0.0.textfsm
+    sha256: c63a4c6a59d1ac98aed1a7748f1196e0aa2c9cca68bf5fa1a8371c58f295cf45
 
 platforms:
   ios: {vendor: Cisco, platforms: [ios, iosxe], family: IOS}
