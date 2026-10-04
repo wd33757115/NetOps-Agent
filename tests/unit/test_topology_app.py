@@ -930,6 +930,9 @@ def test_services_are_read_from_a_snapshot_and_owner_scoped(world):
     with pytest.raises(HTTPException) as foreign:
         service.services("stranger", result["snapshot_id"])
     assert foreign.value.status_code == 404
+    # Across networks, only those whose current snapshot shows a VPN are answered.
+    assert service.services_current("user") == []
+    assert service.services_current("stranger") == []
 
 
 def test_offline_snapshots_without_facts_find_nothing(world):

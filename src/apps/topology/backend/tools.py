@@ -35,6 +35,10 @@ class Trace(BaseModel):
     )
 
 
+class Services(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
 class Evidence(BaseModel):
     model_config = ConfigDict(extra="forbid")
     observation_id: str
@@ -70,6 +74,19 @@ TOOLS = [
         lambda user, body: service.trace_current(
             user.user_id, body.src, body.dst, body.src_vrf, body.dst_vrf
         ),
+        evidence=True,
+    ),
+    Tool(
+        "vpn_services",
+        "VPN 服务视图：从各网络当前快照读出三层 VPN（RFC 9182 L3NM）与 EVPN 二层服务"
+        "（RFC 9291 L2NM）。导出同一 RT 的设备本地实例（VRF/EVI）归为一个服务；"
+        "只靠导入关联的（共享服务泄漏、hub-spoke）是不同服务，在 relations 中列出谁导入了谁的 RT。"
+        "每个成员给出设备、本地实例名、RD/RT、接入接口及其地址和状态；"
+        "承载（LDP、VXLAN）只在所有成员都有证据时给出，未证明的写入 gaps。"
+        "这是由设备配置和状态推出的网络层服务，不是客户订单或服务合同；"
+        "vpn-id 由平台按最小导出 RT 分配；只读，不登录设备。",
+        Services,
+        lambda user, body: service.services_current(user.user_id),
         evidence=True,
     ),
     Tool(

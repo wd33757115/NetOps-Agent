@@ -1,6 +1,6 @@
 # M5：VPN、EVPN/VXLAN 与 DC fabric
 
-按[实施方案 §8](../../../docs/network-digital-twin-implementation.md) 的 M5 执行（负责人 2026-10-03 批准的设计），topology App 0.7.0，依赖规则治理 1.5.0。原则同 M1—M4：
+按[实施方案 §8](../../../docs/network-digital-twin-implementation.md) 的 M5 执行（负责人 2026-10-03 批准的设计），topology App 0.7.1（0.7.0 加上助手工具 `vpn_services`），依赖规则治理 1.5.0。原则同 M1—M4：
 
 - 只输出标准节点。
 - 设备没有给出的列表键不构造；网络层标识（`vpn-id`、`fabric-id`）由平台按固定规则分配。
@@ -59,7 +59,7 @@
 
 ### 网络服务：L3NM（RFC 9182）与 L2NM（RFC 9291）
 
-`model/services.py`，词汇用 vpn-common（RFC 9181）。接口是 `GET /snapshots/{id}/services`，和定位、路径一样由该快照自己的观测计算。
+`model/services.py`，词汇用 vpn-common（RFC 9181）。接口是 `GET /snapshots/{id}/services`，和定位、路径一样由该快照自己的观测计算。助手工具 `topology__vpn_services`（0.7.1）在各网络的当前快照上回答同一问题，只返回存在 VPN 的网络。
 
 - **分组**：导出同一个 RT 的实例属于同一个服务，因为它们始发的路由带同一个 RT，任何导入策略都分不开。只靠导入关联的两组（共享服务泄漏、hub 与 spoke）仍是两个服务：导入写在各实例的 RT 里，并列在 `relations` 中。没有任何 RT 的实例（如管理 VRF）是本地实例，不是 VPN。
 - **标识**：
@@ -191,8 +191,10 @@ M1 正反例从 48 个增至 72 个，全部符合预期（`scripts/topology/m1_
   - LEAF3 也没有 LEAF2 的 192.168.10.0/24。夹具采集时存在的到 LEAF2 的自动 VXLAN 隧道（Tunnel1）现在也没有了。
 - 已尝试的恢复，均无效：
   - 对 LEAF2 做 BGP EVPN 的软刷新和硬复位；
-  - 原样重新下发 LEAF2 的 stitching 导入 RT（配置净变化为零）。
+  - 原样重新下发 LEAF2 的 stitching 导入 RT（配置净变化为零）；
+  - 从控制台重启 LEAF2，不保存配置。LEAF2 的运行配置与仓库中的 `configs/LEAF2.cfg` 一致。
+- 下一步排查：在 LEAF2 上开启 `debug bgp l2vpn evpn` 观察导入过程，或重启 LEAF3。
 - 孪生的输出：BLUE 中没有路由（no_route），VNI 50020 没有链路。这与设备显示的一致。
 - 正向场景的覆盖：L3VNI 对称 IRB 路径由同一实验网正常时采集的夹具覆盖（`test_symmetric_irb_crosses_the_l3_vni_over_both_spines`）。实验网恢复后再复测，复测只需重跑 `m5-live.py submit/poll/verify`。
 
-验收期间没有修改实验网配置（重新下发的那条导入 RT 与原配置完全相同）。主机上的持续 ping 仍在运行，用于保持 ARP/MAC/EVPN 表；需要停止时执行 `lab.py traffic --stop`。
+验收期间没有修改实验网配置（重新下发的那条导入 RT 与原配置完全相同，重启 LEAF2 时没有保存）。主机上的持续 ping 仍在运行，用于保持 ARP/MAC/EVPN 表；需要停止时执行 `lab.py traffic --stop`。

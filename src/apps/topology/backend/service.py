@@ -666,6 +666,24 @@ def services(owner, snapshot_id):
         return _analyse(session, snap, _services)
 
 
+def services_current(owner):
+    """The same projection over the current snapshot of every network that shows a VPN."""
+    with sessions() as session:
+        found = []
+        for network in session.scalars(
+            select(Network)
+            .where(Network.owner_id == owner, Network.current_snapshot.is_not(None))
+            .order_by(Network.created_at.desc())
+            .limit(200)
+        ):
+            snap = session.get(Snapshot, network.current_snapshot)
+            if snap and "simap" in snap.graph:
+                result = _analyse(session, snap, _services)
+                if result["l3nm"]["tree"] or result["l2nm"]["tree"]:
+                    found.append(result)
+        return found
+
+
 def compare(owner, before_id, after_id):
     before, after = snapshot(owner, before_id), snapshot(owner, after_id)
     if before["network_id"] != after["network_id"]:

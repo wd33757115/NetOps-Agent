@@ -59,13 +59,13 @@
 | 1. 拓扑构建读取 `prepare()` 后的事实 | 完成；修正 `_Topology.__init__` 中 ARP 循环仍读原始事实的问题（VSI 学到的 ARP 行在 prepare 后才有 ifname） | `cee08e3`、`a73ae18` |
 | 2. vpn-fabric 路径用例（MPLS、RT 泄漏、隔离、L3VNI、同网段、隧道 down、缺标签） | 完成；路径终点增加 `other_instance` | `cee08e3` |
 | 3. 标准投影 | L3NM/L2NM（`model/services.py`，`GET /snapshots/{id}/services`）；RFC 8944 VXLAN 叠加网络和 RFC 8542 fabric（`model/fabric.py`，进 SIMAP 树）；BGP 地址族、LDP（RFC 9070）、MPLS 接口（RFC 8960）。全部通过 libyang 校验，M1 正反例 48→72 | `a73ae18`、`b170ad4` |
-| 4. 文档、部署、实机验收 | 规则治理 1.5.0（`bootstrap_version` 3）和 topology 0.7.0 已部署；实机 15/17 通过 | 本节所在提交 |
+| 4. 文档、部署、实机验收 | 规则治理 1.5.0（`bootstrap_version` 3）和 topology 0.7.0 已部署；实机 15/17 通过。随后 0.7.1 增加助手工具 `topology__vpn_services`（各网络当前快照的 L3NM/L2NM，只读） | `cd20fe9` 及其后一个提交 |
 
 - **实机验收中两项未通过**：VNI 50020 的 VXLAN 链路，以及 H-B2→H-B3 的 L3VNI 路径。
   - 原因：实验网重启后，LEAF2 收到了 LEAF3 的 type-5 路由（属性齐全）却不导入 VRF BLUE；LEAF3 也不导入 LEAF2 的路由。
-  - 已尝试：BGP 软刷新、硬复位，以及原样重下 stitching RT，都没有恢复。
+  - 已尝试：BGP 软刷新、硬复位、原样重下 stitching RT，以及从控制台重启 LEAF2（不保存配置），都没有恢复。LEAF2 的运行配置与仓库中的 `configs/LEAF2.cfg` 一致。
   - 孪生的输出（no_route、无链路）与设备显示一致。
-  - 接手后：先恢复实验网（例如重启 LEAF2/LEAF3 后核对 `show ip route vrf BLUE`），再重跑 `.runtime/m5-live.py submit / poll / verify`。
+  - 接手后：先排查实验网，例如在 LEAF2 上开启 `debug bgp l2vpn evpn` 观察导入过程，或重启 LEAF3。恢复后再重跑 `.runtime/m5-live.py submit / poll / verify`。
 - **发现的模型缺陷**：RFC 9291 的 evpn-bgp 分支里，`pbb` 的 when 条件用了不带前缀的 `'pbb-evpn'`，导致该分支的任何实例都无法通过校验，IOS 的服务接口类型因此不导出（M1 反例 `l2nm-evpn-signaling-option`）。
 - **yangson**：校验不了 L3NM/L2NM（忽略 when 条件下的 mandatory 叶子、编译不了 L3NM 的 leafref），这两个模型只用 libyang 校验；叠加网络在 App 冻结模块集下用 yangson 校验通过。
 - **实验网主机仍在持续 ping**（保持 ARP/MAC/EVPN 表）。需要停止时运行 `venv/Scripts/python.exe scripts/topology/vpn_fabric/lab.py traffic --stop`。
