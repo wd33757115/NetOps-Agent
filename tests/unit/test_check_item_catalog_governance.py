@@ -835,3 +835,19 @@ def test_active_runtime_bundle_requires_rollout_and_cutover_is_atomic(
             CheckItemRuntimeBundleVersionRecord,
             "runtime-bundle-cpu-v2",
         ).status == "active"
+
+
+def test_system_check_items_and_their_implementations_cannot_be_deleted(tmp_path):
+    repository, service, _session_factory = _environment(tmp_path)
+    assert repository.load_active().check_item("topology.routes") is not None
+    with pytest.raises(CatalogGovernanceConflictError, match="系统基础检查项"):
+        service.delete_check_item(
+            "topology.routes", actor="admin-a", idempotency_key="delete-topology-routes"
+        )
+    with pytest.raises(CatalogGovernanceConflictError, match="默认采集实现"):
+        service.delete_implementation(
+            "topology.routes.comware",
+            actor="admin-a",
+            idempotency_key="delete-topology-routes-comware",
+        )
+    assert repository.load_active().check_item("topology.routes") is not None

@@ -1,4 +1,8 @@
-"""Pinned read-only TextFSM assets, schema projections and completeness checks."""
+"""Pinned read-only TextFSM assets, schema projections and completeness checks.
+
+Comware and IOS ARP and route tables are read through rule-governance check items
+(collectors/rules.py); the assets here serve the capabilities not yet migrated.
+"""
 
 import hashlib
 import io
@@ -13,7 +17,7 @@ import textfsm
 from src.core.parser.parser_bundle import parse_parser_bundle
 from src.core.parser.textfsm_input import prepare_textfsm_input
 
-from ..normalize import age_seconds, ip_address, mac_address, network_prefix
+from ..normalize import ip_address, mac_address
 from .common import interface, vlan
 
 ROOT = Path(__file__).resolve().parents[6]
@@ -29,25 +33,11 @@ class Asset:
 
 # Only reviewed files are executable; changed/missing local assets fall through to NTC/generic.
 ASSETS = {
-    ("comware", "arp"): (
-        Asset(
-            "ntc",
-            "hp_comware_display_arp.textfsm",
-            "2e8355b11fc22910a305ef2ac901de8579daed549321a4e61f86399df199526c",
-        ),
-    ),
     ("comware", "mac"): (
         Asset(
             "ntc",
             "hp_comware_display_mac-address.textfsm",
             "066bec0143b4e5addfe5e4b12deb8aad9beb916e981f6f5125fc04db4d878bbc",
-        ),
-    ),
-    ("comware", "routes"): (
-        Asset(
-            "ntc",
-            "hp_comware_display_ip_routing-table.textfsm",
-            "98aff893caf36fdc182f092b0d07448356ee89c820d9833aed3032bb2797d6a9",
         ),
     ),
     ("comware", "vlan"): (
@@ -57,37 +47,11 @@ ASSETS = {
             "bc11a3776ace464ee887bb51e468c25fcc7a38b02eb89e8a5e8c7b6541e86bfd",
         ),
     ),
-    ("ios", "arp"): (
-        Asset(
-            "repository",
-            "Cisco/WS-C2960XR-24TS-I/show_ip_arp__manual-20260923.textfsm",
-            "37001797646363fa643564078530d5b5cd2b26e1387e425105d76dfd1b695c94",
-            "WS-C2960XR-24TS-I",
-        ),
-        Asset(
-            "repository",
-            "Cisco/ISR4451-X_K9/show_ip_arp__manual-20260923.textfsm",
-            "37001797646363fa643564078530d5b5cd2b26e1387e425105d76dfd1b695c94",
-            "ISR4451-X/K9",
-        ),
-        Asset(
-            "ntc",
-            "cisco_ios_show_ip_arp.textfsm",
-            "c6e99c37d00db1417910674d819b5cce383a59ded8ceb54c7957987881dcc406",
-        ),
-    ),
     ("ios", "mac"): (
         Asset(
             "ntc",
             "cisco_ios_show_mac-address-table.textfsm",
             "28b93670e7c4a393e8cefd4501cb7230ba7269e6ee3939d887d7f2959e5d09e6",
-        ),
-    ),
-    ("ios", "routes"): (
-        Asset(
-            "ntc",
-            "cisco_ios_show_ip_route.textfsm",
-            "3132bebd7273530d80717ae29b7db5fb2a542caa1f4c46d89f1d6a2fcab9555c",
         ),
     ),
     ("nxos", "arp"): (
@@ -167,12 +131,6 @@ def project_table(cap, rows, family):
             }
             if raw.get("INTERFACE"):
                 row["ifname"] = interface(raw["INTERFACE"], family).name
-            if family == "comware":
-                if raw["VLAN_ID"] != "--":
-                    row["vlan"] = vlan(raw["VLAN_ID"])
-                row["type"] = {"D": "dynamic", "S": "static"}.get(raw["TYPE"], raw["TYPE"])
-            elif family == "ios" and raw.get("AGE"):
-                row["age_s"] = age_seconds(raw["AGE"], unit="min")
             records.append(row)
         else:
             port = raw.get("INTERFACE") or raw.get("DESTINATION_PORT") or raw.get("PORTS")
@@ -187,143 +145,6 @@ def project_table(cap, rows, family):
                     }
                 )
     return records
-
-
-def route_records(rows, text):
-    lines = text.splitlines()
-    headers = [
-        n
-        for n, line in enumerate(lines, 1)
-        if re.fullmatch(r"Destination/Mask\s+Proto\s+Pre\s+Cost\s+NextHop\s+Interface\s*", line)
-    ]
-    if len(headers) != 1:
-        raise ValueError("route_header_missing_or_repeated")
-    counts = list(re.finditer(r"(?m)^\s*Destinations\s*:\s*(\d+)\s+Routes\s*:\s*(\d+)\s*$", text))
-    if len(counts) != 1 or int(counts[0][2]) != len(rows):
-        raise ValueError("route_count_mismatch_or_missing")
-    groups, sources = {}, {}
-    prefix_line = None
-    for raw, number in rows:
-        tokens = lines[number - 1].split()
-        route_fields = [raw["PROTOCOL"], raw["DISTANCE"], raw["METRIC"]]
-        next_hop_fields = [raw["NEXTHOP_IP"], raw["NEXTHOP_IF"]]
-        expected = [raw["NETWORK"] + "/" + raw["PREFIX_LENGTH"], *route_fields, *next_hop_fields]
-        if number <= headers[0] or tokens not in (
-            expected,
-            next_hop_fields,
-            route_fields + next_hop_fields,
-        ):
-            raise ValueError("route_unmatched_row_fields")
-        prefix = network_prefix(raw["NETWORK"] + "/" + raw["PREFIX_LENGTH"])
-        preference, metric = int(raw["DISTANCE"]), int(raw["METRIC"])
-        if not 0 <= preference <= 2147483647 or not 0 <= metric <= 2147483647:
-            raise ValueError("invalid_route_metric")
-        # Filldown carries the prefix to ECMP continuation lines; retain its source too.
-        if lines[number - 1].lstrip().startswith(raw["NETWORK"] + "/"):
-            prefix_line = number
-        if prefix_line is None:
-            raise ValueError("route_prefix_source_missing")
-        key = (prefix, raw["PROTOCOL"], preference, metric)
-        record = groups.setdefault(
-            key,
-            {
-                "vrf": "default",
-                "prefix": prefix,
-                "protocol": raw["PROTOCOL"],
-                "preference": preference,
-                "metric": metric,
-                "next_hops": [],
-            },
-        )
-        hop = {
-            "ip": ip_address(raw["NEXTHOP_IP"]),
-            "ifname": interface(raw["NEXTHOP_IF"], "comware").name,
-            "vrf": "default",
-        }
-        if hop not in record["next_hops"]:
-            record["next_hops"].append(hop)
-        source = sources.setdefault(key, {"lines": [], "raw": []})
-        source["lines"] = sorted(set(source["lines"] + [number, prefix_line]))
-        source["raw"].append(raw)
-    if len({r["prefix"] for r in groups.values()}) != int(counts[0][1]):
-        raise ValueError("route_destination_count_mismatch")
-    allowed = {n for source in sources.values() for n in source["lines"]}
-    for number, line in enumerate(lines, 1):
-        if number in allowed or not line.strip():
-            continue
-        if re.fullmatch(r"\s*Destinations\s*:\s*\d+\s+Routes\s*:\s*\d+\s*", line):
-            continue
-        if re.fullmatch(r"Destination/Mask\s+Proto\s+Pre\s+Cost\s+NextHop\s+Interface\s*", line):
-            continue
-        raise ValueError("uncovered_route_line")
-    return list(groups.values()), list(sources.values())
-
-
-# Fixed IOS "show ip route" text around the routes (lab sample 20261002, IOS-XE 17.15).
-IOS_ROUTE_TABLE = re.compile(r"Routing Table: (\S+)\s*")  # "show ip route vrf X"
-IOS_ROUTE_NOISE = (
-    IOS_ROUTE_TABLE.pattern,
-    r"Codes: .*",
-    r"\s+\S+ - .*",  # legend continuation lines
-    r"Gateway of last resort is .*",
-    r"\s*\S+/\d+ is (?:variably )?subnetted, \d+ subnets(?:, \d+ masks)?",
-)
-
-
-def ios_route_records(rows, text):
-    """One record per prefix/protocol/preference/metric; every line is a route or known text.
-
-    A recursive route ("via 10.255.0.1" with no interface) keeps its next hop without one;
-    a connected route has an interface and no next-hop address. A VRF table names itself
-    ("Routing Table: MGMT"); the global table has no such line.
-    """
-    lines = text.splitlines()
-    tables = {m[1] for line in lines if (m := IOS_ROUTE_TABLE.fullmatch(line))}
-    if len(tables) > 1:
-        raise ValueError("route_table_header_conflict")
-    table = next(iter(tables), "default")
-    groups, sources = {}, {}
-    for raw, number in rows:
-        line = lines[number - 1]
-        next_ip, next_if = raw["NEXTHOP_IP"], raw["NEXTHOP_IF"]
-        if (next_ip and next_ip not in line) or (next_if and next_if not in line):
-            raise ValueError("route_unmatched_row_fields")
-        prefix = network_prefix(raw["NETWORK"] + "/" + raw["PREFIX_LENGTH"])
-        preference, metric = int(raw["DISTANCE"] or 0), int(raw["METRIC"] or 0)
-        if not 0 <= preference <= 255 or not 0 <= metric <= 2147483647:
-            raise ValueError("invalid_route_metric")
-        protocol = " ".join(part for part in (raw["PROTOCOL"], raw["TYPE"]) if part)
-        key = (prefix, protocol, preference, metric)
-        record = groups.setdefault(
-            key,
-            {
-                "vrf": table,
-                "prefix": prefix,
-                "protocol": protocol,
-                "preference": preference,
-                "metric": metric,
-                "next_hops": [],
-            },
-        )
-        hop = {
-            "ip": ip_address(next_ip) if next_ip else None,
-            "ifname": interface(next_if, "ios").name if next_if else None,
-            "vrf": table,
-        }
-        if not hop["ip"] and not hop["ifname"]:
-            raise ValueError("route_without_next_hop")
-        if hop not in record["next_hops"]:
-            record["next_hops"].append(hop)
-        source = sources.setdefault(key, {"lines": [], "raw": []})
-        source["lines"] = sorted(set(source["lines"] + [number]))
-        source["raw"].append(raw)
-    allowed = {n for source in sources.values() for n in source["lines"]}
-    for number, line in enumerate(lines, 1):
-        if number in allowed or not line.strip():
-            continue
-        if not any(re.fullmatch(pattern, line) for pattern in IOS_ROUTE_NOISE):
-            raise ValueError("uncovered_route_line")
-    return list(groups.values()), list(sources.values())
 
 
 def vlan_records(rows, text):
@@ -392,12 +213,9 @@ def apply(identity, capability, text, fallback, *, complete, model=None):
             continue
         try:
             rows = replay(load(asset), text)
-            if not rows and capability != "routes":
+            if not rows:
                 raise ValueError("template_zero_rows_nonempty")
-            if capability == "routes":
-                projection = ios_route_records if family == "ios" else route_records
-                records, sources = projection(rows, text)
-            elif capability == "vlan":
+            if capability == "vlan":
                 records, sources = vlan_records(rows, text)
             else:
                 records = project_table(capability, rows, family)

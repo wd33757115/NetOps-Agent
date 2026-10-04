@@ -1,0 +1,18 @@
+Value MAC_ADDRESS (\S+)
+Value INSTANCE (\d+)
+Value VLAN_ID (\d+)
+Value ESI (\S+)
+Value ETHER_TAG (\d+)
+Value NEXTHOP_VTEP (\d+\.\d+\.\d+\.\d+)
+Value NEXTHOP_INTERFACE ([^:\s]+)
+Value SERVICE_INSTANCE (\d+)
+
+# One record per EVPN MAC route (vpn-fabric lab, IOS-XE 17). The next hop is a remote
+# VTEP, or a local port and its service instance ("Et1/0:10").
+Start
+  ^MAC Address\s+EVI\s+VLAN\s+ESI\s+Ether Tag\s+Next Hop\(s\)\s*$$
+  ^[-\s]+$$
+  ^${MAC_ADDRESS}\s+${INSTANCE}\s+${VLAN_ID}\s+${ESI}\s+${ETHER_TAG}\s+${NEXTHOP_VTEP}\s*$$ -> Record
+  ^${MAC_ADDRESS}\s+${INSTANCE}\s+${VLAN_ID}\s+${ESI}\s+${ETHER_TAG}\s+${NEXTHOP_INTERFACE}:${SERVICE_INSTANCE}\s*$$ -> Record
+  ^\s*$$
+  ^. -> Error "unrecognized show l2vpn evpn mac line"

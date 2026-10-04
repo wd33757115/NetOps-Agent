@@ -1,0 +1,24 @@
+Value LOCAL_LABEL (\d+|None)
+Value OUT_LABEL (Pop Label|No Label|\d+|\[T\]\s*\d+)
+Value FEC (\S+?)
+Value BYTES (\d+)
+Value INTERFACE (\S+)
+Value NEXTHOP (\S+)
+Value VRF (\S+)
+
+# One record per label forwarding row (vpn-fabric lab, IOS-XE 17). A VPN prefix carries
+# "[V]"; its aggregate label points at the VRF's own table. A long prefix wraps, ending
+# the line with "\".
+Start
+  ^Local\s+Outgoing\s+Prefix\s+Bytes Label\s+Outgoing\s+Next Hop\s*$$
+  ^Label\s+Label\s+or Tunnel Id\s+Switched\s+interface\s*$$
+  ^${LOCAL_LABEL}\s+${OUT_LABEL}\s+${FEC}\[V\]\s+${BYTES}\s+aggregate/${VRF}\s*$$ -> Record
+  ^${LOCAL_LABEL}\s+${OUT_LABEL}\s+${FEC}(?:\[V\])?\s+${BYTES}\s+${INTERFACE}(?:\s+${NEXTHOP})?\s*$$ -> Record
+  ^${LOCAL_LABEL}\s+${OUT_LABEL}\s+${FEC}(?:\[V\])?\s*\\$$ -> Wrapped
+  ^\s*$$
+  ^. -> Error "unrecognized show mpls forwarding-table line"
+
+Wrapped
+  ^\s+${BYTES}\s+aggregate/${VRF}\s*$$ -> Record Start
+  ^\s+${BYTES}\s+${INTERFACE}(?:\s+${NEXTHOP})?\s*$$ -> Record Start
+  ^. -> Error "unexpected line after a wrapped prefix"

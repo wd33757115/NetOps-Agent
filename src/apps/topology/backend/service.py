@@ -26,7 +26,7 @@ from src.platform.device_access.drivers.paramiko_driver import ParamikoDriver
 from src.platform.device_access.security import CredentialStore
 
 from . import logins, storage
-from .collectors.collect import collect_node, command_allowlist, scoped_command
+from .collectors.collect import collect_node, command_allowlist, scope_base, scoped_command
 from .collectors.identify import TopologyDiscoveryPlan as DiscoveryPlan
 from .collectors.tiers.common import valid_mac
 from .logins import DOMAIN
@@ -853,20 +853,6 @@ def _collect_topology(job, choice):
     return outputs, command_metadata, data, reason
 
 
-# The command a per-VRF expansion extends; the job must already be allowed it. A Comware
-# instance detail extends the instance enumeration itself.
-IOS_SCOPE_BASE = {"arp": "show ip arp", "routes": "show ip route"}
-SCOPE_BASE_COMMANDS = {
-    "ios": IOS_SCOPE_BASE,
-    "iosxe": IOS_SCOPE_BASE,
-    "nxos": {"arp": "show ip arp"},
-    "comware": {
-        "routes": "display ip routing-table",
-        "vrf_detail": "display ip vpn-instance",
-    },
-}
-
-
 def _scoped_context(context, target_ref, connection_profile_id, scopes, capability, family="ios"):
     """Issue exact backend grants for a bounded, validated per-VRF expansion.
 
@@ -882,7 +868,9 @@ def _scoped_context(context, target_ref, connection_profile_id, scopes, capabili
         BatchRequest(
             target_ref,
             connection_profile_id,
-            (Command(capability, SCOPE_BASE_COMMANDS[family][capability]),),
+            # The command the expansion extends (collect.scope_base); a Comware instance
+            # detail extends the instance enumeration itself.
+            (Command(capability, scope_base(capability, family)),),
         ),
     )
     if len(scopes) > 64:

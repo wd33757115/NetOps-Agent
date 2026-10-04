@@ -16,27 +16,27 @@ capabilities:
   interfaces: {command: show interfaces description, parser: generic_ifbrief}
   inventory: {command: show inventory, parser: null}
   ip: {command: show ip interface, parser: generic_ipif}
-  arp: {command: show ip arp, parser: generic_arp}
+  arp: {parser: rules}
   mac: {command: show mac address-table, parser: generic_mac}
   vlan: {command: show vlan brief, parser: generic_vlan}
   trunk: {command: show interfaces trunk, parser: generic_trunk}
   switchport: {command: show interfaces switchport, parser: generic_switchport}
   lag: {command: show etherchannel summary, parser: generic_lag}
   stp: {command: show spanning-tree, parser: generic_stp}
-  routes: {command: show ip route, timeout: 300, parser: template_routes}
-  vrfs: {command: show vrf, parser: generic_vrfs}
+  routes: {timeout: 300, parser: rules}
+  vrfs: {parser: rules}
   vrrp: {command: show vrrp, parser: generic_vrrp}
   ospf_interfaces: {command: show ip ospf interface brief, parser: generic_ospf_interfaces}
   ospf_process: {command: show ip ospf, parser: generic_ospf_process}
   ospf_neighbors: {command: show ip ospf neighbor, parser: generic_ospf_neighbors}
   bgp_peers: {command: show ip bgp summary, parser: generic_bgp_peers}
-  vrf_detail: {command: show vrf detail, parser: generic_vrf_detail}
+  vrf_detail: {parser: rules}
   bgp_vpnv4: {command: show bgp vpnv4 unicast all summary, parser: generic_bgp_vpnv4}
   bgp_evpn: {command: show bgp l2vpn evpn summary, parser: generic_bgp_evpn}
-  ldp_peers: {command: show mpls ldp neighbor, parser: generic_ldp_peers}
-  mpls_lfib: {command: show mpls forwarding-table, parser: generic_mpls_lfib}
-  evpn_instances: {command: show l2vpn evpn evi detail, parser: generic_evpn_instances}
-  evpn_peers: {command: show nve peers, parser: generic_evpn_peers}
-  vxlan_vnis: {command: show nve vni, parser: generic_vxlan_vnis}
-  evpn_mac: {command: show l2vpn evpn mac, parser: generic_evpn_mac}
+  ldp_peers: {parser: rules}
+  mpls_lfib: {parser: rules}
+  evpn_instances: {parser: rules}
+  evpn_peers: {parser: rules}
+  vxlan_vnis: {parser: rules}
+  evpn_mac: {parser: rules}
 verified: []

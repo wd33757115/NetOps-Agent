@@ -32,6 +32,11 @@ from src.apps.rule_governance.backend.check_items.runtime_bundle import (
     CheckItemRuntimeBundleService,
     RuntimeBundleValidationError,
 )
+from src.apps.rule_governance.backend.check_items.system_items import (
+    SystemCheckItemError,
+    ensure_compatible,
+    ensure_deletable,
+)
 from src.common.governance import actor_matches_any
 from src.core.check_items.canonical import freeze_rule_semantics
 from src.core.check_items.command_adapter import (
@@ -53,6 +58,13 @@ from src.infrastructure.db.models import (
 )
 from src.infrastructure.db.postgres import get_db_session
 from src.platform.inventory.repository import DeviceRepository
+
+
+def _ensure_deletable(**asset: str) -> None:
+    try:
+        ensure_deletable(**asset)
+    except SystemCheckItemError as exc:
+        raise CatalogGovernanceConflictError(str(exc)) from exc
 
 
 class CatalogGovernanceConflictError(ValueError):
@@ -233,6 +245,8 @@ class CheckItemCatalogGovernanceService:
             raw["canonical_contract"] = freeze_rule_semantics(dict(raw.get("canonical_contract") or {}))
             candidate = build_check_item_definition(raw, defaults=defaults)
             validate_check_item_definition(candidate)
+            # A system base check item keeps the Values topology discovery reads.
+            ensure_compatible(candidate.id, candidate.canonical_contract)
             _require_text(candidate.name, label="check item name", minimum=2)
             _require_text(candidate.category, label="check item category")
 
@@ -612,6 +626,7 @@ class CheckItemCatalogGovernanceService:
         """Withdraw a check item without destroying versions or audit evidence."""
 
         check_item_id = _require_text(check_item_id, label="check item id")
+        _ensure_deletable(check_item_id=check_item_id)
         actor = _require_text(actor, label="actor")
         reason = str(reason or "").strip()
         idempotency_key = _require_text(
@@ -756,6 +771,7 @@ class CheckItemCatalogGovernanceService:
             implementation_id,
             label="implementation id",
         )
+        _ensure_deletable(implementation=implementation_id)
         actor = _require_text(actor, label="actor")
         reason = str(reason or "").strip()
         idempotency_key = _require_text(

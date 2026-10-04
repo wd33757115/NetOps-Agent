@@ -1,0 +1,14 @@
+Value Required NAME (\S+)
+Value RD (\S+)
+Value PROTOCOLS (ipv[46](?:,ipv[46])*)
+Value List INTERFACES (\S+)
+
+# One record per VRF (campus-wan and vpn-fabric labs, IOS-XE 17). Only the interface
+# column wraps onto continuation lines.
+Start
+  ^\s*Name\s+Default RD\s+Protocols\s+Interfaces\s*$$
+  ^\s{0,4}\S -> Continue.Record
+  ^\s{0,4}${NAME}\s+(?:<not set>|${RD})\s+${PROTOCOLS}(?:\s+${INTERFACES})?\s*$$
+  ^\s{20,}${INTERFACES}\s*$$
+  ^\s*$$
+  ^. -> Error "unrecognized show vrf line"

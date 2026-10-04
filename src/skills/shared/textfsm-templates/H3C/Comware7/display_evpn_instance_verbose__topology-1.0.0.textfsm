@@ -1,0 +1,28 @@
+Value Required INSTANCE (\S+)
+Value RD (\S+)
+Value List EXPORT_RT (\S+)
+Value List IMPORT_RT (\S+)
+Value ENCAPSULATION (\S+)
+Value VNI (\d+)
+
+# One record per EVPN VSI (vpn-fabric lab, Comware 7.1). Targets share a line (up to
+# four). Other "key : value" fields are known and not modeled.
+Start
+  ^VSI Name: -> Continue.Record
+  ^VSI Name:\s*${INSTANCE}\s*$$
+  ^\s+Route distinguisher\s*:\s*${RD}\s*$$
+  ^\s+Export VPN targets\s*:\s*${EXPORT_RT}(\s|$$) -> Continue
+  ^\s+Export VPN targets\s*:\s*\S+\s+${EXPORT_RT}(\s|$$) -> Continue
+  ^\s+Export VPN targets\s*:\s*\S+\s+\S+\s+${EXPORT_RT}(\s|$$) -> Continue
+  ^\s+Export VPN targets\s*:\s*\S+\s+\S+\s+\S+\s+${EXPORT_RT}(\s|$$) -> Continue
+  ^\s+Export VPN targets\s*:\s*\S+(\s+\S+){0,3}\s*$$
+  ^\s+Import VPN targets\s*:\s*${IMPORT_RT}(\s|$$) -> Continue
+  ^\s+Import VPN targets\s*:\s*\S+\s+${IMPORT_RT}(\s|$$) -> Continue
+  ^\s+Import VPN targets\s*:\s*\S+\s+\S+\s+${IMPORT_RT}(\s|$$) -> Continue
+  ^\s+Import VPN targets\s*:\s*\S+\s+\S+\s+\S+\s+${IMPORT_RT}(\s|$$) -> Continue
+  ^\s+Import VPN targets\s*:\s*\S+(\s+\S+){0,3}\s*$$
+  ^\s+Encapsulation\s*:\s*${ENCAPSULATION}\s*$$
+  ^\s+VXLAN ID\s*:\s*${VNI}\s*$$
+  ^\s+[A-Za-z][\w ./()-]*?\s*:(\s.*)?$$
+  ^\s*$$
+  ^. -> Error "unrecognized display evpn instance line"

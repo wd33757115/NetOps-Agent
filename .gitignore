@@ -220,6 +220,10 @@ src/skills/shared/textfsm-templates/Cisco/*
 !src/skills/shared/textfsm-templates/Cisco/IOS-C2960/
 src/skills/shared/textfsm-templates/Cisco/IOS-C2960/*
 !src/skills/shared/textfsm-templates/Cisco/IOS-C2960/show_interface_transceiver_detail__1.0.0.textfsm
+# System base check-item templates (topology discovery) ship with rule governance.
+!src/skills/shared/textfsm-templates/Cisco/IOS/
+src/skills/shared/textfsm-templates/Cisco/IOS/*
+!src/skills/shared/textfsm-templates/Cisco/IOS/*__topology-*.textfsm
 !src/skills/shared/textfsm-templates/H3C/
 src/skills/shared/textfsm-templates/H3C/*
 !src/skills/shared/textfsm-templates/H3C/Comware7/
@@ -227,6 +231,7 @@ src/skills/shared/textfsm-templates/H3C/Comware7/*
 !src/skills/shared/textfsm-templates/H3C/Comware7/display_transceiver_diagnosis_interface__1.0.0.textfsm
 !src/skills/shared/textfsm-templates/H3C/Comware7/display_transceiver_diagnosis_interface_thresholds__1.0.0.textfsm
 !src/skills/shared/textfsm-templates/H3C/Comware7/display_interface_values__1.0.0.textfsm
+!src/skills/shared/textfsm-templates/H3C/Comware7/*__topology-*.textfsm
 src/skills/shared/outputs/*
 !src/skills/shared/outputs/.gitkeep
 

@@ -4,7 +4,7 @@
 
 ## 当前交接 2026-10-04 M5（VPN/EVPN/VXLAN/DC fabric）进度与解析归属调整
 
-**状态（2026-10-04，Claude）：M4 已完成并推送（topology 0.6.0，`2791956`）。M5 按负责人选择先做 VPN/EVPN/VXLAN/DC fabric，设计已获批准（"批准，按这个设计做"）。实验网已搭好并通过实机验证；采集与解析代码、叠加层解读、路径隧道语义已写完，拓扑单元测试 1281 个通过。代码以检查点提交的方式保存，没有部署，也没有推送。同日负责人调整了解析归属：拓扑改为规则治理的消费方，见下文"方向调整"。**
+**状态（2026-10-04，Claude）：M4 已完成并推送（topology 0.6.0，`2791956`）。M5 按负责人选择先做 VPN/EVPN/VXLAN/DC fabric，设计已获批准（"批准，按这个设计做"）。实验网已搭好并通过实机验证；采集与解析代码、叠加层解读、路径隧道语义已写完，拓扑单元测试 1281 个通过。代码以检查点提交的方式保存，没有部署，也没有推送。同日负责人调整了解析归属：拓扑改为规则治理的消费方，见下文"方向调整"及其进度。**
 
 ### M5 设计（已批准）
 | 层次 | 标准 | 说明 |
@@ -75,13 +75,23 @@
 - `src/core/check_items` 有 29 个转发：15 个转到规则治理，14 个转到巡检；另有 26 个真实实现仍留在核心（含 `value_contract`、`command_adapter`、`canonical`、`execution` 等）。
 - 巡检和拓扑都经这些转发调用规则治理的代码，巡检还直接 import 了 `rule_governance.backend.rollout_tasks`。这属于跨 App 的隐性依赖，消费接口要解决它。
 
+### 解析归属调整的进度（2026-10-04，Claude）
+清单和接口方案见 `docs/topology-rule-consumption.md`（负责人已认可，"直接做"）。已完成：
+- **规则治理侧**：
+  - 系统基础检查项资产 `check_items/assets/system_check_items.yaml` 和 `system_items.py`，随目录引导写入数据库；
+  - 删除检查项或其默认实现返回 409，新版本不能去掉必填 Value；
+  - 消费契约 `runtime.py` 新增只读的 `CheckItemSelectionReader`：`select`（型号优先）、`parse`（坏行记下继续读，声明式的必需行与条目数校验）、`commands`（供命令授权）；
+  - 模板按 sha256 钉住，改动未经评审即拒绝。
+- **已迁移 11 项**（IOS/IOS-XE 与 Comware 7）：ARP、路由、VRF 详情、EVPN 对端、LDP、标签转发表、EVPN 实例、VXLAN VNI、隧道接口、EVPN MAC、VRF 列表。
+  - 每项迁移前用全部实验网夹具比对新旧事实，完全一致才删除对应的手写解析器；
+  - 采集档案里这些能力只写 `parser: rules`，命令和按 VRF 的命令形式都取自已发布的实现，并仍须通过拓扑的 L1 只读校验。
+- **测试**：`tests/unit/test_topology_rules.py`。拓扑全部测试通过；其余单元测试的失败与上一提交时相同，非本次引入。
+
 ### 接手后
-先读 `docs/network-digital-twin-implementation.md` §8 M5、`models/network-twin/m5/` 和本节，然后按以下顺序进行：
-1. 出"系统基础检查项与 Value 清单"和拓扑消费接口方案；
-2. 在规则治理里实现系统检查项及保护；
-3. 挂上 IOS 和 H3C 模板，用 vpn-fabric、campus-wan、VSR 的夹具校验；
-4. 拓扑经接口消费，替换手写解析器；
-5. 继续完成上面"M5 尚未完成"的 1–4 项。
+先读 `docs/network-digital-twin-implementation.md` §8 M5、`docs/topology-rule-consumption.md`、`models/network-twin/m5/` 和本节，然后按以下顺序进行：
+1. 继续迁移其余事实（BGP 三张邻居表共用模板，模板已写好但尚未接入；然后 OSPF、接口、IP、LLDP、版本、MAC、VLAN、Trunk、二层口、聚合、生成树、VRRP）。方法同上：先比对，一致后再删手写解析器。
+2. 拓扑去掉对 `src.core.parser.*` 转发的引用。
+3. 继续完成上面"M5 尚未完成"的 1–4 项。
 
 带 yangson 的测试要这样运行：`PYTHONPATH=.runtime/p0-2/yang-deps venv/Scripts/python.exe -m pytest ...`。
 

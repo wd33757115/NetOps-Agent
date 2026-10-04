@@ -466,6 +466,12 @@ def load_catalog(path: str | Path = DEFAULT_CATALOG_PATH) -> CheckItemCatalog:
         raise ValueError("check-item catalog requires check_items")
     if not isinstance(raw_implementations, list) or not raw_implementations:
         raise ValueError("check-item catalog requires implementations")
+    if (source.parent / "system_check_items.yaml").is_file():
+        # System base check items that topology discovery consumes ship with the catalog.
+        from .system_items import check_item_payloads, implementation_payloads
+
+        raw_check_items = [*raw_check_items, *check_item_payloads()]
+        raw_implementations = [*raw_implementations, *implementation_payloads()]
     defaults = load_catalog_defaults(source)
     check_item_defaults = defaults["check_item"]
     implementation_defaults = defaults["implementation"]

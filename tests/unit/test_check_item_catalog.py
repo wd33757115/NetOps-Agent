@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from src.apps.rule_governance.backend.check_items.system_items import system_check_item_ids
 from src.core.check_items import (
     CatalogConflictError,
     CheckItemCatalog,
@@ -110,7 +111,11 @@ def test_production_catalog_is_check_item_centered_and_complete():
     catalog = load_catalog()
 
     assert catalog.catalog_version == 15
-    assert {item.id for item in catalog.check_items} == {
+    # The system base check items topology discovery consumes ship with the catalog.
+    system = system_check_item_ids()
+    assert {"topology.arp", "topology.routes", "topology.vrfs"} <= system
+    assert all(item_id.startswith("topology.") for item_id in system)
+    assert {item.id for item in catalog.check_items} - system == {
         # Unparsed state baselines for diagnosis (text comparison, no parser).
         "interface.brief_text",
         "interface.ip_brief_text",
@@ -143,7 +148,7 @@ def test_production_catalog_is_check_item_centered_and_complete():
         "configuration.startup",
         "operations.critical_logs",
     }
-    assert len(catalog.check_items) == 30
+    assert len(catalog.check_items) == 30 + len(system)
     optical = catalog.check_item("interface.optical_power")
     assert optical is not None
     assert {
@@ -240,8 +245,13 @@ def test_top_catalog_uses_only_approved_canonical_observations():
     canonical = load_canonical_catalog()
 
     assert canonical.status == "active"
+    # System check items own their semantics (frozen under their own catalog id).
+    system = system_check_item_ids()
     assert all(
-        validate_check_item_contract(item, catalog=canonical) == ()
+        validate_check_item_contract(
+            item, catalog=None if item.id in system else canonical
+        )
+        == ()
         for item in catalog.check_items
     )
     cpu = canonical.get("device.cpu.utilization")
@@ -482,7 +492,7 @@ def test_catalog_bootstrap_is_idempotent_and_versions_are_immutable(tmp_path):
     first = repository.bootstrap(catalog)
     second = repository.bootstrap(catalog)
 
-    assert first["created_check_items"] == 30
+    assert first["created_check_items"] == 30 + len(system_check_item_ids())
     assert first["created_implementations"] == len(catalog.implementations)
     assert first["created_links"] > len(catalog.implementations)
     assert second == {
@@ -491,7 +501,7 @@ def test_catalog_bootstrap_is_idempotent_and_versions_are_immutable(tmp_path):
         "created_links": 0,
     }
     active = repository.load_active()
-    assert len(active.check_items) == 30
+    assert len(active.check_items) == 30 + len(system_check_item_ids())
     assert len(active.implementations) == len(catalog.implementations)
 
     changed_item = replace(catalog.check_items[0], digest="0" * 64)

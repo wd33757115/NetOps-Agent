@@ -1,0 +1,29 @@
+Value Required INSTANCE (\S+)
+Value L3_VNI (\d+)
+Value STATE (\S+)
+Value VNI (\d+)
+Value GATEWAY_INTERFACE (\S+(?:\s+\d\S*)?)
+Value List TUNNEL (\S+)
+Value List TUNNEL_STATE (\S+)
+Value List ACCESS_INTERFACE (\S+)
+Value List ACCESS_STATE (\S+)
+
+# One record per VSI (vpn-fabric lab, Comware 7.1). The device names the VSI it creates
+# for an L3 VNI "Auto_L3VNI<vni>_<interface>"; that name is the L3 VNI's evidence.
+# Tunnel rows have six columns, access-circuit rows three. Other "key : value" fields
+# are known and not modeled.
+Start
+  ^VSI Name: -> Continue.Record
+  ^VSI Name:\s*Auto_L3VNI${L3_VNI}_\d+\s*$$ -> Continue
+  ^VSI Name:\s*${INSTANCE}\s*$$
+  ^\s+VSI State\s*:\s*${STATE}\s*$$
+  ^\s+VXLAN ID\s*:\s*${VNI}\s*$$
+  ^\s+Gateway Interface\s*:\s*${GATEWAY_INTERFACE}\s*$$
+  ^\s+(Tunnels|ACs):\s*$$
+  ^\s+Tunnel Name\s+Link ID\s+State\s+Type\s+Flood Proxy\s+Split horizon\s*$$
+  ^\s+AC\s+Link ID\s+State\s*$$
+  ^\s+${TUNNEL}\s+0x[0-9A-Fa-f]+\s+${TUNNEL_STATE}\s+\S+\s+\S+\s+\S+\s*$$
+  ^\s+${ACCESS_INTERFACE}\s+0x[0-9A-Fa-f]+\s+${ACCESS_STATE}\s*$$
+  ^\s+[A-Za-z][\w ./()-]*?\s*:(\s.*)?$$
+  ^\s*$$
+  ^. -> Error "unrecognized display l2vpn vsi line"

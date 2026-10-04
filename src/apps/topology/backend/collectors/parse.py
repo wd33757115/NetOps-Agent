@@ -10,7 +10,6 @@ from .normalize import parser_text
 from .tiers import (
     generic_arp,
     generic_bgp_peers,
-    generic_evpn,
     generic_ifbrief,
     generic_ipif,
     generic_lag,
@@ -24,7 +23,6 @@ from .tiers import (
     generic_trunk,
     generic_version,
     generic_vlan,
-    generic_vpn,
     generic_vrfs,
     generic_vrrp,
 )
@@ -52,15 +50,6 @@ PARSERS = {
     "ospf_interfaces": generic_ospf.parse_interfaces,
     "ospf_process": generic_ospf.parse_process,
     "vrfs": generic_vrfs.parse,
-    # VPN / EVPN / VXLAN (plan §8 M5)
-    "vrf_detail": generic_vpn.parse_vrf_detail,
-    "ldp_peers": generic_vpn.parse_ldp_peers,
-    "mpls_lfib": generic_vpn.parse_mpls_lfib,
-    "evpn_instances": generic_evpn.parse_evpn_instances,
-    "evpn_peers": generic_evpn.parse_evpn_peers,
-    "vxlan_vnis": generic_evpn.parse_vxlan_vnis,
-    "tunnel_interfaces": generic_evpn.parse_tunnel_interfaces,
-    "evpn_mac": generic_evpn.parse_evpn_mac,
 }
 EMPTY = {
     "lldp": r"No (?:LLDP )?neighbors?(?: found)?\.?",
@@ -71,31 +60,12 @@ EMPTY = {
     "bgp_peers": r"% BGP not active\.?",
     "bgp_vpnv4": r"% BGP not active\.?",
     "bgp_evpn": r"% BGP not active\.?",
-    "mpls_lfib": r"no MPLS apps enabled or MPLS not enabled on any interfaces",
     "vrrp": r"VRRP4 is not configured\.",
-    "vrfs": (
-        r"(?:L3VPN is not configured\.|Total VPN-Instances configured\s*:\s*0"
-        r"(?:\s*\n[ \t]*License limit\s*:\s*[YN]\s*\n[ \t]*"
-        r"Max VPN instances permitted by license\s*:\s*\d+)?)"
-    ),
 }
-# A feature that is not configured prints nothing (vpn-fabric: BGP address families,
-# LDP, label tables, EVPN, VXLAN on devices that do not run them).
-ABSENT_EMPTY = frozenset(
-    {
-        "bgp_peers",
-        "bgp_vpnv4",
-        "bgp_evpn",
-        "ldp_peers",
-        "mpls_lfib",
-        "evpn_instances",
-        "evpn_peers",
-        "vxlan_vnis",
-        "tunnel_interfaces",
-        "evpn_mac",
-        "vrf_detail",
-    }
-)
+# A feature that is not configured prints nothing (vpn-fabric: BGP address families on
+# devices that do not run them). Rule governance declares this for the check items it
+# serves (valid_empty).
+ABSENT_EMPTY = frozenset({"bgp_peers", "bgp_vpnv4", "bgp_evpn"})
 MAX_BYTES = 8 * 1024 * 1024
 
 
@@ -249,6 +219,20 @@ def parse(
     use_templates=True,
     model=None,
 ):
+    from . import rules
+
+    if rules.served(identity, capability):
+        # Rule governance publishes how this fact is collected and parsed.
+        if not isinstance(raw, str) or len(raw.encode("utf-8")) > MAX_BYTES:
+            return ParseResult(tier="rules", warnings=["input_invalid_or_over_limit"])
+        return rules.parse(
+            identity,
+            capability,
+            framed_text(raw, command, prompt),
+            # Cleaning removes pager prompts; the output was still cut off there.
+            complete=complete and not parser_text(raw).had_paging,
+            model=model,
+        )
     result = parse_generic(
         identity, capability, raw, complete=complete, command=command, prompt=prompt
     )

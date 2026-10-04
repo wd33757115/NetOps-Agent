@@ -105,7 +105,7 @@ def test_bad_version_contract(field, value):
         lambda d: d["budgets"].update(full=601),
         lambda d: d.update(identity_profiles=["huawei-vrp"]),
         lambda d: d["capabilities"].update(secret={"command": "display secret"}),
-        lambda d: d["capabilities"]["mac"].update(command="display arp"),
+        lambda d: d["capabilities"]["mac"].update(command="display interface brief"),
         lambda d: d["verified"][0].update(parsed=["inventory"]),
     ],
 )
@@ -189,8 +189,12 @@ def setup(monkeypatch):
         "evpn_peers": "evpn_imet",
         "vxlan_vnis": "vsi",
     }
+    def command(cap, spec):
+        # A rules-parsed capability runs the command rule governance publishes.
+        return spec.command or runtime.rules.selection({"os_family": "comware"}, cap).command
+
     outputs = {
-        spec.command: next(
+        command(cap, spec): next(
             path
             for path in (
                 LAB / f"{mapping.get(cap, cap)}.txt",
@@ -203,6 +207,7 @@ def setup(monkeypatch):
             if path.exists()
         ).read_text()
         for cap, spec in profiles["h3c-comware7"].capabilities.items()
+        if "{vrf}" not in command(cap, spec)  # per VPN instance only
     }
     trace = SimpleNamespace(
         outputs=outputs,
@@ -286,7 +291,7 @@ def test_real_fixtures_through_public_batch_pipeline(setup, mode, count):
         assert result.parsed["irf"].status == "unsupported"
         assert result.parsed["vrfs"].status == "complete"
         assert result.parsed["routes"].status == "complete"
-        assert result.parsed["routes"].tier == "template"
+        assert result.parsed["routes"].tier == "rules"
         assert result.missing["vxlan"] == "no_profile_command"
 
 

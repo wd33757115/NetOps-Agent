@@ -1,0 +1,15 @@
+Value Filldown INSTANCE (\S+)
+Value RD (\S+)
+Value PEER (\d+\.\d+\.\d+\.\d+)
+Value TUNNEL_ADDRESS (\d+\.\d+\.\d+\.\d+)
+Value ENCAPSULATION (\S+)
+Value Required VNI (\d+)
+
+# EVPN IMET routes: the remote VTEPs that joined each VSI's flooding list.
+Start
+  ^\s*Total number of automatically discovered peers:\s*\d+\s*$$
+  ^\s*VSI name:\s*${INSTANCE}\s*$$
+  ^RD\s+PE_address\s+Tunnel_address\s+Tunnel mode\s+VXLAN ID\s*$$
+  ^${RD}\s+${PEER}\s+${TUNNEL_ADDRESS}\s+${ENCAPSULATION}\s+${VNI}\s*$$ -> Record
+  ^\s*$$
+  ^. -> Error "unrecognized display evpn auto-discovery imet line"

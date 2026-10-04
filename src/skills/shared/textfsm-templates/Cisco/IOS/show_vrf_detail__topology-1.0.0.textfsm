@@ -1,0 +1,55 @@
+Value Filldown VRF (\S+)
+Value Filldown RD (<not set>|\S+)
+Value Filldown,List INTERFACES (\S+)
+Value Required ADDRESS_FAMILY (ipv4|ipv6|stitching)
+Value List IMPORT_RT (\S+)
+Value List EXPORT_RT (\S+)
+
+# One record per VRF and active address family. IOS-XE lists the route targets a VRF
+# uses with EVPN as "stitching" ones; they get their own record (ADDRESS_FAMILY
+# stitching). Several interfaces or route targets can share one line.
+Start
+  ^VRF\s -> Continue.Record
+  ^VRF\s -> Continue.Clearall
+  ^VRF\s+${VRF}\s+\(VRF Id = \d+\);\s+default RD\s+${RD};\s+default VPNID\s.*$$
+  ^\s+Interfaces:\s*$$
+  ^\s{4}(?!RT:)${INTERFACES}(\s|$$) -> Continue
+  ^\s{4}(?!RT:)\S+\s+${INTERFACES}(\s|$$) -> Continue
+  ^\s{4}(?!RT:)\S+\s+\S+\s+${INTERFACES}(\s|$$) -> Continue
+  ^\s{4}(?!RT:)\S+\s+\S+\s+\S+\s+${INTERFACES}(\s|$$) -> Continue
+  ^\s{4}(?!RT:)\S+(\s+\S+){0,3}\s*$$
+  ^Address family\s+\S+\s+\S+\s+not active\s*$$
+  ^Address family -> Continue.Record
+  ^Address family\s+${ADDRESS_FAMILY}\s+unicast\s+\(Table ID = \S+\):\s*$$
+  ^\s+Export VPN route-target communities\s*$$ -> Export
+  ^\s+Import VPN route-target communities\s*$$ -> Import
+  ^\s+Export VPN route-target stitching communities\s*$$ -> Continue.Record
+  ^\s+Export VPN route-target ${ADDRESS_FAMILY} communities\s*$$ -> Export
+  ^\s+Import VPN route-target stitching communities\s*$$ -> Import
+  ^\s+No (Export|Import) VPN route-target (stitching )?communities\s*$$
+  ^\s+(New CLI format, supports multiple address-families|Flags: 0x[0-9A-Fa-f]+)\s*$$
+  ^\s+(No (import|global export|export) route-map|(Import|Export|Global export) route-map: \S+)\s*$$
+  ^\s+VRF label (distribution protocol|allocation mode): .*$$
+  ^\s*$$
+  ^. -> Error "unrecognized show vrf detail line"
+
+Export
+  ^\s+RT:${EXPORT_RT}(\s|$$) -> Continue
+  ^\s+RT:\S+\s+RT:${EXPORT_RT}(\s|$$) -> Continue
+  ^\s+RT:\S+\s+RT:\S+\s+RT:${EXPORT_RT}(\s|$$) -> Continue
+  ^\s+RT:\S+(\s+RT:\S+){0,3}\s*$$
+  ^\s+Import VPN route-target (stitching )?communities\s*$$ -> Import
+  ^\s+No Import VPN route-target (stitching )?communities\s*$$ -> Start
+  ^. -> Error "unexpected line after export route targets"
+
+Import
+  ^\s+RT:${IMPORT_RT}(\s|$$) -> Continue
+  ^\s+RT:\S+\s+RT:${IMPORT_RT}(\s|$$) -> Continue
+  ^\s+RT:\S+\s+RT:\S+\s+RT:${IMPORT_RT}(\s|$$) -> Continue
+  ^\s+RT:\S+(\s+RT:\S+){0,3}\s*$$
+  ^\s+Export VPN route-target stitching communities\s*$$ -> Continue.Record
+  ^\s+Export VPN route-target ${ADDRESS_FAMILY} communities\s*$$ -> Export
+  ^\s+No Export VPN route-target stitching communities\s*$$ -> Start
+  ^\s+(No (import|global export|export) route-map|(Import|Export|Global export) route-map: \S+)\s*$$ -> Start
+  ^\s+VRF label (distribution protocol|allocation mode): .*$$ -> Start
+  ^. -> Error "unexpected line after import route targets"

@@ -13,10 +13,24 @@ from src.platform.device_access.contracts import DeviceAccessError
 from src.platform.device_access.drivers import netmiko_driver
 
 from .parse import PARSERS
+from .rules import CHECK_ITEMS as RULE_CHECK_ITEMS
+from .rules import FAMILIES as RULE_FAMILIES
 
 DIRECTORY = Path(__file__).with_suffix("")
 CAPABILITIES = frozenset(
-    {*PARSERS, "inventory", "vlan", "lag", "routes", "vrfs", "irf", "mlag", "vxlan", "evpn"}
+    {
+        *PARSERS,
+        *RULE_CHECK_ITEMS,
+        "inventory",
+        "vlan",
+        "lag",
+        "routes",
+        "vrfs",
+        "irf",
+        "mlag",
+        "vxlan",
+        "evpn",
+    }
 )
 MODE_CAPABILITIES = {
     "fast": ("version", "lldp_local", "lldp", "interfaces"),
@@ -105,11 +119,19 @@ class StrictModel(BaseModel):
 
 
 class CapabilitySpec(StrictModel):
-    command: str = Field(min_length=1, max_length=256)
+    # A capability parsed by a rule-governance check item ("rules") runs the command its
+    # published implementation names; the profile then gives no command of its own.
+    command: str | None = Field(default=None, min_length=1, max_length=256)
     timeout: int = Field(default=30, ge=1, le=300)
     parser: str | None = (
         None  # Explicitly pending template/structured parser, not fabricated support.
     )
+
+    @model_validator(mode="after")
+    def one_command_source(self):
+        if (self.command is None) != (self.parser == "rules"):
+            raise ValueError("a command comes from the profile or from rule governance")
+        return self
 
 
 class SessionSpec(StrictModel):
@@ -166,21 +188,23 @@ class Profile(StrictModel):
             raise ValueError("profile version command must match the identification probe")
         seen = set()
         for cap, spec in self.capabilities.items():
-            decision = classify(self.os_family, spec.command)
-            if (
-                decision.level != "L1"
-                or decision.normalized != spec.command
-                or spec.command in seen
-            ):
-                raise ValueError("profile requires distinct normalized read-only commands")
+            if spec.command is not None:
+                decision = classify(self.os_family, spec.command)
+                if (
+                    decision.level != "L1"
+                    or decision.normalized != spec.command
+                    or spec.command in seen
+                ):
+                    raise ValueError("profile requires distinct normalized read-only commands")
             allowed = {GENERIC_NAMES.get(cap)}
-            if cap in {"routes", "vlan"} and self.os_family == "comware":
-                allowed.add("template_" + cap)
-            if cap == "routes" and self.os_family == "ios":
-                allowed.add("template_routes")
+            if cap == "vlan" and self.os_family == "comware":
+                allowed.add("template_vlan")
+            if cap in RULE_CHECK_ITEMS and self.os_family in RULE_FAMILIES:
+                allowed.add("rules")  # parsed by the published rule-governance check item
             if spec.parser is not None and spec.parser not in allowed:
                 raise ValueError("unknown or mismatched parser reference")
-            seen.add(spec.command)
+            if spec.command is not None:
+                seen.add(spec.command)
         for evidence in self.verified:
             if (
                 set(evidence.collected) | set(evidence.unsupported) | set(evidence.parsed)

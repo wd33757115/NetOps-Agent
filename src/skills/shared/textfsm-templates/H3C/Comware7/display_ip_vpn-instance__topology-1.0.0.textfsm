@@ -1,0 +1,14 @@
+Value Required NAME (\S+)
+Value RD (\S+)
+Value CREATED (\d{4}/\d{2}/\d{2}\s+\d{2}:\d{2}:\d{2})
+
+# One record per VPN instance (vpn-fabric lab and VSR, Comware 7.1): the count and
+# license lines, then name, RD and creation time.
+Start
+  ^\s*Total VPN-Instances configured\s*:\s*\d+\s*$$
+  ^\s*License limit\s*:\s*\S+\s*$$
+  ^\s*Max VPN instances permitted by license\s*:\s*\d+\s*$$
+  ^\s*VPN-Instance Name\s+RD\s+Create time\s*$$
+  ^\s*${NAME}\s+${RD}\s+${CREATED}\s*$$ -> Record
+  ^\s*$$
+  ^. -> Error "unrecognized display ip vpn-instance line"

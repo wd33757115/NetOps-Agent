@@ -1,0 +1,17 @@
+Value Filldown SEGMENT_TYPE (VLAN|BD)
+Value INTERFACE (\S+)
+Value Required VNI (\d+)
+Value MULTICAST_GROUP (\S+)
+Value STATE (\S+)
+Value MODE (L2CP|L3CP|L2DP)
+Value SEGMENT (\d+)
+Value CONFIG (\S+)
+Value VRF (\S+)
+
+# One record per VNI (vpn-fabric lab, IOS-XE 17). SEGMENT is the VLAN or bridge domain
+# the header names (SEGMENT_TYPE).
+Start
+  ^Interface\s+VNI\s+Multicast-group\s+VNI state\s+Mode\s+${SEGMENT_TYPE}\s+cfg\s+vrf\s*$$
+  ^${INTERFACE}\s+${VNI}\s+${MULTICAST_GROUP}\s+${STATE}\s+${MODE}\s+${SEGMENT}\s+${CONFIG}\s+${VRF}\s*$$ -> Record
+  ^\s*$$
+  ^. -> Error "unrecognized show nve vni line"

@@ -22,6 +22,14 @@ LEGACY_SSH_TEST_MODULES = (
 )
 
 
+@pytest.fixture(autouse=True, scope="session")
+def topology_rules_from_shipped_catalog():
+    """Unit tests read the rule-governance catalog shipped with the App, not a database."""
+    from src.apps.topology.backend.collectors import rules
+
+    rules.SOURCE = "shipped"
+
+
 @pytest.fixture(scope="session")
 def legacy_ssh_database_template(tmp_path_factory):
     from src.infrastructure.db.models import Base

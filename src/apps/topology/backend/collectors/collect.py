@@ -11,29 +11,63 @@ from src.platform.device_access.drivers.netmiko_driver import NetmikoDriver
 from src.platform.device_access.policy import authorize
 from src.platform.device_access.service import DeviceAccessService
 
+from . import rules
 from .identify import PROBES, Identity, Probe, identify
 from .parse import ParseResult, parse
 from .profiles import MODE_CAPABILITIES, load_profiles, select_profile, verified_driver
 from .tiers.common import vrf_header
-from .tiers.template import IOS_ROUTE_TABLE
 
 MAX_VRF_SCOPES = 64
+IOS_ROUTE_TABLE = re.compile(r"Routing Table: (\S+)\s*")  # "show ip route vrf X" names itself
+# Per-VRF forms of the commands topology still parses itself. The capabilities rule
+# governance serves (rules.CHECK_ITEMS) take theirs from the published implementation.
+LOCAL_SCOPED = {"nxos": {"arp": "show ip arp vrf {vrf}"}}
 
 
-IOS_SCOPED = {"arp": "show ip arp vrf {}", "routes": "show ip route vrf {}"}
-# Per-VRF commands whose layout is verified: IOS ARP and route tables (campus-wan), NX-OS
-# ARP, Comware VPN-instance route tables and instance detail (vpn-fabric).
-SCOPED_COMMANDS = {
-    "ios": IOS_SCOPED,
-    "iosxe": IOS_SCOPED,
-    "nxos": {"arp": IOS_SCOPED["arp"]},
-    "comware": {
-        "routes": "display ip routing-table vpn-instance {}",
-        "vrf_detail": "display ip vpn-instance instance-name {}",
-    },
-}
-# No table of their own outside the VRFs: only the per-VRF commands run.
-INSTANCE_ONLY = frozenset({"vrf_detail"})
+def _cli(family):
+    return "comware" if family == "comware" else "ios"
+
+
+def scoped_form(capability, family):
+    """The per-VRF form of a capability's command ("{vrf}"), or None.
+
+    Per-VRF forms are family-level: the job's grant (service._scoped_context) and the
+    collection must name the same commands without knowing the model.
+    """
+    identity = {"os_family": family}
+    if rules.served(identity, capability):
+        return rules.scoped_form(identity, capability)
+    return LOCAL_SCOPED.get(family, {}).get(capability)
+
+
+def per_instance(capability, family):
+    """A command that itself names the instance has no table outside the VRFs."""
+    form = scoped_form(capability, family)
+    identity = {"os_family": family}
+    return (
+        bool(form)
+        and rules.served(identity, capability)
+        and (rules.selection(identity, capability).command == form)
+    )
+
+
+def scope_base(capability, family, profiles=None):
+    """The command a per-VRF expansion extends; the job must already be allowed it.
+
+    An instance-only command extends the instance enumeration itself ("vrfs").
+    """
+    identity = {"os_family": family}
+    if per_instance(capability, family):
+        capability = "vrfs"
+    if rules.served(identity, capability):
+        return rules.selection(identity, capability).command
+    profiles = profiles if profiles is not None else load_profiles()
+    profile = next(p for p in profiles.values() if p.os_family == _cli_family(family))
+    return profile.capabilities[capability].command
+
+
+def _cli_family(family):
+    return "ios" if family == "iosxe" else family
 
 
 def scoped_command(capability, scope, family="ios"):
@@ -42,15 +76,35 @@ def scoped_command(capability, scope, family="ios"):
         raise ValueError("unsafe VRF command token")
     if scope.lower() in {"all", "default"}:
         raise ValueError("reserved VRF command token")
-    command = SCOPED_COMMANDS[family][capability].format(scope)
-    decision = classify("comware" if family == "comware" else "ios", command)
+    form = scoped_form(capability, family)
+    if not form or "{vrf}" not in form:
+        raise ValueError("no per-VRF command for this capability")
+    command = form.replace("{vrf}", scope)
+    decision = classify(_cli(family), command)
     if decision.level != "L1" or decision.normalized != command:
         raise ValueError("VRF command is not canonical read-only CLI")
     return command
 
 
-def scoped_arp_command(scope):
-    return scoped_command("arp", scope)
+def published_command(identity, capability, model=None):
+    """(missing reason, command) for a rules-parsed capability on this device.
+
+    The command is None without a reason when it only runs per VPN instance.
+    """
+    from src.apps.rule_governance.runtime import SelectionError
+
+    try:
+        chosen = rules.selection(identity, capability, model)
+    except SelectionError:
+        return "implementation_invalid", None
+    if chosen is None:
+        return "no_implementation", None
+    if "{vrf}" in chosen.command:
+        return None, None
+    decision = classify(_cli(identity.os_family), chosen.command)
+    if decision.level != "L1" or decision.normalized != chosen.command:
+        return "command_not_read_only", None
+    return None, chosen.command
 
 
 def _scope_headers(capability, text):
@@ -88,8 +142,12 @@ def _collect_scoped(
 ):
     """Merge only complete scopes and retain a coverage record for every attempt."""
     family = result.identity.os_family
-    instance_only = capability in INSTANCE_ONLY
-    if capability not in SCOPED_COMMANDS.get(family, {}) or (
+    try:
+        form = scoped_form(capability, family)
+        instance_only = bool(form) and per_instance(capability, family)
+    except ValueError:  # an invalid published implementation has no per-VRF form either
+        return
+    if not form or (
         not instance_only and (capability not in result.parsed or capability not in result.results)
     ):
         return
@@ -252,10 +310,23 @@ class CollectionResult:
 
 
 def command_allowlist(profiles=None):
-    """For a backend-issued exact grant; this does not grant domain/CIDR access."""
+    """For a backend-issued exact grant; this does not grant domain/CIDR access.
+
+    Profile commands, plus the global commands rule governance publishes for the
+    capabilities its check items serve (each still L1-checked before it runs).
+    """
     profiles = profiles if profiles is not None else load_profiles()
     return frozenset(
-        {*PROBES, *(spec.command for p in profiles.values() for spec in p.capabilities.values())}
+        {
+            *PROBES,
+            *(
+                spec.command
+                for p in profiles.values()
+                for spec in p.capabilities.values()
+                if spec.command is not None
+            ),
+            *(command for _, command in rules.published_commands()),
+        }
     )
 
 
@@ -375,10 +446,21 @@ def collect_node(
         admission=access.admission,
     )
     defer_routes = profile.os_family in {"ios", "nxos"} and "arp" in selected
+    model = version.summary.get("model")
+    missing = {cap: "no_profile_command" for cap in MODE_CAPABILITIES[mode] if cap not in selected}
+    command_of = {}
+    for cap, spec in selected.items():
+        if spec.parser != "rules":
+            command_of[cap] = spec.command
+            continue
+        # Rule governance publishes how a check-item capability is collected.
+        reason, command_of[cap] = published_command(identity, cap, model)
+        if reason:
+            missing[cap] = reason
     commands = tuple(
-        Command(cap, spec.command, read_timeout=spec.timeout)
+        Command(cap, command_of[cap], read_timeout=spec.timeout)
         for cap, spec in selected.items()
-        if cap != "version" and (cap != "routes" or not defer_routes)
+        if cap != "version" and command_of.get(cap) and (cap != "routes" or not defer_routes)
     )
     batch = collector.execute_batch(
         context,
@@ -399,9 +481,7 @@ def collect_node(
         driver_name,
         results={"version": version_result},
         parsed={"version": version},
-        missing={
-            cap: "no_profile_command" for cap in MODE_CAPABILITIES[mode] if cap not in selected
-        },
+        missing=missing,
         driver_warning=driver_warning,
     )
 
@@ -414,7 +494,7 @@ def collect_node(
             cap,
             item.output,
             complete=item.output_complete and not item.failure_code,
-            model=version.summary.get("model"),
+            model=model,
         )
         if (
             selected[cap].parser is None
@@ -438,7 +518,7 @@ def collect_node(
         on_result,
     )
     # Large route tables come last, after VRF adjacency evidence, within the same deadline.
-    if defer_routes and "routes" in selected:
+    if defer_routes and command_of.get("routes"):
         spec = selected["routes"]
         try:
             batch = collector.execute_batch(
@@ -446,7 +526,7 @@ def collect_node(
                 BatchRequest(
                     target_ref,
                     connection_profile_id,
-                    (Command("routes", spec.command, read_timeout=spec.timeout),),
+                    (Command("routes", command_of["routes"], read_timeout=spec.timeout),),
                     stop_on_error=False,
                     budget_seconds=remaining(),
                 ),

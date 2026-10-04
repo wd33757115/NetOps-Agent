@@ -47,7 +47,10 @@ def test_real_raw_and_clean_without_profile(device, capability, count):
     assert result.records == original.records
     assert result.summary == original.summary
     assert len(result.records) == count
-    assert result.tier == "generic" and result.confidence == "medium"
+    # Comware ARP is read through its rule-governance check item (test_topology_rules.py).
+    assert (result.tier, result.confidence) == (
+        ("rules", "high") if capability == "arp" else ("generic", "medium")
+    )
     assert result.sources
     assert all(source["lines"] for source in result.sources)
     # Evidence metadata lives alongside rows, not in forbidden typed-table columns.
@@ -176,10 +179,12 @@ def test_unrecognized_tail_does_not_silently_drop_rows(capability):
 
 
 def test_count_mismatch_transport_budget_and_routes():
-    assert run("arp", lab("arp") + "\nTotal entries: 5").status == "partial"
-    assert run("arp", lab("arp") + "\nTotal entries: 4").status == "complete"
+    # Comware and IOS tables are read through rule governance (test_topology_rules.py);
+    # the generic parser still serves the other families, with the same table shapes.
+    assert run("arp", lab("arp") + "\nTotal entries: 5", "vrp").status == "partial"
+    assert run("arp", lab("arp") + "\nTotal entries: 4", "vrp").status == "complete"
     assert run("arp", lab("arp"), complete=False).status == "partial"
-    assert run("routes", lab("routes")).status == "failed"
+    assert run("routes", lab("routes"), "vrp").status == "failed"  # no generic route parser
     assert run("mac", "x" * (MAX_BYTES + 1)).status == "failed"
     assert run("mac", b"bytes").status == "failed"
 
@@ -214,12 +219,12 @@ def test_ip_masks_ipv6_vrf_and_no_fabricated_prefixes():
 
 
 def test_arp_ipv6_scoped_vrf_and_invalid_rows():
-    result = run("arp", "VRF: blue\n2001:db8::2 aa:bb:cc:dd:ee:ff GE1/0")
+    result = run("arp", "VRF: blue\n2001:db8::2 aa:bb:cc:dd:ee:ff GE1/0", "vrp")
     assert result.status == "complete"
     assert result.records[0]["vrf"] == "blue"
     assert result.records[0]["ip"] == "2001:db8::2"
-    assert run("arp", "192.0.2.1 incomplete GE1/0").status == "failed"
-    assert run("arp", "999.1.1.1 aa:bb:cc:dd:ee:ff GE1/0").status == "failed"
+    assert run("arp", "192.0.2.1 incomplete GE1/0", "vrp").status == "failed"
+    assert run("arp", "999.1.1.1 aa:bb:cc:dd:ee:ff GE1/0", "vrp").status == "failed"
 
 
 def test_raw_evidence_line_coordinates_and_version():

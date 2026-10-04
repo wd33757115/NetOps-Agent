@@ -1,0 +1,24 @@
+# Based on ntc-templates 9.1.0 hp_comware_display_ip_routing-table.textfsm (Apache-2.0);
+# every line is the count line, the header, a route, an ECMP next hop or blank: an
+# unrecognized line is an error, not a silent skip.
+Value Filldown NETWORK (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})
+Value Filldown PREFIX_LENGTH (\d{1,2})
+Value Filldown PROTOCOL (\w+)
+Value Filldown DISTANCE (\d+)
+Value Filldown METRIC (\d+)
+Value Required NEXTHOP_IP (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})
+Value NEXTHOP_IF (\S+)
+
+Start
+  ^\s*Destinations\s*:\s*\d+\s+Routes\s*:\s*\d+\s*$$
+  ^Destination/Mask\s+Proto\s+Pre\s+Cost\s+NextHop\s+Interface\s*$$ -> Routes
+  ^\s*$$
+  ^. -> Error "unrecognized display ip routing-table line before the table"
+
+Routes
+  ^${NETWORK}/${PREFIX_LENGTH}\s+${PROTOCOL}\s+${DISTANCE}\s+${METRIC}\s+${NEXTHOP_IP}\s+${NEXTHOP_IF}\s*$$ -> Record
+  # ECMP: another next hop of the route above
+  ^\s+${NEXTHOP_IP}\s+${NEXTHOP_IF}\s*$$ -> Record
+  ^\s+${PROTOCOL}\s+${DISTANCE}\s+${METRIC}\s+${NEXTHOP_IP}\s+${NEXTHOP_IF}\s*$$ -> Record
+  ^\s*$$
+  ^. -> Error "unrecognized display ip routing-table line"

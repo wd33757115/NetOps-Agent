@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 from test_topology_campus_wan import IDENTITY
 
-from src.apps.topology.backend.collectors.parse import parse
+from src.apps.topology.backend.collectors.parse import ParseResult, parse
 from src.apps.topology.backend.model.overlay import egress_instances, prepare
 from src.apps.topology.backend.service import topology_observation
 
@@ -107,7 +107,8 @@ def parsed(device):
             out[cap] = parse(identity, cap, path.read_text("utf-8"))
     for cap, prefix in {**SCOPED.get(platform, {}), **INSTANCE.get(platform, {})}.items():
         if cap not in out:
-            out[cap] = parse(identity, cap, "")  # an instance-only capability starts empty
+            # An instance-only capability starts empty, as the collector's merge does.
+            out[cap] = ParseResult(status="complete")
         for path in sorted(folder.glob(f"{prefix}*.txt")):
             if path.name.endswith(".raw.txt"):
                 continue
