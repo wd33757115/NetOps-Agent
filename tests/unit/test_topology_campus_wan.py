@@ -272,15 +272,17 @@ def test_vrrp_virtual_address_locates_as_virtual_router(devices, vip):
 
 
 def test_first_hop_is_the_vrrp_master_of_each_subnet(devices):
-    # PC1 and PC4 have different VRRP masters. The candidate device sequences
-    # differ, but DIST1 has no PC4 ARP observation, so delivery is unproven.
+    # PC1 and PC4 have different VRRP masters, so the candidate device sequences
+    # differ. In this capture DIST1 holds PC4's ARP entry (delivery proven) but DIST2
+    # holds none for PC1, so the way back is unproven and no symmetry is claimed.
     result = trace(devices, BASE, "172.16.10.11", "172.16.20.14")
     forward, reverse = result["forward"], result["reverse"]
     assert (forward["first_hop"], reverse["first_hop"]) == ("vrrp_master", "vrrp_master")
     assert [h["device"]["name"] for h in forward["paths"][0]["hops"]] == ["DIST1.lab.local"]
     assert [h["device"]["name"] for h in reverse["paths"][0]["hops"]] == ["DIST2.lab.local"]
-    assert forward["status"] == "partial"
-    assert forward["paths"][0]["end"]["status"] == "endpoint_unresolved"
+    assert (forward["status"], forward["paths"][0]["end"]["status"]) == ("complete", "delivered")
+    assert reverse["status"] == "partial"
+    assert reverse["paths"][0]["end"]["status"] == "endpoint_unresolved"
     assert result["symmetric"] is None
     assert any(gap["status"] == "endpoint_unresolved" for gap in result["gaps"])
 

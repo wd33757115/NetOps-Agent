@@ -94,7 +94,7 @@ IOS_FACTS = frozenset(
 )
 SWITCH_FACTS = IOS_FACTS | {"lag", "stp", "vlan", "trunk"}
 CAMPUS = Lab(
-    "20261003-010038",
+    "20261005-003643",
     CAMPUS_HOSTS,
     {
         host: COMWARE_FACTS
@@ -120,7 +120,7 @@ CAMPUS_VLAN = Lab(
     frozenset(),
 )
 CAMPUS_OSPF = Lab(
-    "20261003-015834",
+    "20261005-003643",
     CAMPUS_HOSTS,
     {
         host: frozenset({"ospf_interfaces", "ospf_process"})

@@ -1,11 +1,11 @@
 Protocol  Address          Age (min)  Hardware Addr   Type   Interface
-Internet  10.0.36.1             102   aabb.cc00.0211  ARPA   Ethernet0/2
+Internet  10.0.36.1               5   aabb.cc00.0211  ARPA   Ethernet0/2
 Internet  10.0.36.2               -   aabb.cc00.0520  ARPA   Ethernet0/2
-Internet  10.0.46.1             102   aabb.cc00.0301  ARPA   Ethernet0/1
+Internet  10.0.46.1               5   aabb.cc00.0301  ARPA   Ethernet0/1
 Internet  10.0.46.2               -   aabb.cc00.0510  ARPA   Ethernet0/1
 Internet  172.16.10.3             -   aabb.cc80.0500  ARPA   Vlan10
-Internet  172.16.10.11            0   0050.7966.6801  ARPA   Vlan10
+Internet  172.16.10.13            0   0050.7966.6802  ARPA   Vlan10
 Internet  172.16.20.1             -   0000.5e00.0114  ARPA   Vlan20
 Internet  172.16.20.3             -   aabb.cc80.0500  ARPA   Vlan20
-Internet  172.16.20.12           88   0050.7966.6802  ARPA   Vlan20
-Internet  172.16.20.14           88   0050.7966.6805  ARPA   Vlan20
+Internet  172.16.20.12            3   0050.7966.6804  ARPA   Vlan20
+Internet  172.16.20.14            3   0050.7966.6805  ARPA   Vlan20

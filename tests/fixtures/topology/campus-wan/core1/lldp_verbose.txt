@@ -12,7 +12,7 @@ Technical Support: http://www.cisco.com/techsupport
 Copyright (c) 1986-2024 by Cisco Systems, Inc.
 Compiled Sun 11-Aug-24 22:07 by mcpre
 
-Time remaining: 101 seconds
+Time remaining: 117 seconds
 System Capabilities: B,R
 Enabled Capabilities: R
 Management Addresses:
@@ -37,7 +37,7 @@ Technical Support: http://www.cisco.com/techsupport
 Copyright (c) 1986-2024 by Cisco Systems, Inc.
 Compiled Sun 11-Aug-24 22:06 by mc
 
-Time remaining: 106 seconds
+Time remaining: 118 seconds
 System Capabilities: B,R
 Enabled Capabilities: B,R
 Management Addresses:
@@ -63,7 +63,7 @@ Technical Support: http://www.cisco.com/techsupport
 Copyright (c) 1986-2024 by Cisco Systems, Inc.
 Compiled Sun 11-Aug-24 22:06 by mc
 
-Time remaining: 104 seconds
+Time remaining: 119 seconds
 System Capabilities: B,R
 Enabled Capabilities: B,R
 Management Addresses:
@@ -88,7 +88,7 @@ H3C Comware Platform Software, Software Version 7.1.064, Release 1362P12
 H3C VSR1000
 Copyright (c) 2004-2023 New H3C Technologies Co., Ltd. All rights reserved.
 
-Time remaining: 101 seconds
+Time remaining: 95 seconds
 System Capabilities: B,R
 Enabled Capabilities: B,R
 Management Addresses:
@@ -117,7 +117,7 @@ H3C Comware Platform Software, Software Version 7.1.064, Release 1362P12
 H3C VSR1000
 Copyright (c) 2004-2023 New H3C Technologies Co., Ltd. All rights reserved.
 
-Time remaining: 118 seconds
+Time remaining: 93 seconds
 System Capabilities: B,R
 Enabled Capabilities: B,R
 Management Addresses:

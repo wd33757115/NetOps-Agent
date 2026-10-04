@@ -300,7 +300,8 @@ def test_empty_incomplete_transport_is_not_verified_and_unsupported_is_not_empty
 
 @pytest.mark.parametrize(
     "observation",
-    MANIFEST["observations"],
+    # The verbose Comware interface tables are kept for the OSPF table rework (#3).
+    [o for o in MANIFEST["observations"] if o["capability"] != "ospf_interfaces_verbose"],
     ids=lambda item: f"{item['device']}-{item['capability']}",
 )
 def test_all_real_ospf_captures_through_registered_public_parser_and_fact_contract(observation):
@@ -367,8 +368,9 @@ def test_ospf_profiles_modes_import_contract_and_summary_only_storage():
     from src.apps.topology.backend.facts.models import RECORD_MODELS
 
     assert LABS["campus-ospf"] is CAMPUS_OSPF
-    assert CAMPUS_OSPF.batch == MANIFEST["batch"] == "20261003-015834"
-    assert len(MANIFEST["observations"]) == 16 and len(CAMPUS_OSPF.devices) == 8
+    assert CAMPUS_OSPF.batch == MANIFEST["batch"] == "20261005-003643"
+    # Two capabilities per device, plus the verbose interface table of the two Comware BRs.
+    assert len(MANIFEST["observations"]) == 18 and len(CAMPUS_OSPF.devices) == 8
     for profile_id, commands in {
         "h3c-comware7": {
             "ospf_interfaces": "display ospf interface",

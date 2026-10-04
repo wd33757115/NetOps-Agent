@@ -7,7 +7,7 @@ IPv4 Virtual Router Information:
      Admin Status   : Up                  State        : Backup    
      Config Pri     : 100                 Running Pri  : 100       
      Preempt Mode   : Yes                 Delay Time   : 0         
-     Become Master  : 2780ms left 
+     Become Master  : 3120ms left 
      Auth Type      : Not supported      
      Version        : 3
      Virtual IP     : 10.10.1.10/32

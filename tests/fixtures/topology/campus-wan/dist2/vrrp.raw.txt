@@ -8,7 +8,7 @@ Vlan10 - Group 10
   Priority is 100 
   Master Router is 172.16.10.2, priority is 110 
   Master Advertisement interval is 1.000 sec
-  Master Down interval is 3.609 sec (expires in 3.319 sec)
+  Master Down interval is 3.609 sec (expires in 3.057 sec)
   FLAGS: 0/1
 
 Vlan20 - Group 20 

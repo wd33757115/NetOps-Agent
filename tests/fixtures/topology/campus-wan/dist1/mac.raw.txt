@@ -6,9 +6,12 @@ Vlan    Mac Address       Type        Ports
 ----    -----------       --------    -----
   10    0050.7966.6800    DYNAMIC     Et2/1
   10    0050.7966.6801    DYNAMIC     Et2/0
-  10    0050.7966.6804    DYNAMIC     Et2/1
+  10    0050.7966.6802    DYNAMIC     Et2/1
+  10    aabb.cc00.0720    DYNAMIC     Et2/1
   10    aabb.cc80.0500    DYNAMIC     Po1
   20    0000.5e00.0114    DYNAMIC     Po1
+  20    0050.7966.6805    DYNAMIC     Po1
   20    aabb.cc00.0501    DYNAMIC     Po1
-Total Mac Addresses for this criterion: 6
+  20    aabb.cc80.0500    DYNAMIC     Po1
+Total Mac Addresses for this criterion: 9
 DIST1#

@@ -36,7 +36,7 @@ display ospf
 
  Area: 0.0.0.0          (MPLS TE not enabled)
  Authentication type: None    Area flag: Normal
- SPF scheduled count: 6    
+ SPF scheduled count: 7    
  ExChange/Loading neighbors: 0
 
  Interface: 10.0.24.1 (GigabitEthernet3/0)

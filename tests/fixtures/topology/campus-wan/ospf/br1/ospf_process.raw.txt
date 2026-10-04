@@ -18,7 +18,7 @@ display ospf
  Default ASE parameters: Metric: 1 Tag: 1 Type: 2
  Route preference: 10
  ASE route preference: 150
- SPF calculation count: 9    
+ SPF calculation count: 7    
  RFC 1583 compatible
  Fast-reroute: Remote-lfa Disabled
    Maximum-cost: 4294967295
@@ -36,7 +36,7 @@ display ospf
 
  Area: 0.0.0.0          (MPLS TE not enabled)
  Authentication type: None    Area flag: Normal
- SPF scheduled count: 6    
+ SPF scheduled count: 5    
  ExChange/Loading neighbors: 0
 
  Interface: 10.0.13.1 (GigabitEthernet3/0)

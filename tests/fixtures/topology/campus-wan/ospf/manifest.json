@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "batch": "20261003-015834",
+  "batch": "20261005-003643",
   "source": "GNS3 authorized lab capture",
   "raw_format": "UTF-8 text saved by collector before CLI cleanup; original line endings",
   "limitations": [
@@ -18,7 +18,7 @@
       "host": "10.10.1.11",
       "capability": "ospf_interfaces",
       "command": "display ospf interface",
-      "observed_at": "2026-10-03T01:58:39.592715+00:00",
+      "observed_at": "2026-10-04T16:36:48.099782+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -37,20 +37,41 @@
     {
       "device": "br1",
       "host": "10.10.1.11",
+      "capability": "ospf_interfaces_verbose",
+      "command": "display ospf interface verbose",
+      "observed_at": "2026-10-04T16:36:48.151518+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "br1/ospf_interfaces_verbose.txt",
+          "sha256": "f906eb91c135bb033018015e5816a32de936298fb0bd145d845bb3ce8ca01a34",
+          "bytes": 1577
+        },
+        "raw.txt": {
+          "path": "br1/ospf_interfaces_verbose.raw.txt",
+          "sha256": "34dd3eac372007e952b88da2f22ed4d193df8449a79bb09d3892a7d3a0c5dc3e",
+          "bytes": 1711
+        }
+      }
+    },
+    {
+      "device": "br1",
+      "host": "10.10.1.11",
       "capability": "ospf_process",
       "command": "display ospf",
-      "observed_at": "2026-10-03T01:58:39.645980+00:00",
+      "observed_at": "2026-10-04T16:36:48.203165+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "br1/ospf_process.txt",
-          "sha256": "10288b8b9f55fec3d14b43a0bfe4db4f1ccb1dbadd6f4ce091dd841a2b445acd",
+          "sha256": "39d900d548b77b593ecf75c0fa811235b3bdb3355cc23750edc08c1855ceb6ad",
           "bytes": 2714
         },
         "raw.txt": {
           "path": "br1/ospf_process.raw.txt",
-          "sha256": "e201b86ab4b6185377f3715f7b8572284cd01274f14d98fe0924775c4d683548",
+          "sha256": "881e6cc940358ddfa2c00797a6178152e9a891717f7a2955f5e0239ed1b01a97",
           "bytes": 2895
         }
       }
@@ -60,7 +81,7 @@
       "host": "10.10.1.12",
       "capability": "ospf_interfaces",
       "command": "display ospf interface",
-      "observed_at": "2026-10-03T01:58:43.012172+00:00",
+      "observed_at": "2026-10-04T16:36:53.231550+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -79,20 +100,41 @@
     {
       "device": "br2",
       "host": "10.10.1.12",
+      "capability": "ospf_interfaces_verbose",
+      "command": "display ospf interface verbose",
+      "observed_at": "2026-10-04T16:36:53.283131+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "br2/ospf_interfaces_verbose.txt",
+          "sha256": "2a75d887901563bcaa858a602cc0ffed3c28db170014b7b21192d78d81ce24f9",
+          "bytes": 1577
+        },
+        "raw.txt": {
+          "path": "br2/ospf_interfaces_verbose.raw.txt",
+          "sha256": "8e75300088a1d32e89537615450fb9fcf71a3bf323c928a109cf346ec265b864",
+          "bytes": 1711
+        }
+      }
+    },
+    {
+      "device": "br2",
+      "host": "10.10.1.12",
       "capability": "ospf_process",
       "command": "display ospf",
-      "observed_at": "2026-10-03T01:58:43.064897+00:00",
+      "observed_at": "2026-10-04T16:36:53.334713+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "br2/ospf_process.txt",
-          "sha256": "2adc1cef99f807de96119cbdb4dc0041ecd4d16f3c0005dddf62b075eb543123",
+          "sha256": "85dc1893d239c3b03e8dc72646248c4d18de61620c81c055b96fc818429e2075",
           "bytes": 2714
         },
         "raw.txt": {
           "path": "br2/ospf_process.raw.txt",
-          "sha256": "44067761801c6266ddee890a4673962f0fe38046a8744d7cd7e1bc5365648ace",
+          "sha256": "bfb7809e45115774312b9bc350c6da3c403000d07c0eac021bc09bfb7b0f50ce",
           "bytes": 2895
         }
       }
@@ -102,7 +144,7 @@
       "host": "10.10.1.13",
       "capability": "ospf_interfaces",
       "command": "show ip ospf interface brief",
-      "observed_at": "2026-10-03T01:58:43.820339+00:00",
+      "observed_at": "2026-10-04T16:36:56.341122+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -123,18 +165,18 @@
       "host": "10.10.1.13",
       "capability": "ospf_process",
       "command": "show ip ospf",
-      "observed_at": "2026-10-03T01:58:43.873987+00:00",
+      "observed_at": "2026-10-04T16:36:56.443033+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "core1/ospf_process.txt",
-          "sha256": "c00cd627894ebc60fc0074e4377785b999c4ea57d09401e1b320c2c474e57426",
+          "sha256": "743c94f55e752c1890b34c8b9cbd790ae2c063deab1b665b29f13ea1191d3c33",
           "bytes": 2261
         },
         "raw.txt": {
           "path": "core1/ospf_process.raw.txt",
-          "sha256": "c3f73e005eac9584f95d8b4ba68e8f31ed462e8773bda39fc4a2defb1d980c23",
+          "sha256": "2ca49a8efdb7e9f55b766203285914d8a7fe4a8762fb3058650600ebc18f4ff5",
           "bytes": 2337
         }
       }
@@ -144,7 +186,7 @@
       "host": "10.10.1.14",
       "capability": "ospf_interfaces",
       "command": "show ip ospf interface brief",
-      "observed_at": "2026-10-03T01:58:44.641273+00:00",
+      "observed_at": "2026-10-04T16:37:00.218821+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -165,18 +207,18 @@
       "host": "10.10.1.14",
       "capability": "ospf_process",
       "command": "show ip ospf",
-      "observed_at": "2026-10-03T01:58:44.693294+00:00",
+      "observed_at": "2026-10-04T16:37:00.270259+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "core2/ospf_process.txt",
-          "sha256": "297b9a782bb14d1994c7258d92980e0be2b08c5982879a8ffe35890fd246777b",
+          "sha256": "34c3a07a089ac90bf371c4d72d1997b7a60c8bc0a8ceaf781a81c3eb03ea619c",
           "bytes": 2261
         },
         "raw.txt": {
           "path": "core2/ospf_process.raw.txt",
-          "sha256": "b8edbc9b90553a4b2b7cf803704ec1af02d24203f738461989a63fbd4cfb3394",
+          "sha256": "108308740b45d8a512a0e9f2c1cbfddd2546e1434df266beb5c52b1cafda0b61",
           "bytes": 2337
         }
       }
@@ -186,7 +228,7 @@
       "host": "10.10.1.15",
       "capability": "ospf_interfaces",
       "command": "show ip ospf interface brief",
-      "observed_at": "2026-10-03T01:58:45.494250+00:00",
+      "observed_at": "2026-10-04T16:37:03.957495+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -207,18 +249,18 @@
       "host": "10.10.1.15",
       "capability": "ospf_process",
       "command": "show ip ospf",
-      "observed_at": "2026-10-03T01:58:45.546604+00:00",
+      "observed_at": "2026-10-04T16:37:04.009091+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "dist1/ospf_process.txt",
-          "sha256": "1a554fc4771324017d0b32e405d534b6fde04b3ffd98c18b7c442e41e901b009",
+          "sha256": "f63233fe00683b253ad31cfb3427174794a104dc95119634123386f86f832d6a",
           "bytes": 2494
         },
         "raw.txt": {
           "path": "dist1/ospf_process.raw.txt",
-          "sha256": "17513fa52058e225ae8b7062be85b26dcc440f5d86d9cc72d767e2aad6c1883e",
+          "sha256": "607431415d8cd533240c6a901cb2f1d23c370527650c01a6d71b14754109e5b8",
           "bytes": 2579
         }
       }
@@ -228,7 +270,7 @@
       "host": "10.10.1.16",
       "capability": "ospf_interfaces",
       "command": "show ip ospf interface brief",
-      "observed_at": "2026-10-03T01:58:46.281676+00:00",
+      "observed_at": "2026-10-04T16:37:07.570129+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -249,18 +291,18 @@
       "host": "10.10.1.16",
       "capability": "ospf_process",
       "command": "show ip ospf",
-      "observed_at": "2026-10-03T01:58:46.334281+00:00",
+      "observed_at": "2026-10-04T16:37:07.621837+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "dist2/ospf_process.txt",
-          "sha256": "6d43e58bcab5202934aa70f98ef6098cde4c457a110fb46edbb50981e7a148a5",
+          "sha256": "0c8024929d9d5e882ee0005cd865b2600f83352d5a378ca348dab3a022282d12",
           "bytes": 2494
         },
         "raw.txt": {
           "path": "dist2/ospf_process.raw.txt",
-          "sha256": "8d6ad12ebffa51b1277091d7e499e55f6d6c8e13837bba9e1b23ee5a9b00d169",
+          "sha256": "3e0a8b76b847c192239ab8f7d3648e534b372b63e99202becde3f9cc07a690f7",
           "bytes": 2579
         }
       }
@@ -270,7 +312,7 @@
       "host": "10.10.1.17",
       "capability": "ospf_interfaces",
       "command": "show ip ospf interface brief",
-      "observed_at": "2026-10-03T01:58:47.038146+00:00",
+      "observed_at": "2026-10-04T16:37:11.185283+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -291,7 +333,7 @@
       "host": "10.10.1.17",
       "capability": "ospf_process",
       "command": "show ip ospf",
-      "observed_at": "2026-10-03T01:58:47.090831+00:00",
+      "observed_at": "2026-10-04T16:37:11.236706+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -312,7 +354,7 @@
       "host": "10.10.1.18",
       "capability": "ospf_interfaces",
       "command": "show ip ospf interface brief",
-      "observed_at": "2026-10-03T01:58:47.843165+00:00",
+      "observed_at": "2026-10-04T16:37:14.646988+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -333,7 +375,7 @@
       "host": "10.10.1.18",
       "capability": "ospf_process",
       "command": "show ip ospf",
-      "observed_at": "2026-10-03T01:58:47.895282+00:00",
+      "observed_at": "2026-10-04T16:37:14.698825+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
