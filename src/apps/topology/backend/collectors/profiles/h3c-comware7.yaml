@@ -26,10 +26,10 @@ capabilities:
   # Read per VPN instance (the published command names it); see collect._collect_scoped.
   vrf_detail: {parser: rules}
   irf: {command: display irf, parser: null}
-  vrrp: {command: display vrrp verbose, parser: generic_vrrp}
+  vrrp: {parser: rules}
   ospf_interfaces: {command: display ospf interface, parser: generic_ospf_interfaces}
   ospf_process: {command: display ospf, parser: generic_ospf_process}
-  ospf_neighbors: {command: display ospf peer, parser: generic_ospf_neighbors}
+  ospf_neighbors: {parser: rules}
   bgp_peers: {parser: rules}
   bgp_vpnv4: {parser: rules}
   bgp_evpn: {parser: rules}

@@ -25,10 +25,10 @@ capabilities:
   stp: {command: show spanning-tree, parser: generic_stp}
   routes: {timeout: 300, parser: rules}
   vrfs: {parser: rules}
-  vrrp: {command: show vrrp, parser: generic_vrrp}
+  vrrp: {parser: rules}
   ospf_interfaces: {command: show ip ospf interface brief, parser: generic_ospf_interfaces}
   ospf_process: {command: show ip ospf, parser: generic_ospf_process}
-  ospf_neighbors: {command: show ip ospf neighbor, parser: generic_ospf_neighbors}
+  ospf_neighbors: {parser: rules}
   bgp_peers: {parser: rules}
   vrf_detail: {parser: rules}
   bgp_vpnv4: {parser: rules}

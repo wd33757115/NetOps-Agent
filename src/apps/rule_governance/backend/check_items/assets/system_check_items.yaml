@@ -232,6 +232,32 @@ check_items:
       UP_DOWN: [text, false, 会话建立或断开时长原文]
       ROUTER_ID: [ip_or_unassigned, false, 本端 BGP 标识（表头）]
       LOCAL_AS: [integer, false, 本端 AS（表头）]
+  topology.ospf_neighbors:
+    name: 拓扑发现：OSPF 邻居
+    entity_type: ospf_neighbor
+    keys: [NEIGHBOR_ID, INTERFACE]
+    values:
+      NEIGHBOR_ID: [ip_or_unassigned, true, 邻居路由器 ID]
+      INTERFACE: [text, true, 本端接口原文]
+      ADDRESS: [ip_or_unassigned, false, 邻居接口地址]
+      PRIORITY: [integer, false, 邻居优先级]
+      STATE: [text, false, 邻居状态原文]
+      ROLE: [text, false, DR/BDR 角色原文（- 表示无）]
+      DEAD_TIME: [text, false, 失效时间原文]
+      PROCESS: [text, false, 进程号（Comware 表头）]
+      ROUTER_ID: [ip_or_unassigned, false, 本端路由器 ID（Comware 表头）]
+      AREA: [text, false, 区域（Comware 表头）]
+  topology.vrrp:
+    name: 拓扑发现：VRRP 组
+    entity_type: vrrp_group
+    keys: [INTERFACE, VRID]
+    values:
+      INTERFACE: [text, true, 接口原文]
+      VRID: [integer, true, 虚拟路由器编号]
+      STATE: [text, false, 状态原文]
+      PRIORITY: [integer, false, 运行优先级]
+      VIRTUAL_IP: [text, false, 虚拟地址]
+      MASTER_IP: [text, false, 主设备地址]
 
 implementations:
   - check_item: topology.arp
@@ -418,6 +444,31 @@ implementations:
     valid_empty: [BLANK]
     counts:
       - {pattern: '^\s*Total number of peers:\s*(\d+)\s', of: rows}
+  - check_item: topology.ospf_neighbors
+    platform: ios
+    command: show ip ospf neighbor
+    template: Cisco/IOS/show_ip_ospf_neighbor__topology-1.0.0.textfsm
+    sha256: d7f6af9707e3d0b41a271ef4aec04626bd4fbba75a8d48b50bb15c1aa913fe73
+    valid_empty: [BLANK]
+  - check_item: topology.ospf_neighbors
+    platform: comware
+    command: display ospf peer
+    template: H3C/Comware7/display_ospf_peer__topology-1.0.0.textfsm
+    sha256: 76ba8c112bb3adf81cc170446467303861701a4e8acd37032c49bfcf4f5b3db8
+  - check_item: topology.vrrp
+    platform: ios
+    command: show vrrp
+    template: Cisco/IOS/show_vrrp__topology-1.0.0.textfsm
+    sha256: 20e03beb9d0970ddc2c39d35ccbd308c9ba4486c4c571875e3dc54515e7c7c3f
+    valid_empty: [BLANK, '\A\s*VRRP4 is not configured\.\s*\Z']
+  - check_item: topology.vrrp
+    platform: comware
+    command: display vrrp verbose
+    template: H3C/Comware7/display_vrrp_verbose__topology-1.0.0.textfsm
+    sha256: 2d7a1ab2b933c555c4f514c239c9765c3bfcb735c6ca6fb0e29a4909abf5b63b
+    valid_empty: ['\A\s*VRRP4 is not configured\.\s*\Z']
+    counts:
+      - {pattern: '^\s*Total number of virtual routers\s*:\s*(\d+)\s*$', of: rows}
 
 platforms:
   ios: {vendor: Cisco, platforms: [ios, iosxe], family: IOS}

@@ -43,6 +43,8 @@ CHECK_ITEMS = {
     "bgp_peers": "topology.bgp_ipv4_peers",
     "bgp_vpnv4": "topology.bgp_vpnv4_peers",
     "bgp_evpn": "topology.bgp_evpn_peers",
+    "ospf_neighbors": "topology.ospf_neighbors",
+    "vrrp": "topology.vrrp",
 }
 # Families whose CLI output rule governance parses for the capabilities above.
 FAMILIES = frozenset({"ios", "iosxe", "comware"})
@@ -195,11 +197,9 @@ def parse(identity, capability, raw, *, complete=True, model=None):
         # A summary capability: its rows are one fact about the device.
         result.summary = SUMMARIES[capability](result.records)
         result.records = []
-    for field, (key, convert) in HEADERS.get(capability, {}).items():
-        # A table header's value (Filldown on every row) is a fact about the device.
-        value = next((row[field] for row in parsed.rows if row.get(field)), None)
-        if value is not None:
-            result.summary[key] = convert(value)
+    if capability in HEADERS:
+        # Table-header Values (Filldown on every row) are facts about the device.
+        result.summary.update(HEADERS[capability](parsed.rows))
     return result
 
 
@@ -563,6 +563,72 @@ def _bgp_peer(row, family, lines, warnings):
     return record
 
 
+# RFC 9129 nbr-state-type names.
+OSPF_STATES = {
+    "full": "full",
+    "loading": "loading",
+    "exchange": "exchange",
+    "exstart": "exstart",
+    "2way": "2-way",
+    "2-way": "2-way",
+    "init": "init",
+    "attempt": "attempt",
+    "down": "down",
+}
+
+
+def _ospf_neighbor(row, family, lines, warnings):
+    state = OSPF_STATES.get(row["STATE"].lower())
+    if state is None:
+        raise ValueError("unknown_ospf_neighbor_state")
+    record = {
+        "neighbor_router_id": row["NEIGHBOR_ID"],
+        "address": row["ADDRESS"],
+        "priority": int(row["PRIORITY"]),
+        "state": state,
+        "role": row["ROLE"],
+        "dead_time": row["DEAD_TIME"],
+        "ifname": interface(row["INTERFACE"], family).name,
+    }
+    for key, field in (("process", "PROCESS"), ("area", "AREA")):
+        if row.get(field):
+            record[key] = row[field]
+    return record
+
+
+# RFC 8347 VRRP states.
+VRRP_STATES = {
+    "initialize": "initialize",
+    "init": "initialize",
+    "backup": "backup",
+    "master": "master",
+}
+
+
+def _vrrp(row, family, lines, warnings):
+    """RFC 8347 operational state; a group without state or virtual address is refused."""
+    if not row.get("STATE"):
+        raise ValueError("vrrp_block_without_state")
+    if not row.get("VIRTUAL_IP"):
+        raise ValueError("vrrp_block_without_virtual_address")
+    addresses = []
+    for value in row["VIRTUAL_IP"]:
+        if (address := ip_address(value)) not in addresses:
+            addresses.append(address)
+    try:
+        master = ip_address(row["MASTER_IP"]) if row.get("MASTER_IP") else None
+    except ValueError:
+        master = None
+    return {
+        "ifname": interface(row["INTERFACE"], family).name,
+        "vrid": int(row["VRID"]),
+        "state": VRRP_STATES.get(row["STATE"].lower(), row["STATE"].lower()),
+        "priority": int(row["PRIORITY"]) if row.get("PRIORITY") else None,
+        "virtual_addresses": addresses,
+        "last_adv_source": master,
+    }
+
+
 def _vrf(row, family, lines, warnings):
     """A device-local VRF / VPN-instance name, never a global identity."""
     protocols = row.get("PROTOCOLS")
@@ -584,13 +650,36 @@ ROWS = {
     "bgp_peers": _bgp_peer,
     "bgp_vpnv4": _bgp_peer,
     "bgp_evpn": _bgp_peer,
+    "ospf_neighbors": _ospf_neighbor,
+    "vrrp": _vrrp,
 }
 MERGE = {"routes": _merge_routes, "vrf_detail": _merge_vrfs}
 # Capabilities whose rows form one summary fact (the VRF enumeration scopes collection).
 SUMMARIES = {"vrfs": lambda rows: {"instances": rows}}
-# Table-header Values that describe the device: {capability: {Value: (summary key, type)}}.
-BGP_HEADER = {"ROUTER_ID": ("router_id", str), "LOCAL_AS": ("local_as", int)}
-HEADERS = {"bgp_peers": BGP_HEADER, "bgp_vpnv4": BGP_HEADER, "bgp_evpn": BGP_HEADER}
+
+
+def _bgp_header(rows):
+    """The local BGP speaker: router ID and AS from the table header."""
+    found = {}
+    for field, key, convert in (("ROUTER_ID", "router_id", str), ("LOCAL_AS", "local_as", int)):
+        if value := next((row[field] for row in rows if row.get(field)), None):
+            found[key] = convert(value)
+    return found
+
+
+def _ospf_router_ids(rows):
+    """{process: router ID} from the per-process headers (Comware)."""
+    ids = {row["PROCESS"]: row["ROUTER_ID"] for row in rows if row.get("PROCESS")}
+    return {"router_ids": ids} if ids else {}
+
+
+# Table-header Values that describe the device: {capability: rows -> summary}.
+HEADERS = {
+    "bgp_peers": _bgp_header,
+    "bgp_vpnv4": _bgp_header,
+    "bgp_evpn": _bgp_header,
+    "ospf_neighbors": _ospf_router_ids,
+}
 # Tables listing each entity once: a repeated entity is a contradiction, not a new row.
 UNIQUE = {
     "vrfs": ("name",),

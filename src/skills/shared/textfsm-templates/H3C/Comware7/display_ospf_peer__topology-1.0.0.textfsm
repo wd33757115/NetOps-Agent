@@ -1,0 +1,22 @@
+Value Filldown PROCESS (\d+)
+Value Filldown ROUTER_ID (\d+\.\d+\.\d+\.\d+)
+Value Filldown AREA (\S+)
+Value Required NEIGHBOR_ID (\d+\.\d+\.\d+\.\d+)
+Value ADDRESS (\d+\.\d+\.\d+\.\d+)
+Value PRIORITY (\d+)
+Value DEAD_TIME (\S+)
+Value STATE ([\w-]+)
+Value ROLE (\S+)
+Value INTERFACE (\S+)
+
+# One record per OSPF neighbour under its process and area headers (campus-wan and
+# vpn-fabric labs, Comware 7.1). "Full/ -": no DR role on a point-to-point link.
+Start
+  ^\s*OSPF Process\s -> Continue.Clearall
+  ^\s*OSPF Process ${PROCESS} with Router ID ${ROUTER_ID}\s*$$
+  ^\s*Neighbor Brief Information\s*$$
+  ^\s*Area:\s*${AREA}\s*$$
+  ^\s*Router ID\s+Address\s+Pri\s+Dead-Time\s+State\s+Interface\s*$$
+  ^\s*${NEIGHBOR_ID}\s+${ADDRESS}\s+${PRIORITY}\s+${DEAD_TIME}\s+${STATE}/\s*${ROLE}\s+${INTERFACE}\s*$$ -> Record
+  ^\s*$$
+  ^. -> Error "unrecognized display ospf peer line"

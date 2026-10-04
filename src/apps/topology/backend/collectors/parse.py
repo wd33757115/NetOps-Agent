@@ -16,14 +16,12 @@ from .tiers import (
     generic_lldp_local,
     generic_mac,
     generic_ospf,
-    generic_ospf_neighbors,
     generic_stp,
     generic_switchport,
     generic_trunk,
     generic_version,
     generic_vlan,
     generic_vrfs,
-    generic_vrrp,
 )
 from .tiers.common import audit_table, table_count
 
@@ -35,10 +33,8 @@ PARSERS = {
     "interfaces": generic_ifbrief.parse,
     "ip": generic_ipif.parse,
     "version": generic_version.parse,
-    "vrrp": generic_vrrp.parse,
     "lag": generic_lag.parse,
     "stp": generic_stp.parse,
-    "ospf_neighbors": generic_ospf_neighbors.parse,
     "vlan": generic_vlan.parse,
     "trunk": generic_trunk.parse,
     "switchport": generic_switchport.parse,
@@ -52,7 +48,6 @@ EMPTY = {
     "mac": r"No MAC(?: address)? entries(?: found)?\.?",
     "lag": r"No link aggregation group exists\.",
     "stp": r"No spanning tree instances? exists?\.?",
-    "vrrp": r"VRRP4 is not configured\.",
 }
 MAX_BYTES = 8 * 1024 * 1024
 
@@ -145,10 +140,10 @@ def parse_generic(identity, capability, raw, *, complete=True, command=None, pro
     )
     empty_pattern = EMPTY.get(capability)
     if (
-        (family in {"ios", "iosxe"} and capability in {"vrrp", "trunk", "ospf_neighbors"})
+        (family in {"ios", "iosxe"} and capability == "trunk")
         or (family == "comware" and capability == "trunk")
     ) and not text.strip():
-        # Verified lab outputs have no header for empty IOS VRRP/trunks/OSPF neighbours and
+        # Verified lab outputs have no header for empty IOS and
         # Comware trunks; transport completeness is still required.
         empty_pattern = ""
     if empty_pattern is not None and re.fullmatch(empty_pattern, text.strip(), re.I):

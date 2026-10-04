@@ -1,0 +1,19 @@
+Value INTERFACE (\S+)
+Value Required VRID (\d+)
+Value STATE (\w+)
+Value List VIRTUAL_IP (\d+\.\d+\.\d+\.\d+)
+Value PRIORITY (\d+)
+Value MASTER_IP (\S+)
+
+# One record per interface and VRRP group (campus-wan lab, IOS-XE 17). Timers, MAC,
+# preemption and flags lines are known and not modeled.
+Start
+  ^\S+ - Group \d+ -> Continue.Record
+  ^${INTERFACE} - Group ${VRID}\s*$$
+  ^\s+State is ${STATE}\s*$$
+  ^\s+(?:Secondary )?Virtual IP address is ${VIRTUAL_IP}\s*$$
+  ^\s+Priority is ${PRIORITY}\s*$$
+  ^\s+Master Router is ${MASTER_IP}(?: \(local\))?, priority is \d+\s*$$
+  ^\s+(Virtual MAC address is|Advertisement interval is|Preemption|Master Advertisement interval is|Master Down interval is|FLAGS:)(\s.*)?$$
+  ^\s*$$
+  ^. -> Error "unrecognized show vrrp line"
