@@ -18,7 +18,6 @@ from .tiers import (
     generic_switchport,
     generic_trunk,
     generic_version,
-    generic_vlan,
     generic_vrfs,
 )
 from .tiers.common import audit_table, table_count
@@ -31,7 +30,6 @@ PARSERS = {
     "interfaces": generic_ifbrief.parse,
     "ip": generic_ipif.parse,
     "version": generic_version.parse,
-    "vlan": generic_vlan.parse,
     "trunk": generic_trunk.parse,
     "switchport": generic_switchport.parse,
     "ospf_interfaces": generic_ospf.parse_interfaces,

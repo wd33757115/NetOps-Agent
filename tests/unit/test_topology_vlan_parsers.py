@@ -8,11 +8,7 @@ import pytest
 
 from src.apps.topology.backend.collectors.parse import framed_text
 from src.apps.topology.backend.collectors.parse import parse as parse_cli
-from src.apps.topology.backend.collectors.tiers import (
-    generic_switchport,
-    generic_trunk,
-    generic_vlan,
-)
+from src.apps.topology.backend.collectors.tiers import generic_switchport, generic_trunk
 from src.apps.topology.backend.facts.repository import FactInput, validate_records
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures/topology"
@@ -27,6 +23,11 @@ def source(device, capability, *, new=False, raw=False):
         .read_bytes()
         .decode("utf-8")
     )
+
+
+def vlans(text, family="ios"):
+    """VLAN tables are read through the rule-governance check item topology.vlans."""
+    return parse_cli({"os_family": family}, "vlan", text)
 
 
 def port_rows(parsed):
@@ -121,8 +122,8 @@ def test_new_real_captures_through_public_parser_and_fact_contract(observation):
 
 @pytest.mark.parametrize("device", ["dist1", "dist2", "acc1", "acc2"])
 def test_campus_vlan_inventory_and_printed_members_are_separate(device):
-    parsed = generic_vlan.parse(source(device, "vlan"), "ios")
-    assert not parsed.rejected and not parsed.warnings
+    parsed = vlans(source(device, "vlan"))
+    assert parsed.status == "complete" and not parsed.rejected_count and not parsed.warnings
     assert {row["vlan_id"] for row in parsed.records} == {1, 10, 20, 1002, 1003, 1004, 1005}
     assert all(set(row) == {"vlan_id", "name"} for row in parsed.records)
     members = {row["vlan_id"]: row for row in parsed.summary["members"]}
@@ -139,8 +140,8 @@ def test_campus_vlan_inventory_and_printed_members_are_separate(device):
 @pytest.mark.parametrize("device,vid", [("vsr-1", 200), ("vsr-2", 100)])
 def test_old_comware_access_vlan_members_are_real_observations(device, vid):
     text = (FIXTURES / "h3c/vsr1000-7.1.064" / device / "vlan.txt").read_text("utf-8")
-    parsed = generic_vlan.parse(text, "comware")
-    assert not parsed.rejected and not parsed.warnings
+    parsed = vlans(text, "comware")
+    assert parsed.status == "complete" and not parsed.rejected_count and not parsed.warnings
     members = {row["vlan_id"]: row for row in parsed.summary["members"]}
     assert members[vid]["ports"] == ["GigabitEthernet3/0"]
     assert "status" not in members[vid]
@@ -171,33 +172,34 @@ def test_campus_trunk_allowed_active_forwarding_sets_are_distinct(device):
 
 
 @pytest.mark.parametrize(
-    "device,capability,module,command",
+    "device,capability,command",
     [
-        ("acc1", "vlan", generic_vlan, "show vlan brief"),
-        ("acc2", "trunk", generic_trunk, "show interfaces trunk"),
-        ("dist1", "switchport", generic_switchport, "show interfaces switchport"),
+        ("acc1", "vlan", "show vlan brief"),
+        ("acc2", "trunk", "show interfaces trunk"),
+        ("dist1", "switchport", "show interfaces switchport"),
     ],
 )
-def test_raw_framing_and_cleaned_capture_have_the_same_facts(device, capability, module, command):
+def test_raw_framing_and_cleaned_capture_have_the_same_facts(device, capability, command):
     new = capability == "switchport"
-    clean = module.parse(source(device, capability, new=new), "ios")
+    ios = {"os_family": "ios"}
+    clean = parse_cli(ios, capability, source(device, capability, new=new))
     raw = source(device, capability, new=new, raw=True)
     prompt = [line.strip() for line in raw.splitlines() if line.strip()][-1]
-    framed = module.parse(framed_text(raw, command=command, prompt=prompt), "ios")
-    assert not clean.rejected and not framed.rejected
+    framed = parse_cli(ios, capability, framed_text(raw, command=command, prompt=prompt))
+    assert not clean.rejected_count and not framed.rejected_count
     assert framed.records == clean.records and framed.summary == clean.summary
     assert all(item["lines"] for item in framed.sources)
 
 
 def test_vlan_unknown_row_and_duplicate_vid_cannot_become_complete():
     text = source("acc1", "vlan")
-    unknown = generic_vlan.parse(text + "new unexplained table row\n", "ios")
-    assert unknown.rejected == 1
-    assert any("invalid_vlan" in warning for warning in unknown.warnings)
+    unknown = vlans(text + "new unexplained table row\n")
+    assert unknown.status == "partial" and unknown.rejected_count == 1
+    assert any("unrecognized_vlan_row" in warning for warning in unknown.warnings)
     row = next(line for line in text.splitlines() if line.startswith("10 "))
-    duplicate = generic_vlan.parse(text + row + "\n", "ios")
-    assert duplicate.rejected and any(
-        "duplicate_vlan_id" in warning for warning in duplicate.warnings
+    duplicate = vlans(text + row + "\n")
+    assert duplicate.rejected_count and any(
+        "duplicate_entry" in warning for warning in duplicate.warnings
     )
     assert 10 not in {r["vlan_id"] for r in duplicate.records}
     assert 10 not in {r["vlan_id"] for r in duplicate.summary["members"]}
@@ -206,8 +208,8 @@ def test_vlan_unknown_row_and_duplicate_vid_cannot_become_complete():
 def test_vlan_member_with_an_unknown_or_non_bridge_interface_is_rejected():
     text = source("acc1", "vlan")
     for bad in ("UnknownPort9", "Vlan10"):
-        parsed = generic_vlan.parse(text.replace("active    Et1/0", f"active    {bad}"), "ios")
-        assert parsed.rejected
+        parsed = vlans(text.replace("active    Et1/0", f"active    {bad}"))
+        assert parsed.rejected_count
         assert 10 not in {row["vlan_id"] for row in parsed.records}
 
 

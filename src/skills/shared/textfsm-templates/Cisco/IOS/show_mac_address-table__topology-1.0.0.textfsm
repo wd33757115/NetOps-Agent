@@ -1,0 +1,14 @@
+Value VLAN_ID (\d+|All)
+Value MAC_ADDRESS ([0-9a-fA-F]{4}\.[0-9a-fA-F]{4}\.[0-9a-fA-F]{4})
+Value TYPE (\S+)
+Value PORT (\S+)
+
+# One record per MAC entry (campus-wan lab, IOL L2).
+Start
+  ^\s*Mac Address Table\s*$$
+  ^\s*Vlan\s+Mac Address\s+Type\s+Ports\s*$$
+  ^[-\s]+$$
+  ^\s*${VLAN_ID}\s+${MAC_ADDRESS}\s+${TYPE}\s+${PORT}\s*$$ -> Record
+  ^Total Mac Addresses for this criterion:\s*\d+\s*$$
+  ^\s*$$
+  ^. -> Error "unrecognized show mac address-table line"

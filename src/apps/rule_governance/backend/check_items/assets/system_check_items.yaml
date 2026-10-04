@@ -319,6 +319,26 @@ check_items:
       PHYSICAL: [text, false, Comware 的物理状态原文]
       PROTOCOL: [text, false, 协议状态原文]
       DESCRIPTION: [text, false, Comware 的接口描述（可能截断）]
+  topology.mac:
+    name: 拓扑发现：MAC 地址表项
+    entity_type: mac_entry
+    keys: [MAC_ADDRESS, VLAN_ID]
+    values:
+      MAC_ADDRESS: [text, true, MAC 地址原文]
+      VLAN_ID: [text, true, VLAN 原文]
+      PORT: [text, false, 出端口原文]
+      TYPE: [text, false, IOS 的表项类型原文]
+      STATE: [text, false, Comware 的表项状态原文]
+      AGING: [text, false, Comware 是否老化]
+  topology.vlans:
+    name: 拓扑发现：VLAN 与端口列
+    entity_type: vlan
+    keys: [VLAN_ID]
+    values:
+      VLAN_ID: [integer, true, VLAN 编号]
+      NAME: [text, false, VLAN 名称]
+      STATUS: [text, false, IOS 的 VLAN 状态原文]
+      PORTS: [text, false, 端口列每行的原文（逗号或空格分隔）]
 
 implementations:
   - check_item: topology.arp
@@ -573,6 +593,32 @@ implementations:
     template: H3C/Comware7/display_ip_interface_brief__topology-1.0.0.textfsm
     sha256: e3c4df5fd141da5300087d46bea1070f604a2800aeffbddbe312203226e1d918
     required: ['^Interface\s+Physical\s+Protocol\s+IP address/Mask\s+VPN instance\s+Description\s*$']
+  - check_item: topology.mac
+    platform: ios
+    command: show mac address-table
+    template: Cisco/IOS/show_mac_address-table__topology-1.0.0.textfsm
+    sha256: e798dc93d17644ba1550cedd86f820d3d98d0a1b59e48ef0da8d8af0a80d4741
+    valid_empty: [BLANK]
+    counts:
+      - {pattern: '^Total Mac Addresses for this criterion:\s*(\d+)\s*$', of: rows}
+  - check_item: topology.mac
+    platform: comware
+    command: display mac-address
+    template: H3C/Comware7/display_mac-address__topology-1.0.0.textfsm
+    sha256: 9a90d6b1dbfa34e75d024fcca2227d33a04e4ed773c32c53c4a64762fcd44452
+    required: ['^MAC Address\s+VLAN ID\s+State\s+Port/Nickname\s+Aging\s*$']
+  - check_item: topology.vlans
+    platform: ios
+    command: show vlan brief
+    template: Cisco/IOS/show_vlan_brief__topology-1.0.0.textfsm
+    sha256: bd46c884c6d26c4f209737c0d509f9e6a7d97d30d844e3061c9a4bcd4fe18faf
+    required: ['^VLAN\s+Name\s+Status\s+Ports\s*$']
+  - check_item: topology.vlans
+    platform: comware
+    command: display vlan brief
+    template: H3C/Comware7/display_vlan_brief__topology-1.0.0.textfsm
+    sha256: 89a2804718425dc1539d30a6b3629278d01074f18675d76ba735283340103703
+    required: ['^VLAN ID\s+Name\s+Port\s*$']
 
 platforms:
   ios: {vendor: Cisco, platforms: [ios, iosxe], family: IOS}

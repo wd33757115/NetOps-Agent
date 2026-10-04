@@ -1,0 +1,21 @@
+Value Required VLAN_ID (\d+)
+Value NAME (\S+(?: \S+)*)
+Value List PORTS (\S.*?)
+
+# One record per VLAN (campus-wan and VSR labs, Comware 7.1). Names contain spaces
+# ("VLAN 0200"); the port column starts after a gap of two or more spaces and wraps onto
+# indented continuation lines.
+Start
+  ^Brief information about all VLANs:\s*$$
+  ^(Supported Minimum|Supported Maximum|Default) VLAN ID:\s*\d+\s*$$
+  ^VLAN ID\s+Name\s+Port\s*$$ -> Vlans
+  ^\s*$$
+  ^. -> Error "unrecognized display vlan brief line"
+
+Vlans
+  ^\d+\s -> Continue.Record
+  ^${VLAN_ID}\s+${NAME}\s{2,}${PORTS}\s*$$
+  ^${VLAN_ID}\s+${NAME}\s*$$
+  ^\s{20,}${PORTS}\s*$$
+  ^\s*$$
+  ^. -> Error "unrecognized VLAN row"

@@ -197,8 +197,6 @@ class Profile(StrictModel):
                 ):
                     raise ValueError("profile requires distinct normalized read-only commands")
             allowed = {GENERIC_NAMES.get(cap)}
-            if cap == "vlan" and self.os_family == "comware":
-                allowed.add("template_vlan")
             if cap in RULE_CHECK_ITEMS and self.os_family in RULE_FAMILIES:
                 allowed.add("rules")  # parsed by the published rule-governance check item
             if spec.parser is not None and spec.parser not in allowed:

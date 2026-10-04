@@ -1,12 +1,12 @@
 """Pinned read-only TextFSM assets, schema projections and completeness checks.
 
-Comware and IOS ARP and route tables are read through rule-governance check items
-(collectors/rules.py); the assets here serve the capabilities not yet migrated.
+Comware and IOS tables are read through rule-governance check items
+(collectors/rules.py); the assets here serve the families and capabilities not yet
+migrated.
 """
 
 import hashlib
 import io
-import re
 from dataclasses import dataclass
 from importlib.metadata import version
 from pathlib import Path
@@ -33,27 +33,6 @@ class Asset:
 
 # Only reviewed files are executable; changed/missing local assets fall through to NTC/generic.
 ASSETS = {
-    ("comware", "mac"): (
-        Asset(
-            "ntc",
-            "hp_comware_display_mac-address.textfsm",
-            "066bec0143b4e5addfe5e4b12deb8aad9beb916e981f6f5125fc04db4d878bbc",
-        ),
-    ),
-    ("comware", "vlan"): (
-        Asset(
-            "ntc",
-            "hp_comware_display_vlan_brief.textfsm",
-            "bc11a3776ace464ee887bb51e468c25fcc7a38b02eb89e8a5e8c7b6541e86bfd",
-        ),
-    ),
-    ("ios", "mac"): (
-        Asset(
-            "ntc",
-            "cisco_ios_show_mac-address-table.textfsm",
-            "28b93670e7c4a393e8cefd4501cb7230ba7269e6ee3939d887d7f2959e5d09e6",
-        ),
-    ),
     ("nxos", "arp"): (
         Asset(
             "repository",
@@ -147,56 +126,6 @@ def project_table(cap, rows, family):
     return records
 
 
-def vlan_records(rows, text):
-    """NTC matches VLAN IDs but its word-only name truncates spaced names.
-
-    Map name from the explicit Name..Port column boundaries, with per-row evidence.
-    This adapts fields without changing any shared/patrol template.
-    """
-    lines = text.splitlines()
-    headers = [
-        (n, line)
-        for n, line in enumerate(lines, 1)
-        if re.fullmatch(r"VLAN ID\s+Name\s+Port\s*", line)
-    ]
-    if len(headers) != 1:
-        raise ValueError("vlan_header_missing")
-    header_number, header = headers[0]
-    # Comware 7 prints this fixed preamble before the table (lab sample E-series).
-    preamble = (
-        r"Brief information about all VLANs:",
-        r"Supported Minimum VLAN ID:\s*\d+",
-        r"Supported Maximum VLAN ID:\s*\d+",
-        r"Default VLAN ID:\s*\d+",
-    )
-    if any(
-        line.strip() and not any(re.fullmatch(p, line.strip()) for p in preamble)
-        for line in lines[: header_number - 1]
-    ):
-        raise ValueError("uncovered_vlan_header")
-    start, end = header.index("Name"), header.index("Port")
-    records, sources, seen = [], [], set()
-    for raw, number in rows:
-        line = lines[number - 1]
-        identifier = vlan(raw["VLAN_ID"])
-        if identifier in seen or number <= header_number or line[:start].strip() != raw["VLAN_ID"]:
-            raise ValueError("invalid_vlan_row")
-        name = line[start:end].strip()
-        if not name or not name.startswith(raw["VLAN_NAME"]):
-            raise ValueError("vlan_name_source_mismatch")
-        records.append({"vlan_id": identifier, "name": name})
-        sources.append({"lines": [number], "raw": {**raw, "name_column": name}})
-        seen.add(identifier)
-    row_numbers = {number for _, number in rows}
-    if any(
-        line.strip()
-        for n, line in enumerate(lines, 1)
-        if n > header_number and n not in row_numbers
-    ):
-        raise ValueError("uncovered_vlan_line")
-    return records, sources
-
-
 def apply(identity, capability, text, fallback, *, complete, model=None):
     from ..parse import ParseResult
 
@@ -215,13 +144,10 @@ def apply(identity, capability, text, fallback, *, complete, model=None):
             rows = replay(load(asset), text)
             if not rows:
                 raise ValueError("template_zero_rows_nonempty")
-            if capability == "vlan":
-                records, sources = vlan_records(rows, text)
-            else:
-                records = project_table(capability, rows, family)
-                if not fallback.records or records != fallback.records:
-                    raise ValueError("template_generic_disagreement")
-                sources = fallback.sources
+            records = project_table(capability, rows, family)
+            if not fallback.records or records != fallback.records:
+                raise ValueError("template_generic_disagreement")
+            sources = fallback.sources
             incomplete = (
                 not complete
                 or "collection_incomplete" in fallback.warnings

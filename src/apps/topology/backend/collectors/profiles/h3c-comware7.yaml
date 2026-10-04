@@ -17,8 +17,8 @@ capabilities:
   inventory: {command: display device manuinfo, parser: null}
   ip: {parser: rules}
   arp: {parser: rules}
-  mac: {command: display mac-address, parser: generic_mac}
-  vlan: {command: display vlan brief, parser: template_vlan}
+  mac: {parser: rules}
+  vlan: {parser: rules}
   trunk: {command: display port trunk, parser: generic_trunk}
   lag: {parser: rules}
   routes: {timeout: 300, parser: rules}

@@ -283,8 +283,8 @@ def test_synthetic_interface_and_explicit_mask_rows(family, port, canonical):
 
 def test_explicit_zero_total_and_contradictory_body():
     assert run("lldp", "Total entries: 0").status == "complete"
-    assert run("mac", "Total entries: 0").status == "complete"
-    assert run("mac", "BROKEN DATA\nTotal entries: 0").status == "failed"
+    assert generic("mac", "Total entries: 0").status == "complete"
+    assert generic("mac", "BROKEN DATA\nTotal entries: 0").status == "failed"
     assert run("lldp", STYLES[0]["lldp"] + "\nTotal entries: 0").status == "partial"
 
 

@@ -17,8 +17,8 @@ capabilities:
   inventory: {command: show inventory, parser: null}
   ip: {parser: rules}
   arp: {parser: rules}
-  mac: {command: show mac address-table, parser: generic_mac}
-  vlan: {command: show vlan brief, parser: generic_vlan}
+  mac: {parser: rules}
+  vlan: {parser: rules}
   trunk: {command: show interfaces trunk, parser: generic_trunk}
   switchport: {command: show interfaces switchport, parser: generic_switchport}
   lag: {parser: rules}

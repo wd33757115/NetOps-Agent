@@ -22,6 +22,7 @@ from __future__ import annotations
 import ipaddress
 import re
 import time
+from collections import Counter
 
 from .normalize import (
     interface_address,
@@ -56,6 +57,8 @@ CHECK_ITEMS = {
     "stp": "topology.stp_ports",
     "interfaces": "topology.interfaces",
     "ip": "topology.ip_interfaces",
+    "mac": "topology.mac",
+    "vlan": "topology.vlans",
 }
 # Families whose CLI output rule governance parses for the capabilities above.
 FAMILIES = frozenset({"ios", "iosxe", "comware"})
@@ -171,7 +174,7 @@ def parse(identity, capability, raw, *, complete=True, model=None):
         result.warnings.append("unparsed_output" if parsed.reason == "data" else parsed.reason)
         return result
     family = _family(identity)
-    projected, seen = [], set()
+    projected = []
     for row, lines in zip(parsed.rows, parsed.lines):
         try:
             record = ROWS[capability](row, family, lines, result.warnings)
@@ -179,15 +182,20 @@ def parse(identity, capability, raw, *, complete=True, model=None):
             result.rejected_count += 1
             result.warnings.append(f"line:{lines[0] if lines else 0}:invalid_fact_value:{exc}")
             continue
-        if key := UNIQUE.get(capability):
-            identity = tuple(record.get(field) for field in key)
-            if identity in seen:  # one device cannot list the same entity twice
-                result.rejected_count += 1
-                result.warnings.append(f"line:{lines[0] if lines else 0}:duplicate_entry")
-                continue
-            seen.add(identity)
         # A row may hold several facts (an interface block with its addresses).
         projected += [(item, lines) for item in (record if isinstance(record, list) else [record])]
+    if key := UNIQUE.get(capability):
+        # One device cannot list the same entity twice; neither listing is kept.
+        counts = Counter(tuple(record.get(field) for field in key) for record, _ in projected)
+        for record, lines in projected:
+            if counts[tuple(record.get(field) for field in key)] > 1:
+                result.rejected_count += 1
+                result.warnings.append(f"line:{lines[0] if lines else 0}:duplicate_entry")
+        projected = [
+            (record, lines)
+            for record, lines in projected
+            if counts[tuple(record.get(field) for field in key)] == 1
+        ]
     defects = result.rejected_count or parsed.problems
     if capability in WHOLE_TABLES and defects:
         return result  # a route table with an unread or invalid line is not used
@@ -213,6 +221,8 @@ def parse(identity, capability, raw, *, complete=True, model=None):
         # A summary capability: its rows are one fact about the device.
         result.summary = SUMMARIES[capability](result.records)
         result.records = []
+    if capability in SPLITS:
+        result.summary.update(SPLITS[capability](result.records))
     if capability in HEADERS:
         # Table-header Values (Filldown on every row) are facts about the device.
         result.summary.update(HEADERS[capability](parsed.rows, family))
@@ -763,6 +773,45 @@ def _interface_addresses(row, family, lines, warnings):
     ]
 
 
+MAC_TYPES = {"dynamic", "static", "learned", "blackhole"}
+
+
+def _mac_entry(row, family, lines, warnings):
+    kind = (row.get("TYPE") or row.get("STATE") or "").lower()
+    return {
+        "vlan_or_bd": str(vlan(row["VLAN_ID"])),
+        "mac": mac_address(row["MAC_ADDRESS"]),
+        "port": interface(row["PORT"], family).name,
+        "type": kind if kind in MAC_TYPES else None,
+    }
+
+
+def _vlan(row, family, lines, warnings):
+    """A VLAN row; its printed port column is evidence, not the full membership."""
+    ports = []
+    for text in filter(None, row.get("PORTS") or []):  # an absent optional item is None
+        for value in re.split(r"[,\s]+", text.strip()):
+            port = interface(value, family)
+            if port.kind not in {"ethernet", "lag"}:
+                raise ValueError("invalid_vlan_member_interface")
+            if port.name in ports:
+                raise ValueError("duplicate_vlan_port")
+            ports.append(port.name)
+    vid = vlan(row["VLAN_ID"])
+    if not row.get("NAME"):
+        raise ValueError("vlan_name_missing")
+    member = {"vlan_id": vid, "ports": ports}
+    if row.get("STATUS"):
+        member["status"] = row["STATUS"]
+    return {"vlan_id": vid, "name": row["NAME"], "_member": member}
+
+
+def _vlan_members(records):
+    """The port columns become ``summary.members``; the records keep ID and name."""
+    members = [record.pop("_member") for record in records]
+    return {"members": members} if members else {}
+
+
 def _vrf(row, family, lines, warnings):
     """A device-local VRF / VPN-instance name, never a global identity."""
     protocols = row.get("PROTOCOLS")
@@ -790,10 +839,14 @@ ROWS = {
     "stp": _stp_port,
     "interfaces": _interface_state,
     "ip": _interface_addresses,
+    "mac": _mac_entry,
+    "vlan": _vlan,
 }
 MERGE = {"routes": _merge_routes, "vrf_detail": _merge_vrfs}
 # Capabilities whose rows form one summary fact (the VRF enumeration scopes collection).
 SUMMARIES = {"vrfs": lambda rows: {"instances": rows}}
+# Capabilities whose records also carry a summary part: records -> summary (in place).
+SPLITS = {"vlan": _vlan_members}
 
 
 def _bgp_header(rows, family):
@@ -826,4 +879,5 @@ UNIQUE = {
     "tunnel_interfaces": ("ifname",),
     "stp": ("instance", "ifname"),
     "interfaces": ("ifname",),
+    "vlan": ("vlan_id",),
 }

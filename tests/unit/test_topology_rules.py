@@ -378,3 +378,25 @@ def test_ios_label_table_reads_wrapped_prefixes_and_vpn_aggregates():
 def test_unknown_lines_are_never_silently_dropped(capability, family, text):
     result = run(capability, text, family)
     assert result.status in {"partial", "failed"} and result.rejected_count >= 1
+
+
+@pytest.mark.parametrize("device,vid", [("vsr-1", 200), ("vsr-2", 100)])
+def test_comware_vlan_names_keep_their_spaces_and_ports_are_members(device, vid):
+    result = run("vlan", lab("vlan", device))
+    assert result.status == "complete" and result.tier == "rules"
+    assert result.records == [
+        {"vlan_id": 1, "name": "VLAN 0001"},
+        {"vlan_id": vid, "name": f"VLAN {vid:04d}"},
+    ]
+    assert result.summary["members"][1] == {"vlan_id": vid, "ports": ["GigabitEthernet3/0"]}
+
+
+def test_malformed_vlan_rows_are_rejected_not_guessed():
+    text = lab("vlan")
+    wrapped = run("vlan", text + "\n          wrapped-ports GE4/0\n")
+    assert wrapped.status == "partial" and wrapped.rejected_count
+    invalid = run("vlan", text.replace("200       VLAN", "4095      VLAN"))
+    assert invalid.status == "partial" and invalid.rejected_count
+    assert all(row["vlan_id"] != 4095 for row in invalid.records)
+    unknown_header = run("vlan", "UNKNOWN HEADER\n" + text)
+    assert unknown_header.status == "partial" and unknown_header.rejected_count
