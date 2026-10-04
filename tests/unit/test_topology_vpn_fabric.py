@@ -4,6 +4,7 @@ Real captures of scripts/topology/vpn_fabric (batch 20261003-225812): an EVPN-VX
 fabric (IOL spines/leaves, an H3C VSR leaf) and an MPLS L3VPN (IOL PE/P, VSR PE).
 """
 
+import copy
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,6 +14,7 @@ from test_topology_campus_wan import IDENTITY
 
 from src.apps.topology.backend.collectors.parse import ParseResult, parse
 from src.apps.topology.backend.model.overlay import egress_instances, prepare
+from src.apps.topology.backend.model.path import trace
 from src.apps.topology.backend.service import topology_observation
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures/topology/vpn-fabric"
@@ -235,3 +237,94 @@ def test_mpls_vpn_egress_is_the_originating_instance_not_a_local_import(fabric):
     assert egress_instances(pe2, {**tunnel, "import": ["65200:2"]}, "10.2.1.10") == []
     leaf3 = devices[ADDRESS["leaf3"]]
     assert egress_instances(leaf3, {"type": "vxlan", "vni": 50020}, "192.168.20.14") == ["BLUE"]
+
+
+BASE = "urn:netops:topology:vpn-fabric:"
+# Hosts (scripts/topology/vpn_fabric/README.md): A1/B1 both 10.1.1.10 in CUST-A/CUST-B.
+A1, B1, A2, S2 = "10.1.1.10", "10.1.1.10", "10.2.1.10", "10.99.1.10"
+H_R1, H_B2, H_B3 = "192.168.10.11", "192.168.10.12", "192.168.20.14"
+
+
+def route(path):
+    """[(device, instance, tunnel type or None)] of a traced path."""
+    return [
+        (
+            NAME[hop["device"]["address"]],
+            hop.get("vrf"),
+            ((hop.get("route") or {}).get("tunnel") or {}).get("type"),
+        )
+        for hop in path["hops"]
+    ]
+
+
+def test_mpls_vpn_path_runs_in_the_underlay_between_the_customer_instances(fabric):
+    result = trace(fabric, BASE, A1, A2, src_vrf="CUST-A", dst_vrf="CUST-A")
+    (forward,) = result["forward"]["paths"]
+    assert result["forward"]["status"] == result["reverse"]["status"] == "complete"
+    assert route(forward) == [
+        ("pe1", "CUST-A", "mpls"),
+        ("p", "default", None),
+        ("pe2", "CUST-A", None),
+    ]
+    assert forward["end"]["status"] == "delivered"
+    (reverse,) = result["reverse"]["paths"]
+    assert route(reverse)[0] == ("pe2", "CUST-A", "mpls")
+    assert result["symmetric"] is True
+
+
+def test_route_target_leak_reaches_the_shared_instance(fabric):
+    result = trace(fabric, BASE, A1, S2, src_vrf="CUST-A", dst_vrf="SHARED")
+    (forward,) = result["forward"]["paths"]
+    assert route(forward)[-1] == ("pe2", "SHARED", None)
+    assert result["forward"]["status"] == result["reverse"]["status"] == "complete"
+
+
+def test_another_customer_with_the_same_address_is_isolated(fabric):
+    result = trace(fabric, BASE, B1, S2, src_vrf="CUST-B", dst_vrf="SHARED")
+    (forward,) = result["forward"]["paths"]
+    assert route(forward) == [("pe1", "CUST-B", None)] and forward["end"]["status"] == "no_route"
+    # The way back reaches 10.1.1.10 too, but A1 in CUST-A, not B1.
+    (reverse,) = result["reverse"]["paths"]
+    assert reverse["end"]["status"] == "other_instance"
+    assert (reverse["end"]["instance"], reverse["end"]["expected"]) == ("CUST-A", "CUST-B")
+    assert result["forward"]["status"] == result["reverse"]["status"] == "partial"
+
+
+def test_symmetric_irb_crosses_the_l3_vni_over_both_spines(fabric):
+    result = trace(fabric, BASE, H_B2, H_B3, src_vrf="BLUE", dst_vrf="BLUE")
+    paths = result["forward"]["paths"]
+    assert result["forward"]["status"] == "complete" and len(paths) == 2
+    assert {tuple(route(path)) for path in paths} == {
+        (("leaf2", "BLUE", "vxlan"), (spine, "default", None), ("leaf3", "BLUE", None))
+        for spine in ("spine1", "spine2")
+    }
+    tunnels = {path["hops"][0]["route"]["tunnel"]["vni"] for path in paths}
+    assert tunnels == {50020}
+
+
+def test_tenants_sharing_a_subnet_are_not_given_a_path(fabric):
+    # RED is a pure L2 VNI: no gateway proves where 192.168.10.11 sits, so the shared
+    # subnet with BLUE's host is not a path.
+    result = trace(fabric, BASE, H_R1, H_B2)
+    assert result["forward"]["paths"] == []
+    assert result["forward"]["gaps"] == [{"status": "same_subnet_unproven"}]
+    assert trace(fabric, BASE, H_R1, H_B3, src_vrf="RED")["forward"]["status"] == "no_gateway"
+
+
+def test_a_vxlan_tunnel_observed_down_ends_the_path(fabric):
+    devices = copy.deepcopy(fabric)
+    for row in devices[ADDRESS["leaf2"]]["evpn_peers"]:
+        if row["peer"] == "10.255.10.13" and row["vni"] == 50020:
+            row["state"] = "down"
+    (path, *_) = trace(devices, BASE, H_B2, H_B3, src_vrf="BLUE")["forward"]["paths"]
+    assert path["end"] == {"status": "tunnel_down", "endpoint": "10.255.10.13"}
+
+
+def test_a_missing_label_for_the_remote_pe_is_a_gap_not_a_path(fabric):
+    devices = copy.deepcopy(fabric)
+    pe1 = devices[ADDRESS["pe1"]]
+    pe1["mpls_lfib"] = [row for row in pe1["mpls_lfib"] if row["fec"] != "10.255.20.3/32"]
+    result = trace(devices, BASE, A1, A2, src_vrf="CUST-A", dst_vrf="CUST-A")
+    (forward,) = result["forward"]["paths"]
+    assert {"status": "lsp_not_observed", "fec": "10.255.20.3"} in forward["hops"][0]["gaps"]
+    assert result["forward"]["status"] == "partial"

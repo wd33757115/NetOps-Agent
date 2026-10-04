@@ -14,7 +14,9 @@ Where the data ends, a branch ends with a reason instead of a guess:
 - ``loop``: the walk came back to a device it already passed;
 - ``tunnel_down``: the VXLAN tunnel the route uses is observed down;
 - ``tunnel_egress_unresolved`` / ``tunnel_egress_ambiguous``: where a VPN tunnel ends,
-  no (or more than one) instance is proven to receive the packet.
+  no (or more than one) instance is proven to receive the packet;
+- ``other_instance``: delivered, but in another instance than the one named for that end
+  (the address is reused by another VPN, e.g. two customers' 10.1.1.0/24).
 
 A next hop marked as a tunnel (``overlay.prepare``: MPLS VPN or VXLAN L3 VNI) is routed
 in the underlay toward the tunnel endpoint; at the device owning the endpoint the packet
@@ -466,10 +468,14 @@ class _Tracer:
         step(start, start_vrf, first_in, [], frozenset())
         return paths, truncated
 
-    def direction(self, source, dst, vrf=None):
+    def direction(self, source, dst, vrf=None, dst_vrf=None):
         """source is the locate answer for the start address; ``vrf`` keeps only starts in
-        that network instance of their first-hop device (device-local name)."""
+        that network instance of their first-hop device (device-local name); ``dst_vrf`` is
+        the instance the destination is named in."""
         result = {"to": dst, "first_hop": "none", "paths": [], "truncated": False}
+        if vrf is not None:
+            # The named instance decides which of several same-address ends is meant.
+            source = _in_instance(source, vrf)
         masters = []
         device_locations = [
             location for location in source["locations"] if location["status"] == "device"
@@ -541,6 +547,15 @@ class _Tracer:
             room = MAX_PATHS - len(result["paths"])
             result["paths"].extend(paths[:room])
             result["truncated"] |= truncated or len(paths) > room
+        for path in result["paths"]:
+            reached = path["hops"][-1].get("vrf") if path["hops"] else None
+            if dst_vrf and path["end"]["status"] == "delivered" and reached != dst_vrf:
+                path["end"] = {
+                    **path["end"],
+                    "status": "other_instance",
+                    "instance": reached,
+                    "expected": dst_vrf,
+                }
         delivered = bool(result["paths"]) and all(
             p["end"]["status"] == "delivered" for p in result["paths"]
         )
@@ -549,6 +564,32 @@ class _Tracer:
             "complete" if delivered and not result["truncated"] and not state_gaps else "partial"
         )
         return result
+
+
+def _in_instance(source, vrf):
+    """The locate answer narrowed to the ends in one network instance."""
+
+    def inside(location):
+        if location.get("status") == "device":
+            return location.get("vrf") == vrf
+        rows = location.get("arp") or []
+        return not rows or any(row.get("vrf", "default") == vrf for row in rows)
+
+    locations = [location for location in source["locations"] if inside(location)]
+    scoped = {
+        **source,
+        "locations": locations,
+        "router_interfaces": [g for g in source["router_interfaces"] if g["vrf"] == vrf],
+    }
+    if source.get("status") == "conflict":
+        scoped["status"] = (
+            "not_found"
+            if not locations
+            else locations[0]["status"]
+            if len(locations) == 1
+            else "conflict"
+        )
+    return scoped
 
 
 def _sequences(direction, reverse=False):
@@ -571,8 +612,8 @@ def trace(devices, base, src, dst, observed=None, src_vrf=None, dst_vrf=None):
         raise ValueError("源和目的地址相同")
     tracer = _Tracer(devices, base, observed or {})
     source, destination = answer(tracer.loc, "ip", src), answer(tracer.loc, "ip", dst)
-    forward = tracer.direction(source, dst, src_vrf)
-    reverse = tracer.direction(destination, src, dst_vrf)
+    forward = tracer.direction(source, dst, src_vrf, dst_vrf)
+    reverse = tracer.direction(destination, src, dst_vrf, src_vrf)
     forward["from"], reverse["from"] = src, dst
     # Candidate first hops are not observed choices, so they cannot show asymmetry.
     routed = (

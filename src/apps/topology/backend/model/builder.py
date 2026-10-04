@@ -20,6 +20,7 @@ from urllib.parse import quote
 
 from ..collectors.ifname import normalize_ifname
 from .ospf import link_metric, project_ospf
+from .overlay import prepare
 
 ST = "ietf-simap-topology:"
 NT = "ietf-network-topology:"
@@ -183,7 +184,9 @@ def _outer_tag(trunk, switchport=None):
 
 class _Topology:
     def __init__(self, devices, base):
-        self.devices = devices
+        # Read the facts as the path engine does: instance bindings made explicit
+        # (e.g. Comware ARP rows in the instance of their interface or VSI).
+        self.devices = prepare(devices)
         self.protocol = {**project_ospf(devices), "links": {}}
         self.base = base
         self.l2_net = base + "l2"
