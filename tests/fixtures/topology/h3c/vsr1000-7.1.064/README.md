@@ -1,8 +1,12 @@
 # H3C VSR1000 lab fixtures
 
-Source: authorized GNS3 lab batch `20260928-163159`, Comware 7.1.064 Release
-1362P12. `vsr-1` is 10.10.1.1; `vsr-2` is 10.10.1.2. These are lab addresses,
-serials and MACs, preserved to test identity and cross-device correlation.
+Source: authorized GNS3 lab batch `20261005-002043` (re-sampled on 2026-10-05 for
+`display arp verbose`; the first batch was `20260928-163159`, whose brief ARP tables
+are kept in `../vsr1000-brief-arp`), Comware 7.1.064 Release 1362P12. `vsr-1` is
+10.10.1.1; `vsr-2` is 10.10.1.2. These are lab addresses, serials and MACs, preserved
+to test identity and cross-device correlation. The VPCS hosts got new MACs when the lab
+restarted (PC1 0050-7966-6804, PC2 0050-7966-6805); before sampling, PC1 and PC2 ping
+each other and VSR-2 pings 10.10.1.1, as the expected ARP entries need that traffic.
 
 Each device has 14 capabilities, each with a cleaned `.txt` and a `.raw.txt`.
 The latter preserves the bytes of the collector's UTF-8 file, including command

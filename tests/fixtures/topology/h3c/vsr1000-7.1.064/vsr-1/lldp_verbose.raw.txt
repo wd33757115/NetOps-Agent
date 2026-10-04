@@ -2,7 +2,7 @@ display lldp neighbor-information verbose
 LLDP neighbor-information of port 17[GigabitEthernet1/0]:
 LLDP agent nearest-bridge:
  LLDP neighbor index : 1
- Update time         : 0 days, 0 hours, 1 minutes, 56 seconds
+ Update time         : 0 days, 0 hours, 2 minutes, 50 seconds
  Chassis type        : MAC address
  Chassis ID          : 7425-8ae4-1252
  Port ID type        : Interface name
@@ -38,7 +38,7 @@ LLDP agent nearest-bridge:
 LLDP neighbor-information of port 33[GigabitEthernet2/0]:
 LLDP agent nearest-bridge:
  LLDP neighbor index : 1
- Update time         : 0 days, 0 hours, 44 minutes, 38 seconds
+ Update time         : 0 days, 0 hours, 2 minutes, 50 seconds
  Chassis type        : MAC address
  Chassis ID          : 7425-8ae4-1252
  Port ID type        : Interface name

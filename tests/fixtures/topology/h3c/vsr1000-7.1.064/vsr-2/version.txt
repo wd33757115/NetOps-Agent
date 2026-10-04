@@ -1,6 +1,6 @@
 H3C Comware Software, Version 7.1.064, Release 1362P12
 Copyright (c) 2004-2023 New H3C Technologies Co., Ltd. All rights reserved.
-H3C VSR1000 uptime is 0 weeks, 0 days, 0 hours, 50 minutes
+H3C VSR1000 uptime is 0 weeks, 0 days, 0 hours, 21 minutes
 Last reboot reason : Power on
 Boot image: flash:/VSR1000-CMW710-BOOT-R1362P12-X64.bin
 Boot image version: 7.1.064, Release 1362P12

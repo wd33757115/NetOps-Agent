@@ -477,7 +477,6 @@ implementations:
     command: display arp verbose
     template: H3C/Comware7/display_arp_verbose__topology-1.0.0.textfsm
     sha256: adfa8013759f67e6cdb9bdbe8283ed4c5b8ea58a32b64acc0eebb74975d39987
-    valid_empty: [BLANK]
     required: ['^IP address\s+:']
   - check_item: topology.routes
     platform: ios

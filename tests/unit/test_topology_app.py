@@ -877,10 +877,10 @@ def test_locate_answers_from_a_snapshot_with_evidence(world):
 
 def test_locate_searches_the_current_snapshot_of_every_network(world):
     lab_run(world)
-    found = service.locate_current("user", "0050.7966.6801")
+    found = service.locate_current("user", "0050.7966.6805")
     assert [f["status"] for f in found] == ["confirmed"]
     assert service.locate_current("user", "10.200.0.1") == []
-    assert service.locate_current("stranger", "0050.7966.6801") == []
+    assert service.locate_current("stranger", "0050.7966.6805") == []
 
 
 def test_trace_answers_both_directions_from_a_snapshot(world):

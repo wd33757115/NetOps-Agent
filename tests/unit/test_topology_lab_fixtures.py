@@ -113,19 +113,34 @@ def test_e11_route_count_protocols_and_special_interfaces(device):
     assert "127.0.0.0/8" in text and "InLoop0" in text
 
 
+def arp_entries(device):
+    """The verbose ARP table ("display arp verbose") as {IP address: {field: value}}."""
+    entries = {}
+    for block in read(device, "arp").split("\n\n"):
+        fields = dict(
+            (key.strip(), value)
+            for line in block.splitlines()
+            for key, value in re.findall(r"(\S[^:]*?)\s*:\s*(\S+)(?=\s{2,}\S|\s*$)", line)
+        )
+        if "IP address" in fields:
+            entries[fields["IP address"]] = fields
+    return entries
+
+
 @pytest.mark.parametrize("device", ["vsr-1", "vsr-2"])
 def test_e13_e14_e16_shared_segment_and_endpoint_evidence(device):
     expected = EXPECTED["devices"][device]
-    arp = read(device, "arp")
+    entries = arp_entries(device)
     peer_ip = EXPECTED["devices"][expected["peer"]]["management"]
-    assert re.search(rf"^{re.escape(peer_ip)}\s+\S+\s+--\s+GE1/0", arp, re.M)
-    assert re.search(r"^10\.10\.1\.254\s+\S+\s+--\s+GE1/0", arp, re.M)
+    # The other router and the management host over the shared (hub) segment, global table.
+    for address in (peer_ip, "10.10.1.254"):
+        assert (entries[address]["Interface"], entries[address]["VPN instance"]) == ("GE1/0", "--")
     assert "10.10.1.254" not in read(device, "lldp_verbose")
-    assert re.search(
-        rf"^{re.escape(expected['endpoint_ip'])}\s+{expected['endpoint_mac']}"
-        rf"\s+{expected['vlan']}\s+GE3/0",
-        arp,
-        re.M,
+    endpoint = entries[expected["endpoint_ip"]]
+    assert (endpoint["MAC address"], endpoint["SVLAN/CVLAN"], endpoint["Interface"]) == (
+        expected["endpoint_mac"],
+        f"{expected['vlan']}/--",
+        "GE3/0",
     )
     mac_rows = [line.split() for line in read(device, "mac").splitlines()[1:] if line.strip()]
     assert len(mac_rows) == 1 and mac_rows[0][0] == expected["endpoint_mac"]

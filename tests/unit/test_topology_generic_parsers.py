@@ -12,6 +12,7 @@ from src.apps.topology.backend.facts.repository import FactInput, validate_recor
 
 ROOT = Path(__file__).parents[1] / "fixtures/topology"
 LAB = ROOT / "h3c/vsr1000-7.1.064"
+BRIEF_ARP = ROOT / "h3c/vsr1000-brief-arp"  # historical "display arp" (brief) captures
 STYLES = json.loads((ROOT / "synthetic/generic-styles.json").read_text("utf-8"))["cases"]
 FILES = {"lldp": "lldp_verbose", "ip": "ip_interfaces"}
 
@@ -19,6 +20,10 @@ FILES = {"lldp": "lldp_verbose", "ip": "ip_interfaces"}
 def lab(capability, device="vsr-1", raw=False):
     name = FILES.get(capability, capability) + (".raw" if raw else "") + ".txt"
     return (LAB / device / name).read_bytes().decode("utf-8")
+
+
+def brief_arp(device="vsr-1", raw=False):
+    return (BRIEF_ARP / device / ("arp.raw.txt" if raw else "arp.txt")).read_bytes().decode()
 
 
 def run(capability, text, family="comware", **kwargs):
@@ -101,15 +106,20 @@ def test_real_local_identity_med_and_interface_tables():
     ip_rows = run("ip", lab("ip")).records
     assert "GigabitEthernet3/0" not in {r["ifname"] for r in ip_rows}
     assert {r["address"] for r in ip_rows} == {"10.10.1.1", "2.2.2.2", "4.4.4.4", "192.168.1.1"}
+    # The verbose table states its aging unit; the brief one did not.
     arp = run("arp", lab("arp"))
-    assert all("age_s" not in r for r in arp.records)
-    assert "age_unit_unknown" in arp.warnings[0]
+    assert arp.records and all(r["age_s"] % 60 == 0 for r in arp.records)
+    brief = generic("arp", brief_arp())
+    assert all("age_s" not in r for r in brief.records)
 
 
 @pytest.mark.parametrize("case", STYLES, ids=lambda c: c["family"])
 @pytest.mark.parametrize("capability", ["lldp", "arp", "mac"])
 def test_synthetic_five_styles(case, capability):
-    result = run(capability, case[capability], case["family"])
+    # Rule governance reads Comware ARP from the verbose table (test_topology_rules.py);
+    # the brief style stays a generic-parser case.
+    read = generic if (capability, case["family"]) == ("arp", "comware") else run
+    result = read(capability, case[capability], case["family"])
     assert result.status == "complete", result.warnings
     assert len(result.records) == 1
     row = result.records[0]
@@ -186,8 +196,8 @@ def test_unrecognized_tail_does_not_silently_drop_rows(capability):
 def test_count_mismatch_transport_budget_and_routes():
     # Comware and IOS tables are read through rule governance (test_topology_rules.py);
     # the generic parser still serves the other families, with the same table shapes.
-    assert run("arp", lab("arp") + "\nTotal entries: 5", "vrp").status == "partial"
-    assert run("arp", lab("arp") + "\nTotal entries: 4", "vrp").status == "complete"
+    assert run("arp", brief_arp() + "\nTotal entries: 5", "vrp").status == "partial"
+    assert run("arp", brief_arp() + "\nTotal entries: 4", "vrp").status == "complete"
     assert run("arp", lab("arp"), complete=False).status == "partial"
     assert run("routes", lab("routes"), "vrp").status == "failed"  # no generic route parser
     assert run("mac", "x" * (MAX_BYTES + 1)).status == "failed"
@@ -236,8 +246,8 @@ def test_raw_evidence_line_coordinates_and_version():
     text = lab("arp", raw=True)
     result = run("arp", text)
     lines = parser_text(text).text.splitlines()
-    for source in result.sources:
-        assert lines[source["lines"][0] - 1] == source["raw"]["text"]
+    for source in result.sources:  # a verbose entry spans several lines
+        assert "\n".join(lines[n - 1] for n in source["lines"]) == source["raw"]["text"]
     version = run("version", lab("version"))
     assert version.summary == {
         "model": "VSR1000",

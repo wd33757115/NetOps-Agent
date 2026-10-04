@@ -115,7 +115,8 @@ def test_arp_cut_off_output_is_incomplete_not_defective():
     assert paged.status == "partial" and "collection_incomplete" in paged.warnings
     assert len(paged.records) == 5 and paged.rejected_count == 0
     assert run("arp", text, complete=False).status == "partial"
-    assert run("arp", "").status == "complete"  # no entry: a valid empty table
+    # What Comware prints for zero entries is unverified: empty is never a table.
+    assert run("arp", "").status == "failed"
 
 
 def test_vsi_arp_entries_belong_to_the_vsi_interface():

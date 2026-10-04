@@ -25,7 +25,7 @@ def test_pc_behind_an_access_port_is_confirmed_from_the_mac_table():
     assert result["status"] == "confirmed"
     assert ports(result) == [("10.10.1.1", "GigabitEthernet3/0", "mac", "200")]
     location = result["locations"][0]
-    assert location["mac"] == "00:50:79:66:68:01" and location["inferred"] is False
+    assert location["mac"] == "00:50:79:66:68:05" and location["inferred"] is False
     assert location["ports"][0]["evidence_id"] == "obs-1"
     assert location["evidence"]
     assert [
@@ -33,7 +33,7 @@ def test_pc_behind_an_access_port_is_confirmed_from_the_mac_table():
     ] == [("10.10.1.1", "Vlan-interface200", "192.168.1.1")]
 
 
-@pytest.mark.parametrize("query", ["00:50:79:66:68:01", "0050.7966.6801", "00-50-79-66-68-01"])
+@pytest.mark.parametrize("query", ["00:50:79:66:68:05", "0050.7966.6805", "00-50-79-66-68-05"])
 def test_a_mac_in_any_common_notation_finds_the_same_port(query):
     result = locate(lab("vsr-1", "vsr-2"), BASE, query)
     assert result["kind"] == "mac" and result["status"] == "confirmed"

@@ -68,8 +68,8 @@ def test_lab_topology_matches_design():
                 "nic:00-15-5d-01-03-14",
             }
         ): "mp2mp",
-        frozenset({dev(VSR2, "GigabitEthernet3/0"), "nic:00-50-79-66-68-00"}): "p2p",
-        frozenset({dev(VSR1, "GigabitEthernet3/0"), "nic:00-50-79-66-68-01"}): "p2p",
+        frozenset({dev(VSR2, "GigabitEthernet3/0"), "nic:00-50-79-66-68-04"}): "p2p",
+        frozenset({dev(VSR1, "GigabitEthernet3/0"), "nic:00-50-79-66-68-05"}): "p2p",
     }
     assert links(nets["l3"]) == {
         frozenset({dev(VSR1, "GigabitEthernet2/0"), dev(VSR2, "GigabitEthernet2/0")}): "p2p",

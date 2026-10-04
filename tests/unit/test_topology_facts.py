@@ -294,7 +294,8 @@ def test_migration_preserves_old_network_run_and_snapshot(tmp_path):
 
 def test_lab_arp_rows_replay_to_shared_repository_with_raw_evidence(env):
     # Explicit fixture transformation for storage acceptance; production parser is P2-8.
-    root = Path(__file__).resolve().parents[1] / "fixtures/topology/h3c/vsr1000-7.1.064"
+    # The historical brief captures: this test transforms brief rows itself.
+    root = Path(__file__).resolve().parents[1] / "fixtures/topology/h3c/vsr1000-brief-arp"
     for device, host in (("vsr-1", "10.10.1.1"), ("vsr-2", "10.10.1.2")):
         uid = env.repo().create_device("lab", [host])["device_uid"]
         records = []

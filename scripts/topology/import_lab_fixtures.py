@@ -31,7 +31,7 @@ class Lab:
     vrfs: tuple = ()  # names sampled with --vrf (their per-VRF commands are approved too)
 
 
-BATCH = "20260928-163159"
+BATCH = "20261005-002043"
 DEVICES = {"10.10.1.1": "vsr-1", "10.10.1.2": "vsr-2"}
 CAPABILITIES = frozenset(
     {
