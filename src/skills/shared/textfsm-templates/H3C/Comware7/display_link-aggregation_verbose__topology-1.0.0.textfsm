@@ -1,0 +1,10 @@
+Value Required GROUP (\d+)
+Value INTERFACE (\S+)
+Value List MEMBERS (\S+)
+
+# Comware 7.1: no lab sample with a configured aggregation group yet, so every line is
+# refused rather than guessed; "No link aggregation group exists." is the verified empty
+# output (the implementation's valid_empty).
+Start
+  ^\s*$$
+  ^. -> Error "no verified display link-aggregation verbose layout"

@@ -21,8 +21,8 @@ capabilities:
   vlan: {command: show vlan brief, parser: generic_vlan}
   trunk: {command: show interfaces trunk, parser: generic_trunk}
   switchport: {command: show interfaces switchport, parser: generic_switchport}
-  lag: {command: show etherchannel summary, parser: generic_lag}
-  stp: {command: show spanning-tree, parser: generic_stp}
+  lag: {parser: rules}
+  stp: {parser: rules}
   routes: {timeout: 300, parser: rules}
   vrfs: {parser: rules}
   vrrp: {parser: rules}

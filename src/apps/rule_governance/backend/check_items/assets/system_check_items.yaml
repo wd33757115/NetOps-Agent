@@ -258,6 +258,39 @@ check_items:
       PRIORITY: [integer, false, 运行优先级]
       VIRTUAL_IP: [text, false, 虚拟地址]
       MASTER_IP: [text, false, 主设备地址]
+  topology.lag:
+    name: 拓扑发现：链路聚合组与成员
+    entity_type: lag
+    keys: [INTERFACE]
+    values:
+      INTERFACE: [text, true, 聚合接口原文]
+      GROUP: [integer, false, 聚合组号]
+      BUNDLE_FLAGS: [text, false, 聚合接口标志原文]
+      PROTOCOL: [text, false, 聚合协议原文]
+      MEMBERS: [text, false, 成员端口（与 MEMBER_FLAGS 一一对应）]
+      MEMBER_FLAGS: [text, false, 成员端口标志原文]
+      BUNDLED: [text, false, 已捆绑进聚合的成员]
+  topology.stp_ports:
+    name: 拓扑发现：生成树端口角色与状态
+    entity_type: stp_port
+    keys: [INSTANCE, INTERFACE]
+    values:
+      INSTANCE: [text, true, 生成树实例原文（VLAN0010、MST0）]
+      INTERFACE: [text, true, 端口原文]
+      VLAN_ID: [text, false, PVST 实例的 VLAN]
+      MSTI: [text, false, MSTP 实例号]
+      PROTOCOL: [text, false, 生成树协议原文]
+      ROLE: [text, false, 端口角色原文]
+      STATE: [text, false, 端口状态原文]
+      COST: [integer, false, 端口开销]
+      PORT_ID: [text, false, 端口优先级与编号]
+      TYPE: [text, false, 链路类型与边缘端口标记原文]
+      ROOT_PRIORITY: [integer, false, 根桥优先级（实例头）]
+      ROOT_ADDRESS: [text, false, 根桥 MAC（实例头）]
+      ROOT_PORT: [text, false, 根端口（实例头）]
+      IS_ROOT: [text, false, 本桥即根桥（实例头）]
+      BRIDGE_PRIORITY: [integer, false, 本桥优先级（实例头）]
+      BRIDGE_ADDRESS: [text, false, 本桥 MAC（实例头）]
 
 implementations:
   - check_item: topology.arp
@@ -469,6 +502,26 @@ implementations:
     valid_empty: ['\A\s*VRRP4 is not configured\.\s*\Z']
     counts:
       - {pattern: '^\s*Total number of virtual routers\s*:\s*(\d+)\s*$', of: rows}
+  - check_item: topology.lag
+    platform: ios
+    command: show etherchannel summary
+    template: Cisco/IOS/show_etherchannel_summary__topology-1.0.0.textfsm
+    sha256: e4d8126efc0838401fab6751f3363b3311f14354d94c1bff9518d361c7d826e3
+    required: ['^Group\s+Port-channel\s+Protocol\s+Ports\s*$']
+    counts:
+      - {pattern: '^Number of channel-groups in use:\s*(\d+)\s*$', of: rows}
+  - check_item: topology.lag
+    platform: comware
+    command: display link-aggregation verbose
+    template: H3C/Comware7/display_link-aggregation_verbose__topology-1.0.0.textfsm
+    sha256: cd410c8318b331fe538632ba30c309eaee288c9e7f8da5038338cc968837312f
+    valid_empty: ['\A\s*No link aggregation group exists\.\s*\Z']
+  - check_item: topology.stp_ports
+    platform: ios
+    command: show spanning-tree
+    template: Cisco/IOS/show_spanning-tree__topology-1.0.0.textfsm
+    sha256: d0929b4656302b2f3a620be255eb41f0963b6c59c1639d9bd205bcf7f8960744
+    valid_empty: ['\A\s*No spanning tree instances? exists?\.?\s*\Z']
 
 platforms:
   ios: {vendor: Cisco, platforms: [ios, iosxe], family: IOS}

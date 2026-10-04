@@ -20,7 +20,7 @@ capabilities:
   mac: {command: display mac-address, parser: generic_mac}
   vlan: {command: display vlan brief, parser: template_vlan}
   trunk: {command: display port trunk, parser: generic_trunk}
-  lag: {command: display link-aggregation verbose, parser: generic_lag}
+  lag: {parser: rules}
   routes: {timeout: 300, parser: rules}
   vrfs: {parser: rules}
   # Read per VPN instance (the published command names it); see collect._collect_scoped.

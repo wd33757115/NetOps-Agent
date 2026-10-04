@@ -45,6 +45,8 @@ CHECK_ITEMS = {
     "bgp_evpn": "topology.bgp_evpn_peers",
     "ospf_neighbors": "topology.ospf_neighbors",
     "vrrp": "topology.vrrp",
+    "lag": "topology.lag",
+    "stp": "topology.stp_ports",
 }
 # Families whose CLI output rule governance parses for the capabilities above.
 FAMILIES = frozenset({"ios", "iosxe", "comware"})
@@ -199,7 +201,7 @@ def parse(identity, capability, raw, *, complete=True, model=None):
         result.records = []
     if capability in HEADERS:
         # Table-header Values (Filldown on every row) are facts about the device.
-        result.summary.update(HEADERS[capability](parsed.rows))
+        result.summary.update(HEADERS[capability](parsed.rows, family))
     return result
 
 
@@ -629,6 +631,86 @@ def _vrrp(row, family, lines, warnings):
     }
 
 
+def _lag(row, family, lines, warnings):
+    """An aggregate (RFC 8944 lag) with every listed member and the bundled ones."""
+    members = [interface(name, family).name for name in row.get("MEMBERS") or []]
+    flags = row.get("MEMBER_FLAGS") or []
+    if len(flags) != len(members):
+        raise ValueError("lag_member_flags_mismatch")
+    return {
+        "ifname": interface(row["INTERFACE"], family).name,
+        "members": members,
+        "bundled": [interface(name, family).name for name in row.get("BUNDLED") or []],
+        "member_flags": dict(zip(members, flags)),
+    }
+
+
+# IEEE 802.1Q port roles and states by their IOS abbreviations' meaning.
+STP_ROLES = {
+    "Root": "root",
+    "Desg": "designated",
+    "Altn": "alternate",
+    "Back": "backup",
+    "Mstr": "master",
+    "Dis": "disabled",
+}
+STP_STATES = {
+    "FWD": "forwarding",
+    "BLK": "blocking",
+    "LRN": "learning",
+    "LIS": "listening",
+    "DIS": "disabled",
+    "BKN": "broken",
+}
+
+
+def _stp_instance(row):
+    block = {"instance": row["INSTANCE"]}
+    if row.get("VLAN_ID"):
+        block["vlan"] = int(row["VLAN_ID"])
+    elif row.get("MSTI"):
+        block["msti"] = int(row["MSTI"])
+    return block
+
+
+def _stp_port(row, family, lines, warnings):
+    if row.get("ROLE") not in STP_ROLES or row.get("STATE") not in STP_STATES:
+        raise ValueError("unrecognized_stp_port_row")
+    kind = (row.get("TYPE") or "").split()
+    return {
+        **_stp_instance(row),
+        "protocol": row.get("PROTOCOL"),
+        "ifname": interface(row["INTERFACE"], family).name,
+        "role": STP_ROLES[row["ROLE"]],
+        "state": STP_STATES[row["STATE"]],
+        "cost": int(row["COST"]),
+        "port_id": row["PORT_ID"],
+        "link_type": {"P2p": "point-to-point", "Shr": "shared"}.get(kind[0] if kind else ""),
+        "edge": "Edge" in kind,
+    }
+
+
+def _stp_instances(rows, family):
+    """Each instance block's root and bridge identifiers (PVST state is evidence only)."""
+    instances = {}
+    for row in rows:
+        if row["INSTANCE"] in instances:
+            continue
+        block = _stp_instance(row)
+        if row.get("PROTOCOL"):
+            block["protocol"] = row["PROTOCOL"]
+        for section in ("root", "bridge"):
+            if row.get(f"{section.upper()}_PRIORITY"):
+                block[f"{section}_priority"] = int(row[f"{section.upper()}_PRIORITY"])
+            if row.get(f"{section.upper()}_ADDRESS"):
+                block[f"{section}_address"] = row[f"{section.upper()}_ADDRESS"]
+        if row.get("ROOT_PORT"):
+            block["root_port"] = interface(row["ROOT_PORT"], family).name
+        block["is_root"] = bool(row.get("IS_ROOT"))
+        instances[row["INSTANCE"]] = block
+    return {"instances": list(instances.values())}
+
+
 def _vrf(row, family, lines, warnings):
     """A device-local VRF / VPN-instance name, never a global identity."""
     protocols = row.get("PROTOCOLS")
@@ -652,13 +734,15 @@ ROWS = {
     "bgp_evpn": _bgp_peer,
     "ospf_neighbors": _ospf_neighbor,
     "vrrp": _vrrp,
+    "lag": _lag,
+    "stp": _stp_port,
 }
 MERGE = {"routes": _merge_routes, "vrf_detail": _merge_vrfs}
 # Capabilities whose rows form one summary fact (the VRF enumeration scopes collection).
 SUMMARIES = {"vrfs": lambda rows: {"instances": rows}}
 
 
-def _bgp_header(rows):
+def _bgp_header(rows, family):
     """The local BGP speaker: router ID and AS from the table header."""
     found = {}
     for field, key, convert in (("ROUTER_ID", "router_id", str), ("LOCAL_AS", "local_as", int)):
@@ -667,22 +751,24 @@ def _bgp_header(rows):
     return found
 
 
-def _ospf_router_ids(rows):
+def _ospf_router_ids(rows, family):
     """{process: router ID} from the per-process headers (Comware)."""
     ids = {row["PROCESS"]: row["ROUTER_ID"] for row in rows if row.get("PROCESS")}
     return {"router_ids": ids} if ids else {}
 
 
-# Table-header Values that describe the device: {capability: rows -> summary}.
+# Table-header Values that describe the device: {capability: (rows, family) -> summary}.
 HEADERS = {
     "bgp_peers": _bgp_header,
     "bgp_vpnv4": _bgp_header,
     "bgp_evpn": _bgp_header,
     "ospf_neighbors": _ospf_router_ids,
+    "stp": _stp_instances,
 }
 # Tables listing each entity once: a repeated entity is a contradiction, not a new row.
 UNIQUE = {
     "vrfs": ("name",),
     "ldp_peers": ("peer_lsr_id", "label_space"),
     "tunnel_interfaces": ("ifname",),
+    "stp": ("instance", "ifname"),
 }

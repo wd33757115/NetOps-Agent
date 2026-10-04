@@ -1,0 +1,44 @@
+Value Required GROUP (\d+)
+Value INTERFACE (\S+)
+Value BUNDLE_FLAGS (\w+)
+Value PROTOCOL (\S+)
+Value List MEMBERS (\S+?)
+Value List MEMBER_FLAGS (\w+)
+Value List BUNDLED (\S+?)
+
+# One record per channel group (campus-wan lab, IOS-XE 17). Members show their flags,
+# up to four per line, wrapping onto indented lines; flag P is "bundled in
+# port-channel" (BUNDLED).
+Start
+  ^Flags:\s.*$$
+  ^\s+\S+ - .*$$
+  ^Number of channel-groups in use:\s*\d+\s*$$
+  ^Number of aggregators:\s*\d+\s*$$
+  ^Group\s+Port-channel\s+Protocol\s+Ports\s*$$ -> Groups
+  ^\s*$$
+  ^. -> Error "unrecognized show etherchannel summary line"
+
+Groups
+  ^[-+]+\s*$$
+  ^\d+\s -> Continue.Record
+  ^${GROUP}\s+${INTERFACE}\(${BUNDLE_FLAGS}\)\s+${PROTOCOL}\s*$$
+  ^\d+\s+\S+\s+\S+\s+${MEMBERS}\(${MEMBER_FLAGS}\)(\s|$$) -> Continue
+  ^\d+\s+\S+\s+\S+\s+\S+\s+${MEMBERS}\(${MEMBER_FLAGS}\)(\s|$$) -> Continue
+  ^\d+\s+\S+\s+\S+\s+\S+\s+\S+\s+${MEMBERS}\(${MEMBER_FLAGS}\)(\s|$$) -> Continue
+  ^\d+\s+\S+\s+\S+\s+\S+\s+\S+\s+\S+\s+${MEMBERS}\(${MEMBER_FLAGS}\)(\s|$$) -> Continue
+  ^\d+\s+\S+\s+\S+\s+${BUNDLED}\(\w*P\w*\)(\s|$$) -> Continue
+  ^\d+\s+\S+\s+\S+\s+\S+\s+${BUNDLED}\(\w*P\w*\)(\s|$$) -> Continue
+  ^\d+\s+\S+\s+\S+\s+\S+\s+\S+\s+${BUNDLED}\(\w*P\w*\)(\s|$$) -> Continue
+  ^\d+\s+\S+\s+\S+\s+\S+\s+\S+\s+\S+\s+${BUNDLED}\(\w*P\w*\)(\s|$$) -> Continue
+  ^${GROUP}\s+${INTERFACE}\(${BUNDLE_FLAGS}\)\s+${PROTOCOL}(\s+\S+\(\w+\)){1,4}\s*$$
+  ^\s+${MEMBERS}\(${MEMBER_FLAGS}\)(\s|$$) -> Continue
+  ^\s+\S+\s+${MEMBERS}\(${MEMBER_FLAGS}\)(\s|$$) -> Continue
+  ^\s+\S+\s+\S+\s+${MEMBERS}\(${MEMBER_FLAGS}\)(\s|$$) -> Continue
+  ^\s+\S+\s+\S+\s+\S+\s+${MEMBERS}\(${MEMBER_FLAGS}\)(\s|$$) -> Continue
+  ^\s+${BUNDLED}\(\w*P\w*\)(\s|$$) -> Continue
+  ^\s+\S+\s+${BUNDLED}\(\w*P\w*\)(\s|$$) -> Continue
+  ^\s+\S+\s+\S+\s+${BUNDLED}\(\w*P\w*\)(\s|$$) -> Continue
+  ^\s+\S+\s+\S+\s+\S+\s+${BUNDLED}\(\w*P\w*\)(\s|$$) -> Continue
+  ^\s+\S+\(\w+\)(\s+\S+\(\w+\)){0,3}\s*$$
+  ^\s*$$
+  ^. -> Error "unrecognized etherchannel group line"

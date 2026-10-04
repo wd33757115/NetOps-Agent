@@ -11,12 +11,10 @@ from .tiers import (
     generic_arp,
     generic_ifbrief,
     generic_ipif,
-    generic_lag,
     generic_lldp,
     generic_lldp_local,
     generic_mac,
     generic_ospf,
-    generic_stp,
     generic_switchport,
     generic_trunk,
     generic_version,
@@ -33,8 +31,6 @@ PARSERS = {
     "interfaces": generic_ifbrief.parse,
     "ip": generic_ipif.parse,
     "version": generic_version.parse,
-    "lag": generic_lag.parse,
-    "stp": generic_stp.parse,
     "vlan": generic_vlan.parse,
     "trunk": generic_trunk.parse,
     "switchport": generic_switchport.parse,
@@ -46,8 +42,6 @@ EMPTY = {
     "lldp": r"No (?:LLDP )?neighbors?(?: found)?\.?",
     "arp": r"No ARP entries(?: found)?\.?",
     "mac": r"No MAC(?: address)? entries(?: found)?\.?",
-    "lag": r"No link aggregation group exists\.",
-    "stp": r"No spanning tree instances? exists?\.?",
 }
 MAX_BYTES = 8 * 1024 * 1024
 
