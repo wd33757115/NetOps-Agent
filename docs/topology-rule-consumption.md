@@ -142,6 +142,9 @@ commands(check_item_ids) -> [{implementation_id, platforms, command, scoped_comm
   - Trunk、二层口、OSPF 接口与进程是带否决语义的整表：模板把每个有意义的行变成带类型的行，`rules_tables.py` 按输出顺序重放并施加原有的局部/全局否决；
   - 模板的 `Error "..."` 消息作为原因码出现在告警里（如 `conflicting_local_identity` 触发本机身份否决）；
   - 输出被截断且一行未读到时为 failed（Trunk/二层口为带全局否决的 partial），不把它当成空表；输出末尾仅由 Filldown 带出的行不算一行。
+- **已部署（2026-10-04）**：
+  - 规则治理 1.5.0 的 `bootstrap_version` 升到 3，部署时把系统基础检查项写入目录数据库；topology 0.7.0 声明依赖规则治理 ≥1.5.0，以 `published` 读取。
+  - vpn-fabric 实机发现中，8 台设备的 M5 命令全部按已发布实现执行；输出用同一组钉住的模板复读，结果完整（见 `models/network-twin/m5/README.md`）。
 - **待做**：
   - 系统模板登记到规则治理的模板库（数据库），让页面可见、可评审；目前模板文件由资产清单按 sha256 钉住；
   - NX-OS 等家族在有实机样本后补实现，届时删掉对应的通用解析器；

@@ -197,6 +197,13 @@ IEEE 桥实例、component、FDB/FID、VID、端口为二层查找上下文；�
 
 ### M5：服务、策略与影响分析
 
+执行状态（2026-10-04，topology 0.7.0、规则治理 1.5.0）：VPN/EVPN/VXLAN/DC fabric 部分已完成，详见 [models/network-twin/m5](../models/network-twin/m5/README.md)。
+- 采集与解析：全部经规则治理的系统基础检查项。
+- 路径引擎：增加 MPLS 与 VXLAN 隧道语义。
+- 已导出：L3NM/L2NM 服务、RFC 8944 VXLAN 叠加网络、RFC 8542 fabric、BGP 地址族、LDP、MPLS 接口；均通过 libyang 校验。M1 正反例增至 72 个，发现 RFC 9291 的一处模块缺陷。
+- 实机只读验收：17 项中 15 项通过。未通过的两项是 L3VNI 跨 leaf，原因是实验网重启后 BLUE 路由不再导入，孪生如实反映了设备状态。
+- 未完成：L3SM/L2SM、SAP/AC、ACL/NAT/QoS/IPsec、服务保障。
+
 依赖 M2—M4。依次实现 L3SM/L2SM → L3NM/L2NM → SAP/AC 标准绑定；随后接入 ACL、NAT、QoS、IPsec 与可用安全模型，扩充流条件分析。没有服务订单/部署事实不从 VRF 猜客户服务。
 
 保障使用 RFC 9418 的 service/subservice 依赖，RFC 8632 告警及 RFC 9375/OAM 测量；只有接口 Down 可以确定时，服务影响仍由实际依赖关系决定。告警、事件、故障、根因和健康分别处理。

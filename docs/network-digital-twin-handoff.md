@@ -1,10 +1,10 @@
 # 网络数字孪生开发交接
 
-本文最前面记录 2026-10-04 的 M5 进度与解析归属调整；其后保留 2026-10-03 交叉连线修复、模型修复、Claude → GPT 与 2026-09-30 的历史交接。历史工作约束以负责人后续明确指令为准，模型能力与验收范围以最新记录为准。
+本文最前面记录 2026-10-04 的 M5 完成情况与解析归属调整；其后保留 2026-10-03 交叉连线修复、模型修复、Claude → GPT 与 2026-09-30 的历史交接。历史工作约束以负责人后续明确指令为准，模型能力与验收范围以最新记录为准。
 
 ## 当前交接 2026-10-04 M5（VPN/EVPN/VXLAN/DC fabric）进度与解析归属调整
 
-**状态（2026-10-04，Claude）：M4 已完成并推送（topology 0.6.0，`2791956`）。M5 按负责人选择先做 VPN/EVPN/VXLAN/DC fabric，设计已获批准（"批准，按这个设计做"）。实验网已搭好并通过实机验证；采集与解析代码、叠加层解读、路径隧道语义已写完，拓扑单元测试 1281 个通过。代码以检查点提交的方式保存，没有部署，也没有推送。同日负责人调整了解析归属：拓扑改为规则治理的消费方，见下文"方向调整"及其进度。**
+**状态（2026-10-04 傍晚，Claude）：M5 的 VPN/EVPN/VXLAN/DC fabric 部分已完成并部署（topology 0.7.0、规则治理 1.5.0），实机只读验收 17 项中 15 项通过，未通过的两项原因在实验网本身，见下文"M5 完成情况"。同日完成解析归属调整：拓扑改为规则治理的消费方。全部为本地提交，没有推送。**
 
 ### M5 设计（已批准）
 | 层次 | 标准 | 说明 |
@@ -53,15 +53,30 @@
   - trace、API、助手工具增加可选参数 `src_vrf`/`dst_vrf`。
 - **测试**：`tests/unit/test_topology_vpn_fabric.py` 6 个通过；拓扑全部测试 1281 个通过。
 
-### M5 尚未完成
-1. `model/builder.py` 的 `_Topology.__init__` 改为读取 `prepare(devices)` 后的事实（拓扑和路径两边口径一致）。
-2. 用 vpn-fabric 写路径用例：
-   - A1→A2（MPLS）、A1→S2（RT 泄漏）、B1→S2（隔离）；
-   - H-B2→H-B3（L3VNI）、RED/BLUE 同网段隔离；
-   - 隧道 down、缺标签。
-3. 标准投影：L3NM 和 L2NM 的 vpn-service、RFC 8944 VXLAN 叠加网络、RFC 8542 fabric、LDP 与 VXLAN 隧道的邻接。全部用 libyang 校验，加入 M1 正反例。
-   - RFC 示例的离线验收已完成，见 `scripts/topology/m5_examples.py` 和 `models/network-twin/m5/examples.json`：RFC 9291 有 4 个示例单独通过、2 个合并后通过；RFC 9182 的完整示例都有示例自身缺陷。
-4. 文档、topology 0.7.0 部署、实机只读验收。
+### M5 完成情况（详见 `models/network-twin/m5/README.md`）
+| 项 | 结果 | 提交 |
+|---|---|---|
+| 1. 拓扑构建读取 `prepare()` 后的事实 | 完成；修正 `_Topology.__init__` 中 ARP 循环仍读原始事实的问题（VSI 学到的 ARP 行在 prepare 后才有 ifname） | `cee08e3`、`a73ae18` |
+| 2. vpn-fabric 路径用例（MPLS、RT 泄漏、隔离、L3VNI、同网段、隧道 down、缺标签） | 完成；路径终点增加 `other_instance` | `cee08e3` |
+| 3. 标准投影 | L3NM/L2NM（`model/services.py`，`GET /snapshots/{id}/services`）；RFC 8944 VXLAN 叠加网络和 RFC 8542 fabric（`model/fabric.py`，进 SIMAP 树）；BGP 地址族、LDP（RFC 9070）、MPLS 接口（RFC 8960）。全部通过 libyang 校验，M1 正反例 48→72 | `a73ae18`、`b170ad4` |
+| 4. 文档、部署、实机验收 | 规则治理 1.5.0（`bootstrap_version` 3）和 topology 0.7.0 已部署；实机 15/17 通过 | 本节所在提交 |
+
+- **实机验收中两项未通过**：VNI 50020 的 VXLAN 链路，以及 H-B2→H-B3 的 L3VNI 路径。
+  - 原因：实验网重启后，LEAF2 收到了 LEAF3 的 type-5 路由（属性齐全）却不导入 VRF BLUE；LEAF3 也不导入 LEAF2 的路由。
+  - 已尝试：BGP 软刷新、硬复位，以及原样重下 stitching RT，都没有恢复。
+  - 孪生的输出（no_route、无链路）与设备显示一致。
+  - 接手后：先恢复实验网（例如重启 LEAF2/LEAF3 后核对 `show ip route vrf BLUE`），再重跑 `.runtime/m5-live.py submit / poll / verify`。
+- **发现的模型缺陷**：RFC 9291 的 evpn-bgp 分支里，`pbb` 的 when 条件用了不带前缀的 `'pbb-evpn'`，导致该分支的任何实例都无法通过校验，IOS 的服务接口类型因此不导出（M1 反例 `l2nm-evpn-signaling-option`）。
+- **yangson**：校验不了 L3NM/L2NM（忽略 when 条件下的 mandatory 叶子、编译不了 L3NM 的 leafref），这两个模型只用 libyang 校验；叠加网络在 App 冻结模块集下用 yangson 校验通过。
+- **实验网主机仍在持续 ping**（保持 ARP/MAC/EVPN 表）。需要停止时运行 `venv/Scripts/python.exe scripts/topology/vpn_fabric/lab.py traffic --stop`。
+
+### M5 后续（未开始）
+- L3SM/L2SM 与 SAP/AC 绑定：需要服务订单或部署事实，不从 VRF 猜。
+- ACL、NAT、QoS、IPsec 与流条件分析；服务保障（RFC 9418）、告警与 OAM。
+- 设备层的遗留项：
+  - RIB（含 MPLS RIB）仍不导出，原因是 RIB 名称不可得；
+  - BGP 前缀数不导出，原因是 CLI 没有说明计数在入口策略之前还是之后；
+  - Comware 的 LDP 发现源，以及 NX-OS 的 M5 检查项实现，都没有样本。
 
 ### 方向调整（负责人决定，2026-10-04）
 1. **拓扑改为规则治理的消费方。** 规则治理生产 TextFSM、检查项、变化规则和事件，巡检与拓扑都只消费。规则治理要增加一组拓扑所需、不可删除的"系统基础检查项"，并定义它们的同名 Value（`value_contract: same-name/v1`）。
@@ -90,7 +105,9 @@
 - **未做**：系统模板登记到规则治理的模板库（数据库）以便页面评审；目前模板文件由资产清单按 sha256 钉住。巡检迁移在独立会话进行。
 
 ### 接手后
-先读 `docs/network-digital-twin-implementation.md` §8 M5、`docs/topology-rule-consumption.md`、`models/network-twin/m5/` 和本节，然后继续完成上面"M5 尚未完成"的 1–4 项。
+先读 `docs/network-digital-twin-implementation.md` §8 M5、`docs/topology-rule-consumption.md`、`models/network-twin/m5/README.md` 和本节。
+1. 恢复实验网的 L3VNI 后，重跑 M5 实机验收中未通过的两项。
+2. 与负责人确认 M5 后续的范围和顺序（服务绑定、策略、保障），再动手。
 
 带 yangson 的测试要这样运行：`PYTHONPATH=.runtime/p0-2/yang-deps venv/Scripts/python.exe -m pytest ...`。
 
