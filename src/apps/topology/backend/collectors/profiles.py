@@ -12,9 +12,9 @@ from src.platform.device_access.command_policy import classify
 from src.platform.device_access.contracts import DeviceAccessError
 from src.platform.device_access.drivers import netmiko_driver
 
+from . import families
 from .parse import PARSERS
 from .rules import CHECK_ITEMS as RULE_CHECK_ITEMS
-from .rules import FAMILIES as RULE_FAMILIES
 
 DIRECTORY = Path(__file__).with_suffix("")
 CAPABILITIES = frozenset(
@@ -155,7 +155,9 @@ class Profile(StrictModel):
     schema_version: Literal[1]
     id: str = Field(pattern=r"^[a-z][a-z0-9-]{1,63}$")
     vendor: str
-    os_family: Literal["comware", "nxos", "ios"]
+    # The device-access CLI dialect (families.cli); the families speaking it are in
+    # signatures.yaml, so a new family is a data change.
+    os_family: str = Field(pattern=r"^[a-z][a-z0-9-]{1,31}$")
     identity_profiles: list[str] = Field(min_length=1, max_length=2)
     preferred_driver: Literal["paramiko", "netmiko"] = "paramiko"
     session: SessionSpec
@@ -169,17 +171,16 @@ class Profile(StrictModel):
             raise ValueError("unknown capability")
         if {"version", "lldp", "interfaces"} - self.capabilities.keys():
             raise ValueError("fast discovery capabilities are required")
-        if tuple(self.session.paging_off) != TERMINAL_PREPARATION[self.os_family]:
+        if tuple(self.session.paging_off) != TERMINAL_PREPARATION.get(self.os_family):
             raise ValueError("initialization must exactly match the public driver catalog")
-        expected = {
-            "comware": ["h3c-comware7"],
-            "nxos": ["cisco-nxos"],
-            "ios": ["cisco-ios", "cisco-iosxe"],
-        }[self.os_family]
-        if self.id != expected[0] or self.identity_profiles != expected:
+        expected = families.profile_ids(self.os_family)
+        if (
+            self.id != self.identity_profiles[0]
+            or set(self.identity_profiles) != expected
+            or len(self.identity_profiles) != len(expected)
+        ):
             raise ValueError("profile identity must match installed version signatures")
-        version_command = "display version" if self.os_family == "comware" else "show version"
-        if self.capabilities["version"].command != version_command:
+        if self.capabilities["version"].command != families.version_command(self.os_family):
             raise ValueError("profile version command must match the identification probe")
         seen = set()
         for cap, spec in self.capabilities.items():
@@ -194,8 +195,10 @@ class Profile(StrictModel):
                 ):
                     raise ValueError("profile requires distinct normalized read-only commands")
             allowed = {GENERIC_NAMES.get(cap)}
-            if cap in RULE_CHECK_ITEMS and self.os_family in RULE_FAMILIES:
-                allowed.add("rules")  # parsed by the published rule-governance check item
+            if cap in RULE_CHECK_ITEMS:
+                # Parsed by the published check item; whether rule governance publishes an
+                # implementation for the family is decided when the job selects it.
+                allowed.add("rules")
             if spec.parser is not None and spec.parser not in allowed:
                 raise ValueError("unknown or mismatched parser reference")
             if spec.command is not None:
@@ -214,15 +217,11 @@ class Profile(StrictModel):
     def selected(self, mode):
         if mode not in MODE_CAPABILITIES:
             raise ValueError("unknown collection mode")
-        selected = {
+        return {
             cap: self.capabilities[cap]
             for cap in MODE_CAPABILITIES[mode]
             if cap in self.capabilities
         }
-        if self.os_family in {"ios", "nxos"} and "arp" in selected and "vrfs" in self.capabilities:
-            # ARP's global table does not cover device-local named VRFs.
-            selected["vrfs"] = self.capabilities["vrfs"]
-        return selected
 
 
 class UniqueLoader(yaml.SafeLoader):
@@ -266,9 +265,7 @@ def select_profile(identity, profiles):
     if len(matches) != 1:
         raise DeviceAccessError("platform_unsupported", "此节点尚无已安装的采集档案")
     profile = matches[0]
-    if identity.os_family not in (
-        {"ios", "iosxe"} if profile.os_family == "ios" else {profile.os_family}
-    ):
+    if identity.os_family not in families.members(profile.os_family):
         raise DeviceAccessError("platform_ambiguous", "平台身份与档案冲突")
     return profile
 

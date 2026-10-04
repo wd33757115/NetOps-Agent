@@ -11,7 +11,9 @@
 # the sha256 of its text: a changed template is refused until its pin (and the
 # implementation version) is updated in review. scoped_command is the per-VRF form ({vrf} is a
 # device-local instance name the consumer fills in); a command that itself needs an
-# instance name carries {vrf} directly. valid_empty lists outputs that mean "none
+# instance name carries {vrf} directly. scope_header is the line (first group: the name) by
+# which a per-VRF output names its instance; without it the consumer checks the output
+# against the device's interface bindings instead. valid_empty lists outputs that mean "none
 # configured" (BLANK: an empty output). required lists lines every data output has (a
 # table header); counts are totals the device prints ({pattern, of}: the pattern's first
 # group counts the rows read, or the distinct keys). An output missing a required line
@@ -471,6 +473,8 @@ implementations:
     platform: ios
     command: show ip route
     scoped_command: show ip route vrf {vrf}
+    # The per-VRF table names its instance; any other name is refused.
+    scope_header: '^Routing Table: (\S+)\s*$'
     template: Cisco/IOS/show_ip_route__topology-1.0.0.textfsm
     sha256: d8087d85683b4e669128d5120d654d7a93e85906254b71dc38528519390df20b
     required: ['^Gateway of last resort ']

@@ -149,3 +149,20 @@ commands(check_item_ids) -> [{implementation_id, platforms, command, scoped_comm
   - 系统模板登记到规则治理的模板库（数据库），让页面可见、可评审；目前模板文件由资产清单按 sha256 钉住；
   - NX-OS 等家族在有实机样本后补实现，届时删掉对应的通用解析器；
   - 巡检经同一接口消费，另开卡（已在独立会话进行）。
+
+
+## 7. 新增一个设备家族（2026-10-04 负责人决定：只改数据，不改代码）
+
+拓扑代码不认识任何具体厂商。一个家族的全部差异都写在下面几处数据里。
+
+| 步骤 | 位置 | 内容 |
+|---|---|---|
+| 1. 识别 | `collectors/signatures.yaml` 加一行 | 必填：`id`、厂商、版本输出特征 `pattern`、命令风格（show/display）、CLI 方言 `cli`。按需填写：`vendor_pattern`（同一家族以多个品牌出售时，从版本输出读品牌）、`profile_requires`（采集档案验证过的主版本）、`supersedes`（版本输出同时带另一家族的特征时，以本家族为准）、`global_instance`（该家族对公网实例的叫法，如 VRP 的 `_public_`）、`discovery_profile` |
+| 2. 采集档案 | `collectors/profiles/<档案名>.yaml` | 会话准备、各能力 `parser: rules`；版本命令须为"命令风格 + version" |
+| 3. 接口名 | `collectors/ifnames.yaml` 加该 CLI 方言的一组 | 规范前缀、类型、设备会打印的别名 |
+| 4. 命令与解析 | 规则治理：为系统基础检查项发布该家族的实现 | 命令、TextFSM 模板、按 VRF 的命令形式 `scoped_command`、输出自报实例名的行 `scope_header`、空输出与条目数校验；型号例外只在样本证明有差异时添加 |
+| 5. 平台 | 设备访问层（平台能力，不属于拓扑） | 该 CLI 方言的只读命令规则和终端准备；目前支持 ios、nxos、comware、vrp |
+
+- 规则治理是否为某个家族发布了实现，决定拓扑是否经规则治理采集和解析该家族。拓扑代码里没有家族名单。
+- 守卫测试 `tests/unit/test_topology_vendor_neutral.py` 扫描拓扑代码中的字符串常量，出现家族或厂商名即失败。豁免清单只列尚未完成的分支项，只能缩小。
+- 现状与后续：第 1–3 步是 App 内的数据文件，修改后要重新部署；第 4 步在规则治理里发布即可生效。下一步可以把第 1–3 步也移入规则治理，作为可发布的资产，这样开局接入新家族就不需要部署。

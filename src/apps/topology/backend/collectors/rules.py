@@ -24,6 +24,7 @@ import re
 import time
 from collections import Counter
 
+from .families import cli
 from .normalize import (
     interface_address,
     ip_address,
@@ -68,11 +69,6 @@ CHECK_ITEMS = {
     "ospf_interfaces": "topology.ospf_interfaces",
     "ospf_process": "topology.ospf_process",
 }
-# Families whose CLI output rule governance parses for the capabilities above.
-FAMILIES = frozenset({"ios", "iosxe", "comware"})
-# Rule governance matches an implementation by vendor and platform family; the family is
-# what decides the CLI (an HPE Comware device speaks the H3C Comware CLI).
-VENDORS = {"ios": "Cisco", "iosxe": "Cisco", "comware": "H3C"}
 WHOLE_TABLES = frozenset({"routes"})
 SOURCE = "published"  # tests read the catalog shipped with rule governance ("shipped")
 REFRESH_SECONDS = 60  # a newly published implementation is used by the next jobs
@@ -80,17 +76,42 @@ UINT32 = 2**32 - 1
 _readers = {}
 
 
-def reader():
+def _current():
     from src.apps.rule_governance.runtime import CheckItemSelectionReader
 
     cached = _readers.get(SOURCE)
-    if cached is None or time.monotonic() - cached[1] > REFRESH_SECONDS:
-        cached = _readers[SOURCE] = (CheckItemSelectionReader(source=SOURCE), time.monotonic())
-    return cached[0]
+    if cached is None or time.monotonic() - cached["at"] > REFRESH_SECONDS:
+        cached = _readers[SOURCE] = {
+            "reader": CheckItemSelectionReader(source=SOURCE),
+            "at": time.monotonic(),
+            "families": None,
+        }
+    return cached
+
+
+def reader():
+    return _current()["reader"]
+
+
+def families():
+    """{platform family: vendor} rule governance publishes topology implementations for.
+
+    The vendor is the implementation's own: the family decides the CLI (an HPE Comware
+    device speaks the H3C Comware CLI), so a device is matched as its family's vendor.
+    A family is served as soon as rule governance publishes for it; no code names it.
+    """
+    cached = _current()
+    if cached["families"] is None:
+        found = {}
+        for row in cached["reader"].commands(CHECK_ITEMS.values()):
+            for platform in row["platforms"]:
+                found.setdefault(platform, row.get("vendor"))
+        cached["families"] = found
+    return cached["families"]
 
 
 def served(identity, capability):
-    return capability in CHECK_ITEMS and _family(identity) in FAMILIES
+    return capability in CHECK_ITEMS and _family(identity) in families()
 
 
 def _family(identity):
@@ -101,7 +122,7 @@ def _family(identity):
 
 def device(identity, model=None):
     family = _family(identity)
-    found = {"vendor": VENDORS.get(family), "platform": family}
+    found = {"vendor": families().get(family), "platform": family}
     if model:
         found["model"] = model
     return found
@@ -117,10 +138,10 @@ def published_commands():
     for row in reader().commands(CHECK_ITEMS.values()):
         if "{vrf}" in row["command"]:
             continue
-        for family in {"ios" if f == "iosxe" else f for f in set(row["platforms"]) & FAMILIES}:
-            decision = classify(family, row["command"])
+        for dialect in {cli(family) for family in row["platforms"]} - {None}:
+            decision = classify(dialect, row["command"])
             if decision.level == "L1" and decision.normalized == row["command"]:
-                found.add((family, row["command"]))
+                found.add((dialect, row["command"]))
     return found
 
 

@@ -3,14 +3,11 @@
 import hashlib
 import re
 from dataclasses import asdict, dataclass
-from functools import lru_cache
-from pathlib import Path
-
-import yaml
 
 from src.platform.device_access.contracts import DeviceAccessError
 from src.platform.device_access.detection import DiscoveryPlan
 
+from . import families
 from .normalize import parser_text
 
 PROBES = ("display version", "show version")
@@ -18,20 +15,6 @@ REJECTED = re.compile(
     r"(?im)(unrecognized command|unknown command|invalid (?:command|input)|"
     r"incomplete command|wrong parameter|not supported|permission denied)"
 )
-
-
-@lru_cache(maxsize=1)
-def signatures():
-    data = yaml.safe_load(Path(__file__).with_name("signatures.yaml").read_text(encoding="utf-8"))
-    if data["schema_version"] != 1:
-        raise ValueError("unknown signature schema")
-    rows, seen = [], set()
-    for row in data["families"]:
-        if row["id"] in seen or row["command_style"] not in {"display", "show", "unknown"}:
-            raise ValueError("invalid platform signature")
-        seen.add(row["id"])
-        rows.append((row, re.compile(row["pattern"], re.I | re.M | re.ASCII)))
-    return tuple(rows)
 
 
 @dataclass(frozen=True)
@@ -76,7 +59,9 @@ def identify(probes=(), *, lldp_description="", ssh_banner="", prompt="", paging
             raise ValueError("invalid or oversized identification signal")
         normalized = parser_text(raw)
         matches = {
-            row["id"]: row for row, pattern in signatures() if pattern.search(normalized.text)
+            row["id"]: row
+            for row, pattern in families.signatures()
+            if pattern.search(normalized.text)
         }
         rejected = bool(probe and REJECTED.search(normalized.text))
         usable = not probe or (probe.complete and not normalized.had_paging and not rejected)
@@ -103,9 +88,10 @@ def identify(probes=(), *, lldp_description="", ssh_banner="", prompt="", paging
             hints.update(matches)
     if incomplete:
         return Identity(evidence=tuple(evidence), warnings=("incomplete_probe",))
-    # IOS-XE output commonly also contains an IOS Software line.
-    if "iosxe" in own:
-        own.pop("ios", None)
+    # An output may also carry another family's signature (IOS-XE prints an IOS line).
+    for row in list(own.values()):
+        for other in row.get("supersedes", []):
+            own.pop(other, None)
     if len(own) > 1:
         return Identity(
             status="ambiguous",
@@ -114,16 +100,16 @@ def identify(probes=(), *, lldp_description="", ssh_banner="", prompt="", paging
         )
     if own:
         family, row = next(iter(own.items()))
-        if hints - {family, "ios" if family == "iosxe" else family}:
+        if hints - {family, *row.get("supersedes", [])}:
             warnings.append("upstream_hint_disagrees")
+        own_text = "\n".join(probe.output for probe in probes)
         vendor = row["vendor"]
-        if family == "comware":
-            own_text = "\n".join(probe.output for probe in probes)
-            match = re.search(r"(?im)^\s*(H3C|HPE|HP)\s+Comware", own_text)
+        if row.get("vendor_pattern"):
+            match = re.search(row["vendor_pattern"], own_text, re.I | re.M)
             vendor = match.group(1).upper() if match else None
         profile = row["profile_id"]
-        if family == "comware" and not re.search(
-            r"(?im)^\s*(?:(?:H3C|HPE|HP)\s+)?Comware[^\n]*\bversion\s+7\.", own_text
+        if row.get("profile_requires") and not re.search(
+            row["profile_requires"], own_text, re.I | re.M
         ):
             profile = None  # Family recognition does not prove major-version compatibility.
         return Identity(
@@ -164,7 +150,7 @@ class TopologyDiscoveryPlan(DiscoveryPlan):
         self.identity = identify(self.probes.values(), **self.hints)
         if self.identity.status == "ambiguous":
             raise DeviceAccessError("platform_ambiguous", "平台识别证据冲突，请人工确认")
-        return {"comware": "comware-lldp-v1", "nxos": "nxos-lldp-v1"}.get(self.identity.os_family)
+        return families.discovery_profile(self.identity.os_family)
 
     def metadata(self):
         return {**super().metadata(), "identity": asdict(self.identity)}

@@ -27,6 +27,7 @@ from src.platform.device_access.security import CredentialStore
 
 from . import logins, storage
 from .collectors.collect import collect_node, command_allowlist, scope_base, scoped_command
+from .collectors.families import discovery_families
 from .collectors.identify import TopologyDiscoveryPlan as DiscoveryPlan
 from .collectors.tiers.common import valid_mac
 from .logins import DOMAIN
@@ -245,10 +246,6 @@ def _state_inputs(session, run_id):
     ]
 
 
-# Observations from the manual LLDP-only plan or offline import carry these profile ids.
-LEGACY_PLATFORMS = {"comware-lldp-v1": "comware", "nxos-lldp-v1": "nxos"}
-
-
 def _facts(data):
     """Builder input for one observation; LLDP-only observations become lldp records."""
     platform = data.get("platform") or {}
@@ -305,7 +302,9 @@ def _facts(data):
         facts.pop("lldp_local", None)
     # Historical observations without capability metadata remain compatible;
     # explicit conflicts and truncation above still veto their local identity.
-    facts["platform"] = identity.get("os_family") or LEGACY_PLATFORMS.get(
+    # Observations from the manual LLDP-only plan or offline import name only the
+    # discovery profile.
+    facts["platform"] = identity.get("os_family") or discovery_families().get(
         platform.get("profile_id"), ""
     )
     return facts
@@ -887,7 +886,7 @@ def _collect_topology(job, choice):
     return outputs, command_metadata, data, reason
 
 
-def _scoped_context(context, target_ref, connection_profile_id, scopes, capability, family="ios"):
+def _scoped_context(context, target_ref, connection_profile_id, scopes, capability, family):
     """Issue exact backend grants for a bounded, validated per-VRF expansion.
 
     Target and connection come from the already authorized job, which must already be

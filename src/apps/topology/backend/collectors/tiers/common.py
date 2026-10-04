@@ -3,6 +3,7 @@
 import re
 from dataclasses import dataclass, field
 
+from ..families import cli
 from ..ifname import normalize_ifname
 from ..normalize import ip_address, mac_address
 
@@ -88,7 +89,7 @@ IFNAME = re.compile(
 def interface(value, family):
     if not IFNAME.fullmatch(value):
         raise ValueError("unrecognized_interface_shape")
-    return normalize_ifname(value, "ios" if family == "iosxe" else family)
+    return normalize_ifname(value, cli(family) or family)
 
 
 def valid_ip(value):

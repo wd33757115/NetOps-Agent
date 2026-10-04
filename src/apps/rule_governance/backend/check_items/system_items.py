@@ -193,6 +193,7 @@ def templates() -> dict[str, dict[str, Any]]:
         implementation_id(row): {
             "command": row["command"],
             "scoped_command": row.get("scoped_command"),
+            "scope_header": row.get("scope_header"),
             "template": row["template"],
             "sha256": row["sha256"],
             "vendor": platforms[row["platform"]]["vendor"],

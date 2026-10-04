@@ -11,21 +11,20 @@ from src.platform.device_access.drivers.netmiko_driver import NetmikoDriver
 from src.platform.device_access.policy import authorize
 from src.platform.device_access.service import DeviceAccessService
 
-from . import rules
+from . import families, rules
 from .identify import PROBES, Identity, Probe, identify
 from .parse import ParseResult, parse
 from .profiles import MODE_CAPABILITIES, load_profiles, select_profile, verified_driver
 from .tiers.common import vrf_header
 
 MAX_VRF_SCOPES = 64
-IOS_ROUTE_TABLE = re.compile(r"Routing Table: (\S+)\s*")  # "show ip route vrf X" names itself
 # Per-VRF forms of the commands topology still parses itself. The capabilities rule
 # governance serves (rules.CHECK_ITEMS) take theirs from the published implementation.
 LOCAL_SCOPED = {"nxos": {"arp": "show ip arp vrf {vrf}"}}
 
 
 def _cli(family):
-    return "comware" if family == "comware" else "ios"
+    return families.cli(family)
 
 
 def scoped_form(capability, family):
@@ -67,10 +66,17 @@ def scope_base(capability, family, profiles=None):
 
 
 def _cli_family(family):
-    return "ios" if family == "iosxe" else family
+    return families.cli(family) or family
 
 
-def scoped_command(capability, scope, family="ios"):
+def _has_scoped_form(capability, family):
+    try:
+        return bool(scoped_form(capability, family))
+    except ValueError:  # an invalid published implementation has no per-VRF form either
+        return False
+
+
+def scoped_command(capability, scope, family):
     """Only literal VRF tokens, never wildcards, options, separators or CLI filters."""
     if not isinstance(scope, str) or not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.:-]{0,63}", scope):
         raise ValueError("unsafe VRF command token")
@@ -107,16 +113,29 @@ def published_command(identity, capability, model=None):
     return None, chosen.command
 
 
-def _scope_headers(capability, text):
-    """The table names an output gives itself: ARP context/VRF lines, IOS route tables."""
-    if capability == "routes":
-        return {m[1] for line in text.splitlines() if (m := IOS_ROUTE_TABLE.fullmatch(line))}
+def _scope_header(capability, family):
+    """The line pattern a published per-VRF output names its instance by, if declared."""
+    if not rules.served({"os_family": family}, capability):
+        return None
+    try:
+        chosen = rules.selection({"os_family": family}, capability)
+    except ValueError:
+        return None
+    return re.compile(chosen.scope_header) if chosen and chosen.scope_header else None
+
+
+def _scope_headers(capability, text, family):
+    """The instance names an output gives itself: by its implementation's declared header,
+    else by the generic context/VRF lines (ARP context, "VPN instance:", "VRF:")."""
+    if declared := _scope_header(capability, family):
+        return {m[1] for line in text.splitlines() if (m := declared.fullmatch(line))}
     return {vrf_header(line) for line in text.splitlines() if vrf_header(line)}
 
 
 def _bound_elsewhere(result, parsed, scope):
-    """A Comware VPN route table does not name itself; a connected route out of an
-    interface bound to another instance proves the table is not this scope's."""
+    """For a route table that does not name its instance (no declared scope header): a
+    connected route out of an interface bound to another instance proves the table is not
+    this scope's."""
     ip = result.parsed.get("ip")
     if not ip or ip.status != "complete":
         return False
@@ -154,7 +173,7 @@ def _collect_scoped(
     if not instance_only:
         global_table = result.parsed[capability]
         global_output = result.results[capability].output
-        if _scope_headers(capability, global_output) - {"default"}:
+        if _scope_headers(capability, global_output, family) - {"default"}:
             global_table.status = "failed"
             global_table.warnings.append("vrf_output_scope_mismatch")
     enumeration = result.parsed.get("vrfs")
@@ -239,21 +258,18 @@ def _collect_scoped(
             item.output,
             complete=item.output_complete and not item.failure_code,
         )
+        # An output that names its instance (an instance detail's own records, or a
+        # declared header line) must name exactly this one; a route table that does not
+        # name itself must not contradict the device's interface bindings.
         if capability == "vrf_detail":
-            explicit_scopes = {row["vrf"] for row in parsed.records}
+            explicit_scopes, named = {row["vrf"] for row in parsed.records}, True
         else:
-            explicit_scopes = _scope_headers(capability, item.output)
-        # An IOS VRF route table and an instance detail name themselves; one without (or
-        # with another) name is refused. A Comware table must not contradict its bindings.
-        named = capability == "vrf_detail" or (capability == "routes" and family != "comware")
+            explicit_scopes = _scope_headers(capability, item.output, family)
+            named = _scope_header(capability, family) is not None
         if (
             explicit_scopes - {scope}
             or (named and explicit_scopes != {scope})
-            or (
-                family == "comware"
-                and capability == "routes"
-                and _bound_elsewhere(result, parsed, scope)
-            )
+            or (not named and capability == "routes" and _bound_elsewhere(result, parsed, scope))
         ):
             parsed.status = "failed"
             parsed.warnings.append("vrf_output_scope_mismatch")
@@ -410,6 +426,14 @@ def collect_node(
     # Do not restart the node budget after identification.
     remaining()
     selected = profile.selected(mode)
+    if (
+        "vrfs" not in selected
+        and "vrfs" in profile.capabilities
+        and any(_has_scoped_form(cap, identity.os_family) for cap in selected)
+    ):
+        # A table with a per-VRF form does not cover the device-local VRFs: they are
+        # enumerated first.
+        selected["vrfs"] = profile.capabilities["vrfs"]
     # Reuse the successful own-version evidence even if the device exposed a CLI alias.
     version_result = probe_batch.results[-1]
     version = parse(
@@ -445,7 +469,8 @@ def collect_node(
         driver=driver,
         admission=access.admission,
     )
-    defer_routes = profile.os_family in {"ios", "nxos"} and "arp" in selected
+    # Per-VRF ARP runs after the batch; a large route table waits until it has.
+    defer_routes = "arp" in selected and _has_scoped_form("arp", identity.os_family)
     model = version.summary.get("model")
     missing = {cap: "no_profile_command" for cap in MODE_CAPABILITIES[mode] if cap not in selected}
     command_of = {}

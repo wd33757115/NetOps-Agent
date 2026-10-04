@@ -2,54 +2,38 @@
 
 import re
 from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
 
-# canonical prefix, kind, accepted aliases. Prefix matching is case-insensitive.
-PLATFORMS = {
-    "comware": (
-        ("GigabitEthernet", "ethernet", ("GigabitEthernet", "GE")),
-        ("Ten-GigabitEthernet", "ethernet", ("Ten-GigabitEthernet", "XGE")),
-        ("Bridge-Aggregation", "lag", ("Bridge-Aggregation", "BAGG")),
-        ("Route-Aggregation", "lag", ("Route-Aggregation", "RAGG")),
-        ("Vlan-interface", "vlanif", ("Vlan-interface", "Vlan")),
-        ("LoopBack", "loopback", ("LoopBack", "Loop")),
-        ("InLoopBack", "loopback", ("InLoopBack", "InLoop")),
-        ("NULL", "null", ("NULL",)),
-        ("REG", "register", ("REG",)),
-        # VXLAN: auto-created tunnels and the VSI gateway interfaces (vpn-fabric LEAF3).
-        ("Tunnel", "tunnel", ("Tunnel", "Tun")),
-        ("Vsi-interface", "vsi", ("Vsi-interface", "Vsi")),
-    ),
-    "nxos": (
-        ("Ethernet", "ethernet", ("Ethernet", "Eth")),
-        ("port-channel", "lag", ("port-channel", "Po")),
-        ("Vlan", "vlanif", ("Vlan",)),
-        ("loopback", "loopback", ("loopback", "Lo")),
-        ("mgmt", "mgmt", ("mgmt",)),
-        ("Null", "null", ("Null",)),
-    ),
-    "ios": (
-        ("GigabitEthernet", "ethernet", ("GigabitEthernet", "Gi")),
-        ("TenGigabitEthernet", "ethernet", ("TenGigabitEthernet", "Te")),
-        ("FastEthernet", "ethernet", ("FastEthernet", "Fa")),
-        # IOL and some platforms name ports Ethernet0/1; LLDP and MAC tables shorten to Et0/1.
-        ("Ethernet", "ethernet", ("Ethernet", "Et")),
-        ("Port-channel", "lag", ("Port-channel", "Po")),
-        ("Vlan", "vlanif", ("Vlan", "Vl")),
-        ("Loopback", "loopback", ("Loopback", "Lo")),
-        ("Null", "null", ("Null",)),
-        # VXLAN NVE and the tunnel it creates (vpn-fabric IOL leaves).
-        ("Tunnel", "tunnel", ("Tunnel", "Tu")),
-        ("nve", "nve", ("nve", "nv")),
-    ),
-    "vrp": (
-        ("GigabitEthernet", "ethernet", ("GigabitEthernet", "GE")),
-        ("XGigabitEthernet", "ethernet", ("XGigabitEthernet", "XGE")),
-        ("Eth-Trunk", "lag", ("Eth-Trunk",)),
-        ("Vlanif", "vlanif", ("Vlanif",)),
-        ("LoopBack", "loopback", ("LoopBack",)),
-        ("NULL", "null", ("NULL",)),
-    ),
-}
+import yaml
+
+from .families import cli
+
+KINDS = frozenset(
+    {"ethernet", "lag", "vlanif", "loopback", "null", "register", "tunnel", "vsi", "nve", "mgmt"}
+)
+
+
+@lru_cache(maxsize=1)
+def dialects():
+    """{dialect: ((canonical prefix, kind, aliases), ...)} from ifnames.yaml."""
+    data = yaml.safe_load(Path(__file__).with_name("ifnames.yaml").read_text(encoding="utf-8"))
+    if data["schema_version"] != 1:
+        raise ValueError("unknown interface name schema")
+    table = {}
+    for dialect, rows in data["dialects"].items():
+        entries = []
+        for row in rows:
+            canonical, kind, aliases = row["canonical"], row["kind"], row["aliases"]
+            if (
+                set(row) != {"canonical", "kind", "aliases"}
+                or kind not in KINDS
+                or not all(isinstance(v, str) and v for v in (canonical, *aliases))
+            ):
+                raise ValueError("invalid interface name row")
+            entries.append((canonical, kind, tuple(aliases)))
+        table[dialect] = tuple(entries)
+    return table
 
 
 @dataclass(frozen=True)
@@ -70,7 +54,7 @@ def normalize_ifname(raw, platform):
     if any(ord(char) < 32 or ord(char) == 127 for char in raw):
         raise ValueError("control character in interface name")
     text = raw.strip(" ")
-    for canonical, kind, aliases in PLATFORMS.get("ios" if platform == "iosxe" else platform, ()):
+    for canonical, kind, aliases in dialects().get(cli(platform) or platform, ()):
         for alias in aliases:
             match = re.fullmatch(
                 re.escape(alias) + r"([0-9]+(?:/[0-9]+)*(?:\.[0-9]+)?)", text, re.I | re.ASCII

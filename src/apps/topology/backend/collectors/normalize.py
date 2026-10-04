@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
 
+from .families import global_instance
+
 
 def token(value):
     if not isinstance(value, str) or not value or value != value.strip() or not value.isascii():
@@ -61,7 +63,8 @@ def vrf_name(value, platform):
         or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in value)
     ):
         raise ValueError("invalid VRF name")
-    return "default" if platform == "vrp" and value == "_public_" else value
+    # A family may name its global table (VRP: "_public_"; families.global_instance).
+    return "default" if value == global_instance(platform) else value
 
 
 def observed_time(command_finished_at):

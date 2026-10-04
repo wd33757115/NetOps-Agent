@@ -93,6 +93,8 @@ class Selection:
     template_text: str
     output_quality_policy: dict[str, Any]
     template_sha256: str = ""
+    # The line by which a per-instance output names its instance (first group), if any.
+    scope_header: str | None = None
 
 
 @dataclass(frozen=True)
@@ -170,8 +172,9 @@ class CheckItemSelectionReader:
 
     def commands(self, check_item_ids: Iterable[str]) -> list[dict[str, Any]]:
         """What every active implementation of these check items runs, for a consumer's
-        exact command grants: ``{implementation_id, platforms, command, scoped_command}``.
-        ``platforms`` is the implementation's platform match (empty: any platform)."""
+        exact command grants: ``{implementation_id, vendor, platforms, command,
+        scoped_command}``. ``vendor`` and ``platforms`` are the implementation's match
+        (empty platforms: any platform)."""
         from .backend.check_items.system_items import templates
 
         wanted = set(check_item_ids)
@@ -179,6 +182,7 @@ class CheckItemSelectionReader:
         return [
             {
                 "implementation_id": implementation.id,
+                "vendor": implementation.match.get("vendor"),
                 "platforms": tuple(implementation.match.get("platforms") or ()),
                 "command": implementation.commands[0].command,
                 "scoped_command": (bound.get(implementation.id) or {}).get("scoped_command"),
@@ -381,6 +385,7 @@ def _selection(check_item, implementation) -> Selection:
         template_text=text,
         output_quality_policy=dict(implementation.output_quality_policy or {}),
         template_sha256=digest,
+        scope_header=bound.get("scope_header"),
     )
 
 

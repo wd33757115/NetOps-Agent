@@ -246,15 +246,20 @@ def test_a_template_outside_the_contract_is_refused(monkeypatch):
     assert result.warnings[0].startswith("implementation_invalid:")
 
 
-def test_a_device_without_an_implementation_gets_none(monkeypatch):
+def test_a_family_rule_governance_does_not_publish_for_is_not_served(monkeypatch):
+    # Served families come from the published implementations, not from a list in code.
+    assert {"ios", "iosxe", "comware"} <= set(rules.families())
+    assert rules.families()["comware"] == "H3C"  # the implementation's vendor
     base = system_items.spec()
     without = [row for row in base["implementations"] if row["platform"] != "ios"]
     monkeypatch.setattr(
         system_items, "spec", lambda path=None: {**base, "implementations": without}
     )
     monkeypatch.setattr(rules, "_readers", {})
+    assert not {"ios", "iosxe"} & set(rules.families())
+    assert not rules.served({"os_family": "ios"}, "arp")
     result = run("arp", fixture("campus-wan/core1/arp.txt"), "ios")
-    assert result.status == "failed" and result.warnings == ["no_implementation"]
+    assert result.tier != "rules"  # the generic tier reads it, as for any unserved family
 
 
 def test_system_check_items_cannot_be_deleted_or_lose_required_values():

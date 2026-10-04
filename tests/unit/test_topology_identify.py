@@ -157,3 +157,29 @@ def test_two_real_lab_versions_and_upstream_descriptions_are_recognized():
         )
         assert result.os_family == "comware" and result.profile_id == "h3c-comware7"
         assert result.vendor == "H3C"
+
+
+def test_a_new_family_is_a_row_of_data_not_code(monkeypatch):
+    import re
+
+    from src.apps.topology.backend.collectors import families
+
+    row = {
+        "id": "acme",
+        "vendor": "Acme",
+        "profile_id": "acme-os",
+        "command_style": "display",
+        "cli": "vrp",
+        "pattern": r"^\s*Acme Network OS Software\b",
+    }
+    rows = (*families.signatures(), (row, re.compile(row["pattern"], re.I | re.M)))
+    monkeypatch.setattr(families, "signatures", lambda: rows)
+    result = identify([Probe("display version", "Acme Network OS Software, Version 3.1")])
+    assert (result.status, result.os_family, result.vendor, result.profile_id) == (
+        "identified",
+        "acme",
+        "Acme",
+        "acme-os",
+    )
+    assert families.cli("acme") == "vrp" and "acme" in families.members("vrp")
+    assert families.version_command("vrp") == "display version"

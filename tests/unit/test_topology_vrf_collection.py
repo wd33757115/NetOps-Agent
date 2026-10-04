@@ -193,11 +193,11 @@ def test_duplicate_vrf_name_is_not_silently_complete(ios):
 )
 def test_dynamic_scope_tokens_cannot_broaden_or_inject_cli(ios, scope):
     with pytest.raises(ValueError):
-        _scoped_context(ios.context, "node", "connection", (scope,), "arp")
+        _scoped_context(ios.context, "node", "connection", (scope,), "arp", "ios")
 
 
 def test_exact_grant_cannot_authorize_another_scope_target_or_connection(ios):
-    context = _scoped_context(ios.context, "node", "connection", ("blue",), "arp")
+    context = _scoped_context(ios.context, "node", "connection", ("blue",), "arp", "ios")
     authorize(
         context, BatchRequest("node", "connection", (Command("one", "show ip arp vrf blue"),))
     )
@@ -427,10 +427,10 @@ def test_a_vrf_route_output_without_its_own_table_name_is_refused(ios):
 
 
 def test_route_expansion_needs_the_global_route_command_already_granted(ios):
-    granted = _scoped_context(ios.context, "node", "connection", ("MGMT",), "routes")
+    granted = _scoped_context(ios.context, "node", "connection", ("MGMT",), "routes", "ios")
     assert any("show ip route vrf MGMT" in grant.commands for grant in granted.grants)
     narrow = AccessContext(
         "actor", "topology", (AccessGrant("node", "connection", frozenset({"show ip arp"})),)
     )
     with pytest.raises(DeviceAccessError):
-        _scoped_context(narrow, "node", "connection", ("MGMT",), "routes")
+        _scoped_context(narrow, "node", "connection", ("MGMT",), "routes", "ios")
