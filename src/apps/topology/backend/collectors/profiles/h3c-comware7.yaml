@@ -30,9 +30,9 @@ capabilities:
   ospf_interfaces: {command: display ospf interface, parser: generic_ospf_interfaces}
   ospf_process: {command: display ospf, parser: generic_ospf_process}
   ospf_neighbors: {command: display ospf peer, parser: generic_ospf_neighbors}
-  bgp_peers: {command: display bgp peer ipv4, parser: generic_bgp_peers}
-  bgp_vpnv4: {command: display bgp peer vpnv4, parser: generic_bgp_vpnv4}
-  bgp_evpn: {command: display bgp peer l2vpn evpn, parser: generic_bgp_evpn}
+  bgp_peers: {parser: rules}
+  bgp_vpnv4: {parser: rules}
+  bgp_evpn: {parser: rules}
   ldp_peers: {parser: rules}
   mpls_lfib: {parser: rules}
   evpn_instances: {parser: rules}

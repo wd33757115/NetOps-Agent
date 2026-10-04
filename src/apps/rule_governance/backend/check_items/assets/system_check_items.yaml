@@ -194,6 +194,44 @@ check_items:
       PROTOCOLS: [text, false, IOS 已启用的地址族（逗号分隔）]
       INTERFACES: [text, false, IOS 绑定的接口]
       CREATED: [text, false, Comware 的创建时间]
+  topology.bgp_ipv4_peers:
+    name: 拓扑发现：BGP IPv4 单播邻居
+    entity_type: bgp_neighbor
+    keys: [PEER]
+    values:
+      PEER: [ip_or_unassigned, true, 邻居地址]
+      PEER_AS: [integer, true, 邻居 AS]
+      STATE: [text, false, 会话状态原文（IOS 已建立时显示收到的前缀数而不显示状态）]
+      PREFIXES_RECEIVED: [integer, false, 收到的前缀数]
+      UP_DOWN: [text, false, 会话建立或断开时长原文]
+      ROUTER_ID: [ip_or_unassigned, false, 本端 BGP 标识（表头）]
+      LOCAL_AS: [integer, false, 本端 AS（表头）]
+
+  topology.bgp_vpnv4_peers:
+    name: 拓扑发现：BGP VPNv4 邻居
+    entity_type: bgp_neighbor
+    keys: [PEER]
+    values:
+      PEER: [ip_or_unassigned, true, 邻居地址]
+      PEER_AS: [integer, true, 邻居 AS]
+      STATE: [text, false, 会话状态原文（IOS 已建立时显示收到的前缀数而不显示状态）]
+      PREFIXES_RECEIVED: [integer, false, 收到的前缀数]
+      UP_DOWN: [text, false, 会话建立或断开时长原文]
+      ROUTER_ID: [ip_or_unassigned, false, 本端 BGP 标识（表头）]
+      LOCAL_AS: [integer, false, 本端 AS（表头）]
+
+  topology.bgp_evpn_peers:
+    name: 拓扑发现：BGP L2VPN EVPN 邻居
+    entity_type: bgp_neighbor
+    keys: [PEER]
+    values:
+      PEER: [ip_or_unassigned, true, 邻居地址]
+      PEER_AS: [integer, true, 邻居 AS]
+      STATE: [text, false, 会话状态原文（IOS 已建立时显示收到的前缀数而不显示状态）]
+      PREFIXES_RECEIVED: [integer, false, 收到的前缀数]
+      UP_DOWN: [text, false, 会话建立或断开时长原文]
+      ROUTER_ID: [ip_or_unassigned, false, 本端 BGP 标识（表头）]
+      LOCAL_AS: [integer, false, 本端 AS（表头）]
 
 implementations:
   - check_item: topology.arp
@@ -338,6 +376,48 @@ implementations:
     required: ['^\s*Total VPN-Instances configured\s*:']
     counts:
       - {pattern: '^\s*Total VPN-Instances configured\s*:\s*(\d+)\s*$', of: rows}
+  - check_item: topology.bgp_ipv4_peers
+    platform: ios
+    command: show ip bgp summary
+    template: Cisco/IOS/show_bgp_summary__topology-1.0.0.textfsm
+    sha256: 0b03c73aaf23572fd578be5b08fd6c4cc1b6fef50b95c0b1c4d49c1b59b49ec8
+    valid_empty: [BLANK, '\A\s*% BGP not active\.?\s*\Z']
+  - check_item: topology.bgp_ipv4_peers
+    platform: comware
+    command: display bgp peer ipv4
+    template: H3C/Comware7/display_bgp_peer__topology-1.0.0.textfsm
+    sha256: 60d8ebc6d876731f0c114937422068a36212b192d9e2b7f603ee61573f7b8b52
+    valid_empty: [BLANK]
+    counts:
+      - {pattern: '^\s*Total number of peers:\s*(\d+)\s', of: rows}
+  - check_item: topology.bgp_vpnv4_peers
+    platform: ios
+    command: show bgp vpnv4 unicast all summary
+    template: Cisco/IOS/show_bgp_summary__topology-1.0.0.textfsm
+    sha256: 0b03c73aaf23572fd578be5b08fd6c4cc1b6fef50b95c0b1c4d49c1b59b49ec8
+    valid_empty: [BLANK, '\A\s*% BGP not active\.?\s*\Z']
+  - check_item: topology.bgp_vpnv4_peers
+    platform: comware
+    command: display bgp peer vpnv4
+    template: H3C/Comware7/display_bgp_peer__topology-1.0.0.textfsm
+    sha256: 60d8ebc6d876731f0c114937422068a36212b192d9e2b7f603ee61573f7b8b52
+    valid_empty: [BLANK]
+    counts:
+      - {pattern: '^\s*Total number of peers:\s*(\d+)\s', of: rows}
+  - check_item: topology.bgp_evpn_peers
+    platform: ios
+    command: show bgp l2vpn evpn summary
+    template: Cisco/IOS/show_bgp_summary__topology-1.0.0.textfsm
+    sha256: 0b03c73aaf23572fd578be5b08fd6c4cc1b6fef50b95c0b1c4d49c1b59b49ec8
+    valid_empty: [BLANK, '\A\s*% BGP not active\.?\s*\Z']
+  - check_item: topology.bgp_evpn_peers
+    platform: comware
+    command: display bgp peer l2vpn evpn
+    template: H3C/Comware7/display_bgp_peer__topology-1.0.0.textfsm
+    sha256: 60d8ebc6d876731f0c114937422068a36212b192d9e2b7f603ee61573f7b8b52
+    valid_empty: [BLANK]
+    counts:
+      - {pattern: '^\s*Total number of peers:\s*(\d+)\s', of: rows}
 
 platforms:
   ios: {vendor: Cisco, platforms: [ios, iosxe], family: IOS}

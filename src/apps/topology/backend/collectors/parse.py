@@ -9,7 +9,6 @@ from src.core.parser.output_classifier import UNSUPPORTED_PATTERNS, OutputClassi
 from .normalize import parser_text
 from .tiers import (
     generic_arp,
-    generic_bgp_peers,
     generic_ifbrief,
     generic_ipif,
     generic_lag,
@@ -40,10 +39,6 @@ PARSERS = {
     "lag": generic_lag.parse,
     "stp": generic_stp.parse,
     "ospf_neighbors": generic_ospf_neighbors.parse,
-    "bgp_peers": generic_bgp_peers.parse,
-    # The same summary tables for the VPN address families (plan §8 M5).
-    "bgp_vpnv4": generic_bgp_peers.parse,
-    "bgp_evpn": generic_bgp_peers.parse,
     "vlan": generic_vlan.parse,
     "trunk": generic_trunk.parse,
     "switchport": generic_switchport.parse,
@@ -57,15 +52,8 @@ EMPTY = {
     "mac": r"No MAC(?: address)? entries(?: found)?\.?",
     "lag": r"No link aggregation group exists\.",
     "stp": r"No spanning tree instances? exists?\.?",
-    "bgp_peers": r"% BGP not active\.?",
-    "bgp_vpnv4": r"% BGP not active\.?",
-    "bgp_evpn": r"% BGP not active\.?",
     "vrrp": r"VRRP4 is not configured\.",
 }
-# A feature that is not configured prints nothing (vpn-fabric: BGP address families on
-# devices that do not run them). Rule governance declares this for the check items it
-# serves (valid_empty).
-ABSENT_EMPTY = frozenset({"bgp_peers", "bgp_vpnv4", "bgp_evpn"})
 MAX_BYTES = 8 * 1024 * 1024
 
 
@@ -157,13 +145,11 @@ def parse_generic(identity, capability, raw, *, complete=True, command=None, pro
     )
     empty_pattern = EMPTY.get(capability)
     if (
-        (family in {"ios", "iosxe"} and capability in {"arp", "vrrp", "trunk", "ospf_neighbors"})
+        (family in {"ios", "iosxe"} and capability in {"vrrp", "trunk", "ospf_neighbors"})
         or (family == "comware" and capability == "trunk")
-        or (family in {"ios", "iosxe", "comware"} and capability in ABSENT_EMPTY)
     ) and not text.strip():
-        # Verified lab outputs have no header for empty IOS ARP/VRRP/trunks/OSPF neighbours
-        # and Comware trunks, nor for a feature the device does not run (ABSENT_EMPTY);
-        # transport completeness is still required.
+        # Verified lab outputs have no header for empty IOS VRRP/trunks/OSPF neighbours and
+        # Comware trunks; transport completeness is still required.
         empty_pattern = ""
     if empty_pattern is not None and re.fullmatch(empty_pattern, text.strip(), re.I):
         if incomplete and capability in {"trunk", "switchport"}:

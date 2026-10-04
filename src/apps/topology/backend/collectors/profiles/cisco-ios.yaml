@@ -29,10 +29,10 @@ capabilities:
   ospf_interfaces: {command: show ip ospf interface brief, parser: generic_ospf_interfaces}
   ospf_process: {command: show ip ospf, parser: generic_ospf_process}
   ospf_neighbors: {command: show ip ospf neighbor, parser: generic_ospf_neighbors}
-  bgp_peers: {command: show ip bgp summary, parser: generic_bgp_peers}
+  bgp_peers: {parser: rules}
   vrf_detail: {parser: rules}
-  bgp_vpnv4: {command: show bgp vpnv4 unicast all summary, parser: generic_bgp_vpnv4}
-  bgp_evpn: {command: show bgp l2vpn evpn summary, parser: generic_bgp_evpn}
+  bgp_vpnv4: {parser: rules}
+  bgp_evpn: {parser: rules}
   ldp_peers: {parser: rules}
   mpls_lfib: {parser: rules}
   evpn_instances: {parser: rules}

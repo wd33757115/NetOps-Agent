@@ -48,9 +48,9 @@
 | `topology.ospf_process` | OSPF 进程 | ★PROCESS_ID ★ROUTER_ID, VRF |
 | `topology.ospf_interfaces` | OSPF 接口 | ★PROCESS_ID ★INTERFACE ★AREA, IP_ADDRESS, PREFIX_LENGTH, COST, STATE |
 | `topology.ospf_neighbors` | OSPF 邻居 | ★NEIGHBOR_ID ★NEIGHBOR_ADDRESS ★STATE ★INTERFACE, PRIORITY, ROLE, DEAD_TIME, PROCESS_ID, AREA |
-| `topology.bgp_ipv4_peers` | IPv4 单播 BGP 邻居 | ★LOCAL_AS ★PEER ★PEER_AS ★STATE, ROUTER_ID, UP_DOWN, PREFIXES_RECEIVED |
-| `topology.bgp_vpnv4_peers` | VPNv4 BGP 邻居 | 同上 |
-| `topology.bgp_evpn_peers` | EVPN BGP 邻居 | 同上 |
+| `topology.bgp_ipv4_peers` ✅ | IPv4 单播 BGP 邻居 | ★PEER ★PEER_AS, STATE, PREFIXES_RECEIVED, UP_DOWN, ROUTER_ID（表头）, LOCAL_AS（表头） |
+| `topology.bgp_vpnv4_peers` ✅ | VPNv4 BGP 邻居 | 同上 |
+| `topology.bgp_evpn_peers` ✅ | EVPN BGP 邻居 | 同上 |
 | `topology.routes` ✅ | 路由（每个下一跳一行） | ★NETWORK ★PREFIX_LENGTH ★PROTOCOL, TYPE, DISTANCE, METRIC, NEXTHOP_IP, NEXTHOP_IF, NEXTHOP_VRF, VRF, UPTIME, FLAG |
 | `topology.vrfs` ✅ | VRF/VPN 实例（汇总为实例列表） | ★NAME, RD, PROTOCOLS, INTERFACES(List), CREATED |
 | `topology.vrf_detail` ✅ | VRF × 地址族 | ★VRF ★ADDRESS_FAMILY, RD, INTERFACES(List), IMPORT_RT(List), EXPORT_RT(List) |
@@ -135,6 +135,7 @@ commands(check_item_ids) -> [{implementation_id, platforms, command, scoped_comm
 
 - **切片 1**：`topology.arp`、`topology.routes`、`topology.vrf_detail`、`topology.evpn_peers`。
 - **切片 2**：`topology.ldp_peers`、`topology.mpls_lfib`、`topology.evpn_instances`、`topology.vxlan_vnis`、`topology.tunnel_interfaces`、`topology.evpn_mac`、`topology.vrfs`。
+- **切片 3**：`topology.bgp_ipv4_peers`、`topology.bgp_vpnv4_peers`、`topology.bgp_evpn_peers`（两家各一份模板，三项共用）。表头里的本端标识与 AS 由拓扑汇总为设备事实（`HEADERS`）。
 - 以上在 IOS/IOS-XE 与 Comware 7 上经规则治理采集和解析：
   - 采集档案里这些能力只写 `parser: rules`，命令由已发布的实现给出；
   - 每项迁移前都用全部实验网夹具比对过新旧结果，事实完全一致后才删除对应的手写解析器和模板层资产；
@@ -145,7 +146,7 @@ commands(check_item_ids) -> [{implementation_id, platforms, command, scoped_comm
   - 一张表里同一实体只能出现一次（`UNIQUE`：VRF、LDP 对端、隧道接口），重复即剔除并记 `duplicate_entry`；
   - 输出被截断且一行未读到时为 failed，不把它当成空表。
 - **待做**：
-  - 其余事实逐项迁移：BGP（三张邻居表共用模板）、OSPF、接口、IP、LLDP、设备版本、MAC、VLAN、Trunk、二层口、聚合、生成树、VRRP；
+  - 其余事实逐项迁移：OSPF、接口、IP、LLDP、设备版本、MAC、VLAN、Trunk、二层口、聚合、生成树、VRRP；
   - 拓扑去掉对 `src.core.parser.*` 转发的引用（模板层 `tiers/template.py`、`parse.py` 的输出分类）；
   - 系统模板登记到规则治理的模板库（数据库），让页面可见、可评审；目前模板文件由资产清单钉住摘要；
   - 巡检经同一接口消费，另开卡。

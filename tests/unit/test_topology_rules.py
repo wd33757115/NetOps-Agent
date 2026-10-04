@@ -6,6 +6,7 @@ contract ``src.apps.rule_governance.runtime`` and projects the same-name Values.
 """
 
 import hashlib
+import re
 from pathlib import Path
 
 import pytest
@@ -33,8 +34,10 @@ def fixture(path):
 def test_real_comware_tables_through_the_published_check_item(device, routes, capability):
     result = run(capability, lab(capability, device))
     assert result.status == "complete" and result.tier == "rules"
-    assert result.confidence == "high" and result.summary["template_sha256"]
+    assert result.confidence == "high"
+    # The parser reference names the implementation and the pinned template text.
     assert result.parser_ref.startswith(f"rules:topology.{capability}.comware:H3C/Comware7/")
+    assert re.fullmatch(r".*\.textfsm@[0-9a-f]{64}", result.parser_ref)
     assert all(source["lines"] for source in result.sources)
     validate_records(
         FactInput(

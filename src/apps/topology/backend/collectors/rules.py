@@ -40,6 +40,9 @@ CHECK_ITEMS = {
     "tunnel_interfaces": "topology.tunnel_interfaces",
     "evpn_mac": "topology.evpn_mac",
     "vrfs": "topology.vrfs",
+    "bgp_peers": "topology.bgp_ipv4_peers",
+    "bgp_vpnv4": "topology.bgp_vpnv4_peers",
+    "bgp_evpn": "topology.bgp_evpn_peers",
 }
 # Families whose CLI output rule governance parses for the capabilities above.
 FAMILIES = frozenset({"ios", "iosxe", "comware"})
@@ -192,7 +195,11 @@ def parse(identity, capability, raw, *, complete=True, model=None):
         # A summary capability: its rows are one fact about the device.
         result.summary = SUMMARIES[capability](result.records)
         result.records = []
-    result.summary["template_sha256"] = chosen.template_sha256
+    for field, (key, convert) in HEADERS.get(capability, {}).items():
+        # A table header's value (Filldown on every row) is a fact about the device.
+        value = next((row[field] for row in parsed.rows if row.get(field)), None)
+        if value is not None:
+            result.summary[key] = convert(value)
     return result
 
 
@@ -525,6 +532,37 @@ def _evpn_mac(row, family, lines, warnings):
     return record
 
 
+# draft-ietf-idr-bgp-model session-state names.
+BGP_STATES = {
+    "idle": "idle",
+    "connect": "connect",
+    "active": "active",
+    "opensent": "opensent",
+    "openconfirm": "openconfirm",
+    "established": "established",
+}
+
+
+def _bgp_peer(row, family, lines, warnings):
+    # A session that reports received prefixes is established (prefixes are exchanged
+    # only then); IOS shows the count in place of the state.
+    state = row.get("STATE") or ("Established" if row.get("PREFIXES_RECEIVED") else "")
+    normalized = BGP_STATES.get(re.sub(r"\s*\(.*\)$", "", state).lower())
+    if normalized is None:
+        raise ValueError("unknown_bgp_state")
+    record = {
+        "peer": str(ipaddress.ip_address(row["PEER"])),
+        "peer_as": int(row["PEER_AS"]),
+        "state": normalized,
+        "up_down": row.get("UP_DOWN"),
+    }
+    if row.get("PREFIXES_RECEIVED"):
+        record["prefixes_received"] = int(row["PREFIXES_RECEIVED"])
+    if normalized != state.lower():
+        record["state_detail"] = state  # e.g. "Idle (Admin)"
+    return record
+
+
 def _vrf(row, family, lines, warnings):
     """A device-local VRF / VPN-instance name, never a global identity."""
     protocols = row.get("PROTOCOLS")
@@ -543,10 +581,16 @@ ROWS = {
     "tunnel_interfaces": _tunnel,
     "evpn_mac": _evpn_mac,
     "vrfs": _vrf,
+    "bgp_peers": _bgp_peer,
+    "bgp_vpnv4": _bgp_peer,
+    "bgp_evpn": _bgp_peer,
 }
 MERGE = {"routes": _merge_routes, "vrf_detail": _merge_vrfs}
 # Capabilities whose rows form one summary fact (the VRF enumeration scopes collection).
 SUMMARIES = {"vrfs": lambda rows: {"instances": rows}}
+# Table-header Values that describe the device: {capability: {Value: (summary key, type)}}.
+BGP_HEADER = {"ROUTER_ID": ("router_id", str), "LOCAL_AS": ("local_as", int)}
+HEADERS = {"bgp_peers": BGP_HEADER, "bgp_vpnv4": BGP_HEADER, "bgp_evpn": BGP_HEADER}
 # Tables listing each entity once: a repeated entity is a contradiction, not a new row.
 UNIQUE = {
     "vrfs": ("name",),

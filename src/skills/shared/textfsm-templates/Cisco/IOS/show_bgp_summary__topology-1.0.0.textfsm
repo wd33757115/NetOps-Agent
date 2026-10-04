@@ -1,0 +1,29 @@
+Value Filldown ROUTER_ID (\S+)
+Value Filldown LOCAL_AS (\d+)
+Value Required PEER (\S+)
+Value PEER_AS (\d+)
+Value UP_DOWN (\S+)
+Value PREFIXES_RECEIVED (\d+)
+Value STATE (\D\S*(?: \(\S+\))?)
+
+# One record per BGP peer, for the IPv4 unicast, VPNv4 and L2VPN EVPN summaries (campus-wan
+# and vpn-fabric labs, IOS-XE 17). The last column is the received-prefix count once the
+# session is established, else the session state.
+Start
+  ^BGP router identifier ${ROUTER_ID}, local AS number ${LOCAL_AS}\s*$$
+  ^BGP table version is \d+, main routing table version \d+\s*$$
+  ^\d+ (network|path) entries using \d+ bytes of memory\s*$$
+  ^\d+/\d+ BGP path/bestpath attribute entries using \d+ bytes of memory\s*$$
+  ^\d+ BGP [\w -]+ entries using \d+ bytes of memory\s*$$
+  ^BGP using \d+ total bytes of memory\s*$$
+  ^BGP activity .*$$
+  ^\d+ networks peaked at .*$$
+  ^Neighbor\s+V\s+AS\s+MsgRcvd\s+MsgSent\s+TblVer\s+InQ\s+OutQ\s+Up/Down\s+State/PfxRcd\s*$$ -> Peers
+  ^\s*$$
+  ^. -> Error "unrecognized BGP summary line"
+
+Peers
+  ^${PEER}\s+4\s+${PEER_AS}\s+\d+\s+\d+\s+\d+\s+\d+\s+\d+\s+${UP_DOWN}\s+${PREFIXES_RECEIVED}\s*$$ -> Record
+  ^${PEER}\s+4\s+${PEER_AS}\s+\d+\s+\d+\s+\d+\s+\d+\s+\d+\s+${UP_DOWN}\s+${STATE}\s*$$ -> Record
+  ^\s*$$
+  ^. -> Error "unrecognized BGP neighbor row"
