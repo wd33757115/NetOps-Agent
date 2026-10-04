@@ -82,16 +82,15 @@
   - 删除检查项或其默认实现返回 409，新版本不能去掉必填 Value；
   - 消费契约 `runtime.py` 新增只读的 `CheckItemSelectionReader`：`select`（型号优先）、`parse`（坏行记下继续读，声明式的必需行与条目数校验）、`commands`（供命令授权）；
   - 模板按 sha256 钉住，改动未经评审即拒绝。
-- **已迁移 14 项**（IOS/IOS-XE 与 Comware 7）：ARP、路由、VRF 详情、EVPN 对端、LDP、标签转发表、EVPN 实例、VXLAN VNI、隧道接口、EVPN MAC、VRF 列表，以及 IPv4/VPNv4/EVPN 三张 BGP 邻居表。
-  - 每项迁移前用全部实验网夹具比对新旧事实，完全一致才删除对应的手写解析器；
-  - 采集档案里这些能力只写 `parser: rules`，命令和按 VRF 的命令形式都取自已发布的实现，并仍须通过拓扑的 L1 只读校验。
-- **测试**：`tests/unit/test_topology_rules.py`。拓扑全部测试通过；其余单元测试的失败与上一提交时相同，非本次引入。
+- **已全部迁移（29 项）**：IOS/IOS-XE 与 Comware 7 的全部拓扑事实都经规则治理采集和解析，清单见设计文档第 2 节。
+  - 每项迁移前用全部实验网夹具（OSPF 等还加上原测试的全部变异输入）比对新旧事实，一致才删除对应的手写解析器；唯一有意的差异是 LLDP 系统描述现在完整读出。
+  - 采集档案里这些能力只写 `parser: rules`，命令和按 VRF 的命令形式取自已发布的实现，并仍须通过拓扑的 L1 只读校验。
+  - 拓扑只经 `src.apps.rule_governance.runtime` 使用规则治理；`src.core.parser.*` 引用和固定 NTC 模板层已移除。NX-OS 等家族仍走通用解析层，等有实机样本再补实现。
+- **测试**：`tests/unit/test_topology_rules.py` 等；拓扑全部测试通过；其余单元测试的失败与上一提交时相同，非本次引入。
+- **未做**：系统模板登记到规则治理的模板库（数据库）以便页面评审；目前模板文件由资产清单按 sha256 钉住。巡检迁移在独立会话进行。
 
 ### 接手后
-先读 `docs/network-digital-twin-implementation.md` §8 M5、`docs/topology-rule-consumption.md`、`models/network-twin/m5/` 和本节，然后按以下顺序进行：
-1. 继续迁移其余事实（OSPF、接口、IP、LLDP、版本、MAC、VLAN、Trunk、二层口、聚合、生成树、VRRP）。方法同上：先比对，一致后再删手写解析器。
-2. 拓扑去掉对 `src.core.parser.*` 转发的引用。
-3. 继续完成上面"M5 尚未完成"的 1–4 项。
+先读 `docs/network-digital-twin-implementation.md` §8 M5、`docs/topology-rule-consumption.md`、`models/network-twin/m5/` 和本节，然后继续完成上面"M5 尚未完成"的 1–4 项。
 
 带 yangson 的测试要这样运行：`PYTHONPATH=.runtime/p0-2/yang-deps venv/Scripts/python.exe -m pytest ...`。
 

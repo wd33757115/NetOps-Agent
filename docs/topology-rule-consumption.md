@@ -28,41 +28,39 @@
 - **语义自带**：每个 Value 的语义由检查项自己定义（`semantic_definition`），冻结在 `topology-system` 目录下，不依赖共享的标准观测目录。
 - **实现可自由增改**：各厂商、各型号的采集实现（命令 + 模板）可以随时新增或替换。
 
-**清单**（★ 为必填 Value，其余为可选）
+**清单**（由 `system_check_items.yaml` 生成；共 29 项，全部已在 IOS/IOS-XE 与 Comware 7 上接入）
 
-| 检查项 | 一行代表 | Value |
-|---|---|---|
-| `topology.device_version` | 设备 | ★VENDOR ★SOFTWARE_VERSION, MODEL, HOSTNAME, SOFTWARE_IMAGE, PLATFORM_EVIDENCE |
-| `topology.lldp_local` | 本机 LLDP 身份/端口管理地址 | ★CHASSIS_ID, CHASSIS_ID_TYPE, SYSTEM_NAME, LOCAL_INTERFACE, MGMT_ADDRESS |
-| `topology.lldp_neighbors` | 一个 LLDP 邻居 | ★LOCAL_INTERFACE ★CHASSIS_ID ★NEIGHBOR_PORT_ID, CHASSIS_ID_TYPE, PORT_ID_TYPE, NEIGHBOR_NAME, SYSTEM_DESCRIPTION, MGMT_ADDRESS(List) |
-| `topology.interfaces` | 接口 | ★INTERFACE ★LINK_STATUS, PROTOCOL_STATUS, ADMIN_STATUS, DESCRIPTION |
-| `topology.ip_interfaces` | 接口地址 | ★INTERFACE ★IP_ADDRESS ★PREFIX_LENGTH, VRF, STATUS |
-| `topology.arp` ✅ | ARP 表项 | ★IP_ADDRESS ★MAC_ADDRESS, INTERFACE, VLAN_ID(List，VLAN 或 VSI 名，折行分段), AGE, TYPE |
-| `topology.mac` | MAC 表项 | ★MAC_ADDRESS ★VLAN_ID ★INTERFACE, TYPE |
-| `topology.vlans` | VLAN | ★VLAN_ID, NAME, STATUS |
-| `topology.trunks` | Trunk 口 | ★INTERFACE, MODE, NATIVE_VLAN, ALLOWED_VLANS, ACTIVE_VLANS, FORWARDING_VLANS |
-| `topology.switchports` | 二层口 | ★INTERFACE, MODE, ACCESS_VLAN, NATIVE_VLAN, TRUNKING_VLANS |
-| `topology.lag_members` | 聚合成员 | ★BUNDLE ★MEMBER_INTERFACE, PROTOCOL, MEMBER_FLAGS, BUNDLE_STATUS |
-| `topology.stp_ports` | 生成树端口 | ★INSTANCE ★INTERFACE ★ROLE ★STATE, COST, PRIORITY |
-| `topology.vrrp` | VRRP 组 | ★INTERFACE ★VRID ★STATE, PRIORITY, VIRTUAL_IP(List), MASTER_ADDRESS, ADVERTISE_INTERVAL |
-| `topology.ospf_process` | OSPF 进程 | ★PROCESS_ID ★ROUTER_ID, VRF |
-| `topology.ospf_interfaces` | OSPF 接口 | ★PROCESS_ID ★INTERFACE ★AREA, IP_ADDRESS, PREFIX_LENGTH, COST, STATE |
-| `topology.ospf_neighbors` | OSPF 邻居 | ★NEIGHBOR_ID ★NEIGHBOR_ADDRESS ★STATE ★INTERFACE, PRIORITY, ROLE, DEAD_TIME, PROCESS_ID, AREA |
-| `topology.bgp_ipv4_peers` ✅ | IPv4 单播 BGP 邻居 | ★PEER ★PEER_AS, STATE, PREFIXES_RECEIVED, UP_DOWN, ROUTER_ID（表头）, LOCAL_AS（表头） |
-| `topology.bgp_vpnv4_peers` ✅ | VPNv4 BGP 邻居 | 同上 |
-| `topology.bgp_evpn_peers` ✅ | EVPN BGP 邻居 | 同上 |
-| `topology.routes` ✅ | 路由（每个下一跳一行） | ★NETWORK ★PREFIX_LENGTH ★PROTOCOL, TYPE, DISTANCE, METRIC, NEXTHOP_IP, NEXTHOP_IF, NEXTHOP_VRF, VRF, UPTIME, FLAG |
-| `topology.vrfs` ✅ | VRF/VPN 实例（汇总为实例列表） | ★NAME, RD, PROTOCOLS, INTERFACES(List), CREATED |
-| `topology.vrf_detail` ✅ | VRF × 地址族 | ★VRF ★ADDRESS_FAMILY, RD, INTERFACES(List), IMPORT_RT(List), EXPORT_RT(List) |
-| `topology.ldp_peers` ✅ | LDP 会话 | ★PEER_LSR_ID, LABEL_SPACE, STATE, ROLE, LOCAL_LSR_ID, LOCAL_LABEL_SPACE, DISCOVERY_INTERFACE(List), DISCOVERY_ADDRESS(List), ADDRESSES(List) |
-| `topology.mpls_lfib` ✅ | 标签转发表项 | ★FEC ★LOCAL_LABEL ★OUT_LABEL, INTERFACE, NEXTHOP, VRF, PROTOCOL, BYTES |
-| `topology.evpn_instances` ✅ | EVPN 实例（IOS × VLAN） | ★INSTANCE, SERVICE, RD, IMPORT_RT(List), EXPORT_RT(List), INSTANCE_STATE, ENCAPSULATION, VLAN_ID, STATE, VNI, L3_VNI, VTEP_IP, VRF, GATEWAY_INTERFACE, CORE_INTERFACE, ACCESS_INTERFACE(List), SERVICE_INSTANCE(List), PEER(List) |
-| `topology.evpn_peers` ✅ | 每 VNI 的远端 VTEP | ★VNI ★PEER, TYPE, STATE, INSTANCE, RD, INTERFACE, ROUTER_MAC, EVNI, FLAGS, UPTIME, TUNNEL_ADDRESS, ENCAPSULATION |
-| `topology.vxlan_vnis` ✅ | VNI 绑定 / VSI | ★VNI, INSTANCE, L3_VNI, INTERFACE, MULTICAST_GROUP, STATE, MODE, SEGMENT_TYPE, SEGMENT, CONFIG, VRF, GATEWAY_INTERFACE, TUNNEL(List), TUNNEL_STATE(List), ACCESS_INTERFACE(List), ACCESS_STATE(List) |
-| `topology.tunnel_interfaces` ✅ | 隧道接口（Comware） | ★INTERFACE, STATE, PROTOCOL_STATE, SOURCE, DESTINATION, MODE |
-| `topology.evpn_mac` ✅ | EVPN MAC 路由 | ★MAC_ADDRESS ★INSTANCE, VLAN_ID, ESI, ETHER_TAG, NEXTHOP_VTEP, NEXTHOP_INTERFACE, SERVICE_INSTANCE, FLAGS, LOCAL_FLAG, LINK, ENCAPSULATION |
-
-✅ 表示已接入（IOS/IOS-XE 与 Comware 7）。
+| 检查项 | 名称 | Value（★ 为键/必填） | 已发布的采集实现 |
+|---|---|---|---|
+| `topology.arp` | ARP 表项 | ★IP_ADDRESS, ★MAC_ADDRESS, INTERFACE, VLAN_ID, AGE, TYPE | ios: `show ip arp`<br>comware: `display arp` |
+| `topology.routes` | 路由表（每个下一跳一行） | ★NETWORK, ★PREFIX_LENGTH, ★PROTOCOL, TYPE, DISTANCE, METRIC, NEXTHOP_IP, NEXTHOP_IF, NEXTHOP_VRF, VRF, UPTIME, FLAG | ios: `show ip route`<br>comware: `display ip routing-table` |
+| `topology.vrf_detail` | VRF/VPN 实例详情（每地址族一行） | ★VRF, ★ADDRESS_FAMILY, RD, INTERFACES, IMPORT_RT, EXPORT_RT | ios: `show vrf detail`<br>comware: `display ip vpn-instance instance-name {vrf}` |
+| `topology.evpn_peers` | EVPN/VXLAN 每 VNI 的远端 VTEP | ★VNI, ★PEER, TYPE, STATE, INSTANCE, RD, INTERFACE, ROUTER_MAC, EVNI, FLAGS, UPTIME, TUNNEL_ADDRESS, ENCAPSULATION | ios: `show nve peers`<br>comware: `display evpn auto-discovery imet` |
+| `topology.ldp_peers` | LDP 会话 | ★PEER_LSR_ID, LABEL_SPACE, STATE, ROLE, LOCAL_LSR_ID, LOCAL_LABEL_SPACE, DISCOVERY_INTERFACE, DISCOVERY_ADDRESS, ADDRESSES | ios: `show mpls ldp neighbor`<br>comware: `display mpls ldp peer` |
+| `topology.mpls_lfib` | MPLS 标签转发表 | ★FEC, ★LOCAL_LABEL, ★OUT_LABEL, INTERFACE, NEXTHOP, VRF, PROTOCOL, BYTES | ios: `show mpls forwarding-table`<br>comware: `display mpls lsp` |
+| `topology.evpn_instances` | EVPN 实例（IOS 每实例每 VLAN 一行） | ★INSTANCE, SERVICE, RD, IMPORT_RT, EXPORT_RT, INSTANCE_STATE, ENCAPSULATION, VLAN_ID, STATE, VNI, L3_VNI, VTEP_IP, VRF, GATEWAY_INTERFACE, CORE_INTERFACE, ACCESS_INTERFACE, SERVICE_INSTANCE, PEER | ios: `show l2vpn evpn evi detail`<br>comware: `display evpn instance verbose` |
+| `topology.vxlan_vnis` | VXLAN VNI 与 VSI | ★VNI, INSTANCE, L3_VNI, INTERFACE, MULTICAST_GROUP, STATE, MODE, SEGMENT_TYPE, SEGMENT, CONFIG, VRF, GATEWAY_INTERFACE, TUNNEL, TUNNEL_STATE, ACCESS_INTERFACE, ACCESS_STATE | ios: `show nve vni`<br>comware: `display l2vpn vsi verbose` |
+| `topology.tunnel_interfaces` | 隧道接口 | ★INTERFACE, STATE, PROTOCOL_STATE, SOURCE, DESTINATION, MODE | comware: `display interface tunnel` |
+| `topology.evpn_mac` | EVPN MAC 路由 | ★MAC_ADDRESS, ★INSTANCE, VLAN_ID, ESI, ETHER_TAG, NEXTHOP_VTEP, NEXTHOP_INTERFACE, SERVICE_INSTANCE, FLAGS, LOCAL_FLAG, LINK, ENCAPSULATION | ios: `show l2vpn evpn mac`<br>comware: `display evpn route mac` |
+| `topology.vrfs` | VRF/VPN 实例列表 | ★NAME, RD, PROTOCOLS, INTERFACES, CREATED | ios: `show vrf`<br>comware: `display ip vpn-instance` |
+| `topology.bgp_ipv4_peers` | BGP IPv4 单播邻居 | ★PEER, ★PEER_AS, STATE, PREFIXES_RECEIVED, UP_DOWN, ROUTER_ID, LOCAL_AS | ios: `show ip bgp summary`<br>comware: `display bgp peer ipv4` |
+| `topology.bgp_vpnv4_peers` | BGP VPNv4 邻居 | ★PEER, ★PEER_AS, STATE, PREFIXES_RECEIVED, UP_DOWN, ROUTER_ID, LOCAL_AS | ios: `show bgp vpnv4 unicast all summary`<br>comware: `display bgp peer vpnv4` |
+| `topology.bgp_evpn_peers` | BGP L2VPN EVPN 邻居 | ★PEER, ★PEER_AS, STATE, PREFIXES_RECEIVED, UP_DOWN, ROUTER_ID, LOCAL_AS | ios: `show bgp l2vpn evpn summary`<br>comware: `display bgp peer l2vpn evpn` |
+| `topology.ospf_neighbors` | OSPF 邻居 | ★NEIGHBOR_ID, ★INTERFACE, ADDRESS, PRIORITY, STATE, ROLE, DEAD_TIME, PROCESS, ROUTER_ID, AREA | ios: `show ip ospf neighbor`<br>comware: `display ospf peer` |
+| `topology.vrrp` | VRRP 组 | ★INTERFACE, ★VRID, STATE, PRIORITY, VIRTUAL_IP, MASTER_IP | ios: `show vrrp`<br>comware: `display vrrp verbose` |
+| `topology.lag` | 链路聚合组与成员 | ★INTERFACE, GROUP, BUNDLE_FLAGS, PROTOCOL, MEMBERS, MEMBER_FLAGS, BUNDLED | ios: `show etherchannel summary`<br>comware: `display link-aggregation verbose` |
+| `topology.stp_ports` | 生成树端口角色与状态 | ★INSTANCE, ★INTERFACE, VLAN_ID, MSTI, PROTOCOL, ROLE, STATE, COST, PORT_ID, TYPE, ROOT_PRIORITY, ROOT_ADDRESS, ROOT_PORT, IS_ROOT, BRIDGE_PRIORITY, BRIDGE_ADDRESS | ios: `show spanning-tree` |
+| `topology.interfaces` | 接口状态 | ★INTERFACE, ★LINK, PROTOCOL, DESCRIPTION, MODE, PRIMARY_IP, SPEED, DUPLEX, TYPE, PVID | ios: `show interfaces description`<br>comware: `display interface brief` |
+| `topology.ip_interfaces` | 接口地址 | ★INTERFACE, ADDRESS, ADDRESSES, VRF, STATUS, PHYSICAL, PROTOCOL, DESCRIPTION | ios: `show ip interface`<br>comware: `display ip interface brief` |
+| `topology.mac` | MAC 地址表项 | ★MAC_ADDRESS, ★VLAN_ID, PORT, TYPE, STATE, AGING | ios: `show mac address-table`<br>comware: `display mac-address` |
+| `topology.vlans` | VLAN 与端口列 | ★VLAN_ID, NAME, STATUS, PORTS | ios: `show vlan brief`<br>comware: `display vlan brief` |
+| `topology.lldp_neighbors` | LLDP 邻居 | ★LOCAL_INTERFACE, ★CHASSIS_ID, ★PORT_ID, CHASSIS_ID_TYPE, PORT_ID_TYPE, NEIGHBOR_NAME, SYSTEM_DESCRIPTION, MGMT_ADDRESS | ios: `show lldp neighbors detail`<br>comware: `display lldp neighbor-information verbose` |
+| `topology.device_version` | 设备版本与身份 | ★OS_VERSION, MODEL, SERIAL, HOSTNAME, IMAGE_NAME, IMAGE_VERSION, UNIX_PROCESSOR, BOOT_IMAGE, BOOT_IMAGE_VERSION, SYSTEM_IMAGE, SYSTEM_IMAGE_VERSION, VIRTUAL_CPUS, VIRTIO_NIC | ios: `show version`<br>comware: `display version` |
+| `topology.lldp_local` | 本机 LLDP 身份与端口管理地址 | ★CHASSIS_ID, SYSTEM_NAME, SYSTEM_DESCRIPTION, SERIAL, MANUFACTURER, MODEL, LOCAL_INTERFACE, MGMT_ADDRESS | comware: `display lldp local-information` |
+| `topology.trunks` | Trunk 端口的四张 VLAN 表 | ★PORT, MODE, ENCAPSULATION, STATUS, NATIVE_VLAN, ALLOWED_VLANS, ACTIVE_VLANS, FORWARDING_VLANS, BAD_ROW | ios: `show interfaces trunk`<br>comware: `display port trunk` |
+| `topology.switchports` | 二层端口模式与 VLAN | ★NAME, SWITCHPORT, ADMIN_MODE, OPER_MODE, ADMIN_ENCAPSULATION, OPER_ENCAPSULATION, ACCESS_VLAN, NATIVE_VLAN, ADMIN_NATIVE_TAGGING, OPER_NATIVE_TAGGING, TRUNK_VLANS, BAD_FIELD | ios: `show interfaces switchport` |
+| `topology.ospf_interfaces` | OSPF 接口开销（简表，按行） | ★ADDRESS, TABLE, INTERFACE, PROCESS_ID, ROUTER_ID, LABEL, AREA, TYPE, STATE, COST, PRIORITY, DR, BDR, NEIGHBORS, BAD_ROW | ios: `show ip ospf interface brief`<br>comware: `display ospf interface` |
+| `topology.ospf_process` | OSPF 进程与接口映射（按行） | ★PROCESS_ID, ROUTER_ID, AREA, VRF_EVIDENCE, CONFIRMED_ROUTER_ID, ADDRESS, INTERFACE, COST, STATE | ios: `show ip ospf`<br>comware: `display ospf` |
 
 说明：
 
@@ -133,20 +131,18 @@ commands(check_item_ids) -> [{implementation_id, platforms, command, scoped_comm
 
 ## 6. 进度（2026-10-04）
 
-- **切片 1**：`topology.arp`、`topology.routes`、`topology.vrf_detail`、`topology.evpn_peers`。
-- **切片 2**：`topology.ldp_peers`、`topology.mpls_lfib`、`topology.evpn_instances`、`topology.vxlan_vnis`、`topology.tunnel_interfaces`、`topology.evpn_mac`、`topology.vrfs`。
-- **切片 3**：`topology.bgp_ipv4_peers`、`topology.bgp_vpnv4_peers`、`topology.bgp_evpn_peers`（两家各一份模板，三项共用）。表头里的本端标识与 AS 由拓扑汇总为设备事实（`HEADERS`）。
-- 以上在 IOS/IOS-XE 与 Comware 7 上经规则治理采集和解析：
-  - 采集档案里这些能力只写 `parser: rules`，命令由已发布的实现给出；
-  - 每项迁移前都用全部实验网夹具比对过新旧结果，事实完全一致后才删除对应的手写解析器和模板层资产；
-  - NX-OS 等其余家族暂时仍走原通用解析器（例如 NX-OS 的 VRF 列表与 ARP）。
-- **拓扑侧的消费规则**（`collectors/rules.py`）：
+- **已完成：IOS/IOS-XE 与 Comware 7 的全部拓扑事实都经规则治理采集和解析**（上表 29 项；`inventory`、`irf` 两项本就没有解析器）。
+  - 采集档案里这些能力只写 `parser: rules`；命令、按 VRF 的命令形式由已发布的实现给出，并仍须通过拓扑的 L1 只读校验，也只有这样的命令才进入任务授权。`version` 例外：它的命令就是身份识别探测命令，保留在档案中。
+  - 每项迁移前都用全部实验网夹具（必要时加上原测试中的全部变异输入）比对新旧结果，事实一致后才删除对应的手写解析器。唯一的有意差异：LLDP 邻居的系统描述现在完整读出（原解析器在 IOS 上为空、在 "Technical Support: ..." 这类行处截断）。
+  - 拓扑只经 `src.apps.rule_governance.runtime` 使用规则治理；对 `src.core.parser.*` 的引用和固定 NTC 模板层已移除。
+- **拓扑侧的消费规则**（`collectors/rules.py`、`collectors/rules_tables.py`）：
   - 按行使用的表剔除坏行；路由表整表使用（`WHOLE_TABLES`）；
-  - VRF 列表汇总为一个事实（`SUMMARIES`）；
-  - 一张表里同一实体只能出现一次（`UNIQUE`：VRF、LDP 对端、隧道接口），重复即剔除并记 `duplicate_entry`；
-  - 输出被截断且一行未读到时为 failed，不把它当成空表。
+  - VRF 列表、版本、本机 LLDP 汇总为设备事实（`SUMMARIES`），BGP/OSPF 邻居表头、生成树实例头另成汇总（`HEADERS`），VLAN 的端口列拆成 `summary.members`（`SPLITS`）；
+  - 一张表里同一实体只能出现一次（`UNIQUE`），重复的各条都剔除并记 `duplicate_entry`；
+  - Trunk、二层口、OSPF 接口与进程是带否决语义的整表：模板把每个有意义的行变成带类型的行，`rules_tables.py` 按输出顺序重放并施加原有的局部/全局否决；
+  - 模板的 `Error "..."` 消息作为原因码出现在告警里（如 `conflicting_local_identity` 触发本机身份否决）；
+  - 输出被截断且一行未读到时为 failed（Trunk/二层口为带全局否决的 partial），不把它当成空表；输出末尾仅由 Filldown 带出的行不算一行。
 - **待做**：
-  - 其余事实逐项迁移：OSPF、接口、IP、LLDP、设备版本、MAC、VLAN、Trunk、二层口、聚合、生成树、VRRP；
-  - 拓扑去掉对 `src.core.parser.*` 转发的引用（模板层 `tiers/template.py`、`parse.py` 的输出分类）；
-  - 系统模板登记到规则治理的模板库（数据库），让页面可见、可评审；目前模板文件由资产清单钉住摘要；
-  - 巡检经同一接口消费，另开卡。
+  - 系统模板登记到规则治理的模板库（数据库），让页面可见、可评审；目前模板文件由资产清单按 sha256 钉住；
+  - NX-OS 等家族在有实机样本后补实现，届时删掉对应的通用解析器；
+  - 巡检经同一接口消费，另开卡（已在独立会话进行）。
