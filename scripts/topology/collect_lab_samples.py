@@ -41,7 +41,7 @@ COMMANDS = [
     ("lldp_list", "display lldp neighbor-information list"),
     ("interfaces", "display interface brief"),
     ("ip_interfaces", "display ip interface brief"),
-    ("arp", "display arp"),
+    ("arp", "display arp verbose"),  # per entry: VPN instance, VSI and its interface, aging unit
     ("mac", "display mac-address"),
     ("vlan", "display vlan brief"),
     ("trunk", "display port trunk"),
