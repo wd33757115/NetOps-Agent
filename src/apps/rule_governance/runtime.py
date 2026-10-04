@@ -35,6 +35,7 @@ __all__ = [
     "ParserRuntimeBundle",
     "ParserTemplateRef",
     "ParserRuntimeRepository",
+    "classify_output",
 ]
 
 
@@ -381,3 +382,23 @@ def _selection(check_item, implementation) -> Selection:
         output_quality_policy=dict(implementation.output_quality_policy or {}),
         template_sha256=digest,
     )
+
+
+def classify_output(
+    raw_text: str, *, command: str = "", unsupported_patterns: Iterable[str] = ()
+) -> tuple[str, str]:
+    """(status, reason) of a command output before any template runs.
+
+    status: unsupported_command, command_error, truncated, paged, valid_empty,
+    empty_unverified or data. ``unsupported_patterns`` add to the default ones.
+    """
+    from types import SimpleNamespace
+
+    from .backend.parser.output_classifier import UNSUPPORTED_PATTERNS, OutputClassifier
+
+    classified = OutputClassifier().classify(
+        raw_text,
+        decision=SimpleNamespace(canonical_command=command, empty_semantics={}),
+        profile={"unsupported_patterns": [*UNSUPPORTED_PATTERNS, *unsupported_patterns]},
+    )
+    return classified.status, classified.reason

@@ -261,9 +261,7 @@ def test_conflicting_router_id_vetoes_comware_process():
 )
 def test_summary_sentinel_survives_public_parse_as_partial(capability, parser, sample, family):
     module = importlib.import_module("src.apps.topology.backend.collectors.parse")
-    parsed = module.parse(
-        {"os_family": family}, capability, "Unknown OSPF syntax\n" + sample, use_templates=False
-    )
+    parsed = module.parse({"os_family": family}, capability, "Unknown OSPF syntax\n" + sample)
     assert parsed.tier == "rules"
     assert parsed.status == "partial" and parsed.summary["invalid_structure"]
     assert parsed.fact_summary()["invalid_structure"]
@@ -272,7 +270,7 @@ def test_summary_sentinel_survives_public_parse_as_partial(capability, parser, s
 def test_entirely_bad_known_interface_survives_public_parse_as_partial():
     module = importlib.import_module("src.apps.topology.backend.collectors.parse")
     sample = DIST_BRIEF.replace("1     DR", "bad     DR")
-    parsed = module.parse({"os_family": "ios"}, "ospf_interfaces", sample, use_templates=False)
+    parsed = module.parse({"os_family": "ios"}, "ospf_interfaces", sample)
     assert parsed.status == "partial" and not parsed.summary.get("interfaces")
     assert parsed.summary["invalid_interfaces"] == [
         {"process_id": "1", "address": "172.16.20.2", "ifname": "Vlan20"}
@@ -290,14 +288,11 @@ def test_empty_incomplete_transport_is_not_verified_and_unsupported_is_not_empty
     capability, parser
 ):
     module = importlib.import_module("src.apps.topology.backend.collectors.parse")
-    incomplete = module.parse(
-        {"os_family": "ios"}, capability, "", complete=False, use_templates=False
-    )
+    incomplete = module.parse({"os_family": "ios"}, capability, "", complete=False)
     unsupported = module.parse(
         {"os_family": "ios"},
         capability,
         "% Invalid input detected at '^' marker.\n",
-        use_templates=False,
     )
     assert incomplete.status == "failed" and not incomplete.summary
     assert unsupported.status == "unsupported" and not unsupported.summary

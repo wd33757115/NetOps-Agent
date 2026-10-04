@@ -1,10 +1,8 @@
-"""Bounded, deterministic parsing entry point; subsequent tiers plug in here."""
+"""Bounded, deterministic parsing entry point: rule-governance check items, then the
+generic tier for the families they do not cover yet."""
 
 import re
 from dataclasses import dataclass, field
-from types import SimpleNamespace
-
-from src.core.parser.output_classifier import UNSUPPORTED_PATTERNS, OutputClassifier
 
 from .normalize import parser_text
 from .tiers import (
@@ -84,6 +82,8 @@ def parse_generic(identity, capability, raw, *, complete=True, command=None, pro
     No route regex fallback, no profile/template lookup in this tier. Unknown
     syntax fails visibly and can be handed to later parsing tiers by the caller.
     """
+    from src.apps.rule_governance.runtime import classify_output
+
     result = ParseResult(parser_ref=f"generic:{capability}:v1")
     if not isinstance(raw, str) or len(raw) > MAX_BYTES or len(raw.encode("utf-8")) > MAX_BYTES:
         result.warnings.append("input_invalid_or_over_limit")
@@ -92,22 +92,13 @@ def parse_generic(identity, capability, raw, *, complete=True, command=None, pro
     # Raw terminal captures may retain framing. Only remove exact values supplied
     # by the collector, at the edges; leave blank lines to preserve evidence offsets.
     text = framed_text(raw, command, prompt)
-    decision = SimpleNamespace(canonical_command="", empty_semantics={})
-    classified = (
-        OutputClassifier()
-        .classify(
-            raw,
-            decision=decision,
-            profile={
-                "unsupported_patterns": [
-                    *UNSUPPORTED_PATTERNS,
-                    r"(?m)^\s*%\s*(?:Too many parameters|Wrong parameter)\b",
-                    r"(?m)^\s*The operation is not supported on the specified "
-                    r"slot or subslot\.\s*$",
-                ],
-            },
-        )
-        .status
+    # Output classification is rule governance's, through its public contract.
+    classified, _ = classify_output(
+        raw,
+        unsupported_patterns=(
+            r"(?m)^\s*%\s*(?:Too many parameters|Wrong parameter)\b",
+            r"(?m)^\s*The operation is not supported on the specified slot or subslot\.\s*$",
+        ),
     )
     if classified in {"unsupported_command", "command_error"}:
         result.status = "unsupported" if classified == "unsupported_command" else "failed"
@@ -156,21 +147,16 @@ def parse_generic(identity, capability, raw, *, complete=True, command=None, pro
     return result
 
 
-def parse(
-    identity,
-    capability,
-    raw,
-    *,
-    complete=True,
-    command=None,
-    prompt=None,
-    use_templates=True,
-    model=None,
-):
+def parse(identity, capability, raw, *, complete=True, command=None, prompt=None, model=None):
+    """The facts of one command output.
+
+    Rule governance publishes how a check-item capability is parsed (rules.py), with
+    model-first template selection. The generic tier still serves the families it does
+    not cover yet (NX-OS and other platforms).
+    """
     from . import rules
 
     if rules.served(identity, capability):
-        # Rule governance publishes how this fact is collected and parsed.
         if not isinstance(raw, str) or len(raw.encode("utf-8")) > MAX_BYTES:
             return ParseResult(tier="rules", warnings=["input_invalid_or_over_limit"])
         return rules.parse(
@@ -181,24 +167,6 @@ def parse(
             complete=complete and not parser_text(raw).had_paging,
             model=model,
         )
-    result = parse_generic(
+    return parse_generic(
         identity, capability, raw, complete=complete, command=command, prompt=prompt
-    )
-    # Classification and transport bounds always precede template execution.
-    if (
-        not use_templates
-        or result.status == "unsupported"
-        or any(w in result.warnings for w in {"input_invalid_or_over_limit", "command_error"})
-        or (result.status == "complete" and not result.records and not result.summary)
-    ):
-        return result
-    from .tiers.template import apply
-
-    return apply(
-        identity,
-        capability,
-        framed_text(raw, command, prompt),
-        result,
-        complete=complete,
-        model=model,
     )

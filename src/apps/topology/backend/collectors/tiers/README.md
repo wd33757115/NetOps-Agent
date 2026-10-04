@@ -1,9 +1,18 @@
 # 分层解析
 
+默认入口 `collectors.parse.parse(...)` 先看设备系统家族：
+
+- **IOS/IOS-XE 与 Comware 7**：所有采集能力都经规则治理的系统基础检查项解析（`collectors/rules.py`，
+  清单见 `docs/topology-rule-consumption.md`）。命令、按 VRF 的命令形式和 TextFSM 模板都由已发布的
+  采集实现给出，按型号优先、系统家族兜底选择。拓扑只把同名 Value 投影成事实；带否决语义的整表
+  （Trunk、二层口、OSPF）由 `collectors/rules_tables.py` 组装。
+- **其余家族**（NX-OS 等）：仍走本目录的通用解析层，直到规则治理有经过实机验证的实现。
+
+## 通用解析层
+
 `collectors.parse.parse_generic(identity, capability, raw, complete=True)` 是无 I/O 通用解析器。
-不要求型号档案；`identity.os_family` 用于已知接口别名规范化。路由没有通用正则兜底。
-默认入口 `parse(...)` 先做分类及通用回放，再优先选取校验通过的受信模板结果；
-该入口只读加载安装目录中的模板，`use_templates=False` 可单独运行通用层。
+不要求型号档案；`identity.os_family` 用于已知接口别名规范化。路由没有通用正则兜底。输出分类
+（不支持的命令、错误、分页、截断）经规则治理的公开契约 `classify_output` 完成。
 
 结果包括 typed `records`、身份类 `summary`、`status`、`tier=generic`、
 `confidence=medium`、候选/拒绝数量、告警及每行原值。`fact_summary()` 将解析元数据放入
@@ -19,20 +28,8 @@ ARP `Aging` 未标单位时只留在 raw，不猜秒；接口 IP 无掩码不能
 bridge 表的 trunk/hybrid PVID 不冒充 access VLAN；oper down 不推断 admin down。
 LLDP 完整键同义词在 `lldp_aliases.yaml`，管理地址的 type/interface ID/OID 不属于地址。
 
-已验证：两台 H3C VSR1000 实际样本，七项能力 raw/clean 重放与事实库往返。
-`tests/fixtures/topology/synthetic/generic-styles.json` 中五种 CLI 风格均为明确的合成样本。
-其他型号或厂商未进行实机兼容性验收。旧线上 LLDP 解析器保留，现场多能力接线按后续卡实施。
+`tests/fixtures/topology/synthetic/generic-styles.json` 中五种 CLI 风格均为明确的合成样本，
+用于检查通用层的形状规则；NX-OS 等其他型号或厂商未进行实机兼容性验收。
 
-## 固定模板层
-
-`template.py` 固定 NTC 9.1.0 / TextFSM 2.1.0 和逐文件 SHA256；精确型号匹配时优先只读
-使用已有仓库 ARP 模板。本机可选模板不存在、发生修改或回放失败时回退 NTC/通用层。
-不修改模板库及原巡检；不执行模型上传的模板。
-
-ARP/MAC 必须同通用事实一致；Comware 路由校验数量、表头、完整行和规范化字段，合并
-ECMP 并保留前缀/下一跳行号。VLAN 名从原表列边界校验提取，修复上游模板对空格名称
-的截短。未知行或残缺不能变成完整集。`tier=template, confidence=high` 表示本次解析
-经校验，并非该厂商所有型号已实机支持；硬件验证另见 profile.verified。
-
-来源元数据包括模板引用/摘要和解析输入中的行号；统一通过 `fact_summary()` 存入现有
-事实集。支持矩阵与设计取舍见 `docs/network-digital-twin-open-source-reference.md`。
+原先固定 NTC 模板的"模板层"已移除：它的结果必须与通用层完全一致，按型号选模板现由规则
+治理负责。
