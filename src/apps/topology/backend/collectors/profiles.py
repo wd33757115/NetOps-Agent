@@ -120,18 +120,13 @@ class StrictModel(BaseModel):
 
 class CapabilitySpec(StrictModel):
     # A capability parsed by a rule-governance check item ("rules") runs the command its
-    # published implementation names; the profile then gives no command of its own.
+    # published implementation names; the profile then gives no command of its own (the
+    # version command is the identification probe and stays, see Profile.safe).
     command: str | None = Field(default=None, min_length=1, max_length=256)
     timeout: int = Field(default=30, ge=1, le=300)
     parser: str | None = (
         None  # Explicitly pending template/structured parser, not fabricated support.
     )
-
-    @model_validator(mode="after")
-    def one_command_source(self):
-        if (self.command is None) != (self.parser == "rules"):
-            raise ValueError("a command comes from the profile or from rule governance")
-        return self
 
 
 class SessionSpec(StrictModel):
@@ -188,6 +183,8 @@ class Profile(StrictModel):
             raise ValueError("profile version command must match the identification probe")
         seen = set()
         for cap, spec in self.capabilities.items():
+            if cap != "version" and (spec.command is None) != (spec.parser == "rules"):
+                raise ValueError("a command comes from the profile or from rule governance")
             if spec.command is not None:
                 decision = classify(self.os_family, spec.command)
                 if (

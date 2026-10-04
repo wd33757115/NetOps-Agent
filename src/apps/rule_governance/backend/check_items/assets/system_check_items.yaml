@@ -352,6 +352,38 @@ check_items:
       NEIGHBOR_NAME: [text, false, 邻居系统名]
       SYSTEM_DESCRIPTION: [text, false, 邻居系统描述（按行）]
       MGMT_ADDRESS: [text, false, 邻居管理地址]
+  topology.device_version:
+    name: 拓扑发现：设备版本与身份
+    entity_type: device
+    keys: [OS_VERSION]
+    values:
+      OS_VERSION: [text, true, 软件版本原文]
+      MODEL: [text, false, 型号]
+      SERIAL: [text, false, 序列号]
+      HOSTNAME: [text, false, 主机名（IOS）]
+      IMAGE_NAME: [text, false, IOS 镜像名]
+      IMAGE_VERSION: [text, false, IOS 镜像版本]
+      UNIX_PROCESSOR: [text, false, IOS 以 Linux 进程运行时的处理器]
+      BOOT_IMAGE: [text, false, Comware 启动镜像文件]
+      BOOT_IMAGE_VERSION: [text, false, Comware 启动镜像版本]
+      SYSTEM_IMAGE: [text, false, Comware 系统镜像文件]
+      SYSTEM_IMAGE_VERSION: [text, false, Comware 系统镜像版本]
+      VIRTUAL_CPUS: [text, false, 虚拟化平台的 vCPU 数]
+      VIRTIO_NIC: [text, false, virtio 网卡证据]
+
+  topology.lldp_local:
+    name: 拓扑发现：本机 LLDP 身份与端口管理地址
+    entity_type: lldp_local
+    keys: [CHASSIS_ID]
+    values:
+      CHASSIS_ID: [text, true, 本机机箱 ID 原文]
+      SYSTEM_NAME: [text, false, 本机系统名]
+      SYSTEM_DESCRIPTION: [text, false, 本机系统描述（按行）]
+      SERIAL: [text, false, MED 序列号]
+      MANUFACTURER: [text, false, MED 厂商名]
+      MODEL: [text, false, MED 型号]
+      LOCAL_INTERFACE: [text, false, 通告管理地址的端口]
+      MGMT_ADDRESS: [text, false, 端口通告的管理地址]
 
 implementations:
   - check_item: topology.arp
@@ -646,6 +678,24 @@ implementations:
     template: H3C/Comware7/display_lldp_neighbor-information_verbose__topology-1.0.0.textfsm
     sha256: c653c75fe7208f217b7d1d4e9b31b42826aa5fc61d1f9b0321746a4c6ec2508f
     valid_empty: ['\A\s*No (LLDP )?neighbors?( found)?\.?\s*\Z']
+  - check_item: topology.device_version
+    platform: ios
+    command: show version
+    template: Cisco/IOS/show_version__topology-1.0.0.textfsm
+    sha256: 78f6e85a9089485fa0c458af607e2c382dd702547f2cc991c3376c0c0db8491c
+    required: ['\bIOS\b.*\bVersion\s']
+  - check_item: topology.device_version
+    platform: comware
+    command: display version
+    template: H3C/Comware7/display_version__topology-1.0.0.textfsm
+    sha256: 80ed5f69c2c4b65b60a90f8daabf93cdd17aff277b9c6adaebb0c8ce1927f3f5
+    required: ['\bComware\b.*\bVersion\s']
+  - check_item: topology.lldp_local
+    platform: comware
+    command: display lldp local-information
+    template: H3C/Comware7/display_lldp_local-information__topology-1.0.0.textfsm
+    sha256: c2057ea05758209236d2c2c525996dfe68a526066b91bf243a4d65040720df46
+    required: ['^\s*Chassis ID\s*:']
 
 platforms:
   ios: {vendor: Cisco, platforms: [ios, iosxe], family: IOS}

@@ -10,8 +10,8 @@ session:
   max_output_bytes: 4194304
 budgets: {fast: 120, standard: 300, full: 600}
 capabilities:
-  version: {command: display version, parser: generic_version}
-  lldp_local: {command: display lldp local-information, parser: generic_lldp_local}
+  version: {command: display version, parser: rules}
+  lldp_local: {parser: rules}
   lldp: {parser: rules}
   interfaces: {parser: rules}
   inventory: {command: display device manuinfo, parser: null}

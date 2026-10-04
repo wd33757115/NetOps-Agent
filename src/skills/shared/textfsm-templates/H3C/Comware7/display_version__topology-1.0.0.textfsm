@@ -1,0 +1,25 @@
+Value OS_VERSION (.+?)
+Value MODEL (\S+)
+Value SERIAL (\S+)
+Value BOOT_IMAGE ([^/\s]+)
+Value BOOT_IMAGE_VERSION (.+?)
+Value SYSTEM_IMAGE ([^/\s]+)
+Value SYSTEM_IMAGE_VERSION (.+?)
+Value VIRTUAL_CPUS (\d+)
+Value VIRTIO_NIC (VNIC-VIRTIO)
+
+# The device identity lines of "display version" (campus-wan, vpn-fabric and VSR labs,
+# Comware 7.1); one record. The running boot and system image files, and the hypervisor
+# evidence of a virtual device (vCPUs, virtio NICs). Other lines carry nothing modeled.
+Start
+  ^.*?\bComware\b.*?\bVersion\s+${OS_VERSION}\s*$$
+  ^\s*(?:H3C|HPE|HP)\s+${MODEL}\s+uptime is\b.*$$
+  ^\s*(?:Model(?: name| number)?|Device model)\s*[:=]\s*${MODEL}\s*$$
+  ^\s*(?:Serial(?: number)?|System serial number)\s*[:=]?\s+${SERIAL}\s*$$
+  ^\s*Boot image:\s*(?:\S+?[:/])*${BOOT_IMAGE}\s*$$
+  ^\s*Boot image version:\s*${BOOT_IMAGE_VERSION}\s*$$
+  ^\s*System image:\s*(?:\S+?[:/])*${SYSTEM_IMAGE}\s*$$
+  ^\s*System image version:\s*${SYSTEM_IMAGE_VERSION}\s*$$
+  ^.*\bvCPUs:\s*Total\s+${VIRTUAL_CPUS}\b.*$$
+  ^.*\b${VIRTIO_NIC}\b.*$$
+  ^.*$$

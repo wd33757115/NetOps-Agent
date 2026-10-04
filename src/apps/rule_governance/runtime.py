@@ -218,12 +218,16 @@ class CheckItemSelectionReader:
         def values():
             return ["" if value.value is None else value.value for value in fsm.values]
 
-        def take(number, before, *, read=True):
+        def take(number, before, *, read=True, end=False):
             """Give each emitted row the lines that assigned its Values.
 
-            ``read``: the line was read (not rejected, not the end of the output).
+            ``read``: the line was read (not rejected, not the end of the output). At the
+            ``end``, a row no line assigned anything to only carries Filldown Values over
+            from the rows before it; it is not a row of its own.
             """
             nonlocal pending, seen
+            if end and not pending and rows:
+                del emitted[seen:]
             new, assigned = emitted[seen:], read and values() != before
             # A row emitted when the next one starts ("Continue.Record") holds only what
             # was read before this line; the line's Values belong to the next row.
@@ -256,7 +260,7 @@ class CheckItemSelectionReader:
             fsm.ParseText("", eof=True)
         except textfsm.TextFSMError as exc:
             problems.append(f"template_rejected_end_of_output: {exc}")
-        take(len(text), before, read=False)
+        take(len(text), before, read=False, end=True)
         problems.extend(_policy_problems(selection, raw_text, rows))
         incomplete = classified.status in {"truncated", "paged"}
         if not (rejected or problems or incomplete):

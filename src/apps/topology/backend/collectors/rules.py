@@ -60,6 +60,8 @@ CHECK_ITEMS = {
     "mac": "topology.mac",
     "vlan": "topology.vlans",
     "lldp": "topology.lldp_neighbors",
+    "version": "topology.device_version",
+    "lldp_local": "topology.lldp_local",
 }
 # Families whose CLI output rule governance parses for the capabilities above.
 FAMILIES = frozenset({"ios", "iosxe", "comware"})
@@ -854,6 +856,79 @@ def _lldp_neighbor(row, family, lines, warnings):
     }
 
 
+VERSION_FIELDS = (
+    "MODEL",
+    "OS_VERSION",
+    "SERIAL",
+    "HOSTNAME",
+    "BOOT_IMAGE",
+    "BOOT_IMAGE_VERSION",
+    "SYSTEM_IMAGE",
+    "SYSTEM_IMAGE_VERSION",
+    "IMAGE_NAME",
+    "IMAGE_VERSION",
+    "VIRTUAL_CPUS",
+    "VIRTIO_NIC",
+    "UNIX_PROCESSOR",
+)
+
+
+def _version(row, family, lines, warnings):
+    """Identity candidates the output states; nothing is inferred from a hostname."""
+    return {field.lower(): row[field] for field in VERSION_FIELDS if row.get(field)}
+
+
+def _version_summary(rows):
+    return dict(rows[0]) if rows else {}
+
+
+def _lldp_local_row(row, family, lines, warnings):
+    record = {}
+    if row.get("CHASSIS_ID"):
+        try:
+            record["chassis_id"] = mac_address(row["CHASSIS_ID"])
+        except ValueError:
+            record["chassis_id"] = row["CHASSIS_ID"]
+    for key, field in (
+        ("hostname", "SYSTEM_NAME"),
+        ("serial", "SERIAL"),
+        ("vendor", "MANUFACTURER"),
+        ("model", "MODEL"),
+    ):
+        if row.get(field):
+            record[key] = row[field]
+    if description := "\n".join(text for text in row.get("SYSTEM_DESCRIPTION") or [] if text):
+        record["system_description"] = description
+    value = row.get("MGMT_ADDRESS")
+    if value and row.get("LOCAL_INTERFACE"):
+        try:
+            record["mgmt"] = {
+                "ifname": interface(row["LOCAL_INTERFACE"], family).name,
+                "address": ip_address(value),
+            }
+        except ValueError:
+            try:
+                # IEEE 802.1AB address subtype all802: a port without an IP advertises its
+                # MAC. Only IP management addresses are modeled.
+                mac_address(value)
+            except ValueError:
+                raise ValueError("invalid_local_management_address") from None
+    return record
+
+
+def _lldp_local_summary(rows):
+    """The device's own LLDP identity and the management address each port advertises."""
+    summary = {"management_addresses": []}
+    for row in rows:
+        for key, value in row.items():
+            if key == "mgmt":
+                if value not in summary["management_addresses"]:
+                    summary["management_addresses"].append(value)
+            else:
+                summary.setdefault(key, value)
+    return summary if summary.get("chassis_id") else {}
+
+
 def _vrf(row, family, lines, warnings):
     """A device-local VRF / VPN-instance name, never a global identity."""
     protocols = row.get("PROTOCOLS")
@@ -884,10 +959,16 @@ ROWS = {
     "mac": _mac_entry,
     "vlan": _vlan,
     "lldp": _lldp_neighbor,
+    "version": _version,
+    "lldp_local": _lldp_local_row,
 }
 MERGE = {"routes": _merge_routes, "vrf_detail": _merge_vrfs}
 # Capabilities whose rows form one summary fact (the VRF enumeration scopes collection).
-SUMMARIES = {"vrfs": lambda rows: {"instances": rows}}
+SUMMARIES = {
+    "vrfs": lambda rows: {"instances": rows},
+    "version": _version_summary,
+    "lldp_local": _lldp_local_summary,
+}
 # Capabilities whose records also carry a summary part: records -> summary (in place).
 SPLITS = {"vlan": _vlan_members}
 

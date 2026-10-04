@@ -1,0 +1,44 @@
+Value Filldown CHASSIS_ID (\S+)
+Value Filldown SYSTEM_NAME (.*?)
+Value Filldown,List SYSTEM_DESCRIPTION (.*?)
+Value Filldown SERIAL (\S+)
+Value Filldown MANUFACTURER (.*?)
+Value Filldown MODEL (.*?)
+Value Filldown LOCAL_INTERFACE (\S+)
+Value MGMT_ADDRESS (\S+)
+
+# The local LLDP identity (global section and MED inventory) and one record per
+# management address a port advertises (campus-wan, vpn-fabric and VSR labs, Comware
+# 7.1). Other "key : value" lines are not modeled.
+Start
+  ^Global LLDP local-information:\s*$$ -> Global
+  ^\s*$$
+  ^. -> Error "unrecognized display lldp local-information line"
+
+Global
+  ^\s*Chassis ID\s*:\s*${CHASSIS_ID}\s*$$ -> Identified
+  ^\s*[A-Za-z][\w ()/.,-]*?\s*:(\s.*)?$$
+  ^\s*$$
+  ^. -> Error "unrecognized global LLDP line"
+
+# After the chassis ID: a second one contradicts it and is refused (the reason
+# conflicting_local_identity vetoes the local identity downstream).
+Identified
+  ^\s*Chassis ID\s*: -> Error "conflicting local identity"
+  ^\s*System name\s*:\s*${SYSTEM_NAME}\s*$$
+  ^\s*System description\s*:\s*${SYSTEM_DESCRIPTION}\s*$$
+  ^\s{3,}${SYSTEM_DESCRIPTION}\s*$$
+  ^\s*SerialNum\s*:\s*${SERIAL}\s*$$
+  ^\s*Manufacturer name\s*:\s*${MANUFACTURER}\s*$$
+  ^\s*Model name\s*:\s*${MODEL}\s*$$
+  ^LLDP local-information of port \d+\s*\[${LOCAL_INTERFACE}\]:\s*$$ -> Port
+  ^\s*[A-Za-z][\w ()/.,-]*?\s*:(\s.*)?$$
+  ^\s*$$
+  ^. -> Error "unrecognized global LLDP line"
+
+Port
+  ^LLDP local-information of port \d+\s*\[${LOCAL_INTERFACE}\]:\s*$$
+  ^\s*Management address\s*:\s*${MGMT_ADDRESS}\s*$$ -> Record
+  ^\s*[A-Za-z][\w ()/.,-]*?\s*:(\s.*)?$$
+  ^\s*$$
+  ^. -> Error "unrecognized port LLDP line"

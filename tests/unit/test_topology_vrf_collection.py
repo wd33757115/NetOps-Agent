@@ -336,10 +336,11 @@ def test_conflicting_local_chassis_values_cannot_supply_a_strong_identity(with_c
     parsed = parse(
         {"os_family": "comware"},
         "lldp_local",
-        "Chassis ID : 00:11:22:33:44:01\nChassis ID : 00:11:22:33:44:02\n",
+        "Global LLDP local-information:\n"
+        " Chassis ID : 00:11:22:33:44:01\n Chassis ID : 00:11:22:33:44:02\n",
     )
-    assert parsed.status == "partial"
-    assert parsed.summary["chassis_id"] == "00:11:22:33:44:02"
+    assert parsed.status == "partial"  # the second chassis ID is refused, not chosen
+    assert parsed.summary["chassis_id"] == "00:11:22:33:44:01"
     observation = {
         "facts": {"lldp_local": parsed.summary},
         "fact_metadata": {"lldp_local": {"warnings": parsed.warnings}},

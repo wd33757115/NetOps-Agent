@@ -12,7 +12,6 @@ from .tiers import (
     generic_ifbrief,
     generic_ipif,
     generic_lldp,
-    generic_lldp_local,
     generic_mac,
     generic_ospf,
     generic_switchport,
@@ -24,7 +23,6 @@ from .tiers.common import audit_table, table_count
 
 PARSERS = {
     "lldp": generic_lldp.parse,
-    "lldp_local": generic_lldp_local.parse,
     "arp": generic_arp.parse,
     "mac": generic_mac.parse,
     "interfaces": generic_ifbrief.parse,
