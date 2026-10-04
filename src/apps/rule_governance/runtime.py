@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from contextlib import AbstractContextManager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from .backend.parser.identity import DeviceIdentity, DeviceIdentityResolver
@@ -95,6 +95,8 @@ class Selection:
     template_sha256: str = ""
     # The line by which a per-instance output names its instance (first group), if any.
     scope_header: str | None = None
+    # {Value: unit} for Values the device prints as bare numbers ("Age (min)").
+    units: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -386,6 +388,7 @@ def _selection(check_item, implementation) -> Selection:
         output_quality_policy=dict(implementation.output_quality_policy or {}),
         template_sha256=digest,
         scope_header=bound.get("scope_header"),
+        units=dict(bound.get("units") or {}),
     )
 
 

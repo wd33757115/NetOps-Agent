@@ -21,12 +21,8 @@ ALLOWED = {
     # #12: NX-OS still runs on the generic tier until rule governance serves it.
     "collectors/collect.py": {"nxos": 1},
     "collectors/tiers/generic_vrfs.py": {"nxos": 1},
-    # #2/#6: ARP entry type and aging unit.
-    "collectors/rules.py": {"comware": 1, "ios": 1, "iosxe": 1},
     # #3: OSPF interface table structure.
     "collectors/rules_tables.py": {"comware": 1},
-    # #1: Comware ARP instances inferred from bindings.
-    "model/overlay.py": {"comware": 1},
 }
 
 

@@ -13,7 +13,8 @@
 # device-local instance name the consumer fills in); a command that itself needs an
 # instance name carries {vrf} directly. scope_header is the line (first group: the name) by
 # which a per-VRF output names its instance; without it the consumer checks the output
-# against the device's interface bindings instead. valid_empty lists outputs that mean "none
+# against the device's interface bindings instead. units names the unit of a Value the
+# device prints as a bare number ({AGE: min}). valid_empty lists outputs that mean "none
 # configured" (BLANK: an empty output). required lists lines every data output has (a
 # table header); counts are totals the device prints ({pattern, of}: the pattern's first
 # group counts the rows read, or the distinct keys). An output missing a required line
@@ -465,6 +466,7 @@ implementations:
     platform: ios
     command: show ip arp
     scoped_command: show ip arp vrf {vrf}
+    units: {AGE: min}  # the "Age (min)" column prints bare numbers
     template: Cisco/IOS/show_ip_arp__topology-1.0.0.textfsm
     sha256: fc5f65adbd929552fadc05e9d65861e637557ed24f16f58b71b21f6c853b81f3
     valid_empty: [BLANK]

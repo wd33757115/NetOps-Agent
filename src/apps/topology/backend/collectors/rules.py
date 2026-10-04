@@ -209,6 +209,15 @@ def parse(identity, capability, raw, *, complete=True, model=None):
         return result
     projected = []
     for row, lines in zip(parsed.rows, parsed.lines):
+        # A bare number in a Value whose unit the implementation declares gets that unit.
+        row = {
+            **row,
+            **{
+                name: f"{row[name]} {unit}"
+                for name, unit in chosen.units.items()
+                if str(row.get(name) or "").isdigit()
+            },
+        }
         try:
             record = ROWS[capability](row, family, lines, result.warnings)
         except (KeyError, ValueError) as exc:
@@ -300,8 +309,6 @@ def _arp(row, family, lines, warnings):
     age = str(row.get("AGE") or "")
     if match := re.fullmatch(r"(\d+) (s|sec|min|h)", age):
         record["age_s"] = int(match.group(1)) * AGE_UNITS[match.group(2)]
-    elif family in {"ios", "iosxe"} and age.isdigit():
-        record["age_s"] = int(age) * 60  # IOS shows minutes ("Age (min)")
     return record
 
 

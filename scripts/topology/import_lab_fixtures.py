@@ -284,10 +284,8 @@ def prepare(source, secrets, lab=VSR):
             capability = entry["id"]
             if capability in {"paging", "width"}:
                 continue
-            if lab is VSR and capability not in wanted:
-                raise ValueError("unexpected or repeated capability")
             if capability not in wanted:
-                continue
+                continue  # the sampler reads more than any one lab keeps
             if capability in seen:
                 raise ValueError("unexpected or repeated capability")
             if not command_of(capability, entry["command"], lab.vrfs):
