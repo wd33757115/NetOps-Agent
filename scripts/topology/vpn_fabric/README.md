@@ -52,3 +52,20 @@ The steps are the same as campus-wan (`../campus_wan/README.md`), using `vpn_fab
 2. Run `lab.py type LEAF3` / `type PE2` only after the VSR prints "Line con0 is available" (lines typed during automatic configuration are lost). This lets the aux line log in as network-admin. Then run `lab.py push all`.
 3. The owner runs `lab.py account`, which creates the lab login on the 8 managed devices.
 4. Run `lab.py traffic`.
+
+## After a restart: re-bind LEAF2's L3VNI
+
+When the IOL images boot from saved config, `vlan configuration 920 / member vni 50020` is
+applied before `interface nve1` exists, so LEAF2's L3VNI is not bound to VRF BLUE. Symptoms:
+LEAF2 receives LEAF3's type-5 route for 192.168.20.0/24 (RT 65100:50020, Router MAC, VNI
+50020) but does not import it into BLUE, `show nve peers` is empty, and LEAF3 has no route
+to 192.168.10.0/24 or tunnel to LEAF2. BGP clears and a reload do not help. Re-applying the
+membership (no net config change) does:
+
+```text
+lab.py console LEAF2 "configure terminal" "interface nve1" "no member vni 50020 vrf BLUE" "member vni 50020 vrf BLUE" "exit" "vlan configuration 920" "no member vni 50020" "member vni 50020" "end"
+```
+
+Then check `show ip route vrf BLUE` on LEAF2 (B routes via Vlan920) and
+`display ip routing-table vpn-instance BLUE` on LEAF3. Start `lab.py traffic` before
+sampling: host ARP entries age out within hours.
