@@ -19,7 +19,7 @@ capabilities:
   arp: {parser: rules}
   mac: {parser: rules}
   vlan: {parser: rules}
-  trunk: {command: display port trunk, parser: generic_trunk}
+  trunk: {parser: rules}
   lag: {parser: rules}
   routes: {timeout: 300, parser: rules}
   vrfs: {parser: rules}

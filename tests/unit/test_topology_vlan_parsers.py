@@ -8,7 +8,7 @@ import pytest
 
 from src.apps.topology.backend.collectors.parse import framed_text
 from src.apps.topology.backend.collectors.parse import parse as parse_cli
-from src.apps.topology.backend.collectors.tiers import generic_switchport, generic_trunk
+from src.apps.topology.backend.collectors.rules_tables import vid_range
 from src.apps.topology.backend.facts.repository import FactInput, validate_records
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures/topology"
@@ -23,6 +23,16 @@ def source(device, capability, *, new=False, raw=False):
         .read_bytes()
         .decode("utf-8")
     )
+
+
+def trunks(text, family="ios"):
+    """Trunk tables are read through the rule-governance check item topology.trunks."""
+    return parse_cli({"os_family": family}, "trunk", text)
+
+
+def switchports(text):
+    """Switchport blocks are read through the check item topology.switchports."""
+    return parse_cli({"os_family": "ios"}, "switchport", text)
 
 
 def vlans(text, family="ios"):
@@ -149,8 +159,8 @@ def test_old_comware_access_vlan_members_are_real_observations(device, vid):
 
 @pytest.mark.parametrize("device", ["dist1", "dist2", "acc1", "acc2"])
 def test_campus_trunk_allowed_active_forwarding_sets_are_distinct(device):
-    parsed = generic_trunk.parse(source(device, "trunk"), "ios")
-    assert not parsed.rejected and not parsed.warnings
+    parsed = trunks(source(device, "trunk"))
+    assert not parsed.rejected_count and not parsed.warnings
     rows = port_rows(parsed)
     assert len(rows) == (2 if device == "acc1" else 3)
     for row in rows.values():
@@ -216,13 +226,13 @@ def test_vlan_member_with_an_unknown_or_non_bridge_interface_is_rejected():
 def test_trunk_missing_section_and_port_never_fabricate_the_missing_set():
     text = source("acc1", "trunk")
     missing_section = text.split("Port           Vlans in spanning tree", 1)[0]
-    parsed = generic_trunk.parse(missing_section, "ios")
-    assert parsed.rejected and parsed.summary == {"invalid_structure": True}
+    parsed = trunks(missing_section)
+    assert parsed.rejected_count and parsed.summary == {"invalid_structure": True}
     public = parse_cli({"os_family": "ios"}, "trunk", missing_section)
     assert public.status == "partial" and public.summary == {"invalid_structure": True}
     missing_port = text.replace("Et0/1          10\n", "")
-    parsed = generic_trunk.parse(missing_port, "ios")
-    assert parsed.rejected
+    parsed = trunks(missing_port)
+    assert parsed.rejected_count
     assert set(port_rows(parsed)) == {"Ethernet0/2"}
     assert parsed.summary["invalid_ports"] == ["Ethernet0/1"]
 
@@ -230,20 +240,21 @@ def test_trunk_missing_section_and_port_never_fabricate_the_missing_set():
 @pytest.mark.parametrize("bad", ["0", "4095", "20-10", "10,10", "10-20,15-30", "10,"])
 def test_invalid_trunk_vlan_set_drops_its_port(bad):
     text = source("acc1", "trunk").replace("Et0/1          10,20", f"Et0/1          {bad}", 1)
-    parsed = generic_trunk.parse(text, "ios")
-    assert parsed.rejected
+    parsed = trunks(text)
+    assert parsed.rejected_count
     assert "Ethernet0/1" not in port_rows(parsed)
     assert parsed.summary["invalid_ports"] == ["Ethernet0/1"]
 
 
 def test_range_normalization_and_explicit_empty_are_bounded():
-    assert generic_trunk.vid_range("20,10-11,12") == "10-12,20"
-    assert generic_trunk.vid_range("ALL") == "1-4094"
-    assert generic_trunk.vid_range("none") == ""
-    assert generic_trunk.parse("\n", "comware").empty_verified
-    nonempty = generic_trunk.parse("Unreviewed Comware trunk layout\n", "comware")
-    assert not nonempty.empty_verified and nonempty.summary == {"invalid_structure": True}
-    assert "trunk_format_not_verified" in nonempty.warnings
+    assert vid_range("20,10-11,12") == "10-12,20"
+    assert vid_range("ALL") == "1-4094"
+    assert vid_range("none") == ""
+    empty = trunks("\n", "comware")
+    assert empty.status == "complete" and empty.summary == {}
+    nonempty = trunks("Unreviewed Comware trunk layout\n", "comware")
+    assert nonempty.status == "partial" and nonempty.summary == {"invalid_structure": True}
+    assert any("trunk_format_not_verified" in warning for warning in nonempty.warnings)
 
 
 @pytest.mark.parametrize(
@@ -280,8 +291,8 @@ def test_unknown_trunk_format_with_no_valid_rows_does_not_disappear_as_failed():
 
 @pytest.mark.parametrize("device", ["dist1", "dist2"])
 def test_real_switchport_native_tagging_and_bundle_members(device):
-    parsed = generic_switchport.parse(source(device, "switchport", new=True), "ios")
-    assert not parsed.rejected and not parsed.warnings
+    parsed = switchports(source(device, "switchport", new=True))
+    assert not parsed.rejected_count and not parsed.warnings
     rows = port_rows(parsed)
     assert rows["Port-channel1"]["l2_mode"] == "trunk"
     assert rows["Port-channel1"]["trunk_vlans"] == "10,20"
@@ -301,8 +312,8 @@ def test_real_switchport_native_tagging_and_bundle_members(device):
 
 @pytest.mark.parametrize("device", ["acc1", "acc2"])
 def test_real_access_switchport_and_native_vlan_have_distinct_meanings(device):
-    parsed = generic_switchport.parse(source(device, "switchport", new=True), "ios")
-    assert not parsed.rejected and not parsed.warnings
+    parsed = switchports(source(device, "switchport", new=True))
+    assert not parsed.rejected_count and not parsed.warnings
     rows = port_rows(parsed)
     access = rows["Ethernet1/0"]
     assert access["admin_mode"] == access["oper_mode"] == "static access"
@@ -324,8 +335,8 @@ def test_real_access_switchport_and_native_vlan_have_distinct_meanings(device):
 
 def test_switchport_unknown_native_tagging_stays_unknown():
     block = switchport_block().replace("Administrative Native VLAN tagging: disabled\n", "")
-    parsed = generic_switchport.parse(block, "ios")
-    assert not parsed.rejected
+    parsed = switchports(block)
+    assert not parsed.rejected_count
     [row] = port_rows(parsed).values()
     assert row["l2_mode"] == "trunk" and "native_tagged" not in row
     assert "admin_native_tagged" not in row
@@ -336,14 +347,12 @@ def test_synthetic_admin_native_tagging_does_not_establish_operational_tagging()
         "Administrative Native VLAN tagging: disabled",
         "Administrative Native VLAN tagging: enabled",
     )
-    parsed = generic_switchport.parse(block, "ios")
-    assert not parsed.rejected
+    parsed = switchports(block)
+    assert not parsed.rejected_count
     [row] = port_rows(parsed).values()
     assert row["admin_native_tagged"] is True and "native_tagged" not in row
-    explicit = generic_switchport.parse(
-        block + "Operational Native VLAN tagging: disabled\n", "ios"
-    )
-    assert not explicit.rejected
+    explicit = switchports(block + "Operational Native VLAN tagging: disabled\n")
+    assert not explicit.rejected_count
     [row] = port_rows(explicit).values()
     assert row["admin_native_tagged"] is True and row["native_tagged"] is False
 
@@ -357,8 +366,8 @@ def test_synthetic_static_access_down_uses_explicit_admin_mode():
         "Operational Mode: trunk (member of bundle Po1)", "Operational Mode: down"
     )
     block = block.replace("Access Mode VLAN: 1 (default)", "Access Mode VLAN: 10 (USERS-A)")
-    parsed = generic_switchport.parse(block, "ios")
-    assert not parsed.rejected
+    parsed = switchports(block)
+    assert not parsed.rejected_count
     [row] = port_rows(parsed).values()
     assert row["l2_mode"] == "access" and row["pvid"] == row["access_vlan"] == 10
     assert row["oper_mode"] == "down"
@@ -377,16 +386,16 @@ def test_synthetic_static_access_down_uses_explicit_admin_mode():
     ],
 )
 def test_incomplete_or_ambiguous_switchport_block_provides_no_port_facts(mutation):
-    parsed = generic_switchport.parse(mutation(switchport_block()), "ios")
-    assert parsed.rejected
+    parsed = switchports(mutation(switchport_block()))
+    assert parsed.rejected_count
     assert port_rows(parsed) == {}
     assert parsed.summary == {"invalid_ports": ["Ethernet1/0"]}
 
 
 def test_duplicate_switchport_interface_is_not_arbitrarily_selected():
     block = switchport_block()
-    parsed = generic_switchport.parse(block + block, "ios")
-    assert parsed.rejected and port_rows(parsed) == {}
+    parsed = switchports(block + block)
+    assert parsed.rejected_count and port_rows(parsed) == {}
     assert parsed.summary == {"invalid_ports": ["Ethernet1/0"]}
     assert any("duplicate_switchport_interface" in warning for warning in parsed.warnings)
 

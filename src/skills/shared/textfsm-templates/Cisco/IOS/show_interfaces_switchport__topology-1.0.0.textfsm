@@ -1,0 +1,55 @@
+Value NAME (\S+)
+Value List SWITCHPORT (.*?)
+Value List ADMIN_MODE (.*?)
+Value List OPER_MODE (.*?)
+Value List ADMIN_ENCAPSULATION (.*?)
+Value List OPER_ENCAPSULATION (.*?)
+Value List ACCESS_VLAN (.*?)
+Value List NATIVE_VLAN (.*?)
+Value List ADMIN_NATIVE_TAGGING (.*?)
+Value List OPER_NATIVE_TAGGING (.*?)
+Value List TRUNK_VLANS (.*?)
+Value List BAD_FIELD (.*)
+
+# One record per "Name:" block (campus-wan lab, IOL L2 17.15). Every field is a list,
+# so a repeated field shows as two values instead of replacing the first. The fields
+# observed beside the VLAN fields are known only with these exact benign values (a
+# voice or private VLAN must not pass for an ordinary one); any other line in a block
+# is that port's BAD_FIELD.
+Start
+  ^Name: -> Continue.Record
+  ^Name:\s*${NAME}\s*$$ -> Block
+  ^\s*$$
+  ^. -> Error "switchport block header missing"
+
+Block
+  ^Name: -> Continue.Record
+  ^Name:\s*${NAME}\s*$$
+  ^Switchport:\s*${SWITCHPORT}\s*$$
+  ^Administrative Mode:\s*${ADMIN_MODE}\s*$$
+  ^Operational Mode:\s*${OPER_MODE}\s*$$
+  ^Administrative Trunking Encapsulation:\s*${ADMIN_ENCAPSULATION}\s*$$
+  ^Operational Trunking Encapsulation:\s*${OPER_ENCAPSULATION}\s*$$
+  ^Access Mode VLAN:\s*${ACCESS_VLAN}\s*$$
+  ^Trunking Native Mode VLAN:\s*${NATIVE_VLAN}\s*$$
+  ^Administrative Native VLAN tagging:\s*${ADMIN_NATIVE_TAGGING}\s*$$
+  ^Operational Native VLAN tagging:\s*${OPER_NATIVE_TAGGING}\s*$$
+  ^Trunking VLANs Enabled:\s*${TRUNK_VLANS}\s*$$
+  ^Negotiation of Trunking:\s*(On|Off)\s*$$
+  ^Voice VLAN:\s*none\s*$$
+  ^Administrative private-vlan host-association:\s*none\s*$$
+  ^Administrative private-vlan mapping:\s*none\s*$$
+  ^Administrative private-vlan trunk native VLAN:\s*none\s*$$
+  ^Administrative private-vlan trunk Native VLAN tagging:\s*(enabled|disabled)\s*$$
+  ^Administrative private-vlan trunk encapsulation:\s*dot1q\s*$$
+  ^Administrative private-vlan trunk normal VLANs:\s*none\s*$$
+  ^Administrative private-vlan trunk associations:\s*none\s*$$
+  ^Administrative private-vlan trunk mappings:\s*none\s*$$
+  ^Operational private-vlan:\s*none\s*$$
+  ^Pruning VLANs Enabled:\s*([0-9,-]+|none)\s*$$
+  ^Capture VLANs Allowed:\s*(ALL|[0-9,-]+|none)\s*$$
+  ^Capture Mode Disabled\s*$$
+  ^Protected:\s*false\s*$$
+  ^Appliance trust:\s*none\s*$$
+  ^\s*$$
+  ^${BAD_FIELD}$$

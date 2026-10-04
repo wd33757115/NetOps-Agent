@@ -384,6 +384,38 @@ check_items:
       MODEL: [text, false, MED 型号]
       LOCAL_INTERFACE: [text, false, 通告管理地址的端口]
       MGMT_ADDRESS: [text, false, 端口通告的管理地址]
+  topology.trunks:
+    name: 拓扑发现：Trunk 端口的四张 VLAN 表
+    entity_type: trunk_port
+    keys: [PORT]
+    values:
+      PORT: [text, true, 端口原文]
+      MODE: [text, false, 基本表的模式原文]
+      ENCAPSULATION: [text, false, 基本表的封装原文]
+      STATUS: [text, false, 基本表的状态原文]
+      NATIVE_VLAN: [text, false, 基本表的 Native VLAN]
+      ALLOWED_VLANS: [text, false, 允许的 VLAN 集合原文]
+      ACTIVE_VLANS: [text, false, 允许且活动的 VLAN 集合原文]
+      FORWARDING_VLANS: [text, false, 转发中的 VLAN 集合原文]
+      BAD_ROW: [text, false, 该端口无法识别的行]
+
+  topology.switchports:
+    name: 拓扑发现：二层端口模式与 VLAN
+    entity_type: switchport
+    keys: [NAME]
+    values:
+      NAME: [text, true, 端口原文]
+      SWITCHPORT: [text, false, 二层端口开关]
+      ADMIN_MODE: [text, false, 管理模式]
+      OPER_MODE: [text, false, 运行模式]
+      ADMIN_ENCAPSULATION: [text, false, 管理封装]
+      OPER_ENCAPSULATION: [text, false, 运行封装]
+      ACCESS_VLAN: [text, false, Access VLAN 原文]
+      NATIVE_VLAN: [text, false, Native VLAN 原文]
+      ADMIN_NATIVE_TAGGING: [text, false, 管理上的 Native VLAN 打标]
+      OPER_NATIVE_TAGGING: [text, false, 运行中的 Native VLAN 打标]
+      TRUNK_VLANS: [text, false, Trunk 允许的 VLAN 原文]
+      BAD_FIELD: [text, false, 该端口无法识别的字段或取值]
 
 implementations:
   - check_item: topology.arp
@@ -696,6 +728,28 @@ implementations:
     template: H3C/Comware7/display_lldp_local-information__topology-1.0.0.textfsm
     sha256: c2057ea05758209236d2c2c525996dfe68a526066b91bf243a4d65040720df46
     required: ['^\s*Chassis ID\s*:']
+  - check_item: topology.trunks
+    platform: ios
+    command: show interfaces trunk
+    template: Cisco/IOS/show_interfaces_trunk__topology-1.0.0.textfsm
+    sha256: 455aaf7e61efab9ff4d8a06744de14674312d723b656e9c43f7fee049c03a7f7
+    valid_empty: [BLANK]
+    required:
+      - '^Port\s+Mode\s+Encapsulation\s+Status\s+Native vlan\s*$'
+      - '^Port\s+Vlans allowed on trunk\s*$'
+      - '^Port\s+Vlans allowed and active in management domain\s*$'
+      - '^Port\s+Vlans in spanning tree forwarding state and not pruned\s*$'
+  - check_item: topology.trunks
+    platform: comware
+    command: display port trunk
+    template: H3C/Comware7/display_port_trunk__topology-1.0.0.textfsm
+    sha256: 613edd0fc9124993689eb7cfb1af8f3e27537d82b6f44cd1006a820b5e54c81a
+    valid_empty: [BLANK]
+  - check_item: topology.switchports
+    platform: ios
+    command: show interfaces switchport
+    template: Cisco/IOS/show_interfaces_switchport__topology-1.0.0.textfsm
+    sha256: 14186c2842798c90ae3df70678053239ceb2ed8846e718f28db0bbb4131a7459
 
 platforms:
   ios: {vendor: Cisco, platforms: [ios, iosxe], family: IOS}

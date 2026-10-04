@@ -7,13 +7,16 @@ import pytest
 
 from src.apps.topology.backend.collectors.identify import Identity
 from src.apps.topology.backend.collectors.parse import parse as parse_cli
-from src.apps.topology.backend.collectors.tiers import generic_switchport, generic_trunk
 from src.apps.topology.backend.model.builder import L2T, NT, build_topology
 from src.apps.topology.backend.service import topology_observation
 
 YANG = Path(__file__).resolve().parents[2] / "src/apps/topology/resources/yang"
 CAPTURES = Path(__file__).resolve().parents[1] / "fixtures/topology/campus-wan/vlan-trunk"
 PORT = "Ethernet0/1"
+
+
+def read(device, capability):
+    return (CAPTURES / device / f"{capability}.txt").read_text()
 
 
 def trunk(**changes):
@@ -298,8 +301,8 @@ def test_unverified_or_conflicting_bundle_operational_modes_add_no_tags(port):
 
 @pytest.mark.parametrize("device", ["dist1", "dist2"])
 def test_real_bundle_member_mode_accepts_independent_same_port_trunk_evidence(device):
-    observed = generic_switchport.parse((CAPTURES / device / "switchport.txt").read_text(), "ios")
-    assert not observed.rejected
+    observed = parse_cli({"os_family": "ios"}, "switchport", read(device, "switchport"))
+    assert observed.status == "complete"
     members = [p for p in observed.summary["ports"] if p.get("lag_parent") == "Port-channel1"]
     assert {p["ifname"] for p in members} == {"Ethernet1/0", "Ethernet1/1"}
     for member in members:
@@ -317,11 +320,9 @@ def test_real_bundle_member_mode_accepts_independent_same_port_trunk_evidence(de
 
 @pytest.mark.parametrize("device", ["dist1", "dist2"])
 def test_real_dist_aggregate_tags_are_not_copied_to_member_ports(device):
-    trunks = generic_trunk.parse((CAPTURES / device / "trunk.txt").read_text(), "ios")
-    switchports = generic_switchport.parse(
-        (CAPTURES / device / "switchport.txt").read_text(), "ios"
-    )
-    assert not trunks.rejected and not switchports.rejected
+    trunks = parse_cli({"os_family": "ios"}, "trunk", read(device, "trunk"))
+    switchports = parse_cli({"os_family": "ios"}, "switchport", read(device, "switchport"))
+    assert trunks.status == switchports.status == "complete"
     tree = export(
         trunks.summary["ports"],
         switchports.summary["ports"],

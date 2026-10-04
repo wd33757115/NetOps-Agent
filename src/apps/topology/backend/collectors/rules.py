@@ -33,6 +33,7 @@ from .normalize import (
     vrf_name,
 )
 from .parse import ParseResult
+from .rules_tables import ASSEMBLE
 from .tiers.common import IFNAME, interface, vlan
 
 # capability -> system check item
@@ -62,6 +63,8 @@ CHECK_ITEMS = {
     "lldp": "topology.lldp_neighbors",
     "version": "topology.device_version",
     "lldp_local": "topology.lldp_local",
+    "trunk": "topology.trunks",
+    "switchport": "topology.switchports",
 }
 # Families whose CLI output rule governance parses for the capabilities above.
 FAMILIES = frozenset({"ios", "iosxe", "comware"})
@@ -173,10 +176,14 @@ def parse(identity, capability, raw, *, complete=True, model=None):
     result.warnings += list(parsed.problems)
     result.candidate_count = len(parsed.rows) + len(parsed.rejected)
     result.rejected_count = len(parsed.rejected)
+    family = _family(identity)
+    output_failed = parsed.reason in {"command_error", "empty_unverified"}
+    if capability in ASSEMBLE and not (output_failed and not incomplete):
+        # A table with vetoes: a damaged or cut-off table is still a (vetoing) fact.
+        return ASSEMBLE[capability](result, parsed, family, incomplete)
     if parsed.status == "failed":
         result.warnings.append("unparsed_output" if parsed.reason == "data" else parsed.reason)
         return result
-    family = _family(identity)
     projected = []
     for row, lines in zip(parsed.rows, parsed.lines):
         try:

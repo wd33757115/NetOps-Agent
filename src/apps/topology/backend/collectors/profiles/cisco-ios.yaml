@@ -19,8 +19,8 @@ capabilities:
   arp: {parser: rules}
   mac: {parser: rules}
   vlan: {parser: rules}
-  trunk: {command: show interfaces trunk, parser: generic_trunk}
-  switchport: {command: show interfaces switchport, parser: generic_switchport}
+  trunk: {parser: rules}
+  switchport: {parser: rules}
   lag: {parser: rules}
   stp: {parser: rules}
   routes: {timeout: 300, parser: rules}

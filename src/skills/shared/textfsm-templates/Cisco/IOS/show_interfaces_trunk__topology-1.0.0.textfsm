@@ -1,0 +1,45 @@
+Value PORT ([A-Za-z][\w./-]*\d)
+Value MODE (\S+)
+Value ENCAPSULATION (\S+)
+Value STATUS (\S+)
+Value NATIVE_VLAN (\S+)
+Value ALLOWED_VLANS (\S+)
+Value ACTIVE_VLANS (\S+)
+Value FORWARDING_VLANS (\S+)
+Value BAD_ROW (\S.*?)
+
+# One record per port and table (campus-wan lab, IOL L2): the base table, then the VIDs
+# allowed, allowed and active, and forwarding. The four sets mean different things and
+# are kept apart. A port's row in another shape is that port's damage (BAD_ROW); a line
+# that names no port is unrecognized structure.
+Start
+  ^Port\s+Mode\s+Encapsulation\s+Status\s+Native vlan\s*$$ -> Base
+  ^\s*$$
+  ^. -> Error "unrecognized trunk table line"
+
+Base
+  ^${PORT}\s+${MODE}\s+${ENCAPSULATION}\s+${STATUS}\s+${NATIVE_VLAN}\s*$$ -> Record
+  ^Port\s+Vlans allowed on trunk\s*$$ -> Allowed
+  ^${PORT}\s+${BAD_ROW}\s*$$ -> Record
+  ^\s*$$
+  ^. -> Error "unrecognized trunk table line"
+
+Allowed
+  ^${PORT}\s+${ALLOWED_VLANS}\s*$$ -> Record
+  ^Port\s+Vlans allowed and active in management domain\s*$$ -> Active
+  ^${PORT}\s+${BAD_ROW}\s*$$ -> Record
+  ^\s*$$
+  ^. -> Error "unrecognized trunk table line"
+
+Active
+  ^${PORT}\s+${ACTIVE_VLANS}\s*$$ -> Record
+  ^Port\s+Vlans in spanning tree forwarding state and not pruned\s*$$ -> Forwarding
+  ^${PORT}\s+${BAD_ROW}\s*$$ -> Record
+  ^\s*$$
+  ^. -> Error "unrecognized trunk table line"
+
+Forwarding
+  ^${PORT}\s+${FORWARDING_VLANS}\s*$$ -> Record
+  ^${PORT}\s+${BAD_ROW}\s*$$ -> Record
+  ^\s*$$
+  ^. -> Error "unrecognized trunk table line"
