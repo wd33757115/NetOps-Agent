@@ -2,4 +2,4 @@
 '4' - IPv4 flag  '6' - IPv6 flag
 
 Interface  VNI      Type Peer-IP          RMAC/Num_RTs   eVNI     state flags UP time
-nve1       50020    L3CP 10.255.10.13     7425.8ae4.1677 50020      UP  A/M/4 00:01:53
+nve1       50020    L3CP 10.255.10.13     7425.8ae4.1677 50020      UP  A/M/4 01:13:07

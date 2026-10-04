@@ -1,5 +1,5 @@
 show ip ospf neighbor
 
 Neighbor ID     Pri   State           Dead Time   Address         Interface
-10.255.20.2       0   FULL/  -        00:00:33    10.20.12.2      Ethernet0/1
+10.255.20.2       0   FULL/  -        00:00:31    10.20.12.2      Ethernet0/1
 PE1#

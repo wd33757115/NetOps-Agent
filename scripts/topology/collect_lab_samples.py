@@ -52,6 +52,8 @@ COMMANDS = [
     ("vrrp", "display vrrp verbose"),
     ("ospf", "display ospf peer"),
     ("ospf_interfaces", "display ospf interface"),
+    # names each OSPF interface (the brief table only gives its address)
+    ("ospf_interfaces_verbose", "display ospf interface verbose"),
     ("ospf_process", "display ospf"),
     ("bgp", "display bgp peer ipv4"),
     # VPN / EVPN / VXLAN (plan §8 M5)

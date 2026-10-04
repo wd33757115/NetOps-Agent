@@ -1,6 +1,6 @@
 display arp verbose
 IP address          : 10.20.23.1                MAC address    : aabb-cc00-0620
-Type                : Dynamic                   Aging          : 8 min
+Type                : Dynamic                   Aging          : 15 min
 Interface           : GE2/0                     SVLAN/CVLAN    : --/--
 VPN instance        : --
 Link ID             : --
@@ -13,7 +13,7 @@ Nickname            : 0x0000
 Description         : --
 
 IP address          : 10.10.1.25                MAC address    : 0cc3-0000-0000
-Type                : Dynamic                   Aging          : 8 min
+Type                : Dynamic                   Aging          : 15 min
 Interface           : GE1/0                     SVLAN/CVLAN    : --/--
 VPN instance        : --
 Link ID             : --
@@ -26,7 +26,7 @@ Nickname            : 0x0000
 Description         : --
 
 IP address          : 10.10.1.254               MAC address    : 0015-5d01-0314
-Type                : Dynamic                   Aging          : 20 min
+Type                : Dynamic                   Aging          : 8 min
 Interface           : GE1/0                     SVLAN/CVLAN    : --/--
 VPN instance        : --
 Link ID             : --

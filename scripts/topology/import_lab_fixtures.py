@@ -122,7 +122,11 @@ CAMPUS_VLAN = Lab(
 CAMPUS_OSPF = Lab(
     "20261003-015834",
     CAMPUS_HOSTS,
-    dict.fromkeys(CAMPUS_HOSTS, frozenset({"ospf_interfaces", "ospf_process"})),
+    {
+        host: frozenset({"ospf_interfaces", "ospf_process"})
+        | ({"ospf_interfaces_verbose"} if name.startswith("br") else set())
+        for host, name in CAMPUS_HOSTS.items()
+    },
     ROOT / "tests/fixtures/topology/campus-wan/ospf",
     frozenset(),
 )
@@ -193,6 +197,7 @@ COMWARE_VPN = frozenset(
         "vrfs",
         "ospf",
         "ospf_interfaces",
+        "ospf_interfaces_verbose",
         "ospf_process",
         "bgp",
         "bgp_vpnv4",
@@ -220,7 +225,7 @@ def _vrf_caps(names, cisco):
 
 
 VPN_FABRIC = Lab(
-    "20261004-222724",
+    "20261004-233838",
     VPN_FABRIC_HOSTS,
     {
         "10.10.1.21": IOS_VPN,

@@ -18,6 +18,6 @@ C        10.20.12.0/30 is directly connected, Ethernet0/1
 L        10.20.12.2/32 is directly connected, Ethernet0/1
 C        10.20.23.0/30 is directly connected, Ethernet0/2
 L        10.20.23.1/32 is directly connected, Ethernet0/2
-O        10.255.20.1/32 [110/11] via 10.20.12.1, 00:54:27, Ethernet0/1
+O        10.255.20.1/32 [110/11] via 10.20.12.1, 02:05:42, Ethernet0/1
 C        10.255.20.2/32 is directly connected, Loopback0
-O        10.255.20.3/32 [110/10] via 10.20.23.2, 00:51:17, Ethernet0/2
+O        10.255.20.3/32 [110/10] via 10.20.23.2, 02:02:32, Ethernet0/2

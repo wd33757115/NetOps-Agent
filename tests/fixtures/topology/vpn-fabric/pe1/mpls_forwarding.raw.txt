@@ -4,6 +4,6 @@ Label      Label      or Tunnel Id     Switched      interface
 16         Pop Label  10.255.20.2/32   0             Et0/1      10.20.12.2  
 17         Pop Label  10.20.23.0/30    0             Et0/1      10.20.12.2  
 18         17         10.255.20.3/32   0             Et0/1      10.20.12.2  
-19         No Label   10.1.1.0/24[V]   58310         aggregate/CUST-A 
+19         No Label   10.1.1.0/24[V]   894152        aggregate/CUST-A 
 20         No Label   10.1.1.0/24[V]   0             aggregate/CUST-B 
 PE1#

@@ -12,7 +12,7 @@ Technical Support: http://www.cisco.com/techsupport
 Copyright (c) 1986-2024 by Cisco Systems, Inc.
 Compiled Sun 11-Aug-24 22:07 by mcpre
 
-Time remaining: 116 seconds
+Time remaining: 110 seconds
 System Capabilities: B,R
 Enabled Capabilities: R
 Management Addresses:
@@ -37,7 +37,7 @@ Technical Support: http://www.cisco.com/techsupport
 Copyright (c) 1986-2024 by Cisco Systems, Inc.
 Compiled Sun 11-Aug-24 22:07 by mcpre
 
-Time remaining: 117 seconds
+Time remaining: 111 seconds
 System Capabilities: B,R
 Enabled Capabilities: R
 Management Addresses:

@@ -7,5 +7,5 @@ display bgp peer vpnv4
   * - Dynamically created peer
   Peer                    AS  MsgRcvd  MsgSent OutQ PrefRcv Up/Down  State
 
-  10.255.20.1          65200       60       71    0       1 00:51:15 Established
+  10.255.20.1          65200      138      164    0       1 02:02:31 Established
 <PE2>

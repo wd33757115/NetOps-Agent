@@ -12,10 +12,10 @@ Output queue - FIFO queuing: Size/Length/Discards 0/75/0
 Last clearing of counters: Never
 Tunnel source 10.255.10.13, destination 10.255.10.11
 Tunnel protocol/transport UDP_VXLAN/IP
-Last 300 seconds input rate: 21 bytes/sec, 168 bits/sec, 0 packets/sec
-Last 300 seconds output rate: 21 bytes/sec, 168 bits/sec, 0 packets/sec
-Input: 592 packets, 57982 bytes, 0 drops
-Output: 592 packets, 57982 bytes, 0 drops
+Last 300 seconds input rate: 195 bytes/sec, 1560 bits/sec, 2 packets/sec
+Last 300 seconds output rate: 195 bytes/sec, 1560 bits/sec, 1 packets/sec
+Input: 9124 packets, 894042 bytes, 0 drops
+Output: 9122 packets, 893922 bytes, 0 drops
 
 Tunnel1
 Current state: UP
@@ -30,9 +30,9 @@ Output queue - FIFO queuing: Size/Length/Discards 0/75/0
 Last clearing of counters: Never
 Tunnel source 10.255.10.13, destination 10.255.10.12
 Tunnel protocol/transport UDP_VXLAN/IP
-Last 300 seconds input rate: 0 bytes/sec, 0 bits/sec, 0 packets/sec
-Last 300 seconds output rate: 0 bytes/sec, 0 bits/sec, 0 packets/sec
-Input: 238 packets, 23324 bytes, 0 drops
-Output: 242 packets, 23716 bytes, 0 drops
+Last 300 seconds input rate: 195 bytes/sec, 1560 bits/sec, 1 packets/sec
+Last 300 seconds output rate: 195 bytes/sec, 1560 bits/sec, 1 packets/sec
+Input: 8766 packets, 859068 bytes, 0 drops
+Output: 8770 packets, 859460 bytes, 0 drops
 
 <LEAF3>

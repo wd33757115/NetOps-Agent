@@ -3,5 +3,5 @@
 
  Area: 0.0.0.0        
  Router ID       Address         Pri Dead-Time  State             Interface
- 10.255.10.1     10.10.13.1      1   34         Full/ -           GE2/0
- 10.255.10.2     10.10.23.1      1   38         Full/ -           GE3/0
+ 10.255.10.1     10.10.13.1      1   37         Full/ -           GE2/0
+ 10.255.10.2     10.10.23.1      1   37         Full/ -           GE3/0
