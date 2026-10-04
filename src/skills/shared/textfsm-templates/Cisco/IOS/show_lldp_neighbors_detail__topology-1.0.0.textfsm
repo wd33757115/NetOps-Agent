@@ -1,0 +1,29 @@
+Value LOCAL_INTERFACE (\S+)
+Value Required CHASSIS_ID (\S+)
+Value PORT_ID (.+?)
+Value NEIGHBOR_NAME (.*?)
+Value List SYSTEM_DESCRIPTION (.*?)
+Value List MGMT_ADDRESS (\S+)
+
+# One record per LLDP neighbour, each block after a dashed separator (campus-wan and
+# vpn-fabric labs, IOS-XE 17). The system description starts on the next line and runs
+# to the blank line. Capabilities, timers, media and MAC lines are not modeled.
+Start
+  ^-{10,}\s*$$ -> Continue.Record
+  ^-{10,}\s*$$
+  ^Local Intf:\s*${LOCAL_INTERFACE}\s*$$
+  ^Chassis id:\s*${CHASSIS_ID}\s*$$
+  ^Port id:\s*${PORT_ID}\s*$$
+  ^System Name:\s*${NEIGHBOR_NAME}\s*$$
+  ^System Description:\s*$$ -> Description
+  ^System Description:\s*${SYSTEM_DESCRIPTION}\s*$$
+  ^\s+IP:\s*${MGMT_ADDRESS}\s*$$
+  ^Total entries displayed:\s*\d+\s*$$
+  ^[A-Za-z][\w .()/-]*?(:|\s-)(\s.*)?$$
+  ^\s+\S.*$$
+  ^\s*$$
+  ^. -> Error "unrecognized show lldp neighbors detail line"
+
+Description
+  ^\s*$$ -> Start
+  ^${SYSTEM_DESCRIPTION}\s*$$

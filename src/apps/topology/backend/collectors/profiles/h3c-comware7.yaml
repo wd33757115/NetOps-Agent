@@ -12,7 +12,7 @@ budgets: {fast: 120, standard: 300, full: 600}
 capabilities:
   version: {command: display version, parser: generic_version}
   lldp_local: {command: display lldp local-information, parser: generic_lldp_local}
-  lldp: {command: display lldp neighbor-information verbose, parser: generic_lldp}
+  lldp: {parser: rules}
   interfaces: {parser: rules}
   inventory: {command: display device manuinfo, parser: null}
   ip: {parser: rules}

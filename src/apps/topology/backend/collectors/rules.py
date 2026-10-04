@@ -59,6 +59,7 @@ CHECK_ITEMS = {
     "ip": "topology.ip_interfaces",
     "mac": "topology.mac",
     "vlan": "topology.vlans",
+    "lldp": "topology.lldp_neighbors",
 }
 # Families whose CLI output rule governance parses for the capabilities above.
 FAMILIES = frozenset({"ios", "iosxe", "comware"})
@@ -812,6 +813,47 @@ def _vlan_members(records):
     return {"members": members} if members else {}
 
 
+LLDP_LIMITS = {"CHASSIS_ID": 256, "PORT_ID": 256, "NEIGHBOR_NAME": 256}
+LLDP_SUBTYPE_LIMIT = 32
+
+
+def _lldp_neighbor(row, family, lines, warnings):
+    if not row.get("LOCAL_INTERFACE") or not row.get("PORT_ID"):
+        raise ValueError("incomplete_lldp_block")
+    chassis, subtype = row["CHASSIS_ID"], row.get("CHASSIS_ID_TYPE")
+    try:
+        mac = mac_address(chassis)
+    except ValueError:
+        mac = None
+    if subtype and "mac" in subtype.lower() and mac is None:
+        raise ValueError("invalid_chassis_mac")
+    if any(len(row.get(field) or "") > limit for field, limit in LLDP_LIMITS.items()) or any(
+        len(row.get(field) or "") > LLDP_SUBTYPE_LIMIT
+        for field in ("CHASSIS_ID_TYPE", "PORT_ID_TYPE")
+    ):
+        raise ValueError("lldp_field_over_limit")
+    addresses = []
+    for value in row.get("MGMT_ADDRESS") or []:
+        try:
+            address = ip_address(value)
+        except ValueError:
+            warnings.append(f"line:{lines[0] if lines else 0}:invalid_management_address")
+            continue
+        if address not in addresses:
+            addresses.append(address)
+    description = "\n".join(text for text in row.get("SYSTEM_DESCRIPTION") or [] if text)
+    return {
+        "local_if": interface(row["LOCAL_INTERFACE"], family).name,
+        "remote_chassis_id": mac or chassis,
+        "remote_chassis_subtype": subtype,
+        "remote_port_id": row["PORT_ID"],
+        "remote_port_subtype": row.get("PORT_ID_TYPE"),
+        "remote_sysname": row.get("NEIGHBOR_NAME"),
+        "remote_system_description": description or None,
+        "remote_mgmt_addresses": addresses,
+    }
+
+
 def _vrf(row, family, lines, warnings):
     """A device-local VRF / VPN-instance name, never a global identity."""
     protocols = row.get("PROTOCOLS")
@@ -841,6 +883,7 @@ ROWS = {
     "ip": _interface_addresses,
     "mac": _mac_entry,
     "vlan": _vlan,
+    "lldp": _lldp_neighbor,
 }
 MERGE = {"routes": _merge_routes, "vrf_detail": _merge_vrfs}
 # Capabilities whose rows form one summary fact (the VRF enumeration scopes collection).

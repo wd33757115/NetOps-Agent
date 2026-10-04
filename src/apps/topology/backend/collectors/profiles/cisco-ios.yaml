@@ -12,7 +12,7 @@ budgets: {fast: 120, standard: 300, full: 600}
 # IOS-XE is an explicit identity alias, not an assertion of platform-wide verification.
 capabilities:
   version: {command: show version, parser: generic_version}
-  lldp: {command: show lldp neighbors detail, parser: generic_lldp}
+  lldp: {parser: rules}
   interfaces: {parser: rules}
   inventory: {command: show inventory, parser: null}
   ip: {parser: rules}

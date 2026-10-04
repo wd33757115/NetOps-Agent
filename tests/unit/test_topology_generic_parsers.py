@@ -198,12 +198,12 @@ def test_count_mismatch_transport_budget_and_routes():
 
 def test_lldp_incomplete_neighbor_and_bad_address():
     text = STYLES[0]["lldp"]
-    assert run("lldp", text + "\nChassis ID: 0011-2233-4455\n").status == "partial"
-    assert run("lldp", text.replace("192.0.2.2", "999.1.1.1")).status == "partial"
-    assert run("lldp", text.replace("aabb-ccdd-eeff", "not-a-mac")).status == "failed"
-    assert run("lldp", "Port ID: Gi1/0\nManagement address: 192.0.2.1").status == "failed"
+    assert generic("lldp", text + "\nChassis ID: 0011-2233-4455\n").status == "partial"
+    assert generic("lldp", text.replace("192.0.2.2", "999.1.1.1")).status == "partial"
+    assert generic("lldp", text.replace("aabb-ccdd-eeff", "not-a-mac")).status == "failed"
+    assert generic("lldp", "Port ID: Gi1/0\nManagement address: 192.0.2.1").status == "failed"
     multiple = text + "\nChassis type: MAC address\nChassis ID: 0011-2233-4455\nPort ID: Gi2/0\n"
-    result = run("lldp", multiple)
+    result = generic("lldp", multiple)
     assert result.status == "complete" and len(result.records) == 2
     assert result.records[1]["remote_mgmt_addresses"] == []
 
@@ -282,10 +282,10 @@ def test_synthetic_interface_and_explicit_mask_rows(family, port, canonical):
 
 
 def test_explicit_zero_total_and_contradictory_body():
-    assert run("lldp", "Total entries: 0").status == "complete"
+    assert generic("lldp", "Total entries: 0").status == "complete"
     assert generic("mac", "Total entries: 0").status == "complete"
     assert generic("mac", "BROKEN DATA\nTotal entries: 0").status == "failed"
-    assert run("lldp", STYLES[0]["lldp"] + "\nTotal entries: 0").status == "partial"
+    assert generic("lldp", STYLES[0]["lldp"] + "\nTotal entries: 0").status == "partial"
 
 
 @pytest.mark.parametrize("device", ["vsr-1", "vsr-2"])

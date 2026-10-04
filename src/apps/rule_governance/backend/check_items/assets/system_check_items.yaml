@@ -339,6 +339,19 @@ check_items:
       NAME: [text, false, VLAN 名称]
       STATUS: [text, false, IOS 的 VLAN 状态原文]
       PORTS: [text, false, 端口列每行的原文（逗号或空格分隔）]
+  topology.lldp_neighbors:
+    name: 拓扑发现：LLDP 邻居
+    entity_type: lldp_neighbor
+    keys: [LOCAL_INTERFACE, CHASSIS_ID, PORT_ID]
+    values:
+      LOCAL_INTERFACE: [text, true, 本端端口原文]
+      CHASSIS_ID: [text, true, 邻居机箱 ID 原文]
+      PORT_ID: [text, true, 邻居端口 ID 原文]
+      CHASSIS_ID_TYPE: [text, false, 机箱 ID 子类型原文]
+      PORT_ID_TYPE: [text, false, 端口 ID 子类型原文]
+      NEIGHBOR_NAME: [text, false, 邻居系统名]
+      SYSTEM_DESCRIPTION: [text, false, 邻居系统描述（按行）]
+      MGMT_ADDRESS: [text, false, 邻居管理地址]
 
 implementations:
   - check_item: topology.arp
@@ -619,6 +632,20 @@ implementations:
     template: H3C/Comware7/display_vlan_brief__topology-1.0.0.textfsm
     sha256: 89a2804718425dc1539d30a6b3629278d01074f18675d76ba735283340103703
     required: ['^VLAN ID\s+Name\s+Port\s*$']
+  - check_item: topology.lldp_neighbors
+    platform: ios
+    command: show lldp neighbors detail
+    template: Cisco/IOS/show_lldp_neighbors_detail__topology-1.0.0.textfsm
+    sha256: cbc6492a09d01f0b30790e83ef3adcaeb29b56b22d689fc8e314e6da13be5dfc
+    valid_empty: ['\A\s*Total entries displayed:\s*0\s*\Z']
+    counts:
+      - {pattern: '^Total entries displayed:\s*(\d+)\s*$', of: rows}
+  - check_item: topology.lldp_neighbors
+    platform: comware
+    command: display lldp neighbor-information verbose
+    template: H3C/Comware7/display_lldp_neighbor-information_verbose__topology-1.0.0.textfsm
+    sha256: c653c75fe7208f217b7d1d4e9b31b42826aa5fc61d1f9b0321746a4c6ec2508f
+    valid_empty: ['\A\s*No (LLDP )?neighbors?( found)?\.?\s*\Z']
 
 platforms:
   ios: {vendor: Cisco, platforms: [ios, iosxe], family: IOS}
