@@ -1,5 +1,5 @@
 {
- "scope": "M1-6 cases: campus-wan App output, named mutations, real module defects",
+ "scope": "M1-6 cases: campus-wan and vpn-fabric App output, named mutations, real module defects",
  "files": {
   "bgp-peer-type-cli-text.json": "95518a898882227a1163b18feefee6d1d06eca4f7adce638234ccc9ece72dc3d",
   "br1-device.json": "c94eda9cedbd5c0b8ff6d851e27c17de9f59e50f145a6cff9baa493b7bf2d4f5",
@@ -11,6 +11,11 @@
   "dist1-device.json": "c02eb513cadb4fa992c1c3c4f6b67b82ef476fd35fd84d1d5494ba9005e631dd",
   "dist1-inventory.json": "fffdb308a358a4372a6c6d678bff0211ed9ed72299385bfb3dc419847c4d5468",
   "dist1-routing-default.json": "d4700dd83365e74e3c94ac9427fd49916f7ef64509e2e9a379119b7966a7dbf9",
+  "fabric-device-outside-tree.json": "96bb59541ab354af81fd723134d676f5cef41fdc1494720c3bd107b4493dc1ae",
+  "l2nm-auto-discovery-without-bgp-ad.json": "41adbc36559fd830dd03d6088e0b5ac10ec961f2c75e94492cb763ff3e2e33d0",
+  "l2nm-evpn-signaling-option.json": "24161c424bd9ec503786a25db60fe2a8a52f60aeea9ce19e9dd34c92f59d8c04",
+  "l3nm-access-profile-not-active.json": "7689cd770ff515aff00ceef563fe5653dcaa7c046f0ffef3b5f9432d8e77bbbf",
+  "l3nm-route-target-cli-text.json": "a4a462a95ed99449f4cb1c0c31f581223a47c1cc473ea2ff590cb17b1834727f",
   "link-to-tp-of-other-network.json": "9b3ef71b5f65f8acdc363f212d15740e1e6f5954de599d0ba0a97d92d2d7a7ca",
   "netops-br1-device@2026-10-02T17_00_59.735856+00_00.json": "1ffac4b2dc12bddb172344aa34ed548e007337ff73c25d7f80687a69f6451957",
   "netops-campus-topology@2026-10-02T17_00_59.735856+00_00.json": "dfcf922d962a98ddb6eb4e06bf7b2129b6f75e82bc86f95b93d2a6fcb51e69d2",
@@ -23,7 +28,11 @@
   "research-vsr-1-l2.partial.json": "f7ef9eab4679881b41c53e119343d169ec310be070037fc26bbea22bca799a6b",
   "research-vsr-1-routes.json": "6e16991e3da3d28e569712bcec825d028e55d3ee1a9edaf4b94e1c78147d6e74",
   "unknown-interface-type.json": "eeb07c7aa63d567bb73fcc08fd88f21f233445dbf897d19446e638ca682dc2f4",
-  "vrrp-priority-out-of-range.json": "523459e0bd60934d052d982d85ee1577321768aa85c0c94449751f5a6db42d14"
+  "vpn-fabric-l2nm.json": "5d3fbda16d03381b32d519d682f4baa858653ded4ecec9fb6e37470be9e96ffc",
+  "vpn-fabric-l3nm.json": "6e21b65168630609c11f1e87b42d442b1d2cc01393738e29df04337689d36766",
+  "vpn-fabric-topology.json": "971652d29cc02a28474544673a25c0cf026fe5b67fa1d1a72dd04262a714ca2d",
+  "vrrp-priority-out-of-range.json": "523459e0bd60934d052d982d85ee1577321768aa85c0c94449751f5a6db42d14",
+  "vxlan-vni-out-of-range.json": "61570ed241763da5476699a9d52802f968db0760e0239bbec2125482136a0e4c"
  },
  "cases": [
   {
@@ -219,6 +228,78 @@
    "note": "complete-datastore check: native complete, or only unobserved nodes missing"
   },
   {
+   "name": "vpn-fabric-topology",
+   "kind": "instance",
+   "data": "vpn-fabric-topology.json",
+   "mode": "get",
+   "expect": "pass",
+   "note": "App output: hierarchy, types, identities"
+  },
+  {
+   "name": "vpn-fabric-topology",
+   "kind": "instance",
+   "data": "vpn-fabric-topology.json",
+   "mode": "data",
+   "expect": "pass",
+   "note": "App output: references resolve (RFC 8342 §5.3)"
+  },
+  {
+   "name": "vpn-fabric-topology",
+   "kind": "instance",
+   "data": "vpn-fabric-topology.json",
+   "mode": "strict",
+   "expect": "complete-or-collection",
+   "note": "complete-datastore check: native complete, or only unobserved nodes missing"
+  },
+  {
+   "name": "vpn-fabric-l3nm",
+   "kind": "instance",
+   "data": "vpn-fabric-l3nm.json",
+   "mode": "get",
+   "expect": "pass",
+   "note": "App output: hierarchy, types, identities"
+  },
+  {
+   "name": "vpn-fabric-l3nm",
+   "kind": "instance",
+   "data": "vpn-fabric-l3nm.json",
+   "mode": "data",
+   "expect": "pass",
+   "note": "App output: references resolve (RFC 8342 §5.3)"
+  },
+  {
+   "name": "vpn-fabric-l3nm",
+   "kind": "instance",
+   "data": "vpn-fabric-l3nm.json",
+   "mode": "strict",
+   "expect": "complete-or-collection",
+   "note": "complete-datastore check: native complete, or only unobserved nodes missing"
+  },
+  {
+   "name": "vpn-fabric-l2nm",
+   "kind": "instance",
+   "data": "vpn-fabric-l2nm.json",
+   "mode": "get",
+   "expect": "pass",
+   "note": "App output: hierarchy, types, identities"
+  },
+  {
+   "name": "vpn-fabric-l2nm",
+   "kind": "instance",
+   "data": "vpn-fabric-l2nm.json",
+   "mode": "data",
+   "expect": "pass",
+   "note": "App output: references resolve (RFC 8342 §5.3)"
+  },
+  {
+   "name": "vpn-fabric-l2nm",
+   "kind": "instance",
+   "data": "vpn-fabric-l2nm.json",
+   "mode": "strict",
+   "expect": "complete-or-collection",
+   "note": "complete-datastore check: native complete, or only unobserved nodes missing"
+  },
+  {
    "name": "research-vsr-1-routes",
    "kind": "instance",
    "data": "research-vsr-1-routes.json",
@@ -337,6 +418,54 @@
    "mode": "data",
    "expect": "semantic/reference",
    "note": "a link end names a node that is not in the link's network"
+  },
+  {
+   "name": "l3nm-route-target-cli-text",
+   "kind": "instance",
+   "data": "l3nm-route-target-cli-text.json",
+   "mode": "get",
+   "expect": "semantic/type",
+   "note": "RFC 8294 route-target is typed ('0:65100:1'); the CLI 'ASN:nn' text is not"
+  },
+  {
+   "name": "l3nm-access-profile-not-active",
+   "kind": "instance",
+   "data": "l3nm-access-profile-not-active.json",
+   "mode": "data",
+   "expect": "semantic/reference",
+   "note": "an access names a VPN instance profile its node does not activate"
+  },
+  {
+   "name": "l2nm-auto-discovery-without-bgp-ad",
+   "kind": "instance",
+   "data": "l2nm-auto-discovery-without-bgp-ad.json",
+   "mode": "strict",
+   "expect": "semantic/when",
+   "note": "RFC 9291: bgp-auto-discovery (RD, targets) exists only with bgp-ad-enabled"
+  },
+  {
+   "name": "l2nm-evpn-signaling-option",
+   "kind": "instance",
+   "data": "l2nm-evpn-signaling-option.json",
+   "mode": "data",
+   "expect": "schema/unresolved-identity",
+   "note": "RFC 9291 defect: the evpn-bgp case's pbb when names 'pbb-evpn' unprefixed, which ietf-l2vpn-ntw does not define; no instance of the case validates, so IOS 'vlan-based' is not exported"
+  },
+  {
+   "name": "vxlan-vni-out-of-range",
+   "kind": "instance",
+   "data": "vxlan-vni-out-of-range.json",
+   "mode": "get",
+   "expect": "semantic/type",
+   "note": "RFC 8944 vni is 24 bits (0..16777215)"
+  },
+  {
+   "name": "fabric-device-outside-tree",
+   "kind": "instance",
+   "data": "fabric-device-outside-tree.json",
+   "mode": "data",
+   "expect": "semantic/reference",
+   "note": "RFC 8542 device-ref is an instance-identifier: the device node must exist"
   },
   {
    "name": "bgp-ls-missing-import",

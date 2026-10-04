@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from urllib.parse import quote
 
 from ..collectors.ifname import normalize_ifname
+from .fabric import overlay_networks
 from .ospf import link_metric, project_ospf
 from .overlay import prepare
 
@@ -215,7 +216,7 @@ class _Topology:
         self.management = {}  # chassis -> addresses it is managed or advertised by
         self.host_ips = {}
         scopes = {}
-        for facts in devices.values():
+        for facts in self.devices.values():
             for row in facts.get("mac", []):
                 vid = self.mac_vlan(row)
                 if vid is not None:
@@ -659,6 +660,10 @@ class _Topology:
                 {"supporting-network": [{"network-ref": self.l2_net}]},
             )
         )
+        # Overlays (VXLAN, DC fabric) above the L3 network; the L2 network stays first.
+        overlays, overlay_evidence, self.overlay_gaps = overlay_networks(self, l2_links)
+        networks += overlays
+        evidence.update(overlay_evidence)
         return {"ietf-network:networks": {"network": networks}}, evidence
 
     def l3_node(self, device, vrf):
@@ -943,3 +948,10 @@ def build_topology_details(devices, base):
     topology = _Topology(devices, base)
     tree, evidence = topology.build()
     return tree, evidence, topology.protocol
+
+
+def build_topology_layers(devices, base):
+    """build_topology_details plus what the overlay networks could not prove."""
+    topology = _Topology(devices, base)
+    tree, evidence = topology.build()
+    return tree, evidence, topology.protocol, topology.overlay_gaps

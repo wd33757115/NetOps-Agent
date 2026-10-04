@@ -18,10 +18,12 @@ from .retained_links import UNAVAILABLE_OPER_STATUSES, retain_l2_links
 
 
 def _l2(tree):
+    """The physical L2 networks; an overlay (e.g. VXLAN) is supported by another network."""
     return [
         network
         for network in tree.get("ietf-network:networks", {}).get("network", [])
         if L2T + "l2-topology" in network.get("network-types", {})
+        and not network.get("supporting-network")
     ]
 
 

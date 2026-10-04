@@ -112,6 +112,11 @@ def trace(
     return service.trace(user.user_id, snapshot_id, src, dst, src_vrf, dst_vrf)
 
 
+@router.get("/snapshots/{snapshot_id}/services")
+def services(snapshot_id: str, user: CurrentUser = Depends(actor)):
+    return service.services(user.user_id, snapshot_id)
+
+
 @router.get("/snapshots/{snapshot_id}/rfc8345")
 def export(snapshot_id: str, user: CurrentUser = Depends(actor)):
     return service.export(user.user_id, snapshot_id)

@@ -125,6 +125,7 @@ def retain_l2_links(current_tree, prior_tree, device_states, prior_snapshot=None
         old = prior.get(network_id)
         if (
             L2T + "l2-topology" not in network.get("network-types", {})
+            or network.get("supporting-network")  # an overlay, not ports and cables
             or old is None
             or L2T + "l2-topology" not in old.get("network-types", {})
         ):

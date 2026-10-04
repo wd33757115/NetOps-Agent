@@ -13,8 +13,10 @@ import pytest
 from test_topology_campus_wan import IDENTITY
 
 from src.apps.topology.backend.collectors.parse import ParseResult, parse
+from src.apps.topology.backend.model.builder import build_topology_layers, device_node_ids
 from src.apps.topology.backend.model.overlay import egress_instances, prepare
 from src.apps.topology.backend.model.path import trace
+from src.apps.topology.backend.model.services import project_services, typed
 from src.apps.topology.backend.service import topology_observation
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures/topology/vpn-fabric"
@@ -328,3 +330,236 @@ def test_a_missing_label_for_the_remote_pe_is_a_gap_not_a_path(fabric):
     (forward,) = result["forward"]["paths"]
     assert {"status": "lsp_not_observed", "fec": "10.255.20.3"} in forward["hops"][0]["gaps"]
     assert result["forward"]["status"] == "partial"
+
+
+# --------------------------------------------------------------------- standard projections
+
+
+@pytest.fixture(scope="module")
+def ids(fabric):
+    return device_node_ids(fabric, BASE)
+
+
+def device_of(ids, node_id):
+    return next(NAME[k] for k, v in ids.items() if v == node_id)
+
+
+def services(devices):
+    return project_services(devices, BASE)
+
+
+def l3_services(result):
+    return result["l3nm"]["tree"]["ietf-l3vpn-ntw:l3vpn-ntw"]["vpn-services"]["vpn-service"]
+
+
+def l2_services(result):
+    return result["l2nm"]["tree"]["ietf-l2vpn-ntw:l2vpn-ntw"]["vpn-services"]["vpn-service"]
+
+
+def by_name(service_list, ids):
+    """{vpn-name or vpn-id: (service, {device name: vpn-node})}."""
+    return {
+        service.get("vpn-name", service["vpn-id"]): (
+            service,
+            {device_of(ids, n["ne-id"]): n for n in service["vpn-nodes"]["vpn-node"]},
+        )
+        for service in service_list
+    }
+
+
+@pytest.fixture(scope="module")
+def projected(fabric):
+    return services(fabric)
+
+
+def test_cli_route_targets_take_their_rfc_8294_type():
+    assert typed("65200:1") == "0:65200:1"
+    assert typed("10.255.10.12:2") == "1:10.255.10.12:2"
+    assert typed("4200000000:7") == "2:4200000000:7"
+    assert typed("65200:4294967296") is None  # no type holds it
+    assert typed("1.10:5") is None  # asdot is not read
+    assert typed("10.0.0.1:70000") is None
+
+
+def test_l3vpn_services_are_the_instances_sharing_an_exported_target(projected, ids):
+    l3 = by_name(l3_services(projected), ids)
+    assert {name: sorted(nodes) for name, (_, nodes) in l3.items()} == {
+        "BLUE": ["leaf2", "leaf3"],
+        "CUST-A": ["pe1", "pe2"],
+        "CUST-B": ["pe1"],
+        "SHARED": ["pe2"],
+    }
+    service, nodes = l3["CUST-A"]
+    assert service["vpn-id"] == BASE + "l3vpn:0:65200:1"
+    assert service["vpn-type"] == "ietf-vpn-common:l3vpn"
+    assert service["vpn-service-topology"] == "ietf-vpn-common:any-to-any"
+    assert service["underlay-transport"] == {"protocol": ["ietf-vpn-common:ldp"]}
+    pe2 = nodes["pe2"]
+    assert pe2["vpn-node-id"] == ids[ADDRESS["pe2"]] + ":ni:CUST-A"
+    assert (pe2["local-as"], pe2["router-id"]) == (65200, "10.255.20.3")
+    (profile,) = pe2["active-vpn-instance-profiles"]["vpn-instance-profile"]
+    assert profile["rd"] == "0:65200:11"
+    ipv4 = next(
+        a for a in profile["address-family"] if a["address-family"] == "ietf-vpn-common:ipv4"
+    )
+    assert [
+        (t["route-target-type"], [r["route-target"] for r in t["route-targets"]])
+        for t in ipv4["vpn-targets"]["vpn-target"]
+    ] == [("both", ["0:65200:1"]), ("import", ["0:65200:99"])]
+    (access,) = pe2["vpn-network-accesses"]["vpn-network-access"]
+    assert access["ip-connection"] == {"ipv4": {"local-address": "10.2.1.1", "prefix-length": 24}}
+    assert access["status"]["oper-status"] == {"status": "ietf-vpn-common:op-up"}
+    # The management VRF has no route target: a local instance, not a VPN.
+    assert "MGMT" not in l3
+
+
+def test_shared_services_leak_is_a_relation_not_a_merged_service(projected):
+    relations = {
+        (r["service"].rsplit(":", 1)[1], r["imports_from"].rsplit(":", 1)[1])
+        for r in projected["l3nm"]["relations"]
+    }
+    assert relations == {("1", "99"), ("99", "1")}
+
+
+def test_evpn_ip_vrf_is_carried_over_vxlan_and_its_l3_vni_is_no_access(projected, ids):
+    service, nodes = by_name(l3_services(projected), ids)["BLUE"]
+    assert service["underlay-transport"] == {"protocol": ["ietf-vpn-common:vxlan-trans"]}
+    accesses = {
+        name: [
+            (a["id"], a.get("vpn-network-access-type"))
+            for a in node["vpn-network-accesses"]["vpn-network-access"]
+        ]
+        for name, node in nodes.items()
+    }
+    assert accesses == {
+        "leaf2": [("Vlan20", "ietf-vpn-common:irb")],
+        "leaf3": [("Vsi-interface20", "ietf-vpn-common:irb")],
+    }
+
+
+def test_evpn_instances_join_across_vendors_by_their_common_target(projected, ids):
+    l2 = by_name(l2_services(projected), ids)
+    # IOS EVI 10 and the Comware VSI RED share 65100:10010; the local names differ.
+    service, nodes = l2[BASE + "l2vpn:0:65100:10"]
+    assert sorted(nodes) == ["leaf1", "leaf3"]
+    assert service["vpn-type"] == "ietf-vpn-common:vxlan-evpn"
+    assert service["bgp-ad-enabled"] is True
+    assert service["vpn-service-topology"] == "ietf-vpn-common:any-to-any"
+    assert nodes["leaf3"]["bgp-auto-discovery"]["rd"] == "1:10.255.10.13:10"
+    accesses = nodes["leaf1"]["vpn-network-accesses"]["vpn-network-access"]
+    assert [a["id"] for a in accesses] == ["Ethernet1/0"]
+    # VNI 10020 (LEAF2) and 10021 (LEAF3) are different segments, joined only at L3.
+    assert {"20", "BLUE-20"} <= set(l2)
+
+
+def test_evpn_targets_without_a_bgp_evpn_session_are_a_gap(fabric):
+    devices = copy.deepcopy(fabric)
+    devices[ADDRESS["leaf1"]]["bgp_evpn"]["peers"] = []
+    result = services(devices)
+    service = next(s for s in l2_services(result) if s["vpn-id"] == BASE + "l2vpn:0:65100:10")
+    assert "bgp-ad-enabled" not in service
+    assert all("bgp-auto-discovery" not in n for n in service["vpn-nodes"]["vpn-node"])
+    gap = {"code": "bgp_auto_discovery_not_proven", "device": ADDRESS["leaf1"], "instance": "10"}
+    assert gap in result["l2nm"]["gaps"]
+
+
+def overlays(devices):
+    tree, evidence, _, gaps = build_topology_layers(devices, BASE)
+    networks = {
+        n["network-id"].rsplit(":", 1)[1]: n for n in tree["ietf-network:networks"]["network"]
+    }
+    return tree, networks, evidence, gaps
+
+
+def test_vxlan_network_links_vteps_per_vni_over_their_loopbacks(fabric, ids):
+    _, networks, evidence, gaps = overlays(fabric)
+    assert list(networks) == ["l2", "l3", "vxlan", "fabric"] and gaps == []
+    vxlan = networks["vxlan"]
+    assert vxlan["supporting-network"] == [{"network-ref": BASE + "l3"}]
+    nodes = {device_of(ids, n["node-id"]): n for n in vxlan["node"]}
+    assert sorted(nodes) == ["leaf1", "leaf2", "leaf3"]
+    tp = nodes["leaf1"]["ietf-network-topology:termination-point"][0]
+    assert tp["ietf-l2-topology:l2-termination-point-attributes"] == {
+        "encapsulation-type": "ietf-l2-topology:vxlan",
+        "vxlan": {"vni-id": 10010},
+    }
+    assert tp["supporting-termination-point"] == [
+        {
+            "network-ref": BASE + "l3",
+            "node-ref": ids[ADDRESS["leaf1"]],
+            "tp-ref": BASE + "if:Loopback0",
+        }
+    ]
+    links = {
+        tuple(
+            sorted(
+                (device_of(ids, t["node-ref"]), t["tp-ref"].rsplit(":", 1)[1])
+                for t in link["ietf-simap-topology:tp"]
+            )
+        ): evidence[link["link-id"]]
+        for link in vxlan["ietf-network-topology:link"]
+    }
+    assert set(links) == {
+        (("leaf1", "10010"), ("leaf3", "10010")),
+        (("leaf2", "50020"), ("leaf3", "50020")),
+    }
+    # Seen from both VTEPs (IOS nve peer, Comware tunnel bound to the VSI).
+    assert len(links[(("leaf1", "10010"), ("leaf3", "10010"))]) == 2
+
+
+def test_a_vxlan_peer_outside_the_collection_is_a_gap_not_a_link(fabric):
+    devices = {k: v for k, v in fabric.items() if k != ADDRESS["leaf1"]}
+    _, networks, _, gaps = overlays(devices)
+    gap = {
+        "code": "vtep_outside_collection",
+        "device": ADDRESS["leaf3"],
+        "vni": 10010,
+        "peer": "10.255.10.11",
+    }
+    assert gap in gaps
+    assert all(
+        not t["tp-ref"].endswith(":10010")
+        for link in networks["vxlan"]["ietf-network-topology:link"]
+        for t in link["ietf-simap-topology:tp"]
+    )
+
+
+def test_fabric_is_the_evpn_speakers_with_vteps_spines_and_leaves(fabric, ids):
+    _, networks, _, _ = overlays(fabric)
+    (node,) = networks["fabric"]["node"]
+    attributes = node["ietf-dc-fabric-topology:fabric-attributes"]
+    assert attributes["fabric-id"] == node["node-id"] == BASE + "fabric:10.255.10.1"
+    assert attributes["type"] == "ietf-dc-fabric-types:vxlan-fabric"
+    roles = {
+        device_of(ids, d["device-ref"].split("node-id='")[1][:-2]): d["role"]
+        for d in attributes["device-nodes"]
+    }
+    assert roles == {
+        "spine1": ["ietf-dc-fabric-types:spine"],
+        "spine2": ["ietf-dc-fabric-types:spine"],
+        "leaf1": ["ietf-dc-fabric-types:leaf"],
+        "leaf2": ["ietf-dc-fabric-types:leaf"],
+        "leaf3": ["ietf-dc-fabric-types:leaf"],
+    }
+    assert len(attributes["device-links"]) == 6  # each leaf to each spine
+    # The MPLS core speaks no EVPN: no fabric without VTEPs.
+    core = {ADDRESS[n]: fabric[ADDRESS[n]] for n in ("pe1", "p", "pe2")}
+    assert "fabric" not in overlays(core)[1]
+
+
+def test_overlay_networks_are_not_ports_and_cables(fabric):
+    from src.apps.topology.backend.model.snapshot_state import _l2
+
+    tree, *_ = overlays(fabric)
+    assert [n["network-id"] for n in _l2(tree)] == [BASE + "l2"]
+
+
+def test_overlay_export_validates_against_the_frozen_modules(fabric):
+    yangson = pytest.importorskip("yangson", reason="Install tests/topology-requirements.txt")
+    content = pytest.importorskip("yangson.enumerations").ContentType.all
+    yang = Path(__file__).resolve().parents[2] / "src/apps/topology/resources/yang"
+    model = yangson.DataModel((yang / "library.json").read_text(), [str(yang)])
+    tree, *_ = overlays(fabric)
+    model.from_raw(tree).validate(ctype=content)
+    # L3NM/L2NM: yangson ignores the when conditions above their mandatory leaves and
+    # cannot compile L3NM's leafrefs; libyang validates them in the M1 cases.

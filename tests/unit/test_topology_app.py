@@ -920,6 +920,18 @@ def test_trace_searches_current_snapshots_that_know_either_end(world):
     assert service.trace_current("stranger", "192.168.1.2", "1.1.1.2") == []
 
 
+def test_services_are_read_from_a_snapshot_and_owner_scoped(world):
+    result = lab_run(world)
+    found = service.services("user", result["snapshot_id"])
+    assert found["snapshot_id"] == result["snapshot_id"]
+    # The lab runs no VPN: no service is invented from its default instance.
+    assert found["l3nm"] == found["l2nm"] == {"tree": {}, "relations": [], "gaps": []}
+    assert result["graph"]["overlay"] == {"gaps": []}
+    with pytest.raises(HTTPException) as foreign:
+        service.services("stranger", result["snapshot_id"])
+    assert foreign.value.status_code == 404
+
+
 def test_offline_snapshots_without_facts_find_nothing(world):
     row = service.import_captures("user", offline())
     assert service.locate("user", row["snapshot_id"], "10.0.0.2")["status"] == "not_found"

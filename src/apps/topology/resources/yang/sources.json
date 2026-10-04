@@ -35,6 +35,14 @@
     "sha256": "65abd568987103be19342cdfb1611970f59577b97cf760455a553a6149c0fb88",
     "source": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ietf/RFC/ietf-bfd-types@2022-09-22.yang"
   },
+  "ietf-dc-fabric-topology@2019-02-25.yang": {
+    "sha256": "715f63f4133e6a659be8581f45b586a958108302974f38d2ede68b20248a61ce",
+    "source": "https://www.iana.org/assignments/yang-parameters/ietf-dc-fabric-topology@2019-02-25.yang"
+  },
+  "ietf-dc-fabric-types@2019-02-25.yang": {
+    "sha256": "06b806f90c2f9fed01c0a02f996bf164b66dfbabe5395063af72c505cd262a9c",
+    "source": "https://www.iana.org/assignments/yang-parameters/ietf-dc-fabric-types@2019-02-25.yang"
+  },
   "ietf-inet-types@2025-12-22.yang": {
     "sha256": "2fb39c45cd28d95f60838e5f74ac509d780d18f3c5bf78db251049a4d022e266",
     "source": "https://www.rfc-editor.org/rfc/rfc9911.txt"

@@ -1,0 +1,3688 @@
+{
+ "ietf-network:networks": {
+  "network": [
+   {
+    "network-id": "urn:netops:topology:vpn-fabric:l2",
+    "network-types": {
+     "ietf-l2-topology:l2-topology": {}
+    },
+    "ietf-simap-topology:network-category": "ietf-simap-topology:network-category-live",
+    "node": [
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:device:74-25-8a-e3-d1-c8",
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:GigabitEthernet1%2F0",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "GigabitEthernet1/0",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        },
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:GigabitEthernet1%2F0"
+         },
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:host:00-15-5d-01-03-14",
+          "tp-ref": "urn:netops:topology:vpn-fabric:nic:00-15-5d-01-03-14"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:GigabitEthernet2%2F0",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "GigabitEthernet2/0",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        },
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0d-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F2"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:GigabitEthernet3%2F0",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "GigabitEthernet3/0",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        },
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-06",
+          "tp-ref": "urn:netops:topology:vpn-fabric:nic:00-50-79-66-68-06"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:GigabitEthernet4%2F0",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "GigabitEthernet4/0",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        },
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-07",
+          "tp-ref": "urn:netops:topology:vpn-fabric:nic:00-50-79-66-68-07"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:GigabitEthernet5%2F0",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "GigabitEthernet5/0",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       }
+      ],
+      "ietf-l2-topology:l2-node-attributes": {
+       "name": "PE2",
+       "management-address": [
+        "10.10.1.28",
+        "10.20.23.2"
+       ],
+       "management-mac": "74:25:8a:e3:d1:c8"
+      },
+      "ietf-simap-topology:linked-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:host:00-15-5d-01-03-14"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-06"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-07"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0d-00"
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77",
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:GigabitEthernet1%2F0",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "GigabitEthernet1/0",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        },
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e3-d1-c8",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:GigabitEthernet1%2F0"
+         },
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:host:00-15-5d-01-03-14",
+          "tp-ref": "urn:netops:topology:vpn-fabric:nic:00-15-5d-01-03-14"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:GigabitEthernet2%2F0",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "GigabitEthernet2/0",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        },
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-08-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F3"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:GigabitEthernet3%2F0",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "GigabitEthernet3/0",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        },
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-09-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F3"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:GigabitEthernet4%2F0",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "GigabitEthernet4/0",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:GigabitEthernet5%2F0",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "GigabitEthernet5/0",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       }
+      ],
+      "ietf-l2-topology:l2-node-attributes": {
+       "name": "LEAF3",
+       "management-address": [
+        "10.10.1.25",
+        "10.10.13.2",
+        "10.10.23.2"
+       ],
+       "management-mac": "74:25:8a:e4:16:77"
+      },
+      "ietf-simap-topology:linked-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e3-d1-c8"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:host:00-15-5d-01-03-14"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-08-00"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-09-00"
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-08-00",
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F0",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet0/0",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet0/1",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        },
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0a-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F2",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet0/2",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        },
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0b-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F3",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet0/3",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        },
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:GigabitEthernet2%2F0"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F0",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet1/0",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F1",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet1/1",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F2",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet1/2",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F3",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet1/3",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       }
+      ],
+      "ietf-l2-topology:l2-node-attributes": {
+       "name": "SPINE1.lab.local",
+       "management-address": [
+        "10.10.1.21",
+        "10.10.11.1",
+        "10.10.12.1",
+        "10.10.13.1"
+       ],
+       "management-mac": "aa:bb:cc:00:08:00"
+      },
+      "ietf-simap-topology:linked-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0a-00"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0b-00"
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-09-00",
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F0",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet0/0",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet0/1",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        },
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0a-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F2"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F2",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet0/2",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        },
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0b-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F2"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F3",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet0/3",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        },
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:GigabitEthernet3%2F0"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F0",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet1/0",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F1",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet1/1",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F2",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet1/2",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F3",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet1/3",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       }
+      ],
+      "ietf-l2-topology:l2-node-attributes": {
+       "name": "SPINE2.lab.local",
+       "management-address": [
+        "10.10.1.22",
+        "10.10.21.1",
+        "10.10.22.1",
+        "10.10.23.1"
+       ],
+       "management-mac": "aa:bb:cc:00:09:00"
+      },
+      "ietf-simap-topology:linked-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0a-00"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0b-00"
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0a-00",
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F0",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet0/0",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet0/1",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        },
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-08-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F2",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet0/2",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        },
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-09-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F3",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet0/3",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F0",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet1/0",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        },
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:nic:00-50-79-66-68-00"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F1",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet1/1",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F2",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet1/2",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F3",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet1/3",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet2%2F0",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet2/0",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet2%2F1",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet2/1",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet2%2F2",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet2/2",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet2%2F3",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet2/3",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet3%2F0",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet3/0",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet3%2F1",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet3/1",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet3%2F2",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet3/2",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet3%2F3",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet3/3",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       }
+      ],
+      "ietf-l2-topology:l2-node-attributes": {
+       "name": "LEAF1.lab.local",
+       "management-address": [
+        "10.10.1.23",
+        "10.10.11.2",
+        "10.10.21.2"
+       ],
+       "management-mac": "aa:bb:cc:00:0a:00"
+      },
+      "ietf-simap-topology:linked-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-00"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-08-00"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-09-00"
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0b-00",
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F0",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet0/0",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet0/1",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        },
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-08-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F2"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F2",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet0/2",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        },
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-09-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F2"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F3",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet0/3",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F0",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet1/0",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        },
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-01",
+          "tp-ref": "urn:netops:topology:vpn-fabric:nic:00-50-79-66-68-01"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F1",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet1/1",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F2",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet1/2",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F3",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet1/3",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet2%2F0",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet2/0",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet2%2F1",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet2/1",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet2%2F2",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet2/2",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet2%2F3",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet2/3",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet3%2F0",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet3/0",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet3%2F1",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet3/1",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet3%2F2",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet3/2",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet3%2F3",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet3/3",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       }
+      ],
+      "ietf-l2-topology:l2-node-attributes": {
+       "name": "LEAF2.lab.local",
+       "management-address": [
+        "10.10.1.24",
+        "10.10.12.2",
+        "10.10.22.2"
+       ],
+       "management-mac": "aa:bb:cc:00:0b:00"
+      },
+      "ietf-simap-topology:linked-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-01"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-08-00"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-09-00"
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0c-00",
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F0",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet0/0",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet0/1",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        },
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0d-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F2",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet0/2",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F3",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet0/3",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F0",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet1/0",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        },
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-04",
+          "tp-ref": "urn:netops:topology:vpn-fabric:nic:00-50-79-66-68-04"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F1",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet1/1",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        },
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-05",
+          "tp-ref": "urn:netops:topology:vpn-fabric:nic:00-50-79-66-68-05"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F2",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet1/2",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F3",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet1/3",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       }
+      ],
+      "ietf-l2-topology:l2-node-attributes": {
+       "name": "PE1.lab.local",
+       "management-address": [
+        "10.10.1.26",
+        "10.20.12.1"
+       ],
+       "management-mac": "aa:bb:cc:00:0c:00"
+      },
+      "ietf-simap-topology:linked-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-04"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-05"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0d-00"
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0d-00",
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F0",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet0/0",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet0/1",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        },
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0c-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F2",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet0/2",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        },
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e3-d1-c8",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:GigabitEthernet2%2F0"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F3",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet0/3",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F0",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet1/0",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F1",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet1/1",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F2",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet1/2",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F3",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "interface-name": "Ethernet1/3",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        }
+       }
+      ],
+      "ietf-l2-topology:l2-node-attributes": {
+       "name": "P.lab.local",
+       "management-address": [
+        "10.10.1.27",
+        "10.20.12.2",
+        "10.20.23.1"
+       ],
+       "management-mac": "aa:bb:cc:00:0d:00"
+      },
+      "ietf-simap-topology:linked-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e3-d1-c8"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0c-00"
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:host:00-15-5d-01-03-14",
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:nic:00-15-5d-01-03-14",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "mac-address": "00:15:5d:01:03:14",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        },
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e3-d1-c8",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:GigabitEthernet1%2F0"
+         },
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:GigabitEthernet1%2F0"
+         }
+        ]
+       }
+      ],
+      "ietf-simap-topology:linked-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e3-d1-c8"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77"
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-00",
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:nic:00-50-79-66-68-00",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "mac-address": "00:50:79:66:68:00",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        },
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0a-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F0"
+         }
+        ]
+       }
+      ],
+      "ietf-simap-topology:linked-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0a-00"
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-01",
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:nic:00-50-79-66-68-01",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "mac-address": "00:50:79:66:68:01",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        },
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0b-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F0"
+         }
+        ]
+       }
+      ],
+      "ietf-simap-topology:linked-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0b-00"
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-04",
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:nic:00-50-79-66-68-04",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "mac-address": "00:50:79:66:68:04",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        },
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0c-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F0"
+         }
+        ]
+       }
+      ],
+      "ietf-simap-topology:linked-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0c-00"
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-05",
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:nic:00-50-79-66-68-05",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "mac-address": "00:50:79:66:68:05",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        },
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0c-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F1"
+         }
+        ]
+       }
+      ],
+      "ietf-simap-topology:linked-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0c-00"
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-06",
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:nic:00-50-79-66-68-06",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "mac-address": "00:50:79:66:68:06",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        },
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e3-d1-c8",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:GigabitEthernet3%2F0"
+         }
+        ]
+       }
+      ],
+      "ietf-simap-topology:linked-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e3-d1-c8"
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-07",
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:nic:00-50-79-66-68-07",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "mac-address": "00:50:79:66:68:07",
+         "encapsulation-type": "ietf-l2-topology:ethernet"
+        },
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e3-d1-c8",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:GigabitEthernet4%2F0"
+         }
+        ]
+       }
+      ],
+      "ietf-simap-topology:linked-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e3-d1-c8"
+       }
+      ]
+     }
+    ],
+    "ietf-network-topology:link": [
+     {
+      "link-id": "urn:netops:topology:vpn-fabric:l2-link:0a1e5670d689",
+      "ietf-simap-topology:link-direction": "ietf-simap-topology:link-direction-bi",
+      "ietf-simap-topology:link-type": "ietf-simap-topology:link-type-mp2mp",
+      "ietf-simap-topology:tp": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e3-d1-c8",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:GigabitEthernet1%2F0",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:GigabitEthernet1%2F0",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:host:00-15-5d-01-03-14",
+        "tp-ref": "urn:netops:topology:vpn-fabric:nic:00-15-5d-01-03-14",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       }
+      ]
+     },
+     {
+      "link-id": "urn:netops:topology:vpn-fabric:l2-link:be97251e9a4f",
+      "ietf-simap-topology:link-direction": "ietf-simap-topology:link-direction-bi",
+      "ietf-simap-topology:link-type": "ietf-simap-topology:link-type-p2p",
+      "ietf-simap-topology:tp": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0a-00",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F0",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-00",
+        "tp-ref": "urn:netops:topology:vpn-fabric:nic:00-50-79-66-68-00",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       }
+      ]
+     },
+     {
+      "link-id": "urn:netops:topology:vpn-fabric:l2-link:0013391b19dd",
+      "ietf-simap-topology:link-direction": "ietf-simap-topology:link-direction-bi",
+      "ietf-simap-topology:link-type": "ietf-simap-topology:link-type-p2p",
+      "ietf-simap-topology:tp": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0b-00",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F0",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-01",
+        "tp-ref": "urn:netops:topology:vpn-fabric:nic:00-50-79-66-68-01",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       }
+      ]
+     },
+     {
+      "link-id": "urn:netops:topology:vpn-fabric:l2-link:2feae98961e1",
+      "ietf-simap-topology:link-direction": "ietf-simap-topology:link-direction-bi",
+      "ietf-simap-topology:link-type": "ietf-simap-topology:link-type-p2p",
+      "ietf-simap-topology:tp": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0c-00",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F0",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-04",
+        "tp-ref": "urn:netops:topology:vpn-fabric:nic:00-50-79-66-68-04",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       }
+      ]
+     },
+     {
+      "link-id": "urn:netops:topology:vpn-fabric:l2-link:aec6b6869f48",
+      "ietf-simap-topology:link-direction": "ietf-simap-topology:link-direction-bi",
+      "ietf-simap-topology:link-type": "ietf-simap-topology:link-type-p2p",
+      "ietf-simap-topology:tp": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0c-00",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F1",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-05",
+        "tp-ref": "urn:netops:topology:vpn-fabric:nic:00-50-79-66-68-05",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       }
+      ]
+     },
+     {
+      "link-id": "urn:netops:topology:vpn-fabric:l2-link:2df06d5d2418",
+      "ietf-simap-topology:link-direction": "ietf-simap-topology:link-direction-bi",
+      "ietf-simap-topology:link-type": "ietf-simap-topology:link-type-p2p",
+      "ietf-simap-topology:tp": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e3-d1-c8",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:GigabitEthernet3%2F0",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-06",
+        "tp-ref": "urn:netops:topology:vpn-fabric:nic:00-50-79-66-68-06",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       }
+      ]
+     },
+     {
+      "link-id": "urn:netops:topology:vpn-fabric:l2-link:4b861ad51564",
+      "ietf-simap-topology:link-direction": "ietf-simap-topology:link-direction-bi",
+      "ietf-simap-topology:link-type": "ietf-simap-topology:link-type-p2p",
+      "ietf-simap-topology:tp": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e3-d1-c8",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:GigabitEthernet4%2F0",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-07",
+        "tp-ref": "urn:netops:topology:vpn-fabric:nic:00-50-79-66-68-07",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       }
+      ]
+     },
+     {
+      "link-id": "urn:netops:topology:vpn-fabric:l2-link:0a4f4a366d29",
+      "ietf-simap-topology:link-direction": "ietf-simap-topology:link-direction-bi",
+      "ietf-simap-topology:link-type": "ietf-simap-topology:link-type-p2p",
+      "ietf-simap-topology:tp": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e3-d1-c8",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:GigabitEthernet2%2F0",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0d-00",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F2",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       }
+      ]
+     },
+     {
+      "link-id": "urn:netops:topology:vpn-fabric:l2-link:c6d65dceb6d5",
+      "ietf-simap-topology:link-direction": "ietf-simap-topology:link-direction-bi",
+      "ietf-simap-topology:link-type": "ietf-simap-topology:link-type-p2p",
+      "ietf-simap-topology:tp": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:GigabitEthernet2%2F0",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-08-00",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F3",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       }
+      ]
+     },
+     {
+      "link-id": "urn:netops:topology:vpn-fabric:l2-link:542a14d7cf49",
+      "ietf-simap-topology:link-direction": "ietf-simap-topology:link-direction-bi",
+      "ietf-simap-topology:link-type": "ietf-simap-topology:link-type-p2p",
+      "ietf-simap-topology:tp": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:GigabitEthernet3%2F0",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-09-00",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F3",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       }
+      ]
+     },
+     {
+      "link-id": "urn:netops:topology:vpn-fabric:l2-link:d40e8f605963",
+      "ietf-simap-topology:link-direction": "ietf-simap-topology:link-direction-bi",
+      "ietf-simap-topology:link-type": "ietf-simap-topology:link-type-p2p",
+      "ietf-simap-topology:tp": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-08-00",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0a-00",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       }
+      ]
+     },
+     {
+      "link-id": "urn:netops:topology:vpn-fabric:l2-link:76ba9b98ef3a",
+      "ietf-simap-topology:link-direction": "ietf-simap-topology:link-direction-bi",
+      "ietf-simap-topology:link-type": "ietf-simap-topology:link-type-p2p",
+      "ietf-simap-topology:tp": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-08-00",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F2",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0b-00",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       }
+      ]
+     },
+     {
+      "link-id": "urn:netops:topology:vpn-fabric:l2-link:a6a2d358b408",
+      "ietf-simap-topology:link-direction": "ietf-simap-topology:link-direction-bi",
+      "ietf-simap-topology:link-type": "ietf-simap-topology:link-type-p2p",
+      "ietf-simap-topology:tp": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-09-00",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0a-00",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F2",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       }
+      ]
+     },
+     {
+      "link-id": "urn:netops:topology:vpn-fabric:l2-link:0d285b4c641d",
+      "ietf-simap-topology:link-direction": "ietf-simap-topology:link-direction-bi",
+      "ietf-simap-topology:link-type": "ietf-simap-topology:link-type-p2p",
+      "ietf-simap-topology:tp": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-09-00",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F2",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0b-00",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F2",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       }
+      ]
+     },
+     {
+      "link-id": "urn:netops:topology:vpn-fabric:l2-link:dee59e2be851",
+      "ietf-simap-topology:link-direction": "ietf-simap-topology:link-direction-bi",
+      "ietf-simap-topology:link-type": "ietf-simap-topology:link-type-p2p",
+      "ietf-simap-topology:tp": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0c-00",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0d-00",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "network-id": "urn:netops:topology:vpn-fabric:l3",
+    "network-types": {
+     "ietf-l3-unicast-topology:l3-unicast-topology": {}
+    },
+    "ietf-simap-topology:network-category": "ietf-simap-topology:network-category-live",
+    "supporting-network": [
+     {
+      "network-ref": "urn:netops:topology:vpn-fabric:l2"
+     }
+    ],
+    "node": [
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:device:74-25-8a-e3-d1-c8",
+      "ietf-simap-topology:name": "default",
+      "supporting-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e3-d1-c8"
+       }
+      ],
+      "ietf-l3-unicast-topology:l3-node-attributes": {
+       "prefix": [
+        {
+         "prefix": "10.10.1.0/24"
+        },
+        {
+         "prefix": "10.20.23.0/30"
+        },
+        {
+         "prefix": "10.255.20.3/32"
+        }
+       ],
+       "router-id": [
+        "10.255.20.3"
+       ]
+      },
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:GigabitEthernet1%2F0",
+        "ietf-simap-topology:name": "GigabitEthernet1/0",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.10.1.28"
+         ]
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e3-d1-c8",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:GigabitEthernet1%2F0"
+         }
+        ],
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l3",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:GigabitEthernet1%2F0"
+         },
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l3",
+          "node-ref": "urn:netops:topology:vpn-fabric:host:00-15-5d-01-03-14",
+          "tp-ref": "urn:netops:topology:vpn-fabric:ip:10.10.1.254"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:GigabitEthernet2%2F0",
+        "ietf-simap-topology:name": "GigabitEthernet2/0",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.20.23.2"
+         ]
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e3-d1-c8",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:GigabitEthernet2%2F0"
+         }
+        ],
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l3",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0d-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F2"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:LoopBack0",
+        "ietf-simap-topology:name": "LoopBack0",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.255.20.3"
+         ]
+        }
+       }
+      ],
+      "ietf-simap-topology:linked-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:host:00-15-5d-01-03-14"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0d-00"
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:device:74-25-8a-e3-d1-c8:ni:CUST-A",
+      "ietf-simap-topology:name": "CUST-A",
+      "supporting-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e3-d1-c8"
+       }
+      ],
+      "ietf-l3-unicast-topology:l3-node-attributes": {
+       "prefix": [
+        {
+         "prefix": "10.2.1.0/24"
+        }
+       ]
+      },
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:GigabitEthernet3%2F0",
+        "ietf-simap-topology:name": "GigabitEthernet3/0",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.2.1.1"
+         ]
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e3-d1-c8",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:GigabitEthernet3%2F0"
+         }
+        ],
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l3",
+          "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-06",
+          "tp-ref": "urn:netops:topology:vpn-fabric:ip:10.2.1.10"
+         }
+        ]
+       }
+      ],
+      "ietf-simap-topology:linked-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-06"
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:device:74-25-8a-e3-d1-c8:ni:SHARED",
+      "ietf-simap-topology:name": "SHARED",
+      "supporting-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e3-d1-c8"
+       }
+      ],
+      "ietf-l3-unicast-topology:l3-node-attributes": {
+       "prefix": [
+        {
+         "prefix": "10.99.1.0/24"
+        }
+       ]
+      },
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:GigabitEthernet4%2F0",
+        "ietf-simap-topology:name": "GigabitEthernet4/0",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.99.1.1"
+         ]
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e3-d1-c8",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:GigabitEthernet4%2F0"
+         }
+        ],
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l3",
+          "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-07",
+          "tp-ref": "urn:netops:topology:vpn-fabric:ip:10.99.1.10"
+         }
+        ]
+       }
+      ],
+      "ietf-simap-topology:linked-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-07"
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77",
+      "ietf-simap-topology:name": "default",
+      "supporting-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77"
+       }
+      ],
+      "ietf-l3-unicast-topology:l3-node-attributes": {
+       "prefix": [
+        {
+         "prefix": "10.10.1.0/24"
+        },
+        {
+         "prefix": "10.10.13.0/30"
+        },
+        {
+         "prefix": "10.10.23.0/30"
+        },
+        {
+         "prefix": "10.255.10.13/32"
+        }
+       ],
+       "router-id": [
+        "10.255.10.13"
+       ]
+      },
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:GigabitEthernet1%2F0",
+        "ietf-simap-topology:name": "GigabitEthernet1/0",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.10.1.25"
+         ]
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:GigabitEthernet1%2F0"
+         }
+        ],
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l3",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e3-d1-c8",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:GigabitEthernet1%2F0"
+         },
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l3",
+          "node-ref": "urn:netops:topology:vpn-fabric:host:00-15-5d-01-03-14",
+          "tp-ref": "urn:netops:topology:vpn-fabric:ip:10.10.1.254"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:GigabitEthernet2%2F0",
+        "ietf-simap-topology:name": "GigabitEthernet2/0",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.10.13.2"
+         ]
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:GigabitEthernet2%2F0"
+         }
+        ],
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l3",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-08-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F3"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:GigabitEthernet3%2F0",
+        "ietf-simap-topology:name": "GigabitEthernet3/0",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.10.23.2"
+         ]
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:GigabitEthernet3%2F0"
+         }
+        ],
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l3",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-09-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F3"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:LoopBack0",
+        "ietf-simap-topology:name": "LoopBack0",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.255.10.13"
+         ]
+        }
+       }
+      ],
+      "ietf-simap-topology:linked-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e3-d1-c8"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:host:00-15-5d-01-03-14"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-08-00"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-09-00"
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77:ni:BLUE",
+      "ietf-simap-topology:name": "BLUE",
+      "supporting-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77"
+       }
+      ],
+      "ietf-l3-unicast-topology:l3-node-attributes": {
+       "prefix": [
+        {
+         "prefix": "192.168.20.0/24"
+        }
+       ]
+      },
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Vsi-interface20",
+        "ietf-simap-topology:name": "Vsi-interface20",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "192.168.20.1"
+         ]
+        }
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-08-00",
+      "ietf-simap-topology:name": "default",
+      "supporting-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-08-00"
+       }
+      ],
+      "ietf-l3-unicast-topology:l3-node-attributes": {
+       "prefix": [
+        {
+         "prefix": "10.10.11.0/30"
+        },
+        {
+         "prefix": "10.10.12.0/30"
+        },
+        {
+         "prefix": "10.10.13.0/30"
+        },
+        {
+         "prefix": "10.255.10.1/32"
+        }
+       ],
+       "router-id": [
+        "10.255.10.1"
+       ]
+      },
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1",
+        "ietf-simap-topology:name": "Ethernet0/1",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.10.11.1"
+         ]
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-08-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1"
+         }
+        ],
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l3",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0a-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F2",
+        "ietf-simap-topology:name": "Ethernet0/2",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.10.12.1"
+         ]
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-08-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F2"
+         }
+        ],
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l3",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0b-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F3",
+        "ietf-simap-topology:name": "Ethernet0/3",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.10.13.1"
+         ]
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-08-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F3"
+         }
+        ],
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l3",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:GigabitEthernet2%2F0"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Loopback0",
+        "ietf-simap-topology:name": "Loopback0",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.255.10.1"
+         ]
+        }
+       }
+      ],
+      "ietf-simap-topology:linked-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0a-00"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0b-00"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77"
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-08-00:ni:MGMT",
+      "ietf-simap-topology:name": "MGMT",
+      "supporting-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-08-00"
+       }
+      ],
+      "ietf-l3-unicast-topology:l3-node-attributes": {
+       "prefix": [
+        {
+         "prefix": "10.10.1.0/24"
+        }
+       ]
+      },
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F0",
+        "ietf-simap-topology:name": "Ethernet0/0",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.10.1.21"
+         ]
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-08-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F0"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-09-00",
+      "ietf-simap-topology:name": "default",
+      "supporting-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-09-00"
+       }
+      ],
+      "ietf-l3-unicast-topology:l3-node-attributes": {
+       "prefix": [
+        {
+         "prefix": "10.10.21.0/30"
+        },
+        {
+         "prefix": "10.10.22.0/30"
+        },
+        {
+         "prefix": "10.10.23.0/30"
+        },
+        {
+         "prefix": "10.255.10.2/32"
+        }
+       ],
+       "router-id": [
+        "10.255.10.2"
+       ]
+      },
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1",
+        "ietf-simap-topology:name": "Ethernet0/1",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.10.21.1"
+         ]
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-09-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1"
+         }
+        ],
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l3",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0a-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F2"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F2",
+        "ietf-simap-topology:name": "Ethernet0/2",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.10.22.1"
+         ]
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-09-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F2"
+         }
+        ],
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l3",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0b-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F2"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F3",
+        "ietf-simap-topology:name": "Ethernet0/3",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.10.23.1"
+         ]
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-09-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F3"
+         }
+        ],
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l3",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:GigabitEthernet3%2F0"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Loopback0",
+        "ietf-simap-topology:name": "Loopback0",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.255.10.2"
+         ]
+        }
+       }
+      ],
+      "ietf-simap-topology:linked-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0a-00"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0b-00"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77"
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-09-00:ni:MGMT",
+      "ietf-simap-topology:name": "MGMT",
+      "supporting-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-09-00"
+       }
+      ],
+      "ietf-l3-unicast-topology:l3-node-attributes": {
+       "prefix": [
+        {
+         "prefix": "10.10.1.0/24"
+        }
+       ]
+      },
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F0",
+        "ietf-simap-topology:name": "Ethernet0/0",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.10.1.22"
+         ]
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-09-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F0"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0a-00",
+      "ietf-simap-topology:name": "default",
+      "supporting-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0a-00"
+       }
+      ],
+      "ietf-l3-unicast-topology:l3-node-attributes": {
+       "prefix": [
+        {
+         "prefix": "10.10.11.0/30"
+        },
+        {
+         "prefix": "10.10.21.0/30"
+        },
+        {
+         "prefix": "10.255.10.11/32"
+        }
+       ],
+       "router-id": [
+        "10.255.10.11"
+       ]
+      },
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1",
+        "ietf-simap-topology:name": "Ethernet0/1",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.10.11.2"
+         ]
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0a-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1"
+         }
+        ],
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l3",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-08-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F2",
+        "ietf-simap-topology:name": "Ethernet0/2",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.10.21.2"
+         ]
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0a-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F2"
+         }
+        ],
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l3",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-09-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Loopback0",
+        "ietf-simap-topology:name": "Loopback0",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.255.10.11"
+         ]
+        }
+       }
+      ],
+      "ietf-simap-topology:linked-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-08-00"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-09-00"
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0a-00:ni:MGMT",
+      "ietf-simap-topology:name": "MGMT",
+      "supporting-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0a-00"
+       }
+      ],
+      "ietf-l3-unicast-topology:l3-node-attributes": {
+       "prefix": [
+        {
+         "prefix": "10.10.1.0/24"
+        }
+       ]
+      },
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F0",
+        "ietf-simap-topology:name": "Ethernet0/0",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.10.1.23"
+         ]
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0a-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F0"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0b-00",
+      "ietf-simap-topology:name": "default",
+      "supporting-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0b-00"
+       }
+      ],
+      "ietf-l3-unicast-topology:l3-node-attributes": {
+       "prefix": [
+        {
+         "prefix": "10.10.12.0/30"
+        },
+        {
+         "prefix": "10.10.22.0/30"
+        },
+        {
+         "prefix": "10.255.10.12/32"
+        }
+       ],
+       "router-id": [
+        "10.255.10.12"
+       ]
+      },
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1",
+        "ietf-simap-topology:name": "Ethernet0/1",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.10.12.2"
+         ]
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0b-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1"
+         }
+        ],
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l3",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-08-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F2"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F2",
+        "ietf-simap-topology:name": "Ethernet0/2",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.10.22.2"
+         ]
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0b-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F2"
+         }
+        ],
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l3",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-09-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F2"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Loopback0",
+        "ietf-simap-topology:name": "Loopback0",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.255.10.12"
+         ]
+        }
+       }
+      ],
+      "ietf-simap-topology:linked-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-08-00"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-09-00"
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0b-00:ni:BLUE",
+      "ietf-simap-topology:name": "BLUE",
+      "supporting-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0b-00"
+       }
+      ],
+      "ietf-l3-unicast-topology:l3-node-attributes": {
+       "prefix": [
+        {
+         "prefix": "192.168.10.0/24"
+        }
+       ]
+      },
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Vlan20",
+        "ietf-simap-topology:name": "Vlan20",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "192.168.10.1"
+         ]
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0b-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F0"
+         }
+        ],
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l3",
+          "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-01",
+          "tp-ref": "urn:netops:topology:vpn-fabric:ip:192.168.10.12"
+         }
+        ]
+       }
+      ],
+      "ietf-simap-topology:linked-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-01"
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0b-00:ni:MGMT",
+      "ietf-simap-topology:name": "MGMT",
+      "supporting-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0b-00"
+       }
+      ],
+      "ietf-l3-unicast-topology:l3-node-attributes": {
+       "prefix": [
+        {
+         "prefix": "10.10.1.0/24"
+        }
+       ]
+      },
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F0",
+        "ietf-simap-topology:name": "Ethernet0/0",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.10.1.24"
+         ]
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0b-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F0"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0c-00",
+      "ietf-simap-topology:name": "default",
+      "supporting-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0c-00"
+       }
+      ],
+      "ietf-l3-unicast-topology:l3-node-attributes": {
+       "prefix": [
+        {
+         "prefix": "10.20.12.0/30"
+        },
+        {
+         "prefix": "10.255.20.1/32"
+        }
+       ],
+       "router-id": [
+        "10.255.20.1"
+       ]
+      },
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1",
+        "ietf-simap-topology:name": "Ethernet0/1",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.20.12.1"
+         ]
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0c-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1"
+         }
+        ],
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l3",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0d-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Loopback0",
+        "ietf-simap-topology:name": "Loopback0",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.255.20.1"
+         ]
+        }
+       }
+      ],
+      "ietf-simap-topology:linked-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0d-00"
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0c-00:ni:CUST-A",
+      "ietf-simap-topology:name": "CUST-A",
+      "supporting-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0c-00"
+       }
+      ],
+      "ietf-l3-unicast-topology:l3-node-attributes": {
+       "prefix": [
+        {
+         "prefix": "10.1.1.0/24"
+        }
+       ]
+      },
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F0",
+        "ietf-simap-topology:name": "Ethernet1/0",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.1.1.1"
+         ]
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0c-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F0"
+         }
+        ],
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l3",
+          "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-04",
+          "tp-ref": "urn:netops:topology:vpn-fabric:ip:10.1.1.10"
+         }
+        ]
+       }
+      ],
+      "ietf-simap-topology:linked-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-04"
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0c-00:ni:CUST-B",
+      "ietf-simap-topology:name": "CUST-B",
+      "supporting-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0c-00"
+       }
+      ],
+      "ietf-l3-unicast-topology:l3-node-attributes": {
+       "prefix": [
+        {
+         "prefix": "10.1.1.0/24"
+        }
+       ]
+      },
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F1",
+        "ietf-simap-topology:name": "Ethernet1/1",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.1.1.1"
+         ]
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0c-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F1"
+         }
+        ],
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l3",
+          "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-05",
+          "tp-ref": "urn:netops:topology:vpn-fabric:ip:10.1.1.10"
+         }
+        ]
+       }
+      ],
+      "ietf-simap-topology:linked-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-05"
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0c-00:ni:MGMT",
+      "ietf-simap-topology:name": "MGMT",
+      "supporting-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0c-00"
+       }
+      ],
+      "ietf-l3-unicast-topology:l3-node-attributes": {
+       "prefix": [
+        {
+         "prefix": "10.10.1.0/24"
+        }
+       ]
+      },
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F0",
+        "ietf-simap-topology:name": "Ethernet0/0",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.10.1.26"
+         ]
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0c-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F0"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0d-00",
+      "ietf-simap-topology:name": "default",
+      "supporting-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0d-00"
+       }
+      ],
+      "ietf-l3-unicast-topology:l3-node-attributes": {
+       "prefix": [
+        {
+         "prefix": "10.20.12.0/30"
+        },
+        {
+         "prefix": "10.20.23.0/30"
+        },
+        {
+         "prefix": "10.255.20.2/32"
+        }
+       ],
+       "router-id": [
+        "10.255.20.2"
+       ]
+      },
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1",
+        "ietf-simap-topology:name": "Ethernet0/1",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.20.12.2"
+         ]
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0d-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1"
+         }
+        ],
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l3",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0c-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F2",
+        "ietf-simap-topology:name": "Ethernet0/2",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.20.23.1"
+         ]
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0d-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F2"
+         }
+        ],
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l3",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e3-d1-c8",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:GigabitEthernet2%2F0"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Loopback0",
+        "ietf-simap-topology:name": "Loopback0",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.255.20.2"
+         ]
+        }
+       }
+      ],
+      "ietf-simap-topology:linked-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0c-00"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e3-d1-c8"
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0d-00:ni:MGMT",
+      "ietf-simap-topology:name": "MGMT",
+      "supporting-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0d-00"
+       }
+      ],
+      "ietf-l3-unicast-topology:l3-node-attributes": {
+       "prefix": [
+        {
+         "prefix": "10.10.1.0/24"
+        }
+       ]
+      },
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F0",
+        "ietf-simap-topology:name": "Ethernet0/0",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.10.1.27"
+         ]
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0d-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F0"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:host:00-15-5d-01-03-14",
+      "supporting-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:host:00-15-5d-01-03-14"
+       }
+      ],
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:ip:10.10.1.254",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.10.1.254"
+         ]
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:host:00-15-5d-01-03-14",
+          "tp-ref": "urn:netops:topology:vpn-fabric:nic:00-15-5d-01-03-14"
+         }
+        ],
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l3",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e3-d1-c8",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:GigabitEthernet1%2F0"
+         },
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l3",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:GigabitEthernet1%2F0"
+         }
+        ]
+       }
+      ],
+      "ietf-simap-topology:linked-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e3-d1-c8"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77"
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-01",
+      "supporting-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-01"
+       }
+      ],
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:ip:192.168.10.12",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "192.168.10.12"
+         ]
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-01",
+          "tp-ref": "urn:netops:topology:vpn-fabric:nic:00-50-79-66-68-01"
+         }
+        ],
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l3",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0b-00:ni:BLUE",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Vlan20"
+         }
+        ]
+       }
+      ],
+      "ietf-simap-topology:linked-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0b-00:ni:BLUE"
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-04",
+      "supporting-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-04"
+       }
+      ],
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:ip:10.1.1.10",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.1.1.10"
+         ]
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-04",
+          "tp-ref": "urn:netops:topology:vpn-fabric:nic:00-50-79-66-68-04"
+         }
+        ],
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l3",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0c-00:ni:CUST-A",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F0"
+         }
+        ]
+       }
+      ],
+      "ietf-simap-topology:linked-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0c-00:ni:CUST-A"
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-05",
+      "supporting-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-05"
+       }
+      ],
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:ip:10.1.1.10",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.1.1.10"
+         ]
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-05",
+          "tp-ref": "urn:netops:topology:vpn-fabric:nic:00-50-79-66-68-05"
+         }
+        ],
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l3",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0c-00:ni:CUST-B",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F1"
+         }
+        ]
+       }
+      ],
+      "ietf-simap-topology:linked-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0c-00:ni:CUST-B"
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-06",
+      "supporting-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-06"
+       }
+      ],
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:ip:10.2.1.10",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.2.1.10"
+         ]
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-06",
+          "tp-ref": "urn:netops:topology:vpn-fabric:nic:00-50-79-66-68-06"
+         }
+        ],
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l3",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e3-d1-c8:ni:CUST-A",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:GigabitEthernet3%2F0"
+         }
+        ]
+       }
+      ],
+      "ietf-simap-topology:linked-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e3-d1-c8:ni:CUST-A"
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-07",
+      "supporting-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-07"
+       }
+      ],
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:ip:10.99.1.10",
+        "ietf-l3-unicast-topology:l3-termination-point-attributes": {
+         "ip-address": [
+          "10.99.1.10"
+         ]
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l2",
+          "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-07",
+          "tp-ref": "urn:netops:topology:vpn-fabric:nic:00-50-79-66-68-07"
+         }
+        ],
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l3",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e3-d1-c8:ni:SHARED",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:GigabitEthernet4%2F0"
+         }
+        ]
+       }
+      ],
+      "ietf-simap-topology:linked-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e3-d1-c8:ni:SHARED"
+       }
+      ]
+     }
+    ],
+    "ietf-network-topology:link": [
+     {
+      "link-id": "urn:netops:topology:vpn-fabric:l3-link:dd1583ae5c97",
+      "ietf-simap-topology:link-direction": "ietf-simap-topology:link-direction-bi",
+      "ietf-simap-topology:link-type": "ietf-simap-topology:link-type-p2p",
+      "ietf-simap-topology:tp": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0c-00:ni:CUST-A",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F0",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-04",
+        "tp-ref": "urn:netops:topology:vpn-fabric:ip:10.1.1.10",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       }
+      ],
+      "ietf-l3-unicast-topology:l3-link-attributes": {
+       "name": "10.1.1.0/24"
+      },
+      "supporting-link": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "link-ref": "urn:netops:topology:vpn-fabric:l2-link:2feae98961e1"
+       }
+      ]
+     },
+     {
+      "link-id": "urn:netops:topology:vpn-fabric:l3-link:6c1ab854695f",
+      "ietf-simap-topology:link-direction": "ietf-simap-topology:link-direction-bi",
+      "ietf-simap-topology:link-type": "ietf-simap-topology:link-type-p2p",
+      "ietf-simap-topology:tp": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0c-00:ni:CUST-B",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet1%2F1",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-05",
+        "tp-ref": "urn:netops:topology:vpn-fabric:ip:10.1.1.10",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       }
+      ],
+      "ietf-l3-unicast-topology:l3-link-attributes": {
+       "name": "10.1.1.0/24"
+      },
+      "supporting-link": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "link-ref": "urn:netops:topology:vpn-fabric:l2-link:aec6b6869f48"
+       }
+      ]
+     },
+     {
+      "link-id": "urn:netops:topology:vpn-fabric:l3-link:48b57e7c04aa",
+      "ietf-simap-topology:link-direction": "ietf-simap-topology:link-direction-bi",
+      "ietf-simap-topology:link-type": "ietf-simap-topology:link-type-mp2mp",
+      "ietf-simap-topology:tp": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e3-d1-c8",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:GigabitEthernet1%2F0",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:GigabitEthernet1%2F0",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:host:00-15-5d-01-03-14",
+        "tp-ref": "urn:netops:topology:vpn-fabric:ip:10.10.1.254",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       }
+      ],
+      "ietf-l3-unicast-topology:l3-link-attributes": {
+       "name": "10.10.1.0/24"
+      },
+      "supporting-link": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "link-ref": "urn:netops:topology:vpn-fabric:l2-link:0a1e5670d689"
+       }
+      ]
+     },
+     {
+      "link-id": "urn:netops:topology:vpn-fabric:l3-link:f275d24b35da",
+      "ietf-simap-topology:link-direction": "ietf-simap-topology:link-direction-bi",
+      "ietf-simap-topology:link-type": "ietf-simap-topology:link-type-p2p",
+      "ietf-simap-topology:tp": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-08-00",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0a-00",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       }
+      ],
+      "ietf-l3-unicast-topology:l3-link-attributes": {
+       "name": "10.10.11.0/30",
+       "metric1": "10"
+      },
+      "supporting-link": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "link-ref": "urn:netops:topology:vpn-fabric:l2-link:d40e8f605963"
+       }
+      ]
+     },
+     {
+      "link-id": "urn:netops:topology:vpn-fabric:l3-link:88ec4797a6e5",
+      "ietf-simap-topology:link-direction": "ietf-simap-topology:link-direction-bi",
+      "ietf-simap-topology:link-type": "ietf-simap-topology:link-type-p2p",
+      "ietf-simap-topology:tp": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-08-00",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F2",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0b-00",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       }
+      ],
+      "ietf-l3-unicast-topology:l3-link-attributes": {
+       "name": "10.10.12.0/30",
+       "metric1": "10"
+      },
+      "supporting-link": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "link-ref": "urn:netops:topology:vpn-fabric:l2-link:76ba9b98ef3a"
+       }
+      ]
+     },
+     {
+      "link-id": "urn:netops:topology:vpn-fabric:l3-link:afd712048547",
+      "ietf-simap-topology:link-direction": "ietf-simap-topology:link-direction-bi",
+      "ietf-simap-topology:link-type": "ietf-simap-topology:link-type-p2p",
+      "ietf-simap-topology:tp": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:GigabitEthernet2%2F0",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-08-00",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F3",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       }
+      ],
+      "ietf-l3-unicast-topology:l3-link-attributes": {
+       "name": "10.10.13.0/30"
+      },
+      "supporting-link": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "link-ref": "urn:netops:topology:vpn-fabric:l2-link:c6d65dceb6d5"
+       }
+      ]
+     },
+     {
+      "link-id": "urn:netops:topology:vpn-fabric:l3-link:84dcf37b6cb7",
+      "ietf-simap-topology:link-direction": "ietf-simap-topology:link-direction-bi",
+      "ietf-simap-topology:link-type": "ietf-simap-topology:link-type-p2p",
+      "ietf-simap-topology:tp": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-09-00",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0a-00",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F2",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       }
+      ],
+      "ietf-l3-unicast-topology:l3-link-attributes": {
+       "name": "10.10.21.0/30",
+       "metric1": "10"
+      },
+      "supporting-link": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "link-ref": "urn:netops:topology:vpn-fabric:l2-link:a6a2d358b408"
+       }
+      ]
+     },
+     {
+      "link-id": "urn:netops:topology:vpn-fabric:l3-link:ab6ef489a8ba",
+      "ietf-simap-topology:link-direction": "ietf-simap-topology:link-direction-bi",
+      "ietf-simap-topology:link-type": "ietf-simap-topology:link-type-p2p",
+      "ietf-simap-topology:tp": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-09-00",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F2",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0b-00",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F2",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       }
+      ],
+      "ietf-l3-unicast-topology:l3-link-attributes": {
+       "name": "10.10.22.0/30",
+       "metric1": "10"
+      },
+      "supporting-link": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "link-ref": "urn:netops:topology:vpn-fabric:l2-link:0d285b4c641d"
+       }
+      ]
+     },
+     {
+      "link-id": "urn:netops:topology:vpn-fabric:l3-link:73f54a6c4383",
+      "ietf-simap-topology:link-direction": "ietf-simap-topology:link-direction-bi",
+      "ietf-simap-topology:link-type": "ietf-simap-topology:link-type-p2p",
+      "ietf-simap-topology:tp": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:GigabitEthernet3%2F0",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-09-00",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F3",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       }
+      ],
+      "ietf-l3-unicast-topology:l3-link-attributes": {
+       "name": "10.10.23.0/30"
+      },
+      "supporting-link": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "link-ref": "urn:netops:topology:vpn-fabric:l2-link:542a14d7cf49"
+       }
+      ]
+     },
+     {
+      "link-id": "urn:netops:topology:vpn-fabric:l3-link:c957e6c887af",
+      "ietf-simap-topology:link-direction": "ietf-simap-topology:link-direction-bi",
+      "ietf-simap-topology:link-type": "ietf-simap-topology:link-type-p2p",
+      "ietf-simap-topology:tp": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e3-d1-c8:ni:CUST-A",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:GigabitEthernet3%2F0",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-06",
+        "tp-ref": "urn:netops:topology:vpn-fabric:ip:10.2.1.10",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       }
+      ],
+      "ietf-l3-unicast-topology:l3-link-attributes": {
+       "name": "10.2.1.0/24"
+      },
+      "supporting-link": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "link-ref": "urn:netops:topology:vpn-fabric:l2-link:2df06d5d2418"
+       }
+      ]
+     },
+     {
+      "link-id": "urn:netops:topology:vpn-fabric:l3-link:a53fac4957b3",
+      "ietf-simap-topology:link-direction": "ietf-simap-topology:link-direction-bi",
+      "ietf-simap-topology:link-type": "ietf-simap-topology:link-type-p2p",
+      "ietf-simap-topology:tp": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0c-00",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0d-00",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F1",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       }
+      ],
+      "ietf-l3-unicast-topology:l3-link-attributes": {
+       "name": "10.20.12.0/30",
+       "metric1": "10"
+      },
+      "supporting-link": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "link-ref": "urn:netops:topology:vpn-fabric:l2-link:dee59e2be851"
+       }
+      ]
+     },
+     {
+      "link-id": "urn:netops:topology:vpn-fabric:l3-link:412153daed2e",
+      "ietf-simap-topology:link-direction": "ietf-simap-topology:link-direction-bi",
+      "ietf-simap-topology:link-type": "ietf-simap-topology:link-type-p2p",
+      "ietf-simap-topology:tp": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e3-d1-c8",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:GigabitEthernet2%2F0",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0d-00",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:Ethernet0%2F2",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       }
+      ],
+      "ietf-l3-unicast-topology:l3-link-attributes": {
+       "name": "10.20.23.0/30"
+      },
+      "supporting-link": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "link-ref": "urn:netops:topology:vpn-fabric:l2-link:0a4f4a366d29"
+       }
+      ]
+     },
+     {
+      "link-id": "urn:netops:topology:vpn-fabric:l3-link:44fb60899bfe",
+      "ietf-simap-topology:link-direction": "ietf-simap-topology:link-direction-bi",
+      "ietf-simap-topology:link-type": "ietf-simap-topology:link-type-p2p",
+      "ietf-simap-topology:tp": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e3-d1-c8:ni:SHARED",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:GigabitEthernet4%2F0",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-07",
+        "tp-ref": "urn:netops:topology:vpn-fabric:ip:10.99.1.10",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       }
+      ],
+      "ietf-l3-unicast-topology:l3-link-attributes": {
+       "name": "10.99.1.0/24"
+      },
+      "supporting-link": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "link-ref": "urn:netops:topology:vpn-fabric:l2-link:4b861ad51564"
+       }
+      ]
+     },
+     {
+      "link-id": "urn:netops:topology:vpn-fabric:l3-link:4a90d18285e2",
+      "ietf-simap-topology:link-direction": "ietf-simap-topology:link-direction-bi",
+      "ietf-simap-topology:link-type": "ietf-simap-topology:link-type-p2p",
+      "ietf-simap-topology:tp": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0b-00:ni:BLUE",
+        "tp-ref": "urn:netops:topology:vpn-fabric:if:Vlan20",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:host:00-50-79-66-68-01",
+        "tp-ref": "urn:netops:topology:vpn-fabric:ip:192.168.10.12",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       }
+      ],
+      "ietf-l3-unicast-topology:l3-link-attributes": {
+       "name": "192.168.10.0/24"
+      },
+      "supporting-link": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l2",
+        "link-ref": "urn:netops:topology:vpn-fabric:l2-link:0013391b19dd"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "network-id": "urn:netops:topology:vpn-fabric:vxlan",
+    "network-types": {
+     "ietf-l2-topology:l2-topology": {}
+    },
+    "ietf-simap-topology:network-category": "ietf-simap-topology:network-category-live",
+    "supporting-network": [
+     {
+      "network-ref": "urn:netops:topology:vpn-fabric:l3"
+     }
+    ],
+    "node": [
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77",
+      "supporting-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77"
+       }
+      ],
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:vni:10010",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "encapsulation-type": "ietf-l2-topology:vxlan",
+         "vxlan": {
+          "vni-id": 16777216
+         }
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l3",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:LoopBack0"
+         }
+        ],
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:vxlan",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0a-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:vni:10010"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:vni:10021",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "encapsulation-type": "ietf-l2-topology:vxlan",
+         "vxlan": {
+          "vni-id": 10021
+         }
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l3",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:LoopBack0"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:vni:50020",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "encapsulation-type": "ietf-l2-topology:vxlan",
+         "vxlan": {
+          "vni-id": 50020
+         }
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l3",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:LoopBack0"
+         }
+        ],
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:vxlan",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0b-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:vni:50020"
+         }
+        ]
+       }
+      ],
+      "ietf-simap-topology:linked-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:vxlan",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0a-00"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:vxlan",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0b-00"
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0a-00",
+      "supporting-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0a-00"
+       }
+      ],
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:vni:10010",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "encapsulation-type": "ietf-l2-topology:vxlan",
+         "vxlan": {
+          "vni-id": 10010
+         }
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l3",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0a-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Loopback0"
+         }
+        ],
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:vxlan",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77",
+          "tp-ref": "urn:netops:topology:vpn-fabric:vni:10010"
+         }
+        ]
+       }
+      ],
+      "ietf-simap-topology:linked-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:vxlan",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77"
+       }
+      ]
+     },
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0b-00",
+      "supporting-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:l3",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0b-00"
+       }
+      ],
+      "ietf-network-topology:termination-point": [
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:vni:10020",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "encapsulation-type": "ietf-l2-topology:vxlan",
+         "vxlan": {
+          "vni-id": 10020
+         }
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l3",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0b-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Loopback0"
+         }
+        ]
+       },
+       {
+        "tp-id": "urn:netops:topology:vpn-fabric:vni:50020",
+        "ietf-l2-topology:l2-termination-point-attributes": {
+         "encapsulation-type": "ietf-l2-topology:vxlan",
+         "vxlan": {
+          "vni-id": 50020
+         }
+        },
+        "supporting-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:l3",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0b-00",
+          "tp-ref": "urn:netops:topology:vpn-fabric:if:Loopback0"
+         }
+        ],
+        "ietf-simap-topology:linked-termination-point": [
+         {
+          "network-ref": "urn:netops:topology:vpn-fabric:vxlan",
+          "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77",
+          "tp-ref": "urn:netops:topology:vpn-fabric:vni:50020"
+         }
+        ]
+       }
+      ],
+      "ietf-simap-topology:linked-node": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:vxlan",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77"
+       }
+      ]
+     }
+    ],
+    "ietf-network-topology:link": [
+     {
+      "link-id": "urn:netops:topology:vpn-fabric:vxlan-link:9e292f712fcd",
+      "ietf-simap-topology:link-direction": "ietf-simap-topology:link-direction-bi",
+      "ietf-simap-topology:link-type": "ietf-simap-topology:link-type-p2p",
+      "ietf-simap-topology:tp": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:vxlan",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77",
+        "tp-ref": "urn:netops:topology:vpn-fabric:vni:10010",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:vxlan",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0a-00",
+        "tp-ref": "urn:netops:topology:vpn-fabric:vni:10010",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       }
+      ]
+     },
+     {
+      "link-id": "urn:netops:topology:vpn-fabric:vxlan-link:3a44c91f7927",
+      "ietf-simap-topology:link-direction": "ietf-simap-topology:link-direction-bi",
+      "ietf-simap-topology:link-type": "ietf-simap-topology:link-type-p2p",
+      "ietf-simap-topology:tp": [
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:vxlan",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77",
+        "tp-ref": "urn:netops:topology:vpn-fabric:vni:50020",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       },
+       {
+        "network-ref": "urn:netops:topology:vpn-fabric:vxlan",
+        "node-ref": "urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0b-00",
+        "tp-ref": "urn:netops:topology:vpn-fabric:vni:50020",
+        "tp-direction": "ietf-simap-topology:tp-direction-symmetric"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "network-id": "urn:netops:topology:vpn-fabric:fabric",
+    "network-types": {
+     "ietf-dc-fabric-topology:fabric-network": {}
+    },
+    "ietf-simap-topology:network-category": "ietf-simap-topology:network-category-live",
+    "supporting-network": [
+     {
+      "network-ref": "urn:netops:topology:vpn-fabric:l2"
+     }
+    ],
+    "node": [
+     {
+      "node-id": "urn:netops:topology:vpn-fabric:fabric:10.255.10.1",
+      "ietf-dc-fabric-topology:fabric-attributes": {
+       "fabric-id": "urn:netops:topology:vpn-fabric:fabric:10.255.10.1",
+       "type": "ietf-dc-fabric-types:vxlan-fabric",
+       "device-nodes": [
+        {
+         "device-ref": "/ietf-network:networks/network[network-id='urn:netops:topology:vpn-fabric:l2']/node[node-id='urn:netops:topology:vpn-fabric:device:74-25-8a-e4-16-77']",
+         "role": [
+          "ietf-dc-fabric-types:leaf"
+         ]
+        },
+        {
+         "device-ref": "/ietf-network:networks/network[network-id='urn:netops:topology:vpn-fabric:l2']/node[node-id='urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-08-00']",
+         "role": [
+          "ietf-dc-fabric-types:spine"
+         ]
+        },
+        {
+         "device-ref": "/ietf-network:networks/network[network-id='urn:netops:topology:vpn-fabric:l2']/node[node-id='urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-09-00']",
+         "role": [
+          "ietf-dc-fabric-types:spine"
+         ]
+        },
+        {
+         "device-ref": "/ietf-network:networks/network[network-id='urn:netops:topology:vpn-fabric:l2']/node[node-id='urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0a-00']",
+         "role": [
+          "ietf-dc-fabric-types:leaf"
+         ]
+        },
+        {
+         "device-ref": "/ietf-network:networks/network[network-id='urn:netops:topology:vpn-fabric:l2']/node[node-id='urn:netops:topology:vpn-fabric:device:aa-bb-cc-00-0b-00']",
+         "role": [
+          "ietf-dc-fabric-types:leaf"
+         ]
+        }
+       ],
+       "device-links": [
+        {
+         "link-ref": "/ietf-network:networks/network[network-id='urn:netops:topology:vpn-fabric:l2']/ietf-network-topology:link[link-id='urn:netops:topology:vpn-fabric:l2-link:0d285b4c641d']"
+        },
+        {
+         "link-ref": "/ietf-network:networks/network[network-id='urn:netops:topology:vpn-fabric:l2']/ietf-network-topology:link[link-id='urn:netops:topology:vpn-fabric:l2-link:542a14d7cf49']"
+        },
+        {
+         "link-ref": "/ietf-network:networks/network[network-id='urn:netops:topology:vpn-fabric:l2']/ietf-network-topology:link[link-id='urn:netops:topology:vpn-fabric:l2-link:76ba9b98ef3a']"
+        },
+        {
+         "link-ref": "/ietf-network:networks/network[network-id='urn:netops:topology:vpn-fabric:l2']/ietf-network-topology:link[link-id='urn:netops:topology:vpn-fabric:l2-link:a6a2d358b408']"
+        },
+        {
+         "link-ref": "/ietf-network:networks/network[network-id='urn:netops:topology:vpn-fabric:l2']/ietf-network-topology:link[link-id='urn:netops:topology:vpn-fabric:l2-link:c6d65dceb6d5']"
+        },
+        {
+         "link-ref": "/ietf-network:networks/network[network-id='urn:netops:topology:vpn-fabric:l2']/ietf-network-topology:link[link-id='urn:netops:topology:vpn-fabric:l2-link:d40e8f605963']"
+        }
+       ]
+      }
+     }
+    ]
+   }
+  ]
+ }
+}

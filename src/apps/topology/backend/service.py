@@ -30,11 +30,12 @@ from .collectors.collect import collect_node, command_allowlist, scope_base, sco
 from .collectors.identify import TopologyDiscoveryPlan as DiscoveryPlan
 from .collectors.tiers.common import valid_mac
 from .logins import DOMAIN
-from .model.builder import build_topology_details, device_node_ids
+from .model.builder import build_topology_layers, device_node_ids
 from .model.l2_forwarding import analyse as analyse_l2_forwarding
 from .model.locate import locate as locate_in
 from .model.path import trace as trace_in
 from .model.protocols import adjacencies as protocol_adjacencies
+from .model.services import project_services
 from .model.snapshot_state import enrich_snapshot_state
 from .model.view import canvas
 from .models import (
@@ -316,7 +317,7 @@ def _graph(session, run):
     observations = _observations(session, run.id)
     base = f"urn:netops:topology:{network.id}:"
     devices = {o["address"]: _facts(o["data"]) for o in observations}
-    tree, links_evidence, protocols = build_topology_details(devices, base)
+    tree, links_evidence, protocols, overlay_gaps = build_topology_layers(devices, base)
     l2_forwarding = analyse_l2_forwarding(devices, tree, base)
     ids = device_node_ids(devices, base)
     collected = {
@@ -347,6 +348,7 @@ def _graph(session, run):
         "evidence": links_evidence,
         "state": state,
         "protocols": {"ospf": protocols, "adjacencies": protocol_adjacencies(devices)},
+        "overlay": {"gaps": overlay_gaps},
         "l2_forwarding": l2_forwarding,
     }
     targets = session.scalars(select(Target).where(Target.run_id == run.id)).all()
@@ -648,6 +650,20 @@ def trace_current(owner, src, dst, src_vrf=None, dst_vrf=None):
                 if {result["forward"]["status"], result["reverse"]["status"]} != {"no_gateway"}:
                     found.append(_as_history(result))
         return found
+
+
+def _services(devices, base, observed):
+    return project_services(devices, base)
+
+
+def services(owner, snapshot_id):
+    """RFC 9182 L3NM and RFC 9291 L2NM services read from one snapshot's observations."""
+    with sessions() as session:
+        snap = session.get(Snapshot, snapshot_id)
+        if not snap:
+            raise HTTPException(404, "快照不存在")
+        owned(session, Network, snap.network_id, owner)
+        return _analyse(session, snap, _services)
 
 
 def compare(owner, before_id, after_id):

@@ -14,9 +14,11 @@ validation) in up to three modes: get (parse only: hierarchy, types, identities)
 schema each instance is checked against is the lock closure of the modules it uses, at
 their runtime-baseline revisions.
 
-Positive cases are real topology App output for the campus-wan fixtures (same parsers and
-builders as discovery, no device access); negative cases are single, named mutations of
-them, or real catalog modules with real defects.
+Positive cases are real topology App output for the campus-wan and vpn-fabric fixtures
+(same parsers and builders as discovery, the rule-governance catalog shipped with the
+code, no device access); negative cases are single, named mutations of them, or real
+catalog modules with real defects. The vpn-fabric outputs are its topology with the
+VXLAN (RFC 8944) and fabric (RFC 8542) overlays, and its L3NM / L2NM services.
 
 Run: venv/Scripts/python.exe scripts/topology/m1_cases.py [--build]
 Output: models/network-twin/m1/cases/ (instances, manifest) and reports/cases.json.
@@ -54,6 +56,8 @@ CLASSES = [
     (r'Loading "[^"]+" module failed', "schema", "missing-dependency"),
     (r'Node "[^"]+" not found as a child|Unknown (element|member)', "schema", "unknown-node"),
     (r"Invalid identityref", "semantic", "unknown-identity"),
+    # A module expression names an identity its own namespace does not define.
+    (r'Identity "[^"]+" not found in module', "schema", "unresolved-identity"),
     (r"Data for both cases|both cases", "semantic", "choice-conflict"),
     (r"Invalid leafref|Invalid instance-identifier|required instance", "semantic", "reference"),
     (r"When condition", "semantic", "when"),
@@ -92,13 +96,17 @@ def app_outputs() -> dict[str, dict]:
     from types import SimpleNamespace
 
     import test_topology_campus_wan as campus
+    import test_topology_vpn_fabric as vpn
 
+    from src.apps.topology.backend.collectors import rules
     from src.apps.topology.backend.model.builder import build_topology, device_node_ids
     from src.apps.topology.backend.model.device_control import project_device_control
     from src.apps.topology.backend.model.device_ip import enrich_device_ip
     from src.apps.topology.backend.model.device_state import project_device_state
     from src.apps.topology.backend.model.inventory import project_inventory
+    from src.apps.topology.backend.model.services import project_services
 
+    rules.SOURCE = "shipped"  # offline: the catalog shipped with the code, not a database
     out, devices, observed = {}, {}, {}
     for device, spec in campus.EXPECTED["devices"].items():
         identity = campus.IDENTITY[spec["platform"]]
@@ -134,6 +142,15 @@ def app_outputs() -> dict[str, dict]:
     ids = device_node_ids(devices, "urn:netops:topology:campus:")
     for device, (address, observation) in observed.items():
         out[f"{device}-inventory"] = project_inventory(observation, ids[address])["tree"]
+    fabric = {
+        address: {**vpn.observation(name)["facts"], "platform": vpn.DEVICES[name][1]}
+        for name, address in vpn.ADDRESS.items()
+    }
+    base = "urn:netops:topology:vpn-fabric:"
+    out["vpn-fabric-topology"] = build_topology(fabric, base)[0]
+    services = project_services(fabric, base)
+    out["vpn-fabric-l3nm"] = services["l3nm"]["tree"]
+    out["vpn-fabric-l2nm"] = services["l2nm"]["tree"]
     return out
 
 
@@ -278,6 +295,90 @@ def build() -> None:
         "semantic/reference",
         "a link end names a node that is not in the link's network",
     )
+
+    def network(t, kind):
+        return next(
+            n for n in t["ietf-network:networks"]["network"] if n["network-id"].endswith(kind)
+        )
+
+    def l3vpn_node(t):
+        services = t["ietf-l3vpn-ntw:l3vpn-ntw"]["vpn-services"]["vpn-service"]
+        return services[0]["vpn-nodes"]["vpn-node"][0]
+
+    def l2vpn_service(t):
+        return t["ietf-l2vpn-ntw:l2vpn-ntw"]["vpn-services"]["vpn-service"][0]
+
+    mutate(
+        "vpn-fabric-l3nm",
+        "l3nm-route-target-cli-text",
+        lambda t: l3vpn_node(t)["active-vpn-instance-profiles"]["vpn-instance-profile"][0][
+            "address-family"
+        ][0]["vpn-targets"]["vpn-target"][0]["route-targets"][0].update(
+            {"route-target": "65100:1"}
+        ),
+        "get",
+        "semantic/type",
+        "RFC 8294 route-target is typed ('0:65100:1'); the CLI 'ASN:nn' text is not",
+    )
+    mutate(
+        "vpn-fabric-l3nm",
+        "l3nm-access-profile-not-active",
+        lambda t: l3vpn_node(t)["vpn-network-accesses"]["vpn-network-access"][0].update(
+            {"vpn-instance-profile": "NOT-ACTIVE"}
+        ),
+        "data",
+        "semantic/reference",
+        "an access names a VPN instance profile its node does not activate",
+    )
+    mutate(
+        "vpn-fabric-l2nm",
+        "l2nm-auto-discovery-without-bgp-ad",
+        lambda t: l2vpn_service(t).pop("bgp-ad-enabled"),
+        "strict",
+        "semantic/when",
+        "RFC 9291: bgp-auto-discovery (RD, targets) exists only with bgp-ad-enabled",
+    )
+    mutate(
+        "vpn-fabric-l2nm",
+        "l2nm-evpn-signaling-option",
+        lambda t: l2vpn_service(t)["vpn-nodes"]["vpn-node"][0].update(
+            {
+                "signaling-option": {
+                    "service-interface-type": "ietf-l2vpn-ntw:vlan-based-service-interface"
+                }
+            }
+        ),
+        "data",
+        "schema/unresolved-identity",
+        "RFC 9291 defect: the evpn-bgp case's pbb when names 'pbb-evpn' unprefixed, which "
+        "ietf-l2vpn-ntw does not define; no instance of the case validates, so IOS "
+        "'vlan-based' is not exported",
+    )
+    mutate(
+        "vpn-fabric-topology",
+        "vxlan-vni-out-of-range",
+        lambda t: network(t, ":vxlan")["node"][0]["ietf-network-topology:termination-point"][0][
+            "ietf-l2-topology:l2-termination-point-attributes"
+        ]["vxlan"].update({"vni-id": 16777216}),
+        "get",
+        "semantic/type",
+        "RFC 8944 vni is 24 bits (0..16777215)",
+    )
+    mutate(
+        "vpn-fabric-topology",
+        "fabric-device-outside-tree",
+        lambda t: network(t, ":fabric")["node"][0]["ietf-dc-fabric-topology:fabric-attributes"][
+            "device-nodes"
+        ][0].update(
+            {
+                "device-ref": "/ietf-network:networks/network[network-id="
+                "'urn:netops:topology:vpn-fabric:l2']/node[node-id='urn:netops:not-collected']"
+            }
+        ),
+        "data",
+        "semantic/reference",
+        "RFC 8542 device-ref is an instance-identifier: the device node must exist",
+    )
     CASES.mkdir(parents=True, exist_ok=True)
     for old in CASES.glob("*.json"):
         old.unlink()
@@ -369,7 +470,8 @@ def build() -> None:
         }
     )
     manifest = {
-        "scope": "M1-6 cases: campus-wan App output, named mutations, real module defects",
+        "scope": "M1-6 cases: campus-wan and vpn-fabric App output, named mutations, real "
+        "module defects",
         "files": {name: file_digest(CASES / name) for name in sorted(files)},
         "cases": specs,
     }

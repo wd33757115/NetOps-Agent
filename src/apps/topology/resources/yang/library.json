@@ -1,6 +1,6 @@
 {
   "ietf-yang-library:modules-state": {
-    "module-set-id": "netops-topology-simap-l2-l3-vlan",
+    "module-set-id": "netops-topology-simap-l2-l3-vlan-vxlan-fabric",
     "module": [
       {
         "name": "iana-if-type",
@@ -13,6 +13,18 @@
         "revision": "2023-10-26",
         "namespace": "urn:ieee:std:802.1Q:yang:ieee802-dot1q-types",
         "conformance-type": "import"
+      },
+      {
+        "name": "ietf-dc-fabric-topology",
+        "revision": "2019-02-25",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-dc-fabric-topology",
+        "conformance-type": "implement"
+      },
+      {
+        "name": "ietf-dc-fabric-types",
+        "revision": "2019-02-25",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-dc-fabric-types",
+        "conformance-type": "implement"
       },
       {
         "name": "ietf-inet-types",
@@ -31,7 +43,10 @@
         "revision": "2020-11-15",
         "namespace": "urn:ietf:params:xml:ns:yang:ietf-l2-topology",
         "conformance-type": "implement",
-        "feature": ["VLAN"]
+        "feature": [
+          "VLAN",
+          "VXLAN"
+        ]
       },
       {
         "name": "ietf-l3-unicast-topology",
