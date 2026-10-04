@@ -4,7 +4,7 @@ show mac address-table
 
 Vlan    Mac Address       Type        Ports
 ----    -----------       --------    -----
-  20    0050.7966.6801    DYNAMIC     Et1/0
-  20    aabb.cc80.0b00    STATIC      Vl20 
+  20    0050.7966.680f    DYNAMIC     Et1/0
+  20    aabb.cc80.0400    STATIC      Vl20 
 Total Mac Addresses for this criterion: 2
 LEAF2#

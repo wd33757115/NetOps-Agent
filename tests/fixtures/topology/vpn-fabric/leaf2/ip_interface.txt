@@ -1,7 +1,7 @@
 Ethernet0/0 is up, line protocol is up
   Internet address is 10.10.1.24/24
   Broadcast address is 255.255.255.255
-  Address determined by setup command
+  Address determined by non-volatile memory
   MTU is 1500 bytes
   Helper address is not set
   Directed broadcast forwarding is disabled
@@ -44,7 +44,7 @@ Ethernet0/0 is up, line protocol is up
 Ethernet0/1 is up, line protocol is up
   Internet address is 10.10.12.2/30
   Broadcast address is 255.255.255.255
-  Address determined by setup command
+  Address determined by non-volatile memory
   MTU is 1500 bytes
   Helper address is not set
   Directed broadcast forwarding is disabled
@@ -87,7 +87,7 @@ Ethernet0/1 is up, line protocol is up
 Ethernet0/2 is up, line protocol is up
   Internet address is 10.10.22.2/30
   Broadcast address is 255.255.255.255
-  Address determined by setup command
+  Address determined by non-volatile memory
   MTU is 1500 bytes
   Helper address is not set
   Directed broadcast forwarding is disabled
@@ -169,7 +169,7 @@ Ethernet3/3 is up, line protocol is up
 Loopback0 is up, line protocol is up
   Internet address is 10.255.10.12/32
   Broadcast address is 255.255.255.255
-  Address determined by setup command
+  Address determined by non-volatile memory
   MTU is 1514 bytes
   Helper address is not set
   Directed broadcast forwarding is disabled
@@ -253,7 +253,7 @@ Tunnel0 is up, line protocol is up
 Vlan20 is up, line protocol is up
   Internet address is 192.168.10.1/24
   Broadcast address is 255.255.255.255
-  Address determined by setup command
+  Address determined by non-volatile memory
   MTU is 1500 bytes
   Helper address is not set
   Directed broadcast forwarding is disabled

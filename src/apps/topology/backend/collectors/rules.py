@@ -266,27 +266,42 @@ def _ifname(value, family):
     return interface(value, family).name if value else None
 
 
+ARP_TYPES = {"d": "dynamic", "dynamic": "dynamic", "s": "static", "static": "static"}
+AGE_UNITS = {"s": 1, "sec": 1, "min": 60, "h": 3600}
+
+
+def _present(value):
+    """A field the device printed, or None for its "none" marker ("--")."""
+    return value if value not in (None, "", "--") else None
+
+
 def _arp(row, family, lines, warnings):
     record = {
-        "vrf": "default",
+        "vrf": _present(row.get("VRF")) or "default",
         "ip": ip_address(row["IP_ADDRESS"]),
         "mac": mac_address(row["MAC_ADDRESS"]),
     }
     column = "".join(row.get("VLAN_ID") or [])
     if column.isdigit():
         record["vlan"] = vlan(column)
-    elif column and column != "--":
+    elif _present(column):
         record["vsi"] = column  # learned in a VSI (VXLAN)
+    if vsi := _present(row.get("VSI")):
+        record["vsi"] = vsi
     port = row.get("INTERFACE")
-    # A VSI entry learned over a tunnel link shows a link ID instead of an interface.
-    if port and not ("vsi" in record and port.isdigit() and not IFNAME.fullmatch(port)):
+    if gateway := _present(row.get("VSI_INTERFACE")):
+        # A VSI entry belongs to the VSI's gateway interface; its port column is a link.
+        record["ifname"] = _ifname(gateway, family)
+    elif port and not ("vsi" in record and port.isdigit() and not IFNAME.fullmatch(port)):
+        # A VSI entry learned over a tunnel link shows a link ID instead of an interface.
         record["ifname"] = _ifname(port, family)
-    if row.get("TYPE") and family == "comware":
-        record["type"] = {"D": "dynamic", "S": "static"}.get(row["TYPE"], row["TYPE"])
-        # The Comware "Aging" column has no unit; the raw age is not converted.
-        warnings.append(f"line:{lines[0] if lines else 0}:age_unit_unknown")
-    if family in {"ios", "iosxe"} and str(row.get("AGE", "")).isdigit():
-        record["age_s"] = int(row["AGE"]) * 60  # IOS shows minutes
+    if kind := ARP_TYPES.get(str(row.get("TYPE") or "").lower()):
+        record["type"] = kind
+    age = str(row.get("AGE") or "")
+    if match := re.fullmatch(r"(\d+) (s|sec|min|h)", age):
+        record["age_s"] = int(match.group(1)) * AGE_UNITS[match.group(2)]
+    elif family in {"ios", "iosxe"} and age.isdigit():
+        record["age_s"] = int(age) * 60  # IOS shows minutes ("Age (min)")
     return record
 
 

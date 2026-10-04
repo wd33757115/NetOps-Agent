@@ -19,6 +19,6 @@ Gateway of last resort is not set
       10.0.0.0/8 is variably subnetted, 4 subnets, 2 masks
 C        10.1.1.0/24 is directly connected, Ethernet1/0
 L        10.1.1.1/32 is directly connected, Ethernet1/0
-B        10.2.1.0/24 [200/0] via 10.255.20.3, 00:51:05
-B        10.99.1.0/24 [200/0] via 10.255.20.3, 00:51:05
+B        10.2.1.0/24 [200/0] via 10.255.20.3, 00:50:19
+B        10.99.1.0/24 [200/0] via 10.255.20.3, 00:50:19
 PE1#

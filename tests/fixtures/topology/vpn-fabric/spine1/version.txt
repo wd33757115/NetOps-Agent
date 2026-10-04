@@ -5,7 +5,7 @@ Compiled Sun 11-Aug-24 22:07 by mcpre
 
 ROM: Bootstrap program is Linux
 
-SPINE1 uptime is 1 hour, 11 minutes
+SPINE1 uptime is 54 minutes
 System returned to ROM by unknown reload cause - suspect boot_data[BOOT_COUNT] 0x9, BOOT_COUNT 0, BOOTDATA 19
 System image file is "unix:/opt/gns3/images/IOU/x86_64_crb_linux-adventerprisek9-ms.iol"
 Last reload reason: Unknown reason
@@ -28,7 +28,7 @@ If you require further assistance please contact us by sending email to
 export@cisco.com.
 
 Linux Unix (i686) processor with 276644K bytes of memory.
-Processor board ID 2048008
+Processor board ID 2048001
 8 Ethernet interfaces
 512K bytes of NVRAM.
 

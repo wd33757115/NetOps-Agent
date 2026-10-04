@@ -1,4 +1,4 @@
 Local      Outgoing   Prefix           Bytes Label   Outgoing   Next Hop    
 Label      Label      or Tunnel Id     Switched      interface              
-16         Pop Label  10.255.20.1/32   313729        Et0/1      10.20.12.1  
-17         Pop Label  10.255.20.3/32   313670        Et0/2      10.20.23.2  
+16         Pop Label  10.255.20.1/32   70188         Et0/1      10.20.12.1  
+17         Pop Label  10.255.20.3/32   69510         Et0/2      10.20.23.2  

@@ -1,9 +1,9 @@
 LLDP neighbor-information of port 33[GigabitEthernet2/0]:
 LLDP agent nearest-bridge:
  LLDP neighbor index : 1
- Update time         : 0 days, 0 hours, 19 minutes, 40 seconds
+ Update time         : 0 days, 0 hours, 3 minutes, 25 seconds
  Chassis type        : MAC address
- Chassis ID          : aabb-cc00-0d00
+ Chassis ID          : aabb-cc00-0600
  Port ID type        : Interface name
  Port ID             : Et0/2
  Time to live        : 120

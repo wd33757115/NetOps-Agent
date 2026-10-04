@@ -23,6 +23,9 @@ version: 1
 
 check_items:
   topology.arp:
+    # v2 (2026-10-04): the instance and VSI of each entry, as Comware's verbose table
+    # shows them; a device that lists one instance per command leaves VRF empty.
+    version: 2
     name: 拓扑发现：ARP 表项
     entity_type: arp_entry
     keys: [IP_ADDRESS]
@@ -33,6 +36,9 @@ check_items:
       VLAN_ID: [text, false, VLAN 或 VSI 名原文；长 VSI 名折行时按段给出，由使用方拼接]
       AGE: [text, false, 老化时间原文，单位以设备为准]
       TYPE: [text, false, 表项类型原文]
+      VRF: [text, false, 表项所属的 VPN 实例；"--" 为公网；按实例分命令采集的设备不填]
+      VSI: [text, false, 学到表项的 VSI 名；"--" 为无]
+      VSI_INTERFACE: [text, false, VSI 表项所属的三层接口（VSI 网关接口）；"--" 为无]
 
   topology.routes:
     name: 拓扑发现：路由表（每个下一跳一行）
@@ -465,10 +471,12 @@ implementations:
     required: ['^Protocol\s+Address\s+Age \(min\)\s+Hardware Addr\s+Type\s+Interface\s*$']
   - check_item: topology.arp
     platform: comware
-    command: display arp
-    template: H3C/Comware7/display_arp__topology-1.0.0.textfsm
-    sha256: 97affe44d2bf11b7ff57cbc86463a2b9cabd972030aa69e16b06081cc204edbb
-    required: ['^IP address\s+MAC address\s+VLAN/VSI name\s+Interface/Link ID\s+Aging\s+Type\s*$']
+    version: 2
+    command: display arp verbose
+    template: H3C/Comware7/display_arp_verbose__topology-1.0.0.textfsm
+    sha256: adfa8013759f67e6cdb9bdbe8283ed4c5b8ea58a32b64acc0eebb74975d39987
+    valid_empty: [BLANK]
+    required: ['^IP address\s+:']
   - check_item: topology.routes
     platform: ios
     command: show ip route

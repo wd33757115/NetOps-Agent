@@ -5,7 +5,7 @@ Compiled Sun 11-Aug-24 22:06 by mcpre
 
 ROM: Bootstrap program is Linux
 
-LEAF2 uptime is 1 hour, 11 minutes
+LEAF2 uptime is 54 minutes
 System returned to ROM by unknown reload cause - suspect boot_data[BOOT_COUNT] 0x9, BOOT_COUNT 0, BOOTDATA 19
 System image file is "unix:/opt/gns3/images/IOU/x86_64_crb_linux_l2-adventerprisek9-ms.iol"
 Last reload reason: Unknown reason
@@ -28,7 +28,7 @@ If you require further assistance please contact us by sending email to
 export@cisco.com.
 
 Linux Unix (i686) processor with 271650K bytes of memory.
-Processor board ID 2048011
+Processor board ID 2048004
 16 Ethernet interfaces
 2 Virtual Ethernet interfaces
 512K bytes of NVRAM.

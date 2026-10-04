@@ -6,8 +6,6 @@ the same way. Every rule rests on a fact the device showed:
 
 - Interface bindings come from the VRF detail (IOS "show vrf detail", Comware instance
   detail) and from the IP table's VRF column.
-- Comware "display arp" lists every instance without naming it: a row belongs to the
-  instance of its interface, or of the gateway interface of the VSI it was learned in.
 - A next hop out of an interface bound to another instance resolves there (a local
   route leak, e.g. a Comware VPN route imported from another instance).
 - A next hop out of an L3 VNI interface (IOS "show nve vni" L3CP VLAN, Comware
@@ -105,26 +103,6 @@ def _connected(facts, vrf, address):
     return False
 
 
-def _arp(facts, bound):
-    gateways = {
-        row["instance"]: row["gateway"]
-        for row in facts.get("vxlan_vnis") or []
-        if isinstance(row, dict) and row.get("instance") and row.get("gateway")
-    }
-    rows = []
-    for row in facts.get("arp") or []:
-        if not isinstance(row, dict) or row.get("vrf", "default") != "default":
-            rows.append(row)
-            continue
-        gateway = gateways.get(row.get("vsi"))
-        if gateway and not row.get("ifname"):
-            # Learned in a VSI: its L3 interface is the VSI's gateway interface.
-            row = {**row, "ifname": gateway}
-        vrf = bound.get(row.get("ifname")) or bound.get(gateway)
-        rows.append({**row, "vrf": vrf} if vrf and vrf != "default" else row)
-    return rows
-
-
 def _routes(facts, bound):
     l3vni = l3vni_interfaces(facts)
     vteps = vtep_addresses(facts)
@@ -182,8 +160,6 @@ def prepare(devices):
             continue
         bound = bindings(facts)
         copy = dict(facts)
-        if facts.get("platform") == "comware" and facts.get("arp"):
-            copy["arp"] = _arp(facts, bound)
         if facts.get("routes"):
             copy["routes"] = _routes(facts, bound)
         prepared[key] = copy

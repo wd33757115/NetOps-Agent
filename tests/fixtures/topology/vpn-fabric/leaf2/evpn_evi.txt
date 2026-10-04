@@ -19,7 +19,7 @@ EVPN instance:       20 (VLAN Based)
     Core If:         Vlan920
     Access If:       Vlan20
     NVE If:          nve1
-    RMAC:            aabb.cc80.0b00
+    RMAC:            aabb.cc80.0400
     Core Vlan:       920
     L2 VNI:          10020
     L3 VNI:          50020

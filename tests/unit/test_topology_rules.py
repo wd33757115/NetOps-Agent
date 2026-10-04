@@ -30,7 +30,7 @@ def fixture(path):
 
 
 @pytest.mark.parametrize("device,routes", [("vsr-1", 18), ("vsr-2", 19)])
-@pytest.mark.parametrize("capability", ["arp", "routes"])
+@pytest.mark.parametrize("capability", ["routes"])
 def test_real_comware_tables_through_the_published_check_item(device, routes, capability):
     result = run(capability, lab(capability, device))
     assert result.status == "complete" and result.tier == "rules"
@@ -52,27 +52,33 @@ def test_real_comware_tables_through_the_published_check_item(device, routes, ca
             summary=result.fact_summary(),
         )
     )
-    if capability == "routes":
-        assert len(result.records) == routes
-        assert any(row["prefix"] == "0.0.0.0/32" for row in result.records)
-        assert not any(row["prefix"] == "0.0.0.0/0" for row in result.records)
-        hops = [hop for row in result.records for hop in row["next_hops"]]
-        assert {"InLoopBack0", "NULL0"} <= {hop["ifname"] for hop in hops}
-        remote = "1.1.1.0/24" if device == "vsr-1" else "4.4.4.4/32"
-        assert next(r for r in result.records if r["prefix"] == remote)["protocol"] == "O_INTRA"
-    else:
-        # The check item reads what the generic parser read, with the same evidence lines.
-        generic = parse_generic({"os_family": "comware"}, "arp", lab("arp", device))
-        assert result.records == generic.records
-        assert [s["lines"] for s in result.sources] == [s["lines"] for s in generic.sources]
-        texts = [
-            (s["raw"]["text"], g["raw"]["text"]) for s, g in zip(result.sources, generic.sources)
-        ]
-        assert all(ours == theirs for ours, theirs in texts)
+    assert len(result.records) == routes
+    assert any(row["prefix"] == "0.0.0.0/32" for row in result.records)
+    assert not any(row["prefix"] == "0.0.0.0/0" for row in result.records)
+    hops = [hop for row in result.records for hop in row["next_hops"]]
+    assert {"InLoopBack0", "NULL0"} <= {hop["ifname"] for hop in hops}
+    remote = "1.1.1.0/24" if device == "vsr-1" else "4.4.4.4/32"
+    assert next(r for r in result.records if r["prefix"] == remote)["protocol"] == "O_INTRA"
+
+
+def test_comware_arp_names_the_instance_of_every_entry():
+    # "display arp verbose" lists every instance and names each entry's own: no instance
+    # is inferred from interface bindings. Aging carries its unit.
+    result = run("arp", fixture("vpn-fabric/pe2/arp.txt"))
+    assert result.status == "complete" and result.tier == "rules"
+    assert result.parser_ref.startswith(
+        "rules:topology.arp.comware:H3C/Comware7/display_arp_verbose__"
+    )
+    by_ip = {r["ip"]: r for r in result.records}
+    assert (by_ip["10.2.1.10"]["vrf"], by_ip["10.99.1.10"]["vrf"]) == ("CUST-A", "SHARED")
+    assert by_ip["10.20.23.1"]["vrf"] == "default"
+    assert all(r["type"] == "dynamic" and r["age_s"] % 60 == 0 for r in result.records)
+    assert by_ip["10.2.1.10"]["ifname"] == "GigabitEthernet3/0"
+    assert [s["lines"][0] for s in result.sources] == [1, 14, 27, 40, 53]
 
 
 @pytest.mark.parametrize(
-    "case", [c for c in STYLES if c["family"] in {"comware", "ios"}], ids=lambda c: c["family"]
+    "case", [c for c in STYLES if c["family"] == "ios"], ids=lambda c: c["family"]
 )
 def test_synthetic_arp_reads_like_the_generic_parser(case):
     result = run("arp", case["arp"], case["family"])
@@ -92,33 +98,40 @@ def test_real_ios_tables():
 
 
 def test_arp_bad_row_is_rejected_and_the_rest_kept():
-    result = run("arp", lab("arp").replace("0c22-57e9-0001", "not-a-mac"))
+    text = fixture("vpn-fabric/pe2/arp.txt")
+    result = run("arp", text.replace("0050-7966-680d", "not-a-mac"))
+    # The damaged entry's lines are not attributed to its neighbours.
     assert result.status == "partial" and result.rejected_count == 1
-    assert len(result.records) == 3 and "collection_incomplete" not in result.warnings
-    assert "line:5:template_rejected:unrecognized_display_arp_line" in result.warnings
-    assert [s["lines"] for s in result.sources] == [[3], [4], [6]]
-    tail = run("arp", lab("arp") + "\nBROKEN ROW unexpected syntax\n")
-    assert tail.status == "partial" and len(tail.records) == 4
+    assert "line:40:template_rejected:unrecognized_display_arp_verbose_line" in result.warnings
+    assert "10.2.1.10" not in {r["ip"] for r in result.records}
+    tail = run("arp", text + "\nBROKEN ROW unexpected syntax\n")
+    assert tail.status == "partial" and len(tail.records) == 5
     assert run("arp", "some unknown text").status == "failed"
 
 
 def test_arp_cut_off_output_is_incomplete_not_defective():
-    paged = run("arp", lab("arp") + "\n---- More ----")
+    text = fixture("vpn-fabric/pe2/arp.txt")
+    paged = run("arp", text + "\n---- More ----")
     assert paged.status == "partial" and "collection_incomplete" in paged.warnings
-    assert len(paged.records) == 4 and paged.rejected_count == 0
-    assert run("arp", lab("arp"), complete=False).status == "partial"
-    assert "age_unit_unknown" in run("arp", lab("arp")).warnings[0]
+    assert len(paged.records) == 5 and paged.rejected_count == 0
+    assert run("arp", text, complete=False).status == "partial"
+    assert run("arp", "").status == "complete"  # no entry: a valid empty table
 
 
-def test_vsi_arp_entries_keep_the_vsi_and_skip_link_ids():
+def test_vsi_arp_entries_belong_to_the_vsi_interface():
     result = run("arp", fixture("vpn-fabric/leaf3/arp.txt"))
     assert result.status == "complete"
-    by_ip = {r["ip"]: (r, s) for r, s in zip(result.records, result.sources)}
-    host, source = by_ip["192.168.20.14"]
-    assert host["vsi"] == "BLUE-20" and "ifname" not in host  # link ID 0, not an interface
-    gateway, source = by_ip["10.255.10.12"]
-    assert gateway["vsi"] == "Auto_L3VNI50020_920" and gateway["ifname"] == "Tunnel1"
-    assert source["lines"] == [8, 9]  # the wrapped VSI name is that entry's evidence
+    by_ip = {r["ip"]: r for r in result.records}
+    host = by_ip["192.168.20.14"]
+    assert (host["vsi"], host["ifname"], host["vrf"]) == ("BLUE-20", "Vsi-interface20", "BLUE")
+    # The remote VTEP's router MAC, learned for the L3 VNI over the tunnel.
+    gateway = by_ip["10.255.10.12"]
+    assert (gateway["vsi"], gateway["ifname"], gateway["vrf"]) == (
+        "Auto_L3VNI50020_920",
+        "Vsi-interface920",
+        "BLUE",
+    )
+    assert "type" not in gateway  # "Rule" is neither dynamic nor static
 
 
 @pytest.mark.parametrize("suffix", ["\n---- More ----", "\n[truncated]"])
@@ -287,7 +300,7 @@ def test_collection_runs_the_published_commands():
     allowed = collect.command_allowlist()
     assert {
         "show ip arp",
-        "display arp",
+        "display arp verbose",
         "show ip route",
         "display ip routing-table",
         "show vrf detail",

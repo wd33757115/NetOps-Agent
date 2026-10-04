@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "batch": "20261003-225812",
+  "batch": "20261004-222724",
   "source": "GNS3 authorized lab capture",
   "raw_format": "UTF-8 text saved by collector before CLI cleanup; original line endings",
   "limitations": [
@@ -18,19 +18,19 @@
       "host": "10.10.1.21",
       "capability": "version",
       "command": "show version",
-      "observed_at": "2026-10-03T14:58:13.162843+00:00",
+      "observed_at": "2026-10-04T14:27:25.218186+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "spine1/version.txt",
-          "sha256": "1787cb76728c99c3b88a8b819e6726f2d0905c35a80427e1615de458c19cab5f",
-          "bytes": 1497
+          "sha256": "9db6d4230cdbb688d88b3b2a692f0a1572abd5eae9249d7522fba842886514a8",
+          "bytes": 1489
         },
         "raw.txt": {
           "path": "spine1/version.raw.txt",
-          "sha256": "98e60bbb620ab899f17754c5b02aa221716c19c4cb29eaf19f2348ba87732b7c",
-          "bytes": 1555
+          "sha256": "348abbbc7b8d035145aaa2d20e30bb621e71c68502f7b1416fbb50e8e3a41bba",
+          "bytes": 1547
         }
       }
     },
@@ -39,19 +39,19 @@
       "host": "10.10.1.21",
       "capability": "lldp_verbose",
       "command": "show lldp neighbors detail",
-      "observed_at": "2026-10-03T14:58:13.317907+00:00",
+      "observed_at": "2026-10-04T14:27:25.371747+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "spine1/lldp_verbose.txt",
-          "sha256": "2c763cf151ef1ebc86de7d022063ed0a6f780b24f6b0691b3aaf19e8f02698da",
-          "bytes": 2359
+          "sha256": "a73fdf2f66d102ccbbb3571580ce20a935bff3186ae84e5f0c9177a8e9a8cb04",
+          "bytes": 2360
         },
         "raw.txt": {
           "path": "spine1/lldp_verbose.raw.txt",
-          "sha256": "970178e414bebd774c5c79a3ba53fd9b634475756badaead544085015e459aff",
-          "bytes": 2479
+          "sha256": "54b1bf5bd2cd7a91b363c76f18acdbc2895f8a38374730cd86b645b75dd456c6",
+          "bytes": 2480
         }
       }
     },
@@ -60,7 +60,7 @@
       "host": "10.10.1.21",
       "capability": "interfaces_description",
       "command": "show interfaces description",
-      "observed_at": "2026-10-03T14:58:13.675780+00:00",
+      "observed_at": "2026-10-04T14:27:25.728578+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -81,19 +81,19 @@
       "host": "10.10.1.21",
       "capability": "ip_interface",
       "command": "show ip interface",
-      "observed_at": "2026-10-03T14:58:13.881127+00:00",
+      "observed_at": "2026-10-04T14:27:25.933107+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "spine1/ip_interface.txt",
-          "sha256": "77a48444d357e0060613e99c320b517bb55d9714e198b6aff0e61e7706108b16",
-          "bytes": 8145
+          "sha256": "572f1454c6eb4c6754bc4a64409e85c3eeaec9f27801035139df044756b35de2",
+          "bytes": 8175
         },
         "raw.txt": {
           "path": "spine1/ip_interface.raw.txt",
-          "sha256": "afa92af5528dfd333b8fad5542d13fbbcbe2fd5d0835025e31ed0edcbb0b3fbb",
-          "bytes": 8394
+          "sha256": "918bdb8684bb556c809d40d7d1e18336066c56f2e3a57d9821ab4a53abd1799b",
+          "bytes": 8424
         }
       }
     },
@@ -102,18 +102,18 @@
       "host": "10.10.1.21",
       "capability": "arp",
       "command": "show ip arp",
-      "observed_at": "2026-10-03T14:58:13.932345+00:00",
+      "observed_at": "2026-10-04T14:27:25.984355+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "spine1/arp.txt",
-          "sha256": "4596d6d385b29535a27cd95ebc9c66ec6a8bce8ea186678c75531fbbb78b3f07",
+          "sha256": "d3bc8be79327c73d1e2ec68011d94454789db661b529a77f914f6a599945c055",
           "bytes": 509
         },
         "raw.txt": {
           "path": "spine1/arp.raw.txt",
-          "sha256": "5c79d2d53ca742a8ac9287c049121e38910b5c7c9c7f2e6a3fb2261996e54e95",
+          "sha256": "a995df5475241a5070eed5f3ba3fbea7a91794e8ec94aa622470c49c88062d5f",
           "bytes": 536
         }
       }
@@ -123,18 +123,18 @@
       "host": "10.10.1.21",
       "capability": "routes",
       "command": "show ip route",
-      "observed_at": "2026-10-03T14:58:14.546605+00:00",
+      "observed_at": "2026-10-04T14:27:26.547019+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "spine1/routes.txt",
-          "sha256": "379f5ee2c78bef6e55892dd8817fb14a18a3b6ae77fb6d2b681f0f670dad588b",
+          "sha256": "49a937c437a268caa34e004933bc3c867999a47b13423a59fdf2f563abe54cba",
           "bytes": 1794
         },
         "raw.txt": {
           "path": "spine1/routes.raw.txt",
-          "sha256": "ebb6c5734b31d71a4f10a9d46ff95facece5fdf685d2901a7cff9d37d8e07ff6",
+          "sha256": "21a1e72d7b82ac95f5934ec8fccafcb99dcbb3bc933bda31445f7f46924181f0",
           "bytes": 1846
         }
       }
@@ -144,7 +144,7 @@
       "host": "10.10.1.21",
       "capability": "vrfs",
       "command": "show vrf",
-      "observed_at": "2026-10-03T14:58:14.649035+00:00",
+      "observed_at": "2026-10-04T14:27:26.649897+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -165,18 +165,18 @@
       "host": "10.10.1.21",
       "capability": "ospf",
       "command": "show ip ospf neighbor",
-      "observed_at": "2026-10-03T14:58:14.801982+00:00",
+      "observed_at": "2026-10-04T14:27:26.802883+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "spine1/ospf.txt",
-          "sha256": "aead2d8dffbb8ff42a8fc819e1f6dba43ee672d9adab6144d79e83c2c9061bb1",
+          "sha256": "74e8793a01a85c2ff6d5d1ba37041c744de87fd6381e4152d650578a72d958a8",
           "bytes": 310
         },
         "raw.txt": {
           "path": "spine1/ospf.raw.txt",
-          "sha256": "d8dc0796102265c9d8da9a87101c6d3df1b14345428e8e2ba7788b36f110923b",
+          "sha256": "5eadea192028d36543d671a4a540ae330157c894d15ae72f2972e427e6be692d",
           "bytes": 346
         }
       }
@@ -186,7 +186,7 @@
       "host": "10.10.1.21",
       "capability": "ospf_interfaces",
       "command": "show ip ospf interface brief",
-      "observed_at": "2026-10-03T14:58:14.903630+00:00",
+      "observed_at": "2026-10-04T14:27:26.905117+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -207,18 +207,18 @@
       "host": "10.10.1.21",
       "capability": "ospf_process",
       "command": "show ip ospf",
-      "observed_at": "2026-10-03T14:58:14.954957+00:00",
+      "observed_at": "2026-10-04T14:27:26.956802+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "spine1/ospf_process.txt",
-          "sha256": "f47a159640a2c854eaa0a43e00de43331fb804dfff13ad82fad61b0453544d44",
+          "sha256": "e0b0213a588f63a5bfebdca150878ecbc9b6767542bffc6e691f86ff55f183b3",
           "bytes": 2260
         },
         "raw.txt": {
           "path": "spine1/ospf_process.raw.txt",
-          "sha256": "2f232f9d1a392f94e6a6af17b89288ee089b34481d7b53414a8726d3ad6ace46",
+          "sha256": "2156bd42ab275e934f08b65e67438d7333d93f29496f3b30e8d5bae62126e242",
           "bytes": 2337
         }
       }
@@ -228,7 +228,7 @@
       "host": "10.10.1.21",
       "capability": "bgp",
       "command": "show ip bgp summary",
-      "observed_at": "2026-10-03T14:58:15.056826+00:00",
+      "observed_at": "2026-10-04T14:27:27.058330+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -249,7 +249,7 @@
       "host": "10.10.1.21",
       "capability": "vrf_detail",
       "command": "show vrf detail",
-      "observed_at": "2026-10-03T14:58:15.108574+00:00",
+      "observed_at": "2026-10-04T14:27:27.110394+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -270,7 +270,7 @@
       "host": "10.10.1.21",
       "capability": "bgp_vpnv4",
       "command": "show bgp vpnv4 unicast all summary",
-      "observed_at": "2026-10-03T14:58:15.260426+00:00",
+      "observed_at": "2026-10-04T14:27:27.212989+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -291,18 +291,18 @@
       "host": "10.10.1.21",
       "capability": "bgp_evpn",
       "command": "show bgp l2vpn evpn summary",
-      "observed_at": "2026-10-03T14:58:15.412700+00:00",
+      "observed_at": "2026-10-04T14:27:27.314765+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "spine1/bgp_evpn.txt",
-          "sha256": "97fc34db42701e564af1e709a02299dfb15d1b8cc4f9e4ba34b93fa03e9d7594",
+          "sha256": "d52061692ae5e0c688add4db265db53403e5c4a90b360666a10df9ba0644a531",
           "bytes": 945
         },
         "raw.txt": {
           "path": "spine1/bgp_evpn.raw.txt",
-          "sha256": "3c99b4c08552d0eb5dccf4c5201bcad635dacb53054b32ed0ca4152a9d382950",
+          "sha256": "73a01854084a41615800c214eb42897dcc986fccc9646466323ed0bfbb4a5525",
           "bytes": 997
         }
       }
@@ -312,7 +312,7 @@
       "host": "10.10.1.21",
       "capability": "bgp_vpnv4_routes",
       "command": "show bgp vpnv4 unicast all",
-      "observed_at": "2026-10-03T14:58:15.514753+00:00",
+      "observed_at": "2026-10-04T14:27:27.416777+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -333,18 +333,18 @@
       "host": "10.10.1.21",
       "capability": "bgp_evpn_routes",
       "command": "show bgp l2vpn evpn",
-      "observed_at": "2026-10-03T14:58:15.566372+00:00",
+      "observed_at": "2026-10-04T14:27:27.468464+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "spine1/bgp_evpn_routes.txt",
-          "sha256": "013aa7a4444bb31d968750b84d6b6617c08bf5d7b9f922ea4e727b6b2abe2090",
+          "sha256": "8f0b6ea7a87b0ee88e6efe7bf2f6be5ad31b426ece6ef22e8499ad435832ab68",
           "bytes": 2598
         },
         "raw.txt": {
           "path": "spine1/bgp_evpn_routes.raw.txt",
-          "sha256": "9ce09dfefc866fb5ec1b163730913ddf1751ff777677c1377c417813c70fb4e9",
+          "sha256": "0d0fe158cd02f81d1b75e5940038341e5f9cc15061be582b54e5c81aac2033a5",
           "bytes": 2673
         }
       }
@@ -354,7 +354,7 @@
       "host": "10.10.1.21",
       "capability": "ldp",
       "command": "show mpls ldp neighbor",
-      "observed_at": "2026-10-03T14:58:15.617657+00:00",
+      "observed_at": "2026-10-04T14:27:27.570287+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -375,7 +375,7 @@
       "host": "10.10.1.21",
       "capability": "mpls_forwarding",
       "command": "show mpls forwarding-table",
-      "observed_at": "2026-10-03T14:58:15.719541+00:00",
+      "observed_at": "2026-10-04T14:27:27.671873+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -396,7 +396,7 @@
       "host": "10.10.1.21",
       "capability": "nve_peers",
       "command": "show nve peers",
-      "observed_at": "2026-10-03T14:58:15.821295+00:00",
+      "observed_at": "2026-10-04T14:27:27.723151+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -417,7 +417,7 @@
       "host": "10.10.1.21",
       "capability": "nve_vni",
       "command": "show nve vni",
-      "observed_at": "2026-10-03T14:58:15.924828+00:00",
+      "observed_at": "2026-10-04T14:27:27.774995+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -438,7 +438,7 @@
       "host": "10.10.1.21",
       "capability": "evpn_evi",
       "command": "show l2vpn evpn evi detail",
-      "observed_at": "2026-10-03T14:58:16.178434+00:00",
+      "observed_at": "2026-10-04T14:27:27.979840+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -459,19 +459,19 @@
       "host": "10.10.1.22",
       "capability": "version",
       "command": "show version",
-      "observed_at": "2026-10-03T14:58:17.846592+00:00",
+      "observed_at": "2026-10-04T14:27:29.604174+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "spine2/version.txt",
-          "sha256": "482251b0b2f8712b581c2377c7d5e54037a1e5d5f2e96d3d52bde91e69fe03fb",
-          "bytes": 1497
+          "sha256": "5f7d6b0580e653981a0a005adafec302e5c38144f5807a275b4d680695a02c90",
+          "bytes": 1489
         },
         "raw.txt": {
           "path": "spine2/version.raw.txt",
-          "sha256": "ab992b17fdeefd1a4a7b9cfa94b9e4f6603ed048c11c87e2f236562ab24a3f0c",
-          "bytes": 1555
+          "sha256": "9b8b47bd8cfa49fa72ecd7e46c1d16ec1f9a3f33401153c20909b4bd83a5e5f8",
+          "bytes": 1547
         }
       }
     },
@@ -480,19 +480,19 @@
       "host": "10.10.1.22",
       "capability": "lldp_verbose",
       "command": "show lldp neighbors detail",
-      "observed_at": "2026-10-03T14:58:18.001289+00:00",
+      "observed_at": "2026-10-04T14:27:29.707691+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "spine2/lldp_verbose.txt",
-          "sha256": "d812a73ca7d91d8916050f4db37ab5b1574da989167cd8c16ec56fca43aea81d",
-          "bytes": 2361
+          "sha256": "8423cf420300e9ce83b717046316c52a5cee1b63721100f779fda9305adde226",
+          "bytes": 2360
         },
         "raw.txt": {
           "path": "spine2/lldp_verbose.raw.txt",
-          "sha256": "ce21e8632208f989d9fbc0f371ee7e99ec87ff393da121c1e5ecad02cd1b5f76",
-          "bytes": 2481
+          "sha256": "72880588761faf7ef99233865954a1cbf8065bd050b8cf39a6d8189f876ccdeb",
+          "bytes": 2480
         }
       }
     },
@@ -501,7 +501,7 @@
       "host": "10.10.1.22",
       "capability": "interfaces_description",
       "command": "show interfaces description",
-      "observed_at": "2026-10-03T14:58:18.257952+00:00",
+      "observed_at": "2026-10-04T14:27:30.015509+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -522,19 +522,19 @@
       "host": "10.10.1.22",
       "capability": "ip_interface",
       "command": "show ip interface",
-      "observed_at": "2026-10-03T14:58:18.413369+00:00",
+      "observed_at": "2026-10-04T14:27:30.169577+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "spine2/ip_interface.txt",
-          "sha256": "5f35e4e3ed6ee7d4e1909d45519b4fda006e023825d3bbebb96a5cb267c5b3d7",
-          "bytes": 8145
+          "sha256": "2647d1894be522ca5062d73872511c50e12907e3cdb144f228b27dceee6cfa50",
+          "bytes": 8175
         },
         "raw.txt": {
           "path": "spine2/ip_interface.raw.txt",
-          "sha256": "9540cacc4e33323e483ae1b607f0f2fa828ac7f779b0ba86d12d94ea9b28ed4b",
-          "bytes": 8394
+          "sha256": "07bffccdf69bda73183c9f05296af78461aa90044ab6b3b8dd48970528b918e4",
+          "bytes": 8424
         }
       }
     },
@@ -543,18 +543,18 @@
       "host": "10.10.1.22",
       "capability": "arp",
       "command": "show ip arp",
-      "observed_at": "2026-10-03T14:58:18.464720+00:00",
+      "observed_at": "2026-10-04T14:27:30.220917+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "spine2/arp.txt",
-          "sha256": "f49306aec2074e58b48d8ec11d2267c18df8343f18f6f2f3bc89227b6cb4aef7",
+          "sha256": "2edd881156a47a9a9666ea189675a865efeeef4ed60f8c4381a898929f7c491a",
           "bytes": 509
         },
         "raw.txt": {
           "path": "spine2/arp.raw.txt",
-          "sha256": "d55236d7d71b3e8667468e90c8313f8a118b96b361293a802c29a2c16b9e7dc9",
+          "sha256": "7a8eba0f822c9c42e8a57d0d8871fc770dbdd77a9eac24a5268011461ea76b13",
           "bytes": 536
         }
       }
@@ -564,18 +564,18 @@
       "host": "10.10.1.22",
       "capability": "routes",
       "command": "show ip route",
-      "observed_at": "2026-10-03T14:58:19.027194+00:00",
+      "observed_at": "2026-10-04T14:27:30.884945+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "spine2/routes.txt",
-          "sha256": "d0cbea272cacc47572801cb7d941e0f50df412e9bea516ec33dc4504254e4ada",
+          "sha256": "779c0766a9c6e183b8b053a284a78ebd0c6e57fb111ea53747717f8205820d4a",
           "bytes": 1794
         },
         "raw.txt": {
           "path": "spine2/routes.raw.txt",
-          "sha256": "3b7f74e73577d7faa76d3ea602868ccae73dcbfe45e33851c4c5b2eb47b69297",
+          "sha256": "5cff6380e5834277540fec0e4a6e98e3b6fa65930092c27bac5f3e667de84c08",
           "bytes": 1846
         }
       }
@@ -585,7 +585,7 @@
       "host": "10.10.1.22",
       "capability": "vrfs",
       "command": "show vrf",
-      "observed_at": "2026-10-03T14:58:19.130609+00:00",
+      "observed_at": "2026-10-04T14:27:31.037725+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -606,18 +606,18 @@
       "host": "10.10.1.22",
       "capability": "ospf",
       "command": "show ip ospf neighbor",
-      "observed_at": "2026-10-03T14:58:19.233431+00:00",
+      "observed_at": "2026-10-04T14:27:31.190739+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "spine2/ospf.txt",
-          "sha256": "e10d026131a0522cb94b9a10356b0de260fb12991c4b58bc7733f90f5e11ccf4",
+          "sha256": "c35b063c8ceedff1e75ce327b1aa0372ec75babb0e49f51f90034505a98830d1",
           "bytes": 310
         },
         "raw.txt": {
           "path": "spine2/ospf.raw.txt",
-          "sha256": "a22dc41defa5321725c7293d7e1e7401c3fe7202a4819ed4a2880878088a51a6",
+          "sha256": "609811668f829a2214136012d86b78f9776f1615000519a676f33ad9998878e9",
           "bytes": 346
         }
       }
@@ -627,7 +627,7 @@
       "host": "10.10.1.22",
       "capability": "ospf_interfaces",
       "command": "show ip ospf interface brief",
-      "observed_at": "2026-10-03T14:58:19.335625+00:00",
+      "observed_at": "2026-10-04T14:27:31.242055+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -648,19 +648,19 @@
       "host": "10.10.1.22",
       "capability": "ospf_process",
       "command": "show ip ospf",
-      "observed_at": "2026-10-03T14:58:19.387274+00:00",
+      "observed_at": "2026-10-04T14:27:31.293736+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "spine2/ospf_process.txt",
-          "sha256": "83478372e6e9fa879d6ad64d247ec1c3d06b1a6ac33bf8d2b689296314acee86",
-          "bytes": 2260
+          "sha256": "65311dec8f7947869a2f438adb62267c8f9c0ee3cf313b607ffd4546b51a9a2f",
+          "bytes": 2259
         },
         "raw.txt": {
           "path": "spine2/ospf_process.raw.txt",
-          "sha256": "86af792dbd5eaeed586de3350a87c14a79f73b344e88f76b13ba4086ba12672c",
-          "bytes": 2337
+          "sha256": "42369bf2ebb546b1533723bdb657df85ce13c419ab41e6d7dd13edcd0777d954",
+          "bytes": 2336
         }
       }
     },
@@ -669,7 +669,7 @@
       "host": "10.10.1.22",
       "capability": "bgp",
       "command": "show ip bgp summary",
-      "observed_at": "2026-10-03T14:58:19.491770+00:00",
+      "observed_at": "2026-10-04T14:27:31.395181+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -690,7 +690,7 @@
       "host": "10.10.1.22",
       "capability": "vrf_detail",
       "command": "show vrf detail",
-      "observed_at": "2026-10-03T14:58:19.543431+00:00",
+      "observed_at": "2026-10-04T14:27:31.446826+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -711,7 +711,7 @@
       "host": "10.10.1.22",
       "capability": "bgp_vpnv4",
       "command": "show bgp vpnv4 unicast all summary",
-      "observed_at": "2026-10-03T14:58:19.645390+00:00",
+      "observed_at": "2026-10-04T14:27:31.549198+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -732,18 +732,18 @@
       "host": "10.10.1.22",
       "capability": "bgp_evpn",
       "command": "show bgp l2vpn evpn summary",
-      "observed_at": "2026-10-03T14:58:19.747470+00:00",
+      "observed_at": "2026-10-04T14:27:31.651128+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "spine2/bgp_evpn.txt",
-          "sha256": "8ca7e06d848fbb20d3f0ea6b60307dce96db71eabe5901abff25576e8034125f",
+          "sha256": "506df716de809b714878361891b3bf492a6afa31f5f31dda9e05f49682e898c3",
           "bytes": 945
         },
         "raw.txt": {
           "path": "spine2/bgp_evpn.raw.txt",
-          "sha256": "5e0a802ae0c9697ed32779c001733d20ad8a1bb0f16992f7956890047f9c8f6a",
+          "sha256": "551e3f0ba6874c14df60065906d72bf6bfdabde27c3dabb21c81f2fc1fae1eb5",
           "bytes": 997
         }
       }
@@ -753,7 +753,7 @@
       "host": "10.10.1.22",
       "capability": "bgp_vpnv4_routes",
       "command": "show bgp vpnv4 unicast all",
-      "observed_at": "2026-10-03T14:58:19.850932+00:00",
+      "observed_at": "2026-10-04T14:27:31.752817+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -774,18 +774,18 @@
       "host": "10.10.1.22",
       "capability": "bgp_evpn_routes",
       "command": "show bgp l2vpn evpn",
-      "observed_at": "2026-10-03T14:58:19.902700+00:00",
+      "observed_at": "2026-10-04T14:27:31.854955+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "spine2/bgp_evpn_routes.txt",
-          "sha256": "59869a3962a2db77fd6333493a940794b3d143eb670ed90aa39beb30682b2822",
+          "sha256": "7e1410499f783c5617c6c1a20f9a918e614a8db1bc1e416e5cde99cadf354b50",
           "bytes": 2598
         },
         "raw.txt": {
           "path": "spine2/bgp_evpn_routes.raw.txt",
-          "sha256": "691b111ca4af332ea2b367d5d252a04526599c379ae5983ab5a47bb06cf75830",
+          "sha256": "2a5db6f38d47012a7cebb22a1576bc40bbfee0df846378ab6fc9c20f46ce0aa1",
           "bytes": 2673
         }
       }
@@ -795,7 +795,7 @@
       "host": "10.10.1.22",
       "capability": "ldp",
       "command": "show mpls ldp neighbor",
-      "observed_at": "2026-10-03T14:58:20.004510+00:00",
+      "observed_at": "2026-10-04T14:27:31.956664+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -816,7 +816,7 @@
       "host": "10.10.1.22",
       "capability": "mpls_forwarding",
       "command": "show mpls forwarding-table",
-      "observed_at": "2026-10-03T14:58:20.055546+00:00",
+      "observed_at": "2026-10-04T14:27:32.058735+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -837,7 +837,7 @@
       "host": "10.10.1.22",
       "capability": "nve_peers",
       "command": "show nve peers",
-      "observed_at": "2026-10-03T14:58:20.106797+00:00",
+      "observed_at": "2026-10-04T14:27:32.110184+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -858,7 +858,7 @@
       "host": "10.10.1.22",
       "capability": "nve_vni",
       "command": "show nve vni",
-      "observed_at": "2026-10-03T14:58:20.159795+00:00",
+      "observed_at": "2026-10-04T14:27:32.162055+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -879,7 +879,7 @@
       "host": "10.10.1.22",
       "capability": "evpn_evi",
       "command": "show l2vpn evpn evi detail",
-      "observed_at": "2026-10-03T14:58:20.364345+00:00",
+      "observed_at": "2026-10-04T14:27:32.366101+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -900,19 +900,19 @@
       "host": "10.10.1.23",
       "capability": "version",
       "command": "show version",
-      "observed_at": "2026-10-03T14:58:21.877134+00:00",
+      "observed_at": "2026-10-04T14:27:33.930071+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "leaf1/version.txt",
-          "sha256": "da9df3b9c3aa0d7bf5f262012db6666865d267bc3b550a20cde1cc2dd5cd53ad",
-          "bytes": 1503
+          "sha256": "842ad2ba6fd3fcda797b481f395475cd4df8c283b54457d11fd43b7232733f22",
+          "bytes": 1495
         },
         "raw.txt": {
           "path": "leaf1/version.raw.txt",
-          "sha256": "d94e432b618a97a2a1a43c83f3657c494e899cf04fa1011b3f106a52eb3d18ea",
-          "bytes": 1560
+          "sha256": "83fe6068e6a903a4264bf5026a68b06f672feffc39359e3af19cd25781bc6708",
+          "bytes": 1552
         }
       }
     },
@@ -921,18 +921,18 @@
       "host": "10.10.1.23",
       "capability": "lldp_verbose",
       "command": "show lldp neighbors detail",
-      "observed_at": "2026-10-03T14:58:22.031075+00:00",
+      "observed_at": "2026-10-04T14:27:34.133556+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "leaf1/lldp_verbose.txt",
-          "sha256": "d57547eaa5101642f69be312baa120c30db9581161658bb31b89a6cf9ed56668",
+          "sha256": "52b06de5e29e890f82095c27422ed68b615160884d618d91c219921f706dc468",
           "bytes": 1588
         },
         "raw.txt": {
           "path": "leaf1/lldp_verbose.raw.txt",
-          "sha256": "2f2d81655d8ef145d770239b1c09cad1afbdcaa2a977546fc0834b55c024dd5d",
+          "sha256": "90f1211d844e8ae6711c10bf25de3848d5ae94faf6287c9549585b44cd4b3c70",
           "bytes": 1676
         }
       }
@@ -942,7 +942,7 @@
       "host": "10.10.1.23",
       "capability": "interfaces_description",
       "command": "show interfaces description",
-      "observed_at": "2026-10-03T14:58:22.389298+00:00",
+      "observed_at": "2026-10-04T14:27:34.391116+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -963,19 +963,19 @@
       "host": "10.10.1.23",
       "capability": "ip_interface",
       "command": "show ip interface",
-      "observed_at": "2026-10-03T14:58:22.543559+00:00",
+      "observed_at": "2026-10-04T14:27:34.544871+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "leaf1/ip_interface.txt",
-          "sha256": "99086eba96920ab6fa5f5a73e48b9a15f0b6376c848ff6c1f1d6de6c7d9c4071",
-          "bytes": 9231
+          "sha256": "760725e7597bdc8da64f8a450ade05a5f66abd60414376e9743d310b19faa1f7",
+          "bytes": 9255
         },
         "raw.txt": {
           "path": "leaf1/ip_interface.raw.txt",
-          "sha256": "369fdc1c180bea5a1c8343fb1ecf6232cea90cdaac0355f3d1689d5364fbd946",
-          "bytes": 9510
+          "sha256": "5691002fc8979956d6121dd9978bdd359fada481a9ad883a731011ba78abeaea",
+          "bytes": 9534
         }
       }
     },
@@ -984,18 +984,18 @@
       "host": "10.10.1.23",
       "capability": "arp",
       "command": "show ip arp",
-      "observed_at": "2026-10-03T14:58:22.595125+00:00",
+      "observed_at": "2026-10-04T14:27:34.596400+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "leaf1/arp.txt",
-          "sha256": "d9a65d79cc03e73081d1da12edd1c3dd17f30d1e31218ed14675da8a174abeb3",
+          "sha256": "9294350d9644828c2f113508e6710f76cdc435b35c93409bb59734911edfff89",
           "bytes": 363
         },
         "raw.txt": {
           "path": "leaf1/arp.raw.txt",
-          "sha256": "3052842f2adceb0ddcc6e7514a234f0c28a0d528c7e5af855ba093c0756505f8",
+          "sha256": "53eaa375f1d6bf0280404c1488f27ce0f25d8c0476984cc301ef53d103236eb6",
           "bytes": 387
         }
       }
@@ -1005,18 +1005,18 @@
       "host": "10.10.1.23",
       "capability": "mac",
       "command": "show mac address-table",
-      "observed_at": "2026-10-03T14:58:22.698815+00:00",
+      "observed_at": "2026-10-04T14:27:34.699323+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "leaf1/mac.txt",
-          "sha256": "26c683be94805a8922f470ae101469889965312c2199703f02101f3742f77168",
+          "sha256": "2b38ae75cd0b744cbe4190aa0f09ddd33eb8415714586039b57d4fca9a682bb1",
           "bytes": 247
         },
         "raw.txt": {
           "path": "leaf1/mac.raw.txt",
-          "sha256": "ab3e288cad3b18b213e9f4268afc5946edff2747f0bf554c54eb088721d2ef87",
+          "sha256": "60690b77b9db977cd9a0e682de47c36225fc8f65bce6e3405b98d7e5c47748ca",
           "bytes": 284
         }
       }
@@ -1026,7 +1026,7 @@
       "host": "10.10.1.23",
       "capability": "vlan",
       "command": "show vlan brief",
-      "observed_at": "2026-10-03T14:58:22.800715+00:00",
+      "observed_at": "2026-10-04T14:27:34.801826+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -1047,7 +1047,7 @@
       "host": "10.10.1.23",
       "capability": "trunk",
       "command": "show interfaces trunk",
-      "observed_at": "2026-10-03T14:58:22.902712+00:00",
+      "observed_at": "2026-10-04T14:27:34.903885+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -1068,7 +1068,7 @@
       "host": "10.10.1.23",
       "capability": "switchport",
       "command": "show interfaces switchport",
-      "observed_at": "2026-10-03T14:58:23.005155+00:00",
+      "observed_at": "2026-10-04T14:27:35.006759+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -1089,18 +1089,18 @@
       "host": "10.10.1.23",
       "capability": "routes",
       "command": "show ip route",
-      "observed_at": "2026-10-03T14:58:23.159621+00:00",
+      "observed_at": "2026-10-04T14:27:35.262633+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "leaf1/routes.txt",
-          "sha256": "7c21c13788384a002bd7d714254252c4becd467f45f9c9d7eca1b50bb553fe6c",
+          "sha256": "8f11c6590c71ae1d1aef6c28587e6b6cc48b0adcce2cf3c6e1d20f74fc4d492c",
           "bytes": 1892
         },
         "raw.txt": {
           "path": "leaf1/routes.raw.txt",
-          "sha256": "2e829b2a3e58b6fe26c07ca81c30c12e82bc620b74e73e427e14c84514267ac7",
+          "sha256": "83392afe90c88610a437481321905b7ac344c36fc0f922718fbde109e9a002aa",
           "bytes": 1944
         }
       }
@@ -1110,7 +1110,7 @@
       "host": "10.10.1.23",
       "capability": "vrfs",
       "command": "show vrf",
-      "observed_at": "2026-10-03T14:58:23.262479+00:00",
+      "observed_at": "2026-10-04T14:27:35.415765+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -1131,18 +1131,18 @@
       "host": "10.10.1.23",
       "capability": "ospf",
       "command": "show ip ospf neighbor",
-      "observed_at": "2026-10-03T14:58:23.415702+00:00",
+      "observed_at": "2026-10-04T14:27:35.569524+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "leaf1/ospf.txt",
-          "sha256": "a1195ba9889443e4af2f8d5f0bf1e5fe58fe428852301d4e4351907569b4b999",
+          "sha256": "2fd9632bd22915c0b1124549da9e328ed71d3817fb39d89667515983ca331220",
           "bytes": 232
         },
         "raw.txt": {
           "path": "leaf1/ospf.raw.txt",
-          "sha256": "ebabdc3efeac2c41261a70323db47bdcb7858ce00e4cfb0e8013b6333bced2fb",
+          "sha256": "d80ae2aac067b5abe5e5211447e66c9f25df0a76c44abea62891961d0786d9da",
           "bytes": 266
         }
       }
@@ -1152,7 +1152,7 @@
       "host": "10.10.1.23",
       "capability": "ospf_interfaces",
       "command": "show ip ospf interface brief",
-      "observed_at": "2026-10-03T14:58:23.517535+00:00",
+      "observed_at": "2026-10-04T14:27:35.671887+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -1173,18 +1173,18 @@
       "host": "10.10.1.23",
       "capability": "ospf_process",
       "command": "show ip ospf",
-      "observed_at": "2026-10-03T14:58:23.569341+00:00",
+      "observed_at": "2026-10-04T14:27:35.773898+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "leaf1/ospf_process.txt",
-          "sha256": "17a6097496f25d01d5451f7679d0335476b17b21c9bb16c95b2a7081a6c222d2",
+          "sha256": "08f203dbb5b9227fb875a29f4e0ea15ad58f709f54af7ed8b34146f18a609e06",
           "bytes": 2088
         },
         "raw.txt": {
           "path": "leaf1/ospf_process.raw.txt",
-          "sha256": "ffe9a040ee6441a50a26d4bd7a01c2ca1be44fea981eb2e472fd89a7f4474222",
+          "sha256": "dfe585efbb36b50aad1e63568a5b6ac0268990ab5734a84e48cdd8afba44c559",
           "bytes": 2160
         }
       }
@@ -1194,7 +1194,7 @@
       "host": "10.10.1.23",
       "capability": "bgp",
       "command": "show ip bgp summary",
-      "observed_at": "2026-10-03T14:58:23.671212+00:00",
+      "observed_at": "2026-10-04T14:27:35.825150+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -1215,7 +1215,7 @@
       "host": "10.10.1.23",
       "capability": "vrf_detail",
       "command": "show vrf detail",
-      "observed_at": "2026-10-03T14:58:23.722927+00:00",
+      "observed_at": "2026-10-04T14:27:35.876639+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -1236,7 +1236,7 @@
       "host": "10.10.1.23",
       "capability": "bgp_vpnv4",
       "command": "show bgp vpnv4 unicast all summary",
-      "observed_at": "2026-10-03T14:58:23.824381+00:00",
+      "observed_at": "2026-10-04T14:27:36.028540+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -1257,19 +1257,19 @@
       "host": "10.10.1.23",
       "capability": "bgp_evpn",
       "command": "show bgp l2vpn evpn summary",
-      "observed_at": "2026-10-03T14:58:23.926010+00:00",
+      "observed_at": "2026-10-04T14:27:36.130310+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "leaf1/bgp_evpn.txt",
-          "sha256": "82f6a6d89dfba752c8a7ee08909b5afdea97430194f6c663d63fbdb68b339170",
-          "bytes": 899
+          "sha256": "7d159f0b909d9f9426f96447541c0e110e8b2f3a3b96b89bc1b4fd416375a856",
+          "bytes": 900
         },
         "raw.txt": {
           "path": "leaf1/bgp_evpn.raw.txt",
-          "sha256": "12dd0eae3b02422489f5c37e22f66030794c3c02785fe8b2d7c4539d93cd17ba",
-          "bytes": 950
+          "sha256": "d07d09692fbc9a3dbc095b0ee72325a2530fbf71e9826aa7a4cff3c4166ef572",
+          "bytes": 951
         }
       }
     },
@@ -1278,7 +1278,7 @@
       "host": "10.10.1.23",
       "capability": "bgp_vpnv4_routes",
       "command": "show bgp vpnv4 unicast all",
-      "observed_at": "2026-10-03T14:58:23.977466+00:00",
+      "observed_at": "2026-10-04T14:27:36.232141+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -1299,18 +1299,18 @@
       "host": "10.10.1.23",
       "capability": "bgp_evpn_routes",
       "command": "show bgp l2vpn evpn",
-      "observed_at": "2026-10-03T14:58:24.079428+00:00",
+      "observed_at": "2026-10-04T14:27:36.334175+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "leaf1/bgp_evpn_routes.txt",
-          "sha256": "6a0d7d209474f2479e0bd6398de902647f79731bd2ac7cea3a172d4d447b6390",
+          "sha256": "ab5fa8578ee43dc9bcf83cdcf016703e6dc5bd3ebc02024557e6d405396b60bc",
           "bytes": 1639
         },
         "raw.txt": {
           "path": "leaf1/bgp_evpn_routes.raw.txt",
-          "sha256": "670a0d025069307e2a3afaee8b07e2ea63b8c947bed1733d9f3b2fb3a70f6be6",
+          "sha256": "4a63a7fa47604ef2978089d6f446cdd819266079e4a13c7337e587b3dd8ce31d",
           "bytes": 1695
         }
       }
@@ -1320,7 +1320,7 @@
       "host": "10.10.1.23",
       "capability": "ldp",
       "command": "show mpls ldp neighbor",
-      "observed_at": "2026-10-03T14:58:24.181610+00:00",
+      "observed_at": "2026-10-04T14:27:36.386050+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -1341,7 +1341,7 @@
       "host": "10.10.1.23",
       "capability": "mpls_forwarding",
       "command": "show mpls forwarding-table",
-      "observed_at": "2026-10-03T14:58:24.283405+00:00",
+      "observed_at": "2026-10-04T14:27:36.437281+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -1362,18 +1362,18 @@
       "host": "10.10.1.23",
       "capability": "nve_peers",
       "command": "show nve peers",
-      "observed_at": "2026-10-03T14:58:24.334986+00:00",
+      "observed_at": "2026-10-04T14:27:36.538890+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "leaf1/nve_peers.txt",
-          "sha256": "12f976e11aa99bac8e3c84087a6c51fa7c640022af19dda910a76548bdb8e3ff",
+          "sha256": "f9f83f0bfb496f0b9d73e9e9bc006de6d8b7eb3227803efcde988c7a864f703a",
           "bytes": 268
         },
         "raw.txt": {
           "path": "leaf1/nve_peers.raw.txt",
-          "sha256": "b03d210dd7824434fa7076b265d205f2069335e577f2f63c86038103b9996136",
+          "sha256": "740f6b6bfd8fc47718aac682e0c0041254b50585580bb088ebf3ebc99cbe1e43",
           "bytes": 295
         }
       }
@@ -1383,7 +1383,7 @@
       "host": "10.10.1.23",
       "capability": "nve_vni",
       "command": "show nve vni",
-      "observed_at": "2026-10-03T14:58:24.386816+00:00",
+      "observed_at": "2026-10-04T14:27:36.590109+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -1404,7 +1404,7 @@
       "host": "10.10.1.23",
       "capability": "nve_interface",
       "command": "show nve interface nve1 detail",
-      "observed_at": "2026-10-03T14:58:24.488226+00:00",
+      "observed_at": "2026-10-04T14:27:36.641607+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -1425,7 +1425,7 @@
       "host": "10.10.1.23",
       "capability": "evpn_evi",
       "command": "show l2vpn evpn evi detail",
-      "observed_at": "2026-10-03T14:58:24.589736+00:00",
+      "observed_at": "2026-10-04T14:27:36.693174+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -1446,18 +1446,18 @@
       "host": "10.10.1.23",
       "capability": "evpn_mac",
       "command": "show l2vpn evpn mac",
-      "observed_at": "2026-10-03T14:58:24.691488+00:00",
+      "observed_at": "2026-10-04T14:27:36.794512+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "leaf1/evpn_mac.txt",
-          "sha256": "19d54cb4112c4518149d5c7b379f31dcab5748737e157ea0994708457faa6162",
+          "sha256": "6fa0f7416800cff19b1bfe07d3e17332ffb5790db458dd42337b2ef40cef3ce7",
           "bytes": 302
         },
         "raw.txt": {
           "path": "leaf1/evpn_mac.raw.txt",
-          "sha256": "1dd77c450fc3dc173fe49091c3363bee51e0f88c3cf595c5f0894ec78908e86c",
+          "sha256": "1767abcac76a216bace2f73026b35cf573731f3c1a28cf2b91041c2e11b45f9c",
           "bytes": 335
         }
       }
@@ -1467,19 +1467,19 @@
       "host": "10.10.1.24",
       "capability": "version",
       "command": "show version",
-      "observed_at": "2026-10-03T14:58:26.073693+00:00",
+      "observed_at": "2026-10-04T14:27:38.408681+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "leaf2/version.txt",
-          "sha256": "dcc80bb0d2d202cd2bab725b6d75231c579b3c7422c27737f661d67926f196c3",
-          "bytes": 1533
+          "sha256": "e2ae80d5e712d126adf9bd4b2ac9cdb86fc66a0965521b94bae8f87ea963aa5e",
+          "bytes": 1525
         },
         "raw.txt": {
           "path": "leaf2/version.raw.txt",
-          "sha256": "89d51752fd48430603bf24734783de019bd4f62969b9200b878945b6627f5de7",
-          "bytes": 1591
+          "sha256": "a269af199153e89a1744c92fb85e070d7f209ee509d9a49e3cd861f6968255a4",
+          "bytes": 1583
         }
       }
     },
@@ -1488,19 +1488,19 @@
       "host": "10.10.1.24",
       "capability": "lldp_verbose",
       "command": "show lldp neighbors detail",
-      "observed_at": "2026-10-03T14:58:26.227858+00:00",
+      "observed_at": "2026-10-04T14:27:38.511985+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "leaf2/lldp_verbose.txt",
-          "sha256": "2af037079c9bdbf2757d8801c198c41e5f83893db8b548c7127e67202f2d8120",
-          "bytes": 1587
+          "sha256": "7fcfbe806070fac575ced6496153062b1c16886dd8dd7257a0ba91cf17b0886a",
+          "bytes": 1588
         },
         "raw.txt": {
           "path": "leaf2/lldp_verbose.raw.txt",
-          "sha256": "fc06fd6095ad19dd77e95dee368314ff25caed646ed5f34799e60b2096307252",
-          "bytes": 1675
+          "sha256": "b2e3bb6c426fad242140784e3290c07021e4d2662450e6dc4034f80603281350",
+          "bytes": 1676
         }
       }
     },
@@ -1509,7 +1509,7 @@
       "host": "10.10.1.24",
       "capability": "interfaces_description",
       "command": "show interfaces description",
-      "observed_at": "2026-10-03T14:58:26.536672+00:00",
+      "observed_at": "2026-10-04T14:27:38.819852+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -1530,19 +1530,19 @@
       "host": "10.10.1.24",
       "capability": "ip_interface",
       "command": "show ip interface",
-      "observed_at": "2026-10-03T14:58:26.692251+00:00",
+      "observed_at": "2026-10-04T14:27:38.974017+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "leaf2/ip_interface.txt",
-          "sha256": "6464f4fe9c0d18aabfb98d3d1ee531051dd0f9a06670a7a4fc48e2c1facb384f",
-          "bytes": 12295
+          "sha256": "01725ffc306810ec34d9c81f89750f3ad42f3766ba03c363609de2873cf660ca",
+          "bytes": 12325
         },
         "raw.txt": {
           "path": "leaf2/ip_interface.raw.txt",
-          "sha256": "405ddca307e32b944a8960994786fa85217b4a4602a356180e2d903f1e2b67a8",
-          "bytes": 12659
+          "sha256": "bb2ad8ebf271d90efccd70089583f2b0f6c6b2a8b9a11b3c78bfa7ee969a51ec",
+          "bytes": 12689
         }
       }
     },
@@ -1551,18 +1551,18 @@
       "host": "10.10.1.24",
       "capability": "arp",
       "command": "show ip arp",
-      "observed_at": "2026-10-03T14:58:26.743744+00:00",
+      "observed_at": "2026-10-04T14:27:39.025365+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "leaf2/arp.txt",
-          "sha256": "59e91f309181bdbd556f052d79533ba8a1f371fae51b3149f66161e06214f4b9",
+          "sha256": "476ae42029f36ebbdbb913af5d65d505cc81618b7e7f7745df120c0d5db05b2f",
           "bytes": 363
         },
         "raw.txt": {
           "path": "leaf2/arp.raw.txt",
-          "sha256": "690398daeadfa726d5a4bcbb93b78de0829f021fa2e7c95db590fb45369b207c",
+          "sha256": "17cd94b03097bcc817d7c26da39dc19cc9ca7aa0f7ba702ae18f3e111795a3d8",
           "bytes": 387
         }
       }
@@ -1572,18 +1572,18 @@
       "host": "10.10.1.24",
       "capability": "mac",
       "command": "show mac address-table",
-      "observed_at": "2026-10-03T14:58:26.896765+00:00",
+      "observed_at": "2026-10-04T14:27:39.128074+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "leaf2/mac.txt",
-          "sha256": "42a1260f6dee7eb0b93e5d19d9c0375f202874786501504fadbd6e6406fb680e",
+          "sha256": "27760bd29cda41dfdc483991c273e3f70ac738dfbba10a84fcfe6af73bb161f5",
           "bytes": 291
         },
         "raw.txt": {
           "path": "leaf2/mac.raw.txt",
-          "sha256": "f5e3dc5ad3a4f96d837cf6a2fad7478ac6a668a90d7ce84ecf4b89a99237ce89",
+          "sha256": "b04a89bdd9d7f9497319d9068fa0e6701c504772bade6aed91ecefbe18d4c1f8",
           "bytes": 329
         }
       }
@@ -1593,7 +1593,7 @@
       "host": "10.10.1.24",
       "capability": "vlan",
       "command": "show vlan brief",
-      "observed_at": "2026-10-03T14:58:26.998697+00:00",
+      "observed_at": "2026-10-04T14:27:39.179589+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -1614,7 +1614,7 @@
       "host": "10.10.1.24",
       "capability": "trunk",
       "command": "show interfaces trunk",
-      "observed_at": "2026-10-03T14:58:27.100601+00:00",
+      "observed_at": "2026-10-04T14:27:39.281052+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -1635,7 +1635,7 @@
       "host": "10.10.1.24",
       "capability": "switchport",
       "command": "show interfaces switchport",
-      "observed_at": "2026-10-03T14:58:27.203149+00:00",
+      "observed_at": "2026-10-04T14:27:39.383537+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -1656,18 +1656,18 @@
       "host": "10.10.1.24",
       "capability": "routes",
       "command": "show ip route",
-      "observed_at": "2026-10-03T14:58:27.408574+00:00",
+      "observed_at": "2026-10-04T14:27:39.589237+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "leaf2/routes.txt",
-          "sha256": "25616ee7913c1e8ffc98020b2857eeb6f21a28d719a96076b525f4cb12661f87",
+          "sha256": "1e5f8199479256a89d2ce6674220ca65a0e2a34fe03b43a1b580951530346b28",
           "bytes": 1892
         },
         "raw.txt": {
           "path": "leaf2/routes.raw.txt",
-          "sha256": "0019585e831307f9fd8ca6c543c8b926a0f59f6bb95eec87bfb5ab259d2148c2",
+          "sha256": "4663f9bda71ae4d780a5caf3ebe13fbc93c0376617ad2774ded9befa7fb7e1a7",
           "bytes": 1944
         }
       }
@@ -1677,7 +1677,7 @@
       "host": "10.10.1.24",
       "capability": "vrfs",
       "command": "show vrf",
-      "observed_at": "2026-10-03T14:58:27.561574+00:00",
+      "observed_at": "2026-10-04T14:27:39.742427+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -1698,18 +1698,18 @@
       "host": "10.10.1.24",
       "capability": "ospf",
       "command": "show ip ospf neighbor",
-      "observed_at": "2026-10-03T14:58:27.664479+00:00",
+      "observed_at": "2026-10-04T14:27:39.895849+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "leaf2/ospf.txt",
-          "sha256": "5881daf42ddf72523d197dbe73cb9db754925f7567766175d188dcbf1490d3c8",
+          "sha256": "bb74cbc5346cd1e78fa21b25c85a9712576ab64ad2973ce4abc8b2b65a48d022",
           "bytes": 232
         },
         "raw.txt": {
           "path": "leaf2/ospf.raw.txt",
-          "sha256": "1fe3259bad21b4bb8766a2c96e574dcacb753a7c7c43eb472e861a3532531f37",
+          "sha256": "0cbdded06636c0cd0f0f9dc16c2ad11cd372ee9a84e0f022b59f8073b5f1958c",
           "bytes": 266
         }
       }
@@ -1719,7 +1719,7 @@
       "host": "10.10.1.24",
       "capability": "ospf_interfaces",
       "command": "show ip ospf interface brief",
-      "observed_at": "2026-10-03T14:58:27.766487+00:00",
+      "observed_at": "2026-10-04T14:27:39.998469+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -1740,18 +1740,18 @@
       "host": "10.10.1.24",
       "capability": "ospf_process",
       "command": "show ip ospf",
-      "observed_at": "2026-10-03T14:58:27.818364+00:00",
+      "observed_at": "2026-10-04T14:27:40.049973+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "leaf2/ospf_process.txt",
-          "sha256": "41c23c8e7ea71331c55e0849eb4e2fcd8794c7b96f141bdc4d34159187d7672e",
+          "sha256": "2b2749af9efb945239a4545d26ce21ff9c3941164f8bbe700d6e79a5b3f2b387",
           "bytes": 2088
         },
         "raw.txt": {
           "path": "leaf2/ospf_process.raw.txt",
-          "sha256": "40603ebafc159fcd0d7df164fcea1346eeddabefac50ab443c4ac7094dccbc1c",
+          "sha256": "7f4c44eb9c8d409f7400cee873d613c25503b501c40b421b76a5e1c5470af214",
           "bytes": 2160
         }
       }
@@ -1761,7 +1761,7 @@
       "host": "10.10.1.24",
       "capability": "bgp",
       "command": "show ip bgp summary",
-      "observed_at": "2026-10-03T14:58:27.870115+00:00",
+      "observed_at": "2026-10-04T14:27:40.151795+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -1782,18 +1782,18 @@
       "host": "10.10.1.24",
       "capability": "vrf_detail",
       "command": "show vrf detail",
-      "observed_at": "2026-10-03T14:58:27.922098+00:00",
+      "observed_at": "2026-10-04T14:27:40.203318+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "leaf2/vrf_detail.txt",
-          "sha256": "aa1e5394655ddd02b5df5965d4169c430507ed469b68b1ef83f8e3a88982b316",
+          "sha256": "d42965201a03e2394a446ad02dcd7b44a4e34b7a0379d38055dcfbb82fa6c6c5",
           "bytes": 1449
         },
         "raw.txt": {
           "path": "leaf2/vrf_detail.raw.txt",
-          "sha256": "1333ca30ddb36b492f7615656a0ebd179fa2cd3a0f7cc6e8cb004d0f7ab2a681",
+          "sha256": "b3cf4c7956cb329efd8d212c39d8e607de3ac1c6acadaf5a899f7b191f740b6d",
           "bytes": 1515
         }
       }
@@ -1803,7 +1803,7 @@
       "host": "10.10.1.24",
       "capability": "bgp_vpnv4",
       "command": "show bgp vpnv4 unicast all summary",
-      "observed_at": "2026-10-03T14:58:28.023901+00:00",
+      "observed_at": "2026-10-04T14:27:40.305486+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -1824,19 +1824,19 @@
       "host": "10.10.1.24",
       "capability": "bgp_evpn",
       "command": "show bgp l2vpn evpn summary",
-      "observed_at": "2026-10-03T14:58:28.125803+00:00",
+      "observed_at": "2026-10-04T14:27:40.407542+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "leaf2/bgp_evpn.txt",
-          "sha256": "f3a1624866629c4b8d625e64d81c6e265550f17d8aed4acf6a76517b225f6b57",
-          "bytes": 903
+          "sha256": "3ec326e1850c23b53db2228dbd4e9e2c1b3e70b4c372614618e9d5c8cc2769ed",
+          "bytes": 904
         },
         "raw.txt": {
           "path": "leaf2/bgp_evpn.raw.txt",
-          "sha256": "0b717f712725241e7b1b8d89ec8efa08a7c5ea3829db2b242a20fd3103388b3c",
-          "bytes": 954
+          "sha256": "5ae7c042189f16181194ca564903ff350d22851d01b9e21f58f780d5019f6e14",
+          "bytes": 955
         }
       }
     },
@@ -1845,18 +1845,18 @@
       "host": "10.10.1.24",
       "capability": "bgp_vpnv4_routes",
       "command": "show bgp vpnv4 unicast all",
-      "observed_at": "2026-10-03T14:58:28.229640+00:00",
+      "observed_at": "2026-10-04T14:27:40.459565+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "leaf2/bgp_vpnv4_routes.txt",
-          "sha256": "ad1d2996c205c50785ea26401440e3296a6b1fdcc9469513d6460a764042f2b8",
+          "sha256": "d9a26573cb08615af0e2caba9b75f35a911d38379026cc7df27671b32acb58b8",
           "bytes": 906
         },
         "raw.txt": {
           "path": "leaf2/bgp_vpnv4_routes.raw.txt",
-          "sha256": "83f8cfd36e0cb5d81dd1ceb27c9202ad31d897dc9570988b633059337b0e0f46",
+          "sha256": "1362122e45d1c153cdd1ce484add7ce85b096d2e2aaaf51f7b643dcdf81cbc16",
           "bytes": 955
         }
       }
@@ -1866,18 +1866,18 @@
       "host": "10.10.1.24",
       "capability": "bgp_evpn_routes",
       "command": "show bgp l2vpn evpn",
-      "observed_at": "2026-10-03T14:58:28.281383+00:00",
+      "observed_at": "2026-10-04T14:27:40.511050+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "leaf2/bgp_evpn_routes.txt",
-          "sha256": "f83496af8e87d012d8cf33230dde81e33345a1103f56f3dab0017351d2d28cf0",
+          "sha256": "b4f94d2221836e8a2538643d0125062c44d01aa78f6cfc03bdb12c4e31959e7d",
           "bytes": 1786
         },
         "raw.txt": {
           "path": "leaf2/bgp_evpn_routes.raw.txt",
-          "sha256": "b31b6faeacf8b87b00a71854a6542183de8f0c7ab85107ef977540a59579634d",
+          "sha256": "47424cbdf6fa4aad2a9e98af9efaf1dfe6f6441f4da2ab5e61b45224071fbfdd",
           "bytes": 1844
         }
       }
@@ -1887,7 +1887,7 @@
       "host": "10.10.1.24",
       "capability": "ldp",
       "command": "show mpls ldp neighbor",
-      "observed_at": "2026-10-03T14:58:28.383114+00:00",
+      "observed_at": "2026-10-04T14:27:40.562272+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -1908,7 +1908,7 @@
       "host": "10.10.1.24",
       "capability": "mpls_forwarding",
       "command": "show mpls forwarding-table",
-      "observed_at": "2026-10-03T14:58:28.485656+00:00",
+      "observed_at": "2026-10-04T14:27:40.663990+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -1929,18 +1929,18 @@
       "host": "10.10.1.24",
       "capability": "nve_peers",
       "command": "show nve peers",
-      "observed_at": "2026-10-03T14:58:28.536952+00:00",
+      "observed_at": "2026-10-04T14:27:40.715237+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "leaf2/nve_peers.txt",
-          "sha256": "1f87bd6381fe76f007749ed654ac71b0501c4dce57520f72eb3f309f69999ed9",
+          "sha256": "ea637c917a2ffd776c8b4fa7869545de73fc67a3c678c990e18636e667e3cf9c",
           "bytes": 268
         },
         "raw.txt": {
           "path": "leaf2/nve_peers.raw.txt",
-          "sha256": "96b5243d4208c2517e42c2b5bc1614b61a909fd6413c2bc2a42f9d84ff4a6a80",
+          "sha256": "2928abf3d943e0473d1700fb04f0960779929c40682d9606f8913fa8a9da775d",
           "bytes": 295
         }
       }
@@ -1950,7 +1950,7 @@
       "host": "10.10.1.24",
       "capability": "nve_vni",
       "command": "show nve vni",
-      "observed_at": "2026-10-03T14:58:28.588455+00:00",
+      "observed_at": "2026-10-04T14:27:40.767998+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -1971,7 +1971,7 @@
       "host": "10.10.1.24",
       "capability": "nve_interface",
       "command": "show nve interface nve1 detail",
-      "observed_at": "2026-10-03T14:58:28.690307+00:00",
+      "observed_at": "2026-10-04T14:27:40.869314+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -1992,18 +1992,18 @@
       "host": "10.10.1.24",
       "capability": "evpn_evi",
       "command": "show l2vpn evpn evi detail",
-      "observed_at": "2026-10-03T14:58:28.791924+00:00",
+      "observed_at": "2026-10-04T14:27:40.971225+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "leaf2/evpn_evi.txt",
-          "sha256": "8fc52e76c550871ec5fdb4235330935807d55c4643c04e8ed087bedb7536effd",
+          "sha256": "d10138cec4dd70318c38ac0387d86bf758484f1f6a8dff1c9b5d018ba5cd082f",
           "bytes": 1016
         },
         "raw.txt": {
           "path": "leaf2/evpn_evi.raw.txt",
-          "sha256": "4bd10ce2b1f635a543852abf9de8ce7e631fe8762ded95578fb44129541fb8fc",
+          "sha256": "edb0a8f5a77f488f856e126ecd0fdcd9d5e1d782fe8ec8ef6b9d424e0f41ca2a",
           "bytes": 1084
         }
       }
@@ -2013,18 +2013,18 @@
       "host": "10.10.1.24",
       "capability": "evpn_mac",
       "command": "show l2vpn evpn mac",
-      "observed_at": "2026-10-03T14:58:28.893550+00:00",
+      "observed_at": "2026-10-04T14:27:41.023741+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "leaf2/evpn_mac.txt",
-          "sha256": "c601c51039fb569f44bd4e8ec8df4a9852a472ca8fa77d284d3c65381f0a2061",
+          "sha256": "10f0e7c363e630df6a2aac623c14b47a6063f46f4673c5866c1cac776351eb78",
           "bytes": 226
         },
         "raw.txt": {
           "path": "leaf2/evpn_mac.raw.txt",
-          "sha256": "e1a6740c4761e131bd648daf5f3087c27e9da8a10dd2c46706d8e2d1b8bafd40",
+          "sha256": "ffd1de0a0198bc7f3a345e3f13e2c75b47c909648ea2f0024fb2483057d41da3",
           "bytes": 258
         }
       }
@@ -2034,18 +2034,18 @@
       "host": "10.10.1.24",
       "capability": "routes_vrf_BLUE",
       "command": "show ip route vrf BLUE",
-      "observed_at": "2026-10-03T14:58:29.557660+00:00",
+      "observed_at": "2026-10-04T14:27:41.739529+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "leaf2/routes_vrf_BLUE.txt",
-          "sha256": "9e259762d0e89a6231e23ebeea9a2411a0515cc7486299f1ae7086907abc1625",
+          "sha256": "fdd09d52a33f3537e3be93a8b956190e6f292ab63d3c4fef85fbdf2cda6655cb",
           "bytes": 1298
         },
         "raw.txt": {
           "path": "leaf2/routes_vrf_BLUE.raw.txt",
-          "sha256": "4b8371e14543f17c4efd3a004c269cad57c7c52c4d1089bcb6ac729fc7d8a3d8",
+          "sha256": "316ba86b9d1860195048c8ebfff66a922d72491d5cc888ea27dafcb2a03b3a5d",
           "bytes": 1353
         }
       }
@@ -2055,18 +2055,18 @@
       "host": "10.10.1.24",
       "capability": "arp_vrf_BLUE",
       "command": "show ip arp vrf BLUE",
-      "observed_at": "2026-10-03T14:58:29.609180+00:00",
+      "observed_at": "2026-10-04T14:27:41.841955+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "leaf2/arp_vrf_BLUE.txt",
-          "sha256": "b044d8f2aa27b93e2d5034e08f00669f7c2e59e201f2302febe4f109de7a0341",
+          "sha256": "ced343ce8b397661c6be9cabd6dbaf9c8dd5c4b0cdc6878312cc7518e91de8b8",
           "bytes": 208
         },
         "raw.txt": {
           "path": "leaf2/arp_vrf_BLUE.raw.txt",
-          "sha256": "b77662aa8c9b848b0962e3cddd86080776b345d7b773e795fb5f52a4cb61d8cd",
+          "sha256": "d79d1dd4455e5d942634dfce6a8661a5e3720eaa10713225f43b1fdebe400692",
           "bytes": 239
         }
       }
@@ -2076,19 +2076,19 @@
       "host": "10.10.1.25",
       "capability": "version",
       "command": "display version",
-      "observed_at": "2026-10-03T14:58:32.877603+00:00",
+      "observed_at": "2026-10-04T14:27:45.164431+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "leaf3/version.txt",
-          "sha256": "a8a13f8626ad6e661cdec529a2c3c60b00e638ca0a3efe700127b7751b4a3cf2",
-          "bytes": 846
+          "sha256": "69cbd49c363c9085f814ba1edf9e4157eb6ae61a950e5c11ac7214caae724ec0",
+          "bytes": 850
         },
         "raw.txt": {
           "path": "leaf3/version.raw.txt",
-          "sha256": "0f3b60d8866352374ff06a7f87a4ef353037a015fa35c471d9f04e61384b4b0e",
-          "bytes": 914
+          "sha256": "4405a6d1a85e4f38ecfb0ab25093488ce1649e6281e128947ee8393211a478b4",
+          "bytes": 918
         }
       }
     },
@@ -2097,7 +2097,7 @@
       "host": "10.10.1.25",
       "capability": "lldp_local",
       "command": "display lldp local-information",
-      "observed_at": "2026-10-03T14:58:32.982143+00:00",
+      "observed_at": "2026-10-04T14:27:45.268522+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -2118,19 +2118,19 @@
       "host": "10.10.1.25",
       "capability": "lldp_verbose",
       "command": "display lldp neighbor-information verbose",
-      "observed_at": "2026-10-03T14:58:33.033551+00:00",
+      "observed_at": "2026-10-04T14:27:45.320049+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "leaf3/lldp_verbose.txt",
-          "sha256": "510b586811b96efa3f2e6dcba291984cb936a5b7773fda4518fb974efb8901c0",
-          "bytes": 2031
+          "sha256": "5330cf431f3d811d85443d7ee61281ecdd29f9b42cfba984b97910b8ce5bdbe7",
+          "bytes": 2029
         },
         "raw.txt": {
           "path": "leaf3/lldp_verbose.raw.txt",
-          "sha256": "908b1a8389f6da91d94d8ebe5237f041b3f80efc5d195747bf767f90e2a9a8f7",
-          "bytes": 2183
+          "sha256": "0d304748ac64d63b76d44ba25ea091b14358c3ae557c51f1f1e4a7cc99a89213",
+          "bytes": 2181
         }
       }
     },
@@ -2139,7 +2139,7 @@
       "host": "10.10.1.25",
       "capability": "interfaces",
       "command": "display interface brief",
-      "observed_at": "2026-10-03T14:58:33.136341+00:00",
+      "observed_at": "2026-10-04T14:27:45.422778+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -2160,7 +2160,7 @@
       "host": "10.10.1.25",
       "capability": "ip_interfaces",
       "command": "display ip interface brief",
-      "observed_at": "2026-10-03T14:58:33.187790+00:00",
+      "observed_at": "2026-10-04T14:27:45.474421+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -2180,20 +2180,20 @@
       "device": "leaf3",
       "host": "10.10.1.25",
       "capability": "arp",
-      "command": "display arp",
-      "observed_at": "2026-10-03T14:58:33.239409+00:00",
+      "command": "display arp verbose",
+      "observed_at": "2026-10-04T14:27:45.526066+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "leaf3/arp.txt",
-          "sha256": "011f548b53f559372a792e486c71ba85a624f3741f9484c3abc069736a4eb3a1",
-          "bytes": 681
+          "sha256": "1043495acd162442c1814a409e2a2fad180785d44f6cf7f9f02d7f59ec06e380",
+          "bytes": 2777
         },
         "raw.txt": {
           "path": "leaf3/arp.raw.txt",
-          "sha256": "392522c853ff35377ff12fa2a44381c350627da0108f438e04f280fd4e5d0a90",
-          "bytes": 720
+          "sha256": "9f8f569d9708cbff360d86f15313817cce8bfa385113bafa848e64f6d6f8bdad",
+          "bytes": 2963
         }
       }
     },
@@ -2202,7 +2202,7 @@
       "host": "10.10.1.25",
       "capability": "mac",
       "command": "display mac-address",
-      "observed_at": "2026-10-03T14:58:33.290718+00:00",
+      "observed_at": "2026-10-04T14:27:45.577340+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -2223,7 +2223,7 @@
       "host": "10.10.1.25",
       "capability": "routes",
       "command": "display ip routing-table",
-      "observed_at": "2026-10-03T14:58:33.497462+00:00",
+      "observed_at": "2026-10-04T14:27:45.784310+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -2244,18 +2244,18 @@
       "host": "10.10.1.25",
       "capability": "vrfs",
       "command": "display ip vpn-instance",
-      "observed_at": "2026-10-03T14:58:33.548638+00:00",
+      "observed_at": "2026-10-04T14:27:45.835804+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "leaf3/vrfs.txt",
-          "sha256": "772eeb240a2a829c55bfcc079ae3af26cc144a784a42fccbe6f8891b5785155f",
+          "sha256": "94ffe15d8b2fea449d4b036ed3939907dc312b0618bda73e7a80f667f56a2f2a",
           "bytes": 251
         },
         "raw.txt": {
           "path": "leaf3/vrfs.raw.txt",
-          "sha256": "7ebc1668b3133532c58d548964d7cb70da5b915a5168de27a4ee11b48a1b61d1",
+          "sha256": "bf9c7b14b5b3d3d2e5bd3dbf5a0ed85b6b21a1763f91436cdb90e3ea71172c9f",
           "bytes": 294
         }
       }
@@ -2265,18 +2265,18 @@
       "host": "10.10.1.25",
       "capability": "ospf",
       "command": "display ospf peer",
-      "observed_at": "2026-10-03T14:58:33.703161+00:00",
+      "observed_at": "2026-10-04T14:27:45.990130+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "leaf3/ospf.txt",
-          "sha256": "2c5508ca246c72158cd660d5f0bd96e03402fde54565e1fd38added95cde3149",
+          "sha256": "f7c2fd82417f2544095fbea6c9d0580c3da2bab89234e1a06aea91ca52f4fd70",
           "bytes": 331
         },
         "raw.txt": {
           "path": "leaf3/ospf.raw.txt",
-          "sha256": "2961f04a946fd323256a37908b9b98b412a8898d4e3304e23102b16ff4a4deb2",
+          "sha256": "f119b5f3f4d3654c975be5c1ea3442fc849a25f4dec4903d3fe46651c82edf07",
           "bytes": 375
         }
       }
@@ -2286,7 +2286,7 @@
       "host": "10.10.1.25",
       "capability": "ospf_interfaces",
       "command": "display ospf interface",
-      "observed_at": "2026-10-03T14:58:33.755868+00:00",
+      "observed_at": "2026-10-04T14:27:46.041908+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -2307,7 +2307,7 @@
       "host": "10.10.1.25",
       "capability": "ospf_process",
       "command": "display ospf",
-      "observed_at": "2026-10-03T14:58:33.807685+00:00",
+      "observed_at": "2026-10-04T14:27:46.093761+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -2328,7 +2328,7 @@
       "host": "10.10.1.25",
       "capability": "bgp",
       "command": "display bgp peer ipv4",
-      "observed_at": "2026-10-03T14:58:33.858989+00:00",
+      "observed_at": "2026-10-04T14:27:46.145069+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -2349,7 +2349,7 @@
       "host": "10.10.1.25",
       "capability": "bgp_vpnv4",
       "command": "display bgp peer vpnv4",
-      "observed_at": "2026-10-03T14:58:33.910477+00:00",
+      "observed_at": "2026-10-04T14:27:46.196638+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -2370,18 +2370,18 @@
       "host": "10.10.1.25",
       "capability": "bgp_evpn",
       "command": "display bgp peer l2vpn evpn",
-      "observed_at": "2026-10-03T14:58:33.962028+00:00",
+      "observed_at": "2026-10-04T14:27:46.248296+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "leaf3/bgp_evpn.txt",
-          "sha256": "a6da93c54a1ba87b3a7dd25b8fcb46a818b96fd3d37557fc001efb9d9af5d696",
+          "sha256": "2b477f424a38ea937201b1cd1b75f99d3d01830a8f730168ef86ec18694707b5",
           "bytes": 388
         },
         "raw.txt": {
           "path": "leaf3/bgp_evpn.raw.txt",
-          "sha256": "cad394e50c2c60ea45a33093f36041d9f5f599291427bcf47efc67378bc8cf50",
+          "sha256": "8a79f295adf6c8f5d4e9bc7a676a530515722a56b931573551cd5f19d171b318",
           "bytes": 446
         }
       }
@@ -2391,7 +2391,7 @@
       "host": "10.10.1.25",
       "capability": "bgp_vpnv4_routes",
       "command": "display bgp routing-table vpnv4",
-      "observed_at": "2026-10-03T14:58:34.013427+00:00",
+      "observed_at": "2026-10-04T14:27:46.300231+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -2412,18 +2412,18 @@
       "host": "10.10.1.25",
       "capability": "bgp_evpn_routes",
       "command": "display bgp l2vpn evpn",
-      "observed_at": "2026-10-03T14:58:34.065379+00:00",
+      "observed_at": "2026-10-04T14:27:46.351720+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "leaf3/bgp_evpn_routes.txt",
-          "sha256": "7ce49085ed9961badf6668457ad8a245dcce541b81fa82008f25ac5f075fbb52",
+          "sha256": "cdd76bd363117b6848f690f02f4b3d3b60c04ec2b726fe14a829b332768b2348",
           "bytes": 3174
         },
         "raw.txt": {
           "path": "leaf3/bgp_evpn_routes.raw.txt",
-          "sha256": "56f31c735a139dbfc46969ff345a19e49265f029845c271df69bb51258ce9a95",
+          "sha256": "5b32e2039914c446d02977c712fc3c061451d51592c8d33f2b0b07463d6fc247",
           "bytes": 3361
         }
       }
@@ -2433,7 +2433,7 @@
       "host": "10.10.1.25",
       "capability": "ldp",
       "command": "display mpls ldp peer",
-      "observed_at": "2026-10-03T14:58:34.116745+00:00",
+      "observed_at": "2026-10-04T14:27:46.402990+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -2454,7 +2454,7 @@
       "host": "10.10.1.25",
       "capability": "mpls_lsp",
       "command": "display mpls lsp",
-      "observed_at": "2026-10-03T14:58:34.167916+00:00",
+      "observed_at": "2026-10-04T14:27:46.454341+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -2475,7 +2475,7 @@
       "host": "10.10.1.25",
       "capability": "vxlan_tunnels",
       "command": "display vxlan tunnel",
-      "observed_at": "2026-10-03T14:58:34.219585+00:00",
+      "observed_at": "2026-10-04T14:27:46.505769+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -2496,7 +2496,7 @@
       "host": "10.10.1.25",
       "capability": "vsi",
       "command": "display l2vpn vsi verbose",
-      "observed_at": "2026-10-03T14:58:34.271282+00:00",
+      "observed_at": "2026-10-04T14:27:46.557397+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -2517,7 +2517,7 @@
       "host": "10.10.1.25",
       "capability": "evpn_instances",
       "command": "display evpn instance verbose",
-      "observed_at": "2026-10-03T14:58:34.323651+00:00",
+      "observed_at": "2026-10-04T14:27:46.608689+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -2538,7 +2538,7 @@
       "host": "10.10.1.25",
       "capability": "evpn_imet",
       "command": "display evpn auto-discovery imet",
-      "observed_at": "2026-10-03T14:58:34.374775+00:00",
+      "observed_at": "2026-10-04T14:27:46.660765+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -2559,19 +2559,19 @@
       "host": "10.10.1.25",
       "capability": "tunnel_interfaces",
       "command": "display interface tunnel",
-      "observed_at": "2026-10-03T14:58:34.426307+00:00",
+      "observed_at": "2026-10-04T14:27:46.712251+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "leaf3/tunnel_interfaces.txt",
-          "sha256": "481043201ce8c2e1740875d3aeadcf0eabfdbd7679b364826520d079169651bc",
-          "bytes": 1421
+          "sha256": "77286907b8c76373a28f24af73d1f59debd57313db6e09c479196ff070b59b63",
+          "bytes": 1399
         },
         "raw.txt": {
           "path": "leaf3/tunnel_interfaces.raw.txt",
-          "sha256": "2a0af0ae39090fa67d71fde732c0c501e723f8b592ee7c1530e8d5278358d608",
-          "bytes": 1528
+          "sha256": "0509ae9225bda1a4127186870748784fdfd688a1acc94d131c8cdfda715925e3",
+          "bytes": 1506
         }
       }
     },
@@ -2580,18 +2580,18 @@
       "host": "10.10.1.25",
       "capability": "evpn_mac",
       "command": "display evpn route mac",
-      "observed_at": "2026-10-03T14:58:34.477786+00:00",
+      "observed_at": "2026-10-04T14:27:46.763710+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "leaf3/evpn_mac.txt",
-          "sha256": "8b58936409b169aa7e5128a66e221035def76cf7c18559199231c90fbf672adc",
+          "sha256": "d8963a0cab389537cff6f305ea45312f11f0b710517c5c880b6fb7edfdc9c0a8",
           "bytes": 677
         },
         "raw.txt": {
           "path": "leaf3/evpn_mac.raw.txt",
-          "sha256": "86b6bec0d656026f48610d927045a3d5e0e884d457223127526ca767f605fdc5",
+          "sha256": "fb8a7ecf85e63ddaea7ab214a99a2a1645e571de5bb13c62432bf72027641feb",
           "bytes": 767
         }
       }
@@ -2601,7 +2601,7 @@
       "host": "10.10.1.25",
       "capability": "vrf_BLUE",
       "command": "display ip vpn-instance instance-name BLUE",
-      "observed_at": "2026-10-03T14:58:35.145484+00:00",
+      "observed_at": "2026-10-04T14:27:47.481217+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -2622,7 +2622,7 @@
       "host": "10.10.1.25",
       "capability": "routes_vrf_BLUE",
       "command": "display ip routing-table vpn-instance BLUE",
-      "observed_at": "2026-10-03T14:58:35.196819+00:00",
+      "observed_at": "2026-10-04T14:27:47.532648+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -2643,18 +2643,18 @@
       "host": "10.10.1.25",
       "capability": "arp_vrf_BLUE",
       "command": "display arp vpn-instance BLUE",
-      "observed_at": "2026-10-03T14:58:35.248165+00:00",
+      "observed_at": "2026-10-04T14:27:47.584479+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "leaf3/arp_vrf_BLUE.txt",
-          "sha256": "123faf352181c9b2ba38058076e3fc2be4947074cf904f6e95445f64130171bc",
+          "sha256": "d4d21852cf6f201f11f502722f787a61fc2a24b4842ea4ccd88774a9c7242369",
           "bytes": 357
         },
         "raw.txt": {
           "path": "leaf3/arp_vrf_BLUE.raw.txt",
-          "sha256": "82414680f43876582d60d310fdb7c0118ab93c1f1daed09f43826c3190f68169",
+          "sha256": "238f89de0d71e378e7897616dd83aa208fc662acaf8021949470d7c677a1d07b",
           "bytes": 406
         }
       }
@@ -2664,19 +2664,19 @@
       "host": "10.10.1.26",
       "capability": "version",
       "command": "show version",
-      "observed_at": "2026-10-03T14:58:35.963624+00:00",
+      "observed_at": "2026-10-04T14:27:48.228058+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "pe1/version.txt",
-          "sha256": "4c298d8fe9cea9ec464820cd2c37314915134d69b10d9e7f5d8a64d7f06b13f6",
-          "bytes": 1494
+          "sha256": "d6e9f16cd2e6f08b252f4097207df0ca0714227f114fcec964c7406552f927f3",
+          "bytes": 1486
         },
         "raw.txt": {
           "path": "pe1/version.raw.txt",
-          "sha256": "a8015601dce522596a7dee91f45ad43ae4bd73a5157cc78c22f3b52f3a84cc5d",
-          "bytes": 1549
+          "sha256": "62fb3d5aa5ec169c9046f201c304ea64167f3441554a6d753aa66eef7987ec9c",
+          "bytes": 1541
         }
       }
     },
@@ -2685,18 +2685,18 @@
       "host": "10.10.1.26",
       "capability": "lldp_verbose",
       "command": "show lldp neighbors detail",
-      "observed_at": "2026-10-03T14:58:36.117710+00:00",
+      "observed_at": "2026-10-04T14:27:48.381260+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "pe1/lldp_verbose.txt",
-          "sha256": "d03b7f7d079015505a09d8ed32c2210433f30c9cd7ea00dbf4010f849b59dd60",
+          "sha256": "efa30af034117b168b5668f6a8fe8d36cb345e780542639457d02b2ab5c5b882",
           "bytes": 801
         },
         "raw.txt": {
           "path": "pe1/lldp_verbose.raw.txt",
-          "sha256": "20feb59146696818c2fb4752e52a86f9df41f1a9bf15b3fbe73369e86d941736",
+          "sha256": "efc74b373cb52d2eec7f91cd7745f378723619cab73a156a8b101125314317ad",
           "bytes": 862
         }
       }
@@ -2706,7 +2706,7 @@
       "host": "10.10.1.26",
       "capability": "interfaces_description",
       "command": "show interfaces description",
-      "observed_at": "2026-10-03T14:58:36.425227+00:00",
+      "observed_at": "2026-10-04T14:27:48.638309+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -2727,19 +2727,19 @@
       "host": "10.10.1.26",
       "capability": "ip_interface",
       "command": "show ip interface",
-      "observed_at": "2026-10-03T14:58:36.530443+00:00",
+      "observed_at": "2026-10-04T14:27:48.742011+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "pe1/ip_interface.txt",
-          "sha256": "a460fa050d90d9fc0cf9ebfb9788cd833eac7cbaff9fc4a28e50fe204bc7199a",
-          "bytes": 8127
+          "sha256": "8975c22e8df7501b10fbcfd44c039b11bf9fee027c248e42aa922127338a0fae",
+          "bytes": 8157
         },
         "raw.txt": {
           "path": "pe1/ip_interface.raw.txt",
-          "sha256": "b27a730970564e7de9e13bfba3913600e1203130073bf781777717bc5c15fd2e",
-          "bytes": 8373
+          "sha256": "3c1e0af57e7693d393d60b99877177248b522944bb995b13fc86fe879dde6dd6",
+          "bytes": 8403
         }
       }
     },
@@ -2748,18 +2748,18 @@
       "host": "10.10.1.26",
       "capability": "arp",
       "command": "show ip arp",
-      "observed_at": "2026-10-03T14:58:36.581781+00:00",
+      "observed_at": "2026-10-04T14:27:48.793187+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "pe1/arp.txt",
-          "sha256": "340856e4fbcac04dde2ed9e0aa58e518119f1f874245d5ed5971374aa9f74e70",
+          "sha256": "e8ad066329b52447d36adaa8c014e5ae210c63e0436330b1d120479083e0934a",
           "bytes": 217
         },
         "raw.txt": {
           "path": "pe1/arp.raw.txt",
-          "sha256": "57345b6b3ee253b6a10736595cb04dd61c9cb7687b620bc6af43a829ef625a72",
+          "sha256": "625b0e875f5d9b7de1d9d621608f801fb3e2b5ba3d824157286634725828d9b8",
           "bytes": 237
         }
       }
@@ -2769,18 +2769,18 @@
       "host": "10.10.1.26",
       "capability": "routes",
       "command": "show ip route",
-      "observed_at": "2026-10-03T14:58:37.143645+00:00",
+      "observed_at": "2026-10-04T14:27:49.205678+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "pe1/routes.txt",
-          "sha256": "da602bff36f1662befcecfd59915b9c64c103df3bbb0c8fecf61da62a366706a",
+          "sha256": "5f2cd8c22fff88c11d82134c77120f72918d5cfae7beffc9b395e974c116c19c",
           "bytes": 1276
         },
         "raw.txt": {
           "path": "pe1/routes.raw.txt",
-          "sha256": "106b846fe34109aae95f0b605dba6a184f02468265da5cd1732e248a73cd1613",
+          "sha256": "3d1bda04d397a45ce7a4172be9793dd9a2d6cf1ddbbd72ba568c084e1873c457",
           "bytes": 1317
         }
       }
@@ -2790,7 +2790,7 @@
       "host": "10.10.1.26",
       "capability": "vrfs",
       "command": "show vrf",
-      "observed_at": "2026-10-03T14:58:37.296454+00:00",
+      "observed_at": "2026-10-04T14:27:49.308268+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -2811,18 +2811,18 @@
       "host": "10.10.1.26",
       "capability": "ospf",
       "command": "show ip ospf neighbor",
-      "observed_at": "2026-10-03T14:58:37.450051+00:00",
+      "observed_at": "2026-10-04T14:27:49.461178+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "pe1/ospf.txt",
-          "sha256": "4b01af0d5cc2b53dfe61549439fd3aad188af789cbd451e35bd073364a083a36",
+          "sha256": "ff59794b767121b887da5909e475b0f0acf878930aeff8f113def1ff40601f47",
           "bytes": 154
         },
         "raw.txt": {
           "path": "pe1/ospf.raw.txt",
-          "sha256": "054d21158a93915e669b4991fb1df5b20e7a6039a14d453ad1717721cbc68829",
+          "sha256": "674c346ecefe96a34e922be8d338181d89080a4eaeb35c67fc1cba4591b1101e",
           "bytes": 185
         }
       }
@@ -2832,7 +2832,7 @@
       "host": "10.10.1.26",
       "capability": "ospf_interfaces",
       "command": "show ip ospf interface brief",
-      "observed_at": "2026-10-03T14:58:37.502912+00:00",
+      "observed_at": "2026-10-04T14:27:49.563574+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -2853,18 +2853,18 @@
       "host": "10.10.1.26",
       "capability": "ospf_process",
       "command": "show ip ospf",
-      "observed_at": "2026-10-03T14:58:37.554430+00:00",
+      "observed_at": "2026-10-04T14:27:49.615263+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "pe1/ospf_process.txt",
-          "sha256": "eaeab3b0d71f8b26e7c6696b522621a7551035f527cfc088ca3296f74a9d325d",
+          "sha256": "2470248cbc3e6d77ba30bd82d644c063a5f4abd577f5bc4d5b1a9536a9f20d30",
           "bytes": 2259
         },
         "raw.txt": {
           "path": "pe1/ospf_process.raw.txt",
-          "sha256": "be1594d067f21cc3200ea77717a54ae846610de7581d35256dbb614fafd568f0",
+          "sha256": "aac1eeb1e36482c8ea2cc0ae1d6fdb21e5b53b2e2b81b808123b282141a46308",
           "bytes": 2333
         }
       }
@@ -2874,7 +2874,7 @@
       "host": "10.10.1.26",
       "capability": "bgp",
       "command": "show ip bgp summary",
-      "observed_at": "2026-10-03T14:58:37.605814+00:00",
+      "observed_at": "2026-10-04T14:27:49.717059+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -2895,18 +2895,18 @@
       "host": "10.10.1.26",
       "capability": "vrf_detail",
       "command": "show vrf detail",
-      "observed_at": "2026-10-03T14:58:37.657286+00:00",
+      "observed_at": "2026-10-04T14:27:49.768425+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "pe1/vrf_detail.txt",
-          "sha256": "f50b9b2c6ed15b8fca84e5f32935e3be224584d7655772e3b7efcec3a19cf98f",
+          "sha256": "b5762f3bcd84b0c8a939b6f858c81c12d54cd1b85ca16a16d244fa1814336cad",
           "bytes": 1949
         },
         "raw.txt": {
           "path": "pe1/vrf_detail.raw.txt",
-          "sha256": "0e304c90ca15f6bb26e1a15dcc7bee61ef2e9dbb9f4acbb94a0279c9abd6c3d6",
+          "sha256": "89d0455e30a557af2a1becef2f3d1522646cfc54c5f46188f84395eb2f14c2b7",
           "bytes": 2029
         }
       }
@@ -2916,18 +2916,18 @@
       "host": "10.10.1.26",
       "capability": "bgp_vpnv4",
       "command": "show bgp vpnv4 unicast all summary",
-      "observed_at": "2026-10-03T14:58:37.708919+00:00",
+      "observed_at": "2026-10-04T14:27:49.870416+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "pe1/bgp_vpnv4.txt",
-          "sha256": "dd65379fa613b7e53637538a810e6feb6cff0b754269d7d84f726d57a2f78a3c",
+          "sha256": "94df1c547faf29c3c74a25bcb8bccc214bfe32337ca1809a59998fb8c1159f9f",
           "bytes": 765
         },
         "raw.txt": {
           "path": "pe1/bgp_vpnv4.raw.txt",
-          "sha256": "d00169fdbd7b109474ad6e60422e50b8980d77f337d4564f900970bc7cd13a11",
+          "sha256": "3ae22c761dfb5d483c3054ece527668ddda8ec40af2d68d6098baf17de3fef10",
           "bytes": 819
         }
       }
@@ -2937,7 +2937,7 @@
       "host": "10.10.1.26",
       "capability": "bgp_evpn",
       "command": "show bgp l2vpn evpn summary",
-      "observed_at": "2026-10-03T14:58:37.810306+00:00",
+      "observed_at": "2026-10-04T14:27:49.972402+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -2958,7 +2958,7 @@
       "host": "10.10.1.26",
       "capability": "bgp_vpnv4_routes",
       "command": "show bgp vpnv4 unicast all",
-      "observed_at": "2026-10-03T14:58:37.913643+00:00",
+      "observed_at": "2026-10-04T14:27:50.024730+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -2979,7 +2979,7 @@
       "host": "10.10.1.26",
       "capability": "bgp_evpn_routes",
       "command": "show bgp l2vpn evpn",
-      "observed_at": "2026-10-03T14:58:38.015503+00:00",
+      "observed_at": "2026-10-04T14:27:50.126469+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -3000,18 +3000,18 @@
       "host": "10.10.1.26",
       "capability": "ldp",
       "command": "show mpls ldp neighbor",
-      "observed_at": "2026-10-03T14:58:38.117086+00:00",
+      "observed_at": "2026-10-04T14:27:50.178102+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "pe1/ldp.txt",
-          "sha256": "6a571630aa3dcd17fc2e06ca892f45cc075f91d66664028239f0c251fe273224",
+          "sha256": "8c1a960ece12d54b9aed647b228e0ef793baf0c305aabb5331537452db938478",
           "bytes": 351
         },
         "raw.txt": {
           "path": "pe1/ldp.raw.txt",
-          "sha256": "6022beb3a9715317b782ad9be2efef1a1a68dac05809250cd55ca341dff78025",
+          "sha256": "9ba0f3e638b833ed2cac2941886a4e9ad2a127433eff235f9a852c8dc63438d2",
           "bytes": 387
         }
       }
@@ -3021,18 +3021,18 @@
       "host": "10.10.1.26",
       "capability": "mpls_forwarding",
       "command": "show mpls forwarding-table",
-      "observed_at": "2026-10-03T14:58:38.168280+00:00",
+      "observed_at": "2026-10-04T14:27:50.229256+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "pe1/mpls_forwarding.txt",
-          "sha256": "96a053dfa695eae77aebbefce199876308ae319a77dadb9b9144f8e1db636b65",
+          "sha256": "ef06c568abd7692da3bd594b38090a514d8499f5a8cbe48f3c180586baeb28fa",
           "bytes": 527
         },
         "raw.txt": {
           "path": "pe1/mpls_forwarding.raw.txt",
-          "sha256": "0dd417cb27ef03d9e23ade556873eccb8358590baad2d0a2d324451cd8261cf1",
+          "sha256": "a40f31c243b1a4c985332aa5212ed533b6ca32c2c24eb3b572a46c6c26380228",
           "bytes": 566
         }
       }
@@ -3042,7 +3042,7 @@
       "host": "10.10.1.26",
       "capability": "nve_peers",
       "command": "show nve peers",
-      "observed_at": "2026-10-03T14:58:38.269722+00:00",
+      "observed_at": "2026-10-04T14:27:50.281225+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -3063,7 +3063,7 @@
       "host": "10.10.1.26",
       "capability": "nve_vni",
       "command": "show nve vni",
-      "observed_at": "2026-10-03T14:58:38.371240+00:00",
+      "observed_at": "2026-10-04T14:27:50.333277+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -3084,7 +3084,7 @@
       "host": "10.10.1.26",
       "capability": "evpn_evi",
       "command": "show l2vpn evpn evi detail",
-      "observed_at": "2026-10-03T14:58:38.624969+00:00",
+      "observed_at": "2026-10-04T14:27:50.486685+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -3105,18 +3105,18 @@
       "host": "10.10.1.26",
       "capability": "routes_vrf_CUST-A",
       "command": "show ip route vrf CUST-A",
-      "observed_at": "2026-10-03T14:58:38.930767+00:00",
+      "observed_at": "2026-10-04T14:27:50.792698+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "pe1/routes_vrf_CUST-A.txt",
-          "sha256": "5cb877cef27439801a3ad22ca1e13868fc8e4c1fe293777afebae3e27f4b6ce0",
+          "sha256": "f53ea6af4174c4959a5dfcc9305f69a5ab4315dff68aca49eef51619fa6056f7",
           "bytes": 1136
         },
         "raw.txt": {
           "path": "pe1/routes_vrf_CUST-A.raw.txt",
-          "sha256": "3b9ca76162548da95cf6e8860490ee89cd9c448a5ff0f191cb341a8a33a575b1",
+          "sha256": "80e8e4c51fe2bc0508f957b98031ae0337ef526bcba2ae41aa6ecbaf65ce66a9",
           "bytes": 1189
         }
       }
@@ -3126,18 +3126,18 @@
       "host": "10.10.1.26",
       "capability": "arp_vrf_CUST-A",
       "command": "show ip arp vrf CUST-A",
-      "observed_at": "2026-10-03T14:58:39.032385+00:00",
+      "observed_at": "2026-10-04T14:27:50.894749+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "pe1/arp_vrf_CUST-A.txt",
-          "sha256": "b7fa3b70e6f9b56d28db627e64bb90e66f874532dde15473bebc3a2d0cfc2553",
+          "sha256": "20ce0508398e05391a9b7c11fb049bf87940f1994c2c68e60c631d62315e471d",
           "bytes": 217
         },
         "raw.txt": {
           "path": "pe1/arp_vrf_CUST-A.raw.txt",
-          "sha256": "e2c56f19ea4fe61e0bee48910e14edf25f5da6b7ba3100d4e6cd2df2576c1369",
+          "sha256": "9fb3f505a5105766d306a953078b52b3e4ff512c13cad01ec8c146aabebc16b0",
           "bytes": 248
         }
       }
@@ -3147,7 +3147,7 @@
       "host": "10.10.1.26",
       "capability": "routes_vrf_CUST-B",
       "command": "show ip route vrf CUST-B",
-      "observed_at": "2026-10-03T14:58:39.134087+00:00",
+      "observed_at": "2026-10-04T14:27:50.996652+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -3168,18 +3168,18 @@
       "host": "10.10.1.26",
       "capability": "arp_vrf_CUST-B",
       "command": "show ip arp vrf CUST-B",
-      "observed_at": "2026-10-03T14:58:39.235852+00:00",
+      "observed_at": "2026-10-04T14:27:51.098824+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "pe1/arp_vrf_CUST-B.txt",
-          "sha256": "42041f7551c9bb3347f92eab888b39c863bb52c38c6eeefb437f70b7cfdf613f",
+          "sha256": "95b4c70bd253a7f5772df96ac3a78d7146504f6911e1f35e2e865bbbbe30be86",
           "bytes": 217
         },
         "raw.txt": {
           "path": "pe1/arp_vrf_CUST-B.raw.txt",
-          "sha256": "f4737119a02a7c5dd57cf9bead3fff1183a0f0dc39fae81b8bba91c2c6dd08a5",
+          "sha256": "2c07891ea98f056a342e06200a3efc82a56c5ced0ccaca697ac6220bb64dcac0",
           "bytes": 248
         }
       }
@@ -3189,19 +3189,19 @@
       "host": "10.10.1.27",
       "capability": "version",
       "command": "show version",
-      "observed_at": "2026-10-03T14:58:40.240712+00:00",
+      "observed_at": "2026-10-04T14:27:52.099417+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "p/version.txt",
-          "sha256": "d4d5d2fb6a6b05d63a274d722948f98154ac7171b70eb61fe23b412a5d915079",
-          "bytes": 1492
+          "sha256": "fe5fe5dd1c6fd484ee7f566a066f1edde7288062b75578e56cdfb97d966743ab",
+          "bytes": 1484
         },
         "raw.txt": {
           "path": "p/version.raw.txt",
-          "sha256": "3dff66c7a87fcb91480ba1f9b2140318702ce828553517c03a03dbc17a180248",
-          "bytes": 1545
+          "sha256": "cb0f3189f63c99b675f99e502d8bc015679decc370f6a51b47879004c545021a",
+          "bytes": 1537
         }
       }
     },
@@ -3210,18 +3210,18 @@
       "host": "10.10.1.27",
       "capability": "lldp_verbose",
       "command": "show lldp neighbors detail",
-      "observed_at": "2026-10-03T14:58:40.396558+00:00",
+      "observed_at": "2026-10-04T14:27:52.253193+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "p/lldp_verbose.txt",
-          "sha256": "c7dbcdd8994a7d5ecc19cedd148b1cc5c92c8265c0c00689bbab1c044ebc27e5",
+          "sha256": "06148693b5a6415c41a0176447b781f9ef422f2c4900b4fd646213c3325542f2",
           "bytes": 1549
         },
         "raw.txt": {
           "path": "p/lldp_verbose.raw.txt",
-          "sha256": "b0250c9e331ed9895d25e050c047cb11979d1ea74935d8e12972379b05167eaf",
+          "sha256": "9742a0f9bcb5f46f84f880d634f59408f59e0135e897e2989026a53c8f46f98a",
           "bytes": 1637
         }
       }
@@ -3231,7 +3231,7 @@
       "host": "10.10.1.27",
       "capability": "interfaces_description",
       "command": "show interfaces description",
-      "observed_at": "2026-10-03T14:58:40.753510+00:00",
+      "observed_at": "2026-10-04T14:27:52.559482+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -3252,19 +3252,19 @@
       "host": "10.10.1.27",
       "capability": "ip_interface",
       "command": "show ip interface",
-      "observed_at": "2026-10-03T14:58:40.908945+00:00",
+      "observed_at": "2026-10-04T14:27:52.712937+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "p/ip_interface.txt",
-          "sha256": "2c90ffd983d79f308cff1e087c5bd86dbdbf5531fe5d229b88196e1c4cf8244c",
-          "bytes": 6713
+          "sha256": "8240a66b58fbdb12d8d733f0de4db6c897ecad02abad3379beb8a156c2b8b8a1",
+          "bytes": 6737
         },
         "raw.txt": {
           "path": "p/ip_interface.raw.txt",
-          "sha256": "72d1802836047006296032c4ed73055f27e1c12b5ccf4d920a4f53a7cf668ad7",
-          "bytes": 6916
+          "sha256": "edeecac6a704a2971239cd391cb9f6befe6f9f63b94ce2c1ccea3347cf851899",
+          "bytes": 6940
         }
       }
     },
@@ -3273,18 +3273,18 @@
       "host": "10.10.1.27",
       "capability": "arp",
       "command": "show ip arp",
-      "observed_at": "2026-10-03T14:58:40.960220+00:00",
+      "observed_at": "2026-10-04T14:27:52.764315+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "p/arp.txt",
-          "sha256": "ae738a4d5cd3b386a46322adc68a7d93ee12db9d208e0ce58c384d5dc2a98d01",
+          "sha256": "1a4d335a9de9da29dbdb28d69c4b8dbc89d8e69222ae0e962d2b83891a8e271f",
           "bytes": 363
         },
         "raw.txt": {
           "path": "p/arp.raw.txt",
-          "sha256": "1c1f90cd9621d250ebce5cd12d627820bf970eb8faa47caf6f5f661f9a5fc93e",
+          "sha256": "1977041196c23320c1e95fb4e0942160725cee7d13c8f95eaf59e2ad48e13ab9",
           "bytes": 383
         }
       }
@@ -3294,18 +3294,18 @@
       "host": "10.10.1.27",
       "capability": "routes",
       "command": "show ip route",
-      "observed_at": "2026-10-03T14:58:41.524523+00:00",
+      "observed_at": "2026-10-04T14:27:53.327896+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "p/routes.txt",
-          "sha256": "5f906d52217d4eb21067f07457a29c78c438c63dde467b3dab3da3dbee12a4fa",
+          "sha256": "7444bf2ed247d5fd8001bf592f72205b82755970a111c8d7436a71c7807b8345",
           "bytes": 1322
         },
         "raw.txt": {
           "path": "p/routes.raw.txt",
-          "sha256": "4dd48c4ea033a1230d4b1564ba32509187b9f732df113d0eb0f39c39c3e8f07f",
+          "sha256": "491890e521de4ee85b2ae7c33607abaae39241cfdcf1796a7d15a360af85e61a",
           "bytes": 1362
         }
       }
@@ -3315,7 +3315,7 @@
       "host": "10.10.1.27",
       "capability": "vrfs",
       "command": "show vrf",
-      "observed_at": "2026-10-03T14:58:41.627064+00:00",
+      "observed_at": "2026-10-04T14:27:53.430726+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -3336,18 +3336,18 @@
       "host": "10.10.1.27",
       "capability": "ospf",
       "command": "show ip ospf neighbor",
-      "observed_at": "2026-10-03T14:58:41.780715+00:00",
+      "observed_at": "2026-10-04T14:27:53.533946+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "p/ospf.txt",
-          "sha256": "aafc7cbdeab58507760678751f4f08c69a98734dbf2ff4c0c856100776d07563",
+          "sha256": "58223730fb6b1b956103446f1dd770da33daccab7009f0a134cb02fe6ebc81ea",
           "bytes": 232
         },
         "raw.txt": {
           "path": "p/ospf.raw.txt",
-          "sha256": "3384d8cf0e7fedf3ca0aca36adb0f90e8ad3a647bbd3376dae2e8e90e99fa6c9",
+          "sha256": "e490c2ad9e79507c4642a2a8dc483b0ec6f8fdb54dbd495bf4eebd968267e70b",
           "bytes": 262
         }
       }
@@ -3357,7 +3357,7 @@
       "host": "10.10.1.27",
       "capability": "ospf_interfaces",
       "command": "show ip ospf interface brief",
-      "observed_at": "2026-10-03T14:58:41.883911+00:00",
+      "observed_at": "2026-10-04T14:27:53.585659+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -3378,18 +3378,18 @@
       "host": "10.10.1.27",
       "capability": "ospf_process",
       "command": "show ip ospf",
-      "observed_at": "2026-10-03T14:58:41.935380+00:00",
+      "observed_at": "2026-10-04T14:27:53.637274+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "p/ospf_process.txt",
-          "sha256": "7efd4c323a953b70bf16faf107a39acf9cb60113cab4db5b683852246b22b180",
+          "sha256": "413c20eec623b930d763af34a370401acb1dc4bad31843cc71645a3e4b61fb29",
           "bytes": 2259
         },
         "raw.txt": {
           "path": "p/ospf_process.raw.txt",
-          "sha256": "61d402afba3224300882acbf66490c39e76ec894aeefff489671c9902f3f4dd6",
+          "sha256": "c8b675708c8d338992f149acad55a0ed9959d58ced48dadd795b8d67936c06c6",
           "bytes": 2331
         }
       }
@@ -3399,7 +3399,7 @@
       "host": "10.10.1.27",
       "capability": "bgp",
       "command": "show ip bgp summary",
-      "observed_at": "2026-10-03T14:58:41.986858+00:00",
+      "observed_at": "2026-10-04T14:27:53.688972+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -3420,7 +3420,7 @@
       "host": "10.10.1.27",
       "capability": "vrf_detail",
       "command": "show vrf detail",
-      "observed_at": "2026-10-03T14:58:42.038083+00:00",
+      "observed_at": "2026-10-04T14:27:53.740152+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -3441,7 +3441,7 @@
       "host": "10.10.1.27",
       "capability": "bgp_vpnv4",
       "command": "show bgp vpnv4 unicast all summary",
-      "observed_at": "2026-10-03T14:58:42.139383+00:00",
+      "observed_at": "2026-10-04T14:27:53.841850+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -3462,7 +3462,7 @@
       "host": "10.10.1.27",
       "capability": "bgp_evpn",
       "command": "show bgp l2vpn evpn summary",
-      "observed_at": "2026-10-03T14:58:42.190935+00:00",
+      "observed_at": "2026-10-04T14:27:53.943031+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -3483,7 +3483,7 @@
       "host": "10.10.1.27",
       "capability": "bgp_vpnv4_routes",
       "command": "show bgp vpnv4 unicast all",
-      "observed_at": "2026-10-03T14:58:42.294198+00:00",
+      "observed_at": "2026-10-04T14:27:54.045106+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -3504,7 +3504,7 @@
       "host": "10.10.1.27",
       "capability": "bgp_evpn_routes",
       "command": "show bgp l2vpn evpn",
-      "observed_at": "2026-10-03T14:58:42.397307+00:00",
+      "observed_at": "2026-10-04T14:27:54.096315+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -3525,18 +3525,18 @@
       "host": "10.10.1.27",
       "capability": "ldp",
       "command": "show mpls ldp neighbor",
-      "observed_at": "2026-10-03T14:58:42.499471+00:00",
+      "observed_at": "2026-10-04T14:27:54.197684+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "p/ldp.txt",
-          "sha256": "2859840e8caef57e8866a8ca7e5d0c24ff0ab7426ea94549a432a170171c484b",
+          "sha256": "018252072224ceeec282ddfb777e9440e58b8685635ab176913cc2d8a71c65ca",
           "bytes": 672
         },
         "raw.txt": {
           "path": "p/ldp.raw.txt",
-          "sha256": "56ce910c1449eab70eb7a0677fdefd300bbeed90bf385d3207a42e23e9231903",
+          "sha256": "df06c35c4011192557e4f6c1f2e6715fd7f412ad6b9255e99c20aad2bfd761e8",
           "bytes": 714
         }
       }
@@ -3546,18 +3546,18 @@
       "host": "10.10.1.27",
       "capability": "mpls_forwarding",
       "command": "show mpls forwarding-table",
-      "observed_at": "2026-10-03T14:58:42.550765+00:00",
+      "observed_at": "2026-10-04T14:27:54.299521+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "p/mpls_forwarding.txt",
-          "sha256": "9760cde8103fcbdc884df4d7633a2f860dda3ff5f5f4d726a3117ce359829757",
+          "sha256": "5cc480710be0182a3ccbdb6a5d12b2f04f5f821dace1a19c5a9621bd7e9286f5",
           "bytes": 308
         },
         "raw.txt": {
           "path": "p/mpls_forwarding.raw.txt",
-          "sha256": "287e007cd4c2993d146c6600ad6c41a368ffd2f3c55d3a41f6a495c629689cc6",
+          "sha256": "3f8e6d0b4e3e4fe21d0c4ee925958b674810f40da7c72792442122f1842cc2f4",
           "bytes": 342
         }
       }
@@ -3567,7 +3567,7 @@
       "host": "10.10.1.27",
       "capability": "nve_peers",
       "command": "show nve peers",
-      "observed_at": "2026-10-03T14:58:42.601903+00:00",
+      "observed_at": "2026-10-04T14:27:54.351709+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -3588,7 +3588,7 @@
       "host": "10.10.1.27",
       "capability": "nve_vni",
       "command": "show nve vni",
-      "observed_at": "2026-10-03T14:58:42.655088+00:00",
+      "observed_at": "2026-10-04T14:27:54.403709+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -3609,7 +3609,7 @@
       "host": "10.10.1.27",
       "capability": "evpn_evi",
       "command": "show l2vpn evpn evi detail",
-      "observed_at": "2026-10-03T14:58:42.858756+00:00",
+      "observed_at": "2026-10-04T14:27:54.557286+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -3630,19 +3630,19 @@
       "host": "10.10.1.28",
       "capability": "version",
       "command": "display version",
-      "observed_at": "2026-10-03T14:58:47.196824+00:00",
+      "observed_at": "2026-10-04T14:27:58.637455+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "pe2/version.txt",
-          "sha256": "a8a13f8626ad6e661cdec529a2c3c60b00e638ca0a3efe700127b7751b4a3cf2",
-          "bytes": 846
+          "sha256": "69cbd49c363c9085f814ba1edf9e4157eb6ae61a950e5c11ac7214caae724ec0",
+          "bytes": 850
         },
         "raw.txt": {
           "path": "pe2/version.raw.txt",
-          "sha256": "390e4674406ab131b57f04189e2557e9b306e8daf5068b0a92eff5604b5f73b4",
-          "bytes": 912
+          "sha256": "1f2033fff9cb641d6dbcad1d67f45c71cb89fc83b3b409ea34340d15a9a90922",
+          "bytes": 916
         }
       }
     },
@@ -3651,7 +3651,7 @@
       "host": "10.10.1.28",
       "capability": "lldp_local",
       "command": "display lldp local-information",
-      "observed_at": "2026-10-03T14:58:47.301373+00:00",
+      "observed_at": "2026-10-04T14:27:58.741048+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -3672,19 +3672,19 @@
       "host": "10.10.1.28",
       "capability": "lldp_verbose",
       "command": "display lldp neighbor-information verbose",
-      "observed_at": "2026-10-03T14:58:47.353009+00:00",
+      "observed_at": "2026-10-04T14:27:58.792625+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "pe2/lldp_verbose.txt",
-          "sha256": "1e38cca59c51a7ec958243e4b22771646aa55d073b1aab3a664aff29aca27bc0",
-          "bytes": 1008
+          "sha256": "d6b77b33251cdc3eb15536d0ea7a50641829fcdd24bbd791a6dfca5b9e7a26ce",
+          "bytes": 1007
         },
         "raw.txt": {
           "path": "pe2/lldp_verbose.raw.txt",
-          "sha256": "197559c03f2fa8e044f7a7ea3383f5763831f77f1c35ef1a9e712a20ef97cd79",
-          "bytes": 1108
+          "sha256": "cc20f9812a18a48bd479e74843312a57485a3048e5e1ce881bd04018fa6bfdc8",
+          "bytes": 1107
         }
       }
     },
@@ -3693,7 +3693,7 @@
       "host": "10.10.1.28",
       "capability": "interfaces",
       "command": "display interface brief",
-      "observed_at": "2026-10-03T14:58:47.456035+00:00",
+      "observed_at": "2026-10-04T14:27:58.895057+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -3714,7 +3714,7 @@
       "host": "10.10.1.28",
       "capability": "ip_interfaces",
       "command": "display ip interface brief",
-      "observed_at": "2026-10-03T14:58:47.507536+00:00",
+      "observed_at": "2026-10-04T14:27:58.946603+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -3734,20 +3734,20 @@
       "device": "pe2",
       "host": "10.10.1.28",
       "capability": "arp",
-      "command": "display arp",
-      "observed_at": "2026-10-03T14:58:47.559022+00:00",
+      "command": "display arp verbose",
+      "observed_at": "2026-10-04T14:27:58.998140+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "pe2/arp.txt",
-          "sha256": "7613ec02d520c6b045fc2263ece2235534e86a3e7c0e86ea58d558482586cb1c",
-          "bytes": 562
+          "sha256": "ea99b2efe2cbfed23fcda8bb8e505e5f9a87a09e49a999c61454114f5ad9d28a",
+          "bytes": 2270
         },
         "raw.txt": {
           "path": "pe2/arp.raw.txt",
-          "sha256": "6ca9eb1fc56d7898b01344089f36bb52d25d5da009ce6025244223f80c116d61",
-          "bytes": 595
+          "sha256": "93bb0577718600208c97355837004b56fdbbd2169ba9ebbafa48e6f90f1078d7",
+          "bytes": 2428
         }
       }
     },
@@ -3756,7 +3756,7 @@
       "host": "10.10.1.28",
       "capability": "mac",
       "command": "display mac-address",
-      "observed_at": "2026-10-03T14:58:47.610254+00:00",
+      "observed_at": "2026-10-04T14:27:59.049358+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -3777,7 +3777,7 @@
       "host": "10.10.1.28",
       "capability": "routes",
       "command": "display ip routing-table",
-      "observed_at": "2026-10-03T14:58:47.816596+00:00",
+      "observed_at": "2026-10-04T14:27:59.256925+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -3798,18 +3798,18 @@
       "host": "10.10.1.28",
       "capability": "vrfs",
       "command": "display ip vpn-instance",
-      "observed_at": "2026-10-03T14:58:47.868142+00:00",
+      "observed_at": "2026-10-04T14:27:59.308556+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "pe2/vrfs.txt",
-          "sha256": "b98784daf2145ae19d32acf66a81163520bb2cddebbc10800f84c121ee7ab85a",
+          "sha256": "cb30c9f2302c89e71dd23b7ecd1aa682596cef8cc0ef941a77cbdc8e7a1dfef1",
           "bytes": 328
         },
         "raw.txt": {
           "path": "pe2/vrfs.raw.txt",
-          "sha256": "4096d918e6412bd6bd5c2a2e9cb908d09c8a89a3c9a46cbc5c08170c6b5ccb11",
+          "sha256": "bdb88a2915a76b0de1e962883f42aa984bff18f1925ce600170c65678960008e",
           "bytes": 371
         }
       }
@@ -3819,18 +3819,18 @@
       "host": "10.10.1.28",
       "capability": "ospf",
       "command": "display ospf peer",
-      "observed_at": "2026-10-03T14:58:48.022391+00:00",
+      "observed_at": "2026-10-04T14:27:59.462653+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "pe2/ospf.txt",
-          "sha256": "2a107bbecb8f00cefbb16e9ebe6b6a7af6279b03c2419764842768a9bba7d84d",
+          "sha256": "4ed680056f24e67c2a297297ca63aee8557e3abb86b3e55aba943722ab8383b6",
           "bytes": 258
         },
         "raw.txt": {
           "path": "pe2/ospf.raw.txt",
-          "sha256": "b0f4f50802724ca0281a619df1c496417ebb81de836535f43eccb3b49ae3d99d",
+          "sha256": "74958c03eb32e64230ef2334f88cac6b35a299f509fe2647844f8e94617dc444",
           "bytes": 298
         }
       }
@@ -3840,7 +3840,7 @@
       "host": "10.10.1.28",
       "capability": "ospf_interfaces",
       "command": "display ospf interface",
-      "observed_at": "2026-10-03T14:58:48.075755+00:00",
+      "observed_at": "2026-10-04T14:27:59.514243+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -3861,7 +3861,7 @@
       "host": "10.10.1.28",
       "capability": "ospf_process",
       "command": "display ospf",
-      "observed_at": "2026-10-03T14:58:48.127309+00:00",
+      "observed_at": "2026-10-04T14:27:59.565963+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -3882,7 +3882,7 @@
       "host": "10.10.1.28",
       "capability": "bgp",
       "command": "display bgp peer ipv4",
-      "observed_at": "2026-10-03T14:58:48.178801+00:00",
+      "observed_at": "2026-10-04T14:27:59.617572+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -3903,18 +3903,18 @@
       "host": "10.10.1.28",
       "capability": "bgp_vpnv4",
       "command": "display bgp peer vpnv4",
-      "observed_at": "2026-10-03T14:58:48.230236+00:00",
+      "observed_at": "2026-10-04T14:27:59.669145+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "pe2/bgp_vpnv4.txt",
-          "sha256": "82190a7d4cba84d640aef0538490fe7532cc561c04e6de0aaceb4b5d1b3afa6c",
+          "sha256": "4fe56194b273cf59cb6f793df6f3aaf4300b1402e26ab0d8a2dd9cbf9a589cd0",
           "bytes": 306
         },
         "raw.txt": {
           "path": "pe2/bgp_vpnv4.raw.txt",
-          "sha256": "f99582a932c8ad06bb9c6e48e32953f1a74aabe08fb81e8eb9b922ffd63814e6",
+          "sha256": "01cc6c513dd4886a155b35aa339be1aa3a5f0a0669d5ccc4ecb08dfc9d685c01",
           "bytes": 355
         }
       }
@@ -3924,7 +3924,7 @@
       "host": "10.10.1.28",
       "capability": "bgp_evpn",
       "command": "display bgp peer l2vpn evpn",
-      "observed_at": "2026-10-03T14:58:48.281686+00:00",
+      "observed_at": "2026-10-04T14:27:59.720575+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -3945,7 +3945,7 @@
       "host": "10.10.1.28",
       "capability": "bgp_vpnv4_routes",
       "command": "display bgp routing-table vpnv4",
-      "observed_at": "2026-10-03T14:58:48.335251+00:00",
+      "observed_at": "2026-10-04T14:27:59.772914+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -3966,7 +3966,7 @@
       "host": "10.10.1.28",
       "capability": "bgp_evpn_routes",
       "command": "display bgp l2vpn evpn",
-      "observed_at": "2026-10-03T14:58:48.386610+00:00",
+      "observed_at": "2026-10-04T14:27:59.824116+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -3987,18 +3987,18 @@
       "host": "10.10.1.28",
       "capability": "ldp",
       "command": "display mpls ldp peer",
-      "observed_at": "2026-10-03T14:58:48.438200+00:00",
+      "observed_at": "2026-10-04T14:27:59.875353+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "pe2/ldp.txt",
-          "sha256": "08d96f933d8cb0d9c141ae21403d6d1833032ccf0c44091fe9a478969628f260",
+          "sha256": "3fc7caa8193681638a80b5f4f728cb69c4cfc4cdf910829d01530db297207bac",
           "bytes": 190
         },
         "raw.txt": {
           "path": "pe2/ldp.raw.txt",
-          "sha256": "829aa3ae525b82f9ab23e7379213909d5025c4436db26c1b5e6c46e442fe279e",
+          "sha256": "2f53259e54b55048bb2c4a88f42a3f604d24284e7faeecf6a633fcc5a215567f",
           "bytes": 227
         }
       }
@@ -4008,7 +4008,7 @@
       "host": "10.10.1.28",
       "capability": "mpls_lsp",
       "command": "display mpls lsp",
-      "observed_at": "2026-10-03T14:58:48.489708+00:00",
+      "observed_at": "2026-10-04T14:27:59.926924+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -4029,7 +4029,7 @@
       "host": "10.10.1.28",
       "capability": "vxlan_tunnels",
       "command": "display vxlan tunnel",
-      "observed_at": "2026-10-03T14:58:48.541171+00:00",
+      "observed_at": "2026-10-04T14:27:59.978642+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -4050,7 +4050,7 @@
       "host": "10.10.1.28",
       "capability": "vsi",
       "command": "display l2vpn vsi verbose",
-      "observed_at": "2026-10-03T14:58:48.592399+00:00",
+      "observed_at": "2026-10-04T14:28:00.030111+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -4071,7 +4071,7 @@
       "host": "10.10.1.28",
       "capability": "evpn_instances",
       "command": "display evpn instance verbose",
-      "observed_at": "2026-10-03T14:58:48.643781+00:00",
+      "observed_at": "2026-10-04T14:28:00.081271+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -4092,7 +4092,7 @@
       "host": "10.10.1.28",
       "capability": "evpn_imet",
       "command": "display evpn auto-discovery imet",
-      "observed_at": "2026-10-03T14:58:48.694993+00:00",
+      "observed_at": "2026-10-04T14:28:00.132337+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -4113,7 +4113,7 @@
       "host": "10.10.1.28",
       "capability": "tunnel_interfaces",
       "command": "display interface tunnel",
-      "observed_at": "2026-10-03T14:58:48.746268+00:00",
+      "observed_at": "2026-10-04T14:28:00.183655+00:00",
       "transport_status": "rejected_by_device",
       "expected_status": "unsupported",
       "files": {
@@ -4134,7 +4134,7 @@
       "host": "10.10.1.28",
       "capability": "evpn_mac",
       "command": "display evpn route mac",
-      "observed_at": "2026-10-03T14:58:48.797396+00:00",
+      "observed_at": "2026-10-04T14:28:00.234745+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -4155,7 +4155,7 @@
       "host": "10.10.1.28",
       "capability": "vrf_CUST-A",
       "command": "display ip vpn-instance instance-name CUST-A",
-      "observed_at": "2026-10-03T14:58:49.005524+00:00",
+      "observed_at": "2026-10-04T14:28:00.440300+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -4176,7 +4176,7 @@
       "host": "10.10.1.28",
       "capability": "routes_vrf_CUST-A",
       "command": "display ip routing-table vpn-instance CUST-A",
-      "observed_at": "2026-10-03T14:58:49.057132+00:00",
+      "observed_at": "2026-10-04T14:28:00.491637+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -4197,18 +4197,18 @@
       "host": "10.10.1.28",
       "capability": "arp_vrf_CUST-A",
       "command": "display arp vpn-instance CUST-A",
-      "observed_at": "2026-10-03T14:58:49.108369+00:00",
+      "observed_at": "2026-10-04T14:28:00.543111+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "pe2/arp_vrf_CUST-A.txt",
-          "sha256": "1faf0b0dc2ed6b5564717cf82a152cc9c1b322069917d811da3908718d4f8c4b",
+          "sha256": "1e124272bbe28f3cadaf741d7cc129040f1ae5b64128e53315bea696de244359",
           "bytes": 238
         },
         "raw.txt": {
           "path": "pe2/arp_vrf_CUST-A.raw.txt",
-          "sha256": "4f231f6e9d70c71888bd0cad9c1e8cec588aa4bcd1feed627dd042deb649e235",
+          "sha256": "e527bc3cca104f5825ee21feaa396e7f3bd8193210f798438f5d310467deed83",
           "bytes": 283
         }
       }
@@ -4218,7 +4218,7 @@
       "host": "10.10.1.28",
       "capability": "vrf_SHARED",
       "command": "display ip vpn-instance instance-name SHARED",
-      "observed_at": "2026-10-03T14:58:49.314363+00:00",
+      "observed_at": "2026-10-04T14:28:00.748432+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -4239,7 +4239,7 @@
       "host": "10.10.1.28",
       "capability": "routes_vrf_SHARED",
       "command": "display ip routing-table vpn-instance SHARED",
-      "observed_at": "2026-10-03T14:58:49.367170+00:00",
+      "observed_at": "2026-10-04T14:28:00.799710+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
@@ -4260,18 +4260,18 @@
       "host": "10.10.1.28",
       "capability": "arp_vrf_SHARED",
       "command": "display arp vpn-instance SHARED",
-      "observed_at": "2026-10-03T14:58:49.418850+00:00",
+      "observed_at": "2026-10-04T14:28:00.851102+00:00",
       "transport_status": "ok",
       "expected_status": "complete",
       "files": {
         "txt": {
           "path": "pe2/arp_vrf_SHARED.txt",
-          "sha256": "fa0df39eae5745b0bb5406ebb70e9ea0360660951cf85a588d635dbdd38542e6",
+          "sha256": "ef93629893ee1d6d82c96de68ff531e765915e658b72bf086d70cbe1aea1e024",
           "bytes": 238
         },
         "raw.txt": {
           "path": "pe2/arp_vrf_SHARED.raw.txt",
-          "sha256": "78b68faa66616bac7af19515e99a4f726ed15a6f8a8a768fa63a66c46ac9f4e2",
+          "sha256": "13636ea767244ff0f5b01a9348f7c7e5900c7d4cbf2374e7101cf58ddee32339",
           "bytes": 283
         }
       }

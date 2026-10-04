@@ -4,7 +4,7 @@ Flags: D - Dynamic   B - BGP      L - Local active
        E - Multihoming ES sync    F - Leaf
 
 VSI name: RED
- MAC address    : 0050-7966-6802
+ MAC address    : 0050-7966-680e
   Link ID/Name  : 0x0
   Flags         : DL
   Encap         : VXLAN
@@ -12,7 +12,7 @@ VSI name: RED
   Color         : -
   Color-Only    : -
 
- MAC address    : 0050-7966-6800
+ MAC address    : 0050-7966-680c
   Link ID/Name  : -
   Flags         : B
   Encap         : 
@@ -21,7 +21,7 @@ VSI name: RED
   Color-Only    : -
 
 VSI name: BLUE-20
- MAC address    : 0050-7966-6803
+ MAC address    : 0050-7966-6809
   Link ID/Name  : 0x0
   Flags         : DL
   Encap         : VXLAN

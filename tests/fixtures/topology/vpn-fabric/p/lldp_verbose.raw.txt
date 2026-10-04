@@ -12,7 +12,7 @@ H3C Comware Platform Software, Software Version 7.1.064, Release 1362P12
 H3C VSR1000
 Copyright (c) 2004-2023 New H3C Technologies Co., Ltd. All rights reserved.
 
-Time remaining: 95 seconds
+Time remaining: 116 seconds
 System Capabilities: B,R
 Enabled Capabilities: B,R
 Management Addresses:
@@ -31,7 +31,7 @@ Peer Source MAC: 0cc4.0000.0001
 ------------------------------------------------
 Local Intf: Et0/1
 Local Intf service instance: -
-Chassis id: aabb.cc00.0c00
+Chassis id: aabb.cc00.0500
 Port id: Et0/1
 Port Description: to P e0/1
 System Name: PE1.lab.local
@@ -42,7 +42,7 @@ Technical Support: http://www.cisco.com/techsupport
 Copyright (c) 1986-2024 by Cisco Systems, Inc.
 Compiled Sun 11-Aug-24 22:07 by mcpre
 
-Time remaining: 108 seconds
+Time remaining: 98 seconds
 System Capabilities: B,R
 Enabled Capabilities: R
 Management Addresses:
@@ -51,7 +51,7 @@ Auto Negotiation - not supported
 Physical media capabilities - not advertised
 Media Attachment Unit type - not advertised
 Vlan ID: - not advertised
-Peer Source MAC: aabb.cc00.0c10
+Peer Source MAC: aabb.cc00.0510
 
 
 Total entries displayed: 2

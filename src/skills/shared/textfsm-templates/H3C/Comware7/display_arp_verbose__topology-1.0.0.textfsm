@@ -1,0 +1,23 @@
+Value Required IP_ADDRESS (\d+\.\d+\.\d+\.\d+)
+Value MAC_ADDRESS ([0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4})
+Value TYPE (\S+)
+Value AGE (\S+(?: \S+)?)
+Value INTERFACE (\S+)
+Value VLAN_ID (\S+)
+Value VRF (\S+)
+Value VSI (\S+)
+Value VSI_INTERFACE (\S+)
+
+# One block per entry, each starting with its "IP address" line. "--" means none; the
+# consumer reads it as absent. Aging carries its unit ("12 min").
+Start
+  ^IP address\s+: -> Continue.Record
+  ^IP address\s+:\s+${IP_ADDRESS}\s+MAC address\s+:\s+${MAC_ADDRESS}\s*$$
+  ^Type\s+:\s+${TYPE}\s+Aging\s+:\s+${AGE}\s*$$
+  ^Interface\s+:\s+${INTERFACE}\s+SVLAN/CVLAN\s+:\s+${VLAN_ID}/\S+\s*$$
+  ^VPN instance\s+:\s+${VRF}\s*$$
+  ^VSI name\s+:\s+${VSI}\s*$$
+  ^VSI interface\s+:\s+${VSI_INTERFACE}\s*$$
+  ^(Link ID|VXLAN ID|MPLS PW ID|MPLS peer PE address|Nickname|Description)\s*:.*$$
+  ^\s*$$
+  ^.* -> Error "unrecognized display arp verbose line"

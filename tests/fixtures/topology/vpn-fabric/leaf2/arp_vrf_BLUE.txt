@@ -1,3 +1,3 @@
 Protocol  Address          Age (min)  Hardware Addr   Type   Interface
-Internet  10.255.10.12            -   aabb.cc80.0b00  ARPA   Vlan920
-Internet  192.168.10.12           0   0050.7966.6801  ARPA   Vlan20
+Internet  10.255.10.12            -   aabb.cc80.0400  ARPA   Vlan920
+Internet  192.168.10.12           0   0050.7966.680f  ARPA   Vlan20

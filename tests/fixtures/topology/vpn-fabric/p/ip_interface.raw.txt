@@ -2,7 +2,7 @@ show ip interface
 Ethernet0/0 is up, line protocol is up
   Internet address is 10.10.1.27/24
   Broadcast address is 255.255.255.255
-  Address determined by setup command
+  Address determined by non-volatile memory
   MTU is 1500 bytes
   Helper address is not set
   Directed broadcast forwarding is disabled
@@ -45,11 +45,11 @@ Ethernet0/0 is up, line protocol is up
 Ethernet0/1 is up, line protocol is up
   Internet address is 10.20.12.2/30
   Broadcast address is 255.255.255.255
-  Address determined by setup command
+  Address determined by non-volatile memory
   MTU is 1500 bytes
   Helper address is not set
   Directed broadcast forwarding is disabled
-  Multicast reserved groups joined: 224.0.0.5 224.0.0.2
+  Multicast reserved groups joined: 224.0.0.2 224.0.0.5
   Outgoing Common access list is not set 
   Outgoing access list is not set
   Inbound Common access list is not set 
@@ -88,11 +88,11 @@ Ethernet0/1 is up, line protocol is up
 Ethernet0/2 is up, line protocol is up
   Internet address is 10.20.23.1/30
   Broadcast address is 255.255.255.255
-  Address determined by setup command
+  Address determined by non-volatile memory
   MTU is 1500 bytes
   Helper address is not set
   Directed broadcast forwarding is disabled
-  Multicast reserved groups joined: 224.0.0.5 224.0.0.2
+  Multicast reserved groups joined: 224.0.0.2 224.0.0.5
   Outgoing Common access list is not set 
   Outgoing access list is not set
   Inbound Common access list is not set 
@@ -141,7 +141,7 @@ Ethernet1/3 is administratively down, line protocol is down
 Loopback0 is up, line protocol is up
   Internet address is 10.255.20.2/32
   Broadcast address is 255.255.255.255
-  Address determined by setup command
+  Address determined by non-volatile memory
   MTU is 1514 bytes
   Helper address is not set
   Directed broadcast forwarding is disabled

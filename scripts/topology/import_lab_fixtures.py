@@ -220,7 +220,7 @@ def _vrf_caps(names, cisco):
 
 
 VPN_FABRIC = Lab(
-    "20261003-225812",
+    "20261004-222724",
     VPN_FABRIC_HOSTS,
     {
         "10.10.1.21": IOS_VPN,

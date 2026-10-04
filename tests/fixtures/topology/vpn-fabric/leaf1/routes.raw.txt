@@ -17,17 +17,17 @@ Gateway of last resort is not set
       10.0.0.0/8 is variably subnetted, 13 subnets, 2 masks
 C        10.10.11.0/30 is directly connected, Ethernet0/1
 L        10.10.11.2/32 is directly connected, Ethernet0/1
-O        10.10.12.0/30 [110/20] via 10.10.11.1, 01:08:13, Ethernet0/1
-O        10.10.13.0/30 [110/20] via 10.10.11.1, 01:08:13, Ethernet0/1
+O        10.10.12.0/30 [110/20] via 10.10.11.1, 00:54:04, Ethernet0/1
+O        10.10.13.0/30 [110/20] via 10.10.11.1, 00:54:04, Ethernet0/1
 C        10.10.21.0/30 is directly connected, Ethernet0/2
 L        10.10.21.2/32 is directly connected, Ethernet0/2
-O        10.10.22.0/30 [110/20] via 10.10.21.1, 01:08:11, Ethernet0/2
-O        10.10.23.0/30 [110/20] via 10.10.21.1, 01:08:11, Ethernet0/2
-O        10.255.10.1/32 [110/11] via 10.10.11.1, 01:08:13, Ethernet0/1
-O        10.255.10.2/32 [110/11] via 10.10.21.1, 01:08:11, Ethernet0/2
+O        10.10.22.0/30 [110/20] via 10.10.21.1, 00:54:08, Ethernet0/2
+O        10.10.23.0/30 [110/20] via 10.10.21.1, 00:54:08, Ethernet0/2
+O        10.255.10.1/32 [110/11] via 10.10.11.1, 00:54:04, Ethernet0/1
+O        10.255.10.2/32 [110/11] via 10.10.21.1, 00:54:08, Ethernet0/2
 C        10.255.10.11/32 is directly connected, Loopback0
-O        10.255.10.12/32 [110/21] via 10.10.21.1, 01:07:37, Ethernet0/2
-                         [110/21] via 10.10.11.1, 01:07:41, Ethernet0/1
-O        10.255.10.13/32 [110/20] via 10.10.21.1, 00:52:59, Ethernet0/2
-                         [110/20] via 10.10.11.1, 00:53:04, Ethernet0/1
+O        10.255.10.12/32 [110/21] via 10.10.21.1, 00:54:04, Ethernet0/2
+                         [110/21] via 10.10.11.1, 00:54:04, Ethernet0/1
+O        10.255.10.13/32 [110/20] via 10.10.21.1, 00:51:30, Ethernet0/2
+                         [110/20] via 10.10.11.1, 00:51:35, Ethernet0/1
 LEAF1#

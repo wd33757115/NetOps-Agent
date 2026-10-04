@@ -1,5 +1,5 @@
  Routing Process "ospf 1" with ID 10.255.10.12
- Start time: 00:03:22.532, Time elapsed: 01:07:57.488
+ Start time: 00:00:01.304, Time elapsed: 00:54:24.713
  Supports only single TOS(TOS0) routes
  Supports opaque LSA
  Supports Link-local Signaling (LLS)
@@ -39,10 +39,10 @@
     Area BACKBONE(0)
         Number of interfaces in this area is 3 (1 loopback)
 	Area has no authentication
-	SPF algorithm last executed 00:53:03.339 ago
-	SPF algorithm executed 14 times
+	SPF algorithm last executed 00:51:34.620 ago
+	SPF algorithm executed 12 times
 	Area ranges are
-	Number of LSA 5. Checksum Sum 0x0334EF
+	Number of LSA 5. Checksum Sum 0x0364D7
 	Number of opaque link LSA 0. Checksum Sum 0x000000
 	Number of DCbitless LSA 1
 	Number of indication LSA 0

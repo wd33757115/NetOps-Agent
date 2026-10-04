@@ -1,7 +1,7 @@
 ------------------------------------------------
 Local Intf: Et0/1
 Local Intf service instance: -
-Chassis id: aabb.cc00.0800
+Chassis id: aabb.cc00.0100
 Port id: Et0/1
 Port Description: to LEAF1 e0/1
 System Name: SPINE1.lab.local
@@ -12,7 +12,7 @@ Technical Support: http://www.cisco.com/techsupport
 Copyright (c) 1986-2024 by Cisco Systems, Inc.
 Compiled Sun 11-Aug-24 22:07 by mcpre
 
-Time remaining: 102 seconds
+Time remaining: 116 seconds
 System Capabilities: B,R
 Enabled Capabilities: R
 Management Addresses:
@@ -21,12 +21,12 @@ Auto Negotiation - not supported
 Physical media capabilities - not advertised
 Media Attachment Unit type - not advertised
 Vlan ID: - not advertised
-Peer Source MAC: aabb.cc00.0810
+Peer Source MAC: aabb.cc00.0110
 
 ------------------------------------------------
 Local Intf: Et0/2
 Local Intf service instance: -
-Chassis id: aabb.cc00.0900
+Chassis id: aabb.cc00.0200
 Port id: Et0/1
 Port Description: to LEAF1 e0/2
 System Name: SPINE2.lab.local
@@ -37,7 +37,7 @@ Technical Support: http://www.cisco.com/techsupport
 Copyright (c) 1986-2024 by Cisco Systems, Inc.
 Compiled Sun 11-Aug-24 22:07 by mcpre
 
-Time remaining: 110 seconds
+Time remaining: 117 seconds
 System Capabilities: B,R
 Enabled Capabilities: R
 Management Addresses:
@@ -46,7 +46,7 @@ Auto Negotiation - not supported
 Physical media capabilities - not advertised
 Media Attachment Unit type - not advertised
 Vlan ID: - not advertised
-Peer Source MAC: aabb.cc00.0910
+Peer Source MAC: aabb.cc00.0210
 
 
 Total entries displayed: 2
