@@ -1,7 +1,7 @@
 manifest_version: 1
 id: rule-governance
 name: 规则治理
-version: 1.5.1
+version: 1.5.2
 platform_api: '>=1.0,<2.0'
 icon: rules
 aliases:
@@ -81,7 +81,7 @@ agent:
 database:
   mode: legacy
   bootstrap: src.apps.rule_governance.backend.bootstrap:initialize
-  bootstrap_version: 4
+  bootstrap_version: 5
   tables:
   - netops_assessment_policy_bindings
   - netops_assessment_policy_cutovers

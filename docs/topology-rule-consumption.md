@@ -28,7 +28,7 @@
 - **语义自带**：每个 Value 的语义由检查项自己定义（`semantic_definition`），冻结在 `topology-system` 目录下，不依赖共享的标准观测目录。
 - **实现可自由增改**：各厂商、各型号的采集实现（命令 + 模板）可以随时新增或替换。
 
-**清单**（由 `system_check_items.yaml` 生成；共 29 项，全部已在 IOS/IOS-XE 与 Comware 7 上接入）
+**清单**（由 `system_check_items.yaml` 生成；共 31 项，全部已在 IOS/IOS-XE 与 Comware 7 上接入）
 
 | 检查项 | 名称 | Value（★ 为键/必填） | 已发布的采集实现 |
 |---|---|---|---|
@@ -61,6 +61,8 @@
 | `topology.switchports` | 二层端口模式与 VLAN | ★NAME, SWITCHPORT, ADMIN_MODE, OPER_MODE, ADMIN_ENCAPSULATION, OPER_ENCAPSULATION, ACCESS_VLAN, NATIVE_VLAN, ADMIN_NATIVE_TAGGING, OPER_NATIVE_TAGGING, TRUNK_VLANS, BAD_FIELD | ios: `show interfaces switchport` |
 | `topology.ospf_interfaces` | OSPF 接口开销（简表，按行） | ★ADDRESS, TABLE, INTERFACE, PROCESS_ID, ROUTER_ID, LABEL, AREA, TYPE, STATE, COST, PRIORITY, DR, BDR, NEIGHBORS, BAD_ROW | ios: `show ip ospf interface brief`<br>comware: `display ospf interface` |
 | `topology.ospf_process` | OSPF 进程与接口映射（按行） | ★PROCESS_ID, ROUTER_ID, AREA, VRF_EVIDENCE, CONFIRMED_ROUTER_ID, ADDRESS, INTERFACE, COST, STATE | ios: `show ip ospf`<br>comware: `display ospf` |
+| `topology.pbr_bindings` | 策略路由的接口绑定 | ★INTERFACE, ★POLICY, TYPE | ios: `show ip policy`<br>comware: `display ip policy-based-route setup` |
+| `topology.nat_bindings` | NAT 的接口绑定 | ★INTERFACE, ★KIND, RULE | ios: `show ip nat statistics`<br>comware: `display nat all` |
 
 说明：
 
@@ -153,6 +155,12 @@ commands(check_item_ids) -> [{implementation_id, platforms, command, scoped_comm
   - #8–#11 家族、厂商、CLI 方言、验证过的主版本、接口名：都改为数据。
   - 三套实验网的夹具（vpn-fabric、VSR、campus-wan）已用新命令重采，同时采回 Comware 的 `display ospf interface verbose` 原文。
   - 未完成：#3/#4 OSPF 整表（改用 verbose 原文）、#12 NX-OS。
+- **路径上标注策略路由/NAT（2026-10-05，topology 0.7.3、规则治理 1.5.2）**：
+  - 新增 `topology.pbr_bindings`、`topology.nat_bindings` 两项，只读"哪个接口绑定了哪个策略、哪种 NAT"，不解析策略内容。
+  - 路径仍按路由表推导。入接口绑定了策略路由的跳带 `policy_may_redirect` 缺口，入或出接口绑定了 NAT 的跳带 `nat_may_translate` 缺口，该方向为 partial；缺口给出设备、接口和策略名，由 LLM 到该设备查看策略。
+  - 绑定表完整才保存。未完整采集的设备在跳上标 `policy_bindings: not_observed`，不改变状态。
+  - 模板只认已知格式：Comware 策略类型只认 Forward/Local；`display nat all` 中未知段落里出现接口行即判失败。宁可"未观察"，不误报"没有策略"。
+  - 未覆盖、无样本：IOS 的 NAT 虚拟接口（`ip nat enable`），防火墙按安全域或安全策略配置的 NAT。
 - **待做**：
   - 系统模板登记到规则治理的模板库（数据库），让页面可见、可评审；目前模板文件由资产清单按 sha256 钉住；
   - NX-OS 等家族在有实机样本后补实现，届时删掉对应的通用解析器；

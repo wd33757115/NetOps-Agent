@@ -68,6 +68,8 @@ CHECK_ITEMS = {
     "switchport": "topology.switchports",
     "ospf_interfaces": "topology.ospf_interfaces",
     "ospf_process": "topology.ospf_process",
+    "pbr_bindings": "topology.pbr_bindings",
+    "nat_bindings": "topology.nat_bindings",
 }
 WHOLE_TABLES = frozenset({"routes"})
 SOURCE = "published"  # tests read the catalog shipped with rule governance ("shipped")
@@ -987,7 +989,32 @@ def _vrf(row, family, lines, warnings):
     return {"name": row["NAME"], "address_families": protocols.split(",") if protocols else []}
 
 
+def _pbr_binding(row, family, lines, warnings):
+    """A policy applied to packets arriving on an interface; a policy for locally generated
+    packets (type Local, interface "local" or "N/A") routes no transit traffic."""
+    port = row["INTERFACE"]
+    if str(row.get("TYPE") or "forward").lower() != "forward" or port.lower() in {
+        "local",
+        "n/a",
+    }:
+        return []
+    return {"ifname": interface(port, family).name, "policy": row["POLICY"]}
+
+
+def _nat_binding(row, family, lines, warnings):
+    """NAT on interfaces: how each is bound (inside, outside, outbound, ...), one record each."""
+    kind = " ".join(row["KIND"].lower().split())
+    rule = row.get("RULE") if str(row.get("RULE") or "").strip("-") else None
+    return [
+        {"ifname": interface(name, family).name, "kind": kind, **({"rule": rule} if rule else {})}
+        for name in re.split(r"\s*,\s*", row["INTERFACE"].strip())
+        if name
+    ]
+
+
 ROWS = {
+    "pbr_bindings": _pbr_binding,
+    "nat_bindings": _nat_binding,
     "arp": _arp,
     "routes": _route,
     "vrf_detail": _vrf_family,

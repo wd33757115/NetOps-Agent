@@ -71,7 +71,7 @@
 - **实验网主机仍在持续 ping**（保持 ARP/MAC/EVPN 表）。需要停止时运行 `venv/Scripts/python.exe scripts/topology/vpn_fabric/lab.py traffic --stop`。
 
 ### 厂商无关化（2026-10-05，负责人决定）
-- **方向**：拓扑只回答"数据包从源到目的经过哪些设备"，其余交给 LLM；OSPF/BGP/LDP 建模保留现状，不再深化。路径上出现策略路由或 NAT 时，只标注"可能改变走向"（待设计卡）。
+- **方向**：拓扑只回答"数据包从源到目的经过哪些设备"，其余交给 LLM；OSPF/BGP/LDP 建模保留现状，不再深化。路径上出现策略路由或 NAT 时，只标注"可能改变走向"（已完成，topology 0.7.3，见 `docs/topology-rule-consumption.md` 第 6 节）。
 - **完成**：家族差异全部改为数据，新增家族的步骤见 `docs/topology-rule-consumption.md` 第 7 节。
   - 守卫测试 `test_topology_vendor_neutral.py` 禁止拓扑代码出现家族名，豁免清单只剩 #3 和 #12。
   - Comware ARP 改用 verbose；三套实验网夹具已重采。

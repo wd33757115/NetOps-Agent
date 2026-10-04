@@ -40,6 +40,8 @@ capabilities:
   vxlan_vnis: {parser: rules}
   tunnel_interfaces: {parser: rules}
   evpn_mac: {parser: rules}
+  pbr_bindings: {parser: rules}
+  nat_bindings: {parser: rules}
 verified:
   - model: VSR1000
     version: 7.1.064 Release 1362P12

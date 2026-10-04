@@ -23,6 +23,19 @@ in the underlay toward the tunnel endpoint; at the device owning the endpoint th
 is routed again in the receiving instance. MPLS hops need an LSP for the endpoint in the
 device's label table, VXLAN ingress needs the tunnel to that VTEP observed up.
 
+The route table is not the whole decision where a hop's interface is bound to a policy
+route or to NAT. The path is still the route-table path, but such a hop carries a gap
+(so the direction is partial) naming the device, interface and policy, for someone to
+read that policy on the device; its content is not evaluated here:
+
+- ``policy_may_redirect``: a policy route is applied to packets arriving on the hop's
+  ingress interface;
+- ``nat_may_translate``: NAT is bound to the hop's ingress or egress interface.
+
+A hop on a device whose bindings were not observed completely says so
+(``policy_bindings: not_observed``) without changing the status: absent evidence is not
+evidence of a policy.
+
 A source host starts at the gateway of its subnet (every candidate when several could
 be its gateway); a source that is a device starts at that device. Equal-cost next hops
 branch, up to ``MAX_PATHS``. The reverse direction is traced the same way, and different
@@ -239,6 +252,31 @@ class _Tracer:
             return None
         return {"status": "lsp_not_observed", "fec": endpoint}
 
+    def policy_gaps(self, key, ifname, direction):
+        """What may move a packet off the route-table path at this interface: a policy
+        route applied to arriving packets (ingress only), NAT in either direction."""
+        facts = self.devices[key]
+        if not ifname:
+            return []
+        gaps = []
+        if direction == "in":
+            gaps += [
+                {"status": "policy_may_redirect", "interface": ifname, "policy": row["policy"]}
+                for row in facts.get("pbr_bindings") or []
+                if row.get("ifname") == ifname
+            ]
+        gaps += [
+            {
+                "status": "nat_may_translate",
+                "interface": ifname,
+                "kind": row["kind"],
+                **({"rule": row["rule"]} if row.get("rule") else {}),
+            }
+            for row in facts.get("nat_bindings") or []
+            if row.get("ifname") == ifname
+        ]
+        return gaps
+
     def vxlan_state(self, key, tunnel):
         """The observed state of the tunnel to a VTEP: IOS NVE peers, Comware tunnels."""
         facts = self.devices[key]
@@ -304,6 +342,10 @@ class _Tracer:
             if unavailable:
                 end([*trail, hop], "interface_unavailable", **unavailable)
                 return
+            if not {"pbr_bindings", "nat_bindings"} <= self.devices[key].keys():
+                hop["policy_bindings"] = "not_observed"
+            if ingress := self.policy_gaps(key, in_if, "in"):
+                hop.setdefault("gaps", []).extend(ingress)
             if tunnel is not None and self.topo.ip_candidates(
                 tunnel["endpoint"], device=key, vrf=vrf
             ):
@@ -391,6 +433,8 @@ class _Tracer:
                     if unavailable:
                         end(here, "interface_unavailable", **unavailable)
                         continue
+                    if egress := self.policy_gaps(key, out, "out"):
+                        current.setdefault("gaps", []).extend(egress)
                     evidence = self.endpoint_evidence(key, next_vrf, out, dst)
                     if not evidence or len({row["mac"] for row in evidence}) != 1:
                         end(here, "endpoint_unresolved", interface=out, destination=dst)
@@ -419,6 +463,8 @@ class _Tracer:
                     }
                     if chain:
                         current["resolved_via"] = chain
+                    if egress := self.policy_gaps(key, neighbour_out, "out"):
+                        current.setdefault("gaps", []).extend(egress)
                     here = [*trail, current]
                     if neighbour_out.upper().startswith("NULL"):
                         end(here, "blackhole")

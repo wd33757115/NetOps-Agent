@@ -66,6 +66,9 @@ MODE_CAPABILITIES = {
         "vxlan_vnis",
         "tunnel_interfaces",
         "evpn_mac",
+        # What may move a packet off the route-table path (a policy, an address rewrite).
+        "pbr_bindings",
+        "nat_bindings",
         "routes",
     ),
     "standard": (

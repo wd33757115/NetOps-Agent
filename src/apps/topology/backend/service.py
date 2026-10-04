@@ -58,6 +58,7 @@ from .repository import owned, sessions
 APP_ID = "topology"
 MODEL_PROFILE = "rfc8345+simap-yang-03:l2-l3:scoped-v2"
 ACTIVE = ("queued", "running", "waiting_for_input")
+POLICY_FACTS = frozenset({"pbr_bindings", "nat_bindings"})
 TOPOLOGY_FACTS = (
     "version",
     "lldp_local",
@@ -88,6 +89,8 @@ TOPOLOGY_FACTS = (
     "vxlan_vnis",
     "tunnel_interfaces",
     "evpn_mac",
+    "pbr_bindings",
+    "nat_bindings",
 )
 NODE_BUDGET_SECONDS = 240
 # A lease outlives the node budget, so a live collection is never reclaimed mid-way.
@@ -929,7 +932,12 @@ def topology_observation(result):
         if cap in {"version", "lldp_local", "trunk", "switchport"}
         else parsed.records
         for cap, parsed in result.parsed.items()
-        if cap in TOPOLOGY_FACTS and parsed.status in {"complete", "partial"}
+        if cap in TOPOLOGY_FACTS
+        and (
+            parsed.status == "complete"
+            # A partial binding table cannot say an interface has none; it stays unobserved.
+            or (parsed.status == "partial" and cap not in POLICY_FACTS)
+        )
     }
     for cap in ("bgp_peers", "bgp_vpnv4", "bgp_evpn"):
         if cap in facts:

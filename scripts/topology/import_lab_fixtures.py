@@ -241,7 +241,17 @@ VPN_FABRIC = Lab(
     frozenset(),
     VPN_VRFS,
 )
+# Policy routing / NAT interface bindings (2026-10-05): test policies configured on CORE1
+# (IOS) and BR1 (Comware) for 192.0.2.0/24 only, sampled, then removed from the lab.
+CAMPUS_POLICIES = Lab(
+    "20261005-071919",
+    {"10.10.1.11": "br1", "10.10.1.13": "core1"},
+    dict.fromkeys(("10.10.1.11", "10.10.1.13"), frozenset({"pbr_bindings", "nat_bindings"})),
+    ROOT / "tests/fixtures/topology/campus-wan/policies",
+    frozenset(),
+)
 LABS = {
+    "campus-policies": CAMPUS_POLICIES,
     "vpn-fabric": VPN_FABRIC,
     "vsr1000": VSR,
     "campus-vrf-routes": CAMPUS_VRF_ROUTES,

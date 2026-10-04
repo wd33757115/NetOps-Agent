@@ -56,6 +56,9 @@ COMMANDS = [
     ("ospf_interfaces_verbose", "display ospf interface verbose"),
     ("ospf_process", "display ospf"),
     ("bgp", "display bgp peer ipv4"),
+    # interface bindings of policy routing and NAT (path hops they may redirect)
+    ("pbr_bindings", "display ip policy-based-route setup"),
+    ("nat_bindings", "display nat all"),
     # VPN / EVPN / VXLAN (plan §8 M5)
     ("bgp_vpnv4", "display bgp peer vpnv4"),
     ("bgp_evpn", "display bgp peer l2vpn evpn"),
@@ -101,6 +104,8 @@ CISCO_COMMANDS = [
     ("ospf_interfaces", "show ip ospf interface brief"),
     ("ospf_process", "show ip ospf"),
     ("bgp", "show ip bgp summary"),
+    ("pbr_bindings", "show ip policy"),
+    ("nat_bindings", "show ip nat statistics"),
     # VPN / EVPN / VXLAN (plan §8 M5)
     ("vrf_detail", "show vrf detail"),
     ("bgp_vpnv4", "show bgp vpnv4 unicast all summary"),

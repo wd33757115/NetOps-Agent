@@ -461,6 +461,26 @@ check_items:
       COST: [text, false, Comware 的接口开销原文]
       STATE: [text, false, Comware 的接口状态原文]
 
+  topology.pbr_bindings:
+    # 2026-10-05: a path hop entering on such an interface may not follow the route table.
+    name: 拓扑发现：策略路由的接口绑定
+    entity_type: pbr_binding
+    keys: [INTERFACE, POLICY]
+    values:
+      INTERFACE: [text, true, 应用策略路由的接口；local 或 N/A 表示本机发出的报文]
+      POLICY: [text, true, 策略名（route-map 或 policy-based-route 名）]
+      TYPE: [text, false, 策略类型原文（如 Forward、Local）]
+
+  topology.nat_bindings:
+    # 2026-10-05: a path hop through such an interface may have its addresses translated.
+    name: 拓扑发现：NAT 的接口绑定
+    entity_type: nat_binding
+    keys: [INTERFACE, KIND]
+    values:
+      INTERFACE: [text, true, 绑定 NAT 的接口；IOS 一行可列多个，以逗号分隔]
+      KIND: [text, true, 绑定方式原文（Inside、Outside、outbound、internal server、static、inbound）]
+      RULE: [text, false, 规则引用原文（如 ACL 编号）]
+
 implementations:
   - check_item: topology.arp
     platform: ios
@@ -821,6 +841,32 @@ implementations:
     template: H3C/Comware7/display_ospf__topology-1.0.0.textfsm
     sha256: c63a4c6a59d1ac98aed1a7748f1196e0aa2c9cca68bf5fa1a8371c58f295cf45
 
+  - check_item: topology.pbr_bindings
+    platform: ios
+    command: show ip policy
+    template: Cisco/IOS/show_ip_policy__topology-1.0.0.textfsm
+    sha256: f1c3fb77da4ecd9cbd0a900d50297f524783a455ba67f71a31ceda7d070ac177
+    required: ['^Interface\s+Route map\s*$']
+  - check_item: topology.pbr_bindings
+    platform: comware
+    command: display ip policy-based-route setup
+    template: H3C/Comware7/display_ip_policy-based-route_setup__topology-1.0.0.textfsm
+    sha256: 3006a6fd3e0f8d1feac61c9f9bfb181b44ce548f960a5d6586a9fb9434b1fe87
+    valid_empty: ['\A\s*PBR4 is not configured\.\s*\Z']
+    required: ['^Policy name\s+Type\s+Interface\s*$']
+  - check_item: topology.nat_bindings
+    platform: ios
+    command: show ip nat statistics
+    template: Cisco/IOS/show_ip_nat_statistics__topology-1.0.0.textfsm
+    sha256: 42c35f0675170d46cc64ad5f1eee868f73b291ac3f73a2e095521ba3c66be4cf
+    valid_empty: [BLANK]  # IOS prints nothing until NAT is configured
+    required: ['^Total active translations:']
+  - check_item: topology.nat_bindings
+    platform: comware
+    command: display nat all
+    template: H3C/Comware7/display_nat_all__topology-1.0.0.textfsm
+    sha256: 653e5f7b2f37f762af918849ba31dfec5bab6da31eba5d524fdc6fcc098fa237
+    valid_empty: ['\A\s*NAT is not configured\.\s*\Z']
 platforms:
   ios: {vendor: Cisco, platforms: [ios, iosxe], family: IOS}
   comware: {vendor: H3C, platforms: [comware], family: Comware7}

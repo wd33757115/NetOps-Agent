@@ -68,7 +68,12 @@ TOOLS = [
         "MPLS 每跳需观察到到端点的标签，VXLAN 入口需观察到隧道 Up。"
         "同一地址在多个 VPN 中重复时，用 src_vrf/dst_vrf 指定实例，否则各实例都作为候选。"
         "complete 表示这套推导所需的观测证据齐备，不是数据面实测成功；"
-        "未计算全部 ACL、策略路由和二层转发规则。"
+        "入接口绑定策略路由（policy_may_redirect）或入/出接口绑定 NAT（nat_may_translate）"
+        "的跳带缺口、该方向为 partial，缺口给出设备、接口和策略名或 NAT 方式："
+        "路径仍是路由表推导的，策略内容未计算，需到该设备查看该策略是否匹配这条流量、"
+        "把它改到哪里或改写成什么地址；"
+        "跳上 policy_bindings: not_observed 表示该设备的绑定未完整采集，不等于没有策略。"
+        "未计算 ACL 和二层转发规则。"
         "现场不一致也可能源于覆盖或推导限制；只读，不登录设备。",
         Trace,
         lambda user, body: service.trace_current(

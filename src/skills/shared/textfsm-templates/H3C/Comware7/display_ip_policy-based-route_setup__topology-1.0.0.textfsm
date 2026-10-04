@@ -1,0 +1,12 @@
+Value Required POLICY (\S+)
+Value TYPE (Forward|Local)
+Value INTERFACE (\S+)
+
+# "display ip policy-based-route setup": each applied policy, its type (Forward: packets
+# arriving on the interface; Local: locally generated packets) and the interface. Any
+# other type (one applied to every interface, say) is not a row this table can read.
+Start
+  ^Policy name\s+Type\s+Interface\s*$$
+  ^${POLICY}\s+${TYPE}\s+${INTERFACE}\s*$$ -> Record
+  ^\s*$$
+  ^.* -> Error "unrecognized display ip policy-based-route setup line"

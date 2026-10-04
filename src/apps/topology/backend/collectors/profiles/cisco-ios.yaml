@@ -39,4 +39,6 @@ capabilities:
   evpn_peers: {parser: rules}
   vxlan_vnis: {parser: rules}
   evpn_mac: {parser: rules}
+  pbr_bindings: {parser: rules}
+  nat_bindings: {parser: rules}
 verified: []
