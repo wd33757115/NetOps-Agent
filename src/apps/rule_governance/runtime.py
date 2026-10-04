@@ -101,7 +101,8 @@ class ParsedRows:
     ``lines[i]`` are the 1-based input lines row i was read from: the lines since the
     previous row up to the one that emitted it, without rejected lines. A line the
     template rejects (its ``Error`` action) is listed in ``rejected`` and parsing goes on
-    with the next line. ``problems`` are output-quality findings: a required line that
+    with the next line (``rejected_reasons``: the template's message for it, as a slug).
+    ``problems`` are output-quality findings: a required line that
     is missing, or a count the output advertises that differs from what was read.
     ``incomplete_output``: the output itself was cut off (paging, truncation).
 
@@ -115,6 +116,7 @@ class ParsedRows:
     reason: str = ""
     lines: list[list[int]] = ()
     rejected: tuple[int, ...] = ()
+    rejected_reasons: tuple[str, ...] = ()  # the template's Error message per rejected line
     problems: tuple[str, ...] = ()
     incomplete_output: bool = False
 
@@ -207,7 +209,7 @@ class CheckItemSelectionReader:
             return ParsedRows("complete", [], classified.reason)
         fsm = textfsm.TextFSM(io.StringIO(selection.template_text))
         emitted = fsm.ParseText("", eof=False)  # the FSM appends its records to this list
-        rows, lines, rejected, pending, seen = [], [], [], [], 0
+        rows, lines, rejected, reasons, pending, seen = [], [], [], [], [], 0
         text = raw_text.splitlines()
 
         # Scalar Values hold what the FSM has read so far (a List Value only its last item).
@@ -243,8 +245,9 @@ class CheckItemSelectionReader:
             before = values()
             try:
                 fsm.ParseText(line + "\n", eof=False)
-            except textfsm.TextFSMError:
+            except textfsm.TextFSMError as exc:
                 rejected.append(number)  # the FSM keeps its state; the next line goes on
+                reasons.append(_rejection(exc))
                 take(number, before, read=False)
                 continue
             take(number, before)
@@ -266,9 +269,19 @@ class CheckItemSelectionReader:
             classified.status,
             lines,
             rejected=tuple(rejected),
+            rejected_reasons=tuple(reasons),
             problems=tuple(problems),
             incomplete_output=incomplete,
         )
+
+
+def _rejection(exc: Exception) -> str:
+    """The message a template's ``Error "..."`` gives, as a slug ("template_rejected")."""
+    import re
+
+    match = re.match(r'Error: "?(.*?)"?\. Rule Line', str(exc))
+    words = re.findall(r"[a-z0-9]+", (match[1] if match else "").lower())
+    return "_".join(words) or "template_rejected"
 
 
 def _policy_problems(selection: Selection, raw_text: str, rows: list[dict[str, Any]]):

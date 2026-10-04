@@ -13,9 +13,9 @@ budgets: {fast: 120, standard: 300, full: 600}
 capabilities:
   version: {command: show version, parser: generic_version}
   lldp: {command: show lldp neighbors detail, parser: generic_lldp}
-  interfaces: {command: show interfaces description, parser: generic_ifbrief}
+  interfaces: {parser: rules}
   inventory: {command: show inventory, parser: null}
-  ip: {command: show ip interface, parser: generic_ipif}
+  ip: {parser: rules}
   arp: {parser: rules}
   mac: {command: show mac address-table, parser: generic_mac}
   vlan: {command: show vlan brief, parser: generic_vlan}

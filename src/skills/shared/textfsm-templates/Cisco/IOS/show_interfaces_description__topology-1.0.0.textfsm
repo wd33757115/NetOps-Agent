@@ -1,0 +1,16 @@
+Value Required INTERFACE (\S+)
+Value LINK (up|down|admin down|deleted)
+Value PROTOCOL (up|down)
+Value DESCRIPTION (.*?)
+
+# One record per interface (campus-wan and vpn-fabric labs, IOS-XE 17). The Status
+# column reports an administrative shutdown itself ("admin down").
+Start
+  ^Interface\s+Status\s+Protocol\s+Description\s*$$ -> Interfaces
+  ^\s*$$
+  ^. -> Error "unrecognized show interfaces description line"
+
+Interfaces
+  ^${INTERFACE}\s+${LINK}\s+${PROTOCOL}(?:\s+${DESCRIPTION})?\s*$$ -> Record
+  ^\s*$$
+  ^. -> Error "unrecognized interface row"

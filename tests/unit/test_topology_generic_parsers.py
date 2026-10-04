@@ -6,7 +6,8 @@ from pathlib import Path
 import pytest
 
 from src.apps.topology.backend.collectors.normalize import parser_text
-from src.apps.topology.backend.collectors.parse import MAX_BYTES, parse
+from src.apps.topology.backend.collectors.parse import MAX_BYTES, parse, parse_generic
+from src.apps.topology.backend.collectors.rules import CHECK_ITEMS
 from src.apps.topology.backend.facts.repository import FactInput, validate_records
 
 ROOT = Path(__file__).parents[1] / "fixtures/topology"
@@ -24,6 +25,12 @@ def run(capability, text, family="comware", **kwargs):
     return parse(
         {"os_family": family, "profile_id": None}, capability, text, use_templates=False, **kwargs
     )
+
+
+def generic(capability, text, family="comware", **kwargs):
+    """The generic parser itself: shape rules for the families rule governance does not
+    serve yet (IOS and Comware outputs of CHECK_ITEMS are read by their check items)."""
+    return parse_generic({"os_family": family, "profile_id": None}, capability, text, **kwargs)
 
 
 @pytest.mark.parametrize("device", ["vsr-1", "vsr-2"])
@@ -47,9 +54,9 @@ def test_real_raw_and_clean_without_profile(device, capability, count):
     assert result.records == original.records
     assert result.summary == original.summary
     assert len(result.records) == count
-    # Comware ARP is read through its rule-governance check item (test_topology_rules.py).
+    # Rule-governance check items read these Comware tables (test_topology_rules.py).
     assert (result.tier, result.confidence) == (
-        ("rules", "high") if capability == "arp" else ("generic", "medium")
+        ("rules", "high") if capability in CHECK_ITEMS else ("generic", "medium")
     )
     assert result.sources
     assert all(source["lines"] for source in result.sources)
@@ -202,13 +209,13 @@ def test_lldp_incomplete_neighbor_and_bad_address():
 
 
 def test_ip_masks_ipv6_vrf_and_no_fabricated_prefixes():
-    result = run("ip", "Interface IP-Address Mask\nGi1/0/1 192.0.2.1 255.255.255.0\n", "ios")
+    result = generic("ip", "Interface IP-Address Mask\nGi1/0/1 192.0.2.1 255.255.255.0\n", "ios")
     assert result.status == "complete"
     assert result.records[0]["prefix_len"] == 24
-    assert run("ip", "Gi1/0/1 192.0.2.1 up up", "ios").status == "failed"
-    assert run("ip", "Gi1/0/1 192.0.2.1/99 up up", "ios").status == "failed"
+    assert generic("ip", "Gi1/0/1 192.0.2.1 up up", "ios").status == "failed"
+    assert generic("ip", "Gi1/0/1 192.0.2.1/99 up up", "ios").status == "failed"
     invalid = "Interface IP address/Mask VPN instance\nGE1/0 999.1.1.1 --"
-    assert run("ip", invalid).status == "failed"
+    assert generic("ip", invalid).status == "failed"
     result = run("ip", "Interface IP address/Mask VPN instance\nGE0/0/1 2001:db8::1/64 blue", "vrp")
     assert result.status == "complete" and result.records[0]["vrf"] == "blue"
     assert result.records[0]["prefix_len"] == 64
@@ -260,11 +267,11 @@ def test_raw_evidence_line_coordinates_and_version():
     ],
 )
 def test_synthetic_interface_and_explicit_mask_rows(family, port, canonical):
-    interfaces = run("interfaces", f"Interface Physical Protocol\n{port} up up\n", family)
+    interfaces = generic("interfaces", f"Interface Physical Protocol\n{port} up up\n", family)
     assert interfaces.status == "complete"
     assert interfaces.records[0]["ifname"] == canonical
     assert interfaces.records[0]["oper_status"] == "up"
-    addresses = run("ip", f"Interface IP address/Mask\n{port} 192.0.2.1/24\n", family)
+    addresses = generic("ip", f"Interface IP address/Mask\n{port} 192.0.2.1/24\n", family)
     assert addresses.status == "complete"
     assert addresses.records[0] == {
         "ifname": canonical,
@@ -298,12 +305,9 @@ def test_framing_only_removed_at_known_edges():
 
 
 def test_duplicate_interfaces_and_bad_bridge_rows():
-    assert run("interfaces", "GE1/0 UP UP\nGE1/0 DOWN DOWN").status == "partial"
-    assert run("interfaces", "GE1/0 unknown state description up").status == "failed"
-    assert (
-        run("interfaces", "Brief information on interfaces in bridge mode:\nGE1/0 UP 1G F A").status
-        == "failed"
-    )
-    assert (
-        run("interfaces", "GE1/0 administratively down down").records[0]["admin_status"] == "down"
-    )
+    assert generic("interfaces", "GE1/0 UP UP\nGE1/0 DOWN DOWN").status == "partial"
+    assert generic("interfaces", "GE1/0 unknown state description up").status == "failed"
+    bridge = "Brief information on interfaces in bridge mode:\nGE1/0 UP 1G F A"
+    assert generic("interfaces", bridge).status == "failed"
+    shut = generic("interfaces", "GE1/0 administratively down down")
+    assert shut.records[0]["admin_status"] == "down"

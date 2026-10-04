@@ -105,7 +105,7 @@ def test_bad_version_contract(field, value):
         lambda d: d["budgets"].update(full=601),
         lambda d: d.update(identity_profiles=["huawei-vrp"]),
         lambda d: d["capabilities"].update(secret={"command": "display secret"}),
-        lambda d: d["capabilities"]["mac"].update(command="display interface brief"),
+        lambda d: d["capabilities"]["mac"].update(command="display device manuinfo"),
         lambda d: d["verified"][0].update(parsed=["inventory"]),
     ],
 )

@@ -23,7 +23,14 @@ import ipaddress
 import re
 import time
 
-from .normalize import ip_address, mac_address, network_prefix
+from .normalize import (
+    interface_address,
+    ip_address,
+    mac_address,
+    network_prefix,
+    speed_mbps,
+    vrf_name,
+)
 from .parse import ParseResult
 from .tiers.common import IFNAME, interface, vlan
 
@@ -47,6 +54,8 @@ CHECK_ITEMS = {
     "vrrp": "topology.vrrp",
     "lag": "topology.lag",
     "stp": "topology.stp_ports",
+    "interfaces": "topology.interfaces",
+    "ip": "topology.ip_interfaces",
 }
 # Families whose CLI output rule governance parses for the capabilities above.
 FAMILIES = frozenset({"ios", "iosxe", "comware"})
@@ -150,7 +159,11 @@ def parse(identity, capability, raw, *, complete=True, model=None):
     incomplete = not complete or parsed.incomplete_output
     if incomplete:
         result.warnings.append("collection_incomplete")
-    result.warnings += [f"line:{n}:template_rejected" for n in parsed.rejected]
+    reasons = parsed.rejected_reasons or ("",) * len(parsed.rejected)
+    result.warnings += [
+        f"line:{n}:template_rejected" + (f":{why}" if why and why != "template_rejected" else "")
+        for n, why in zip(parsed.rejected, reasons)
+    ]
     result.warnings += list(parsed.problems)
     result.candidate_count = len(parsed.rows) + len(parsed.rejected)
     result.rejected_count = len(parsed.rejected)
@@ -173,7 +186,8 @@ def parse(identity, capability, raw, *, complete=True, model=None):
                 result.warnings.append(f"line:{lines[0] if lines else 0}:duplicate_entry")
                 continue
             seen.add(identity)
-        projected.append((record, lines))
+        # A row may hold several facts (an interface block with its addresses).
+        projected += [(item, lines) for item in (record if isinstance(record, list) else [record])]
     defects = result.rejected_count or parsed.problems
     if capability in WHOLE_TABLES and defects:
         return result  # a route table with an unread or invalid line is not used
@@ -711,6 +725,44 @@ def _stp_instances(rows, family):
     return {"instances": list(instances.values())}
 
 
+# Link states that say the port is administratively shut down.
+ADMIN_DOWN = {"adm", "*down", "admin down", "administratively down", "disabled"}
+L2_MODES = {"A": "access", "T": "trunk", "H": "hybrid"}
+
+
+def _interface_state(row, family, lines, warnings):
+    name = interface(row["INTERFACE"], family)
+    link = row["LINK"].lower()
+    record = {
+        "ifname": name.name,
+        "raw_name": row["INTERFACE"],
+        "type": name.kind,
+        "oper_status": "up" if link in {"up", "up(s)", "connected"} else "down",
+        # These tables report an administrative shutdown in the link column itself.
+        "admin_status": "down" if link in ADMIN_DOWN else "up",
+    }
+    if row.get("MODE") == "bridge":
+        record["speed_mbps"] = speed_mbps(row["SPEED"])
+        record["l2_mode"] = L2_MODES[row["TYPE"]]
+        pvid = vlan(row["PVID"])
+        if row["TYPE"] == "A":
+            record["access_vlan"] = pvid  # a trunk/hybrid PVID is not an access VLAN
+    record["description"] = " ".join((row.get("DESCRIPTION") or "").split()) or None
+    return record
+
+
+def _interface_addresses(row, family, lines, warnings):
+    """Each address an interface shows, with its mask; "--" is no address."""
+    name = interface(row["INTERFACE"], family).name
+    vrf = vrf_name(row["VRF"], family) if row.get("VRF") else "default"
+    values = row.get("ADDRESSES") or ([row["ADDRESS"]] if row.get("ADDRESS") else [])
+    return [
+        {"ifname": name, "vrf": vrf, **interface_address(value)}
+        for value in values
+        if value.lower() not in {"--", "unassigned", "none"}
+    ]
+
+
 def _vrf(row, family, lines, warnings):
     """A device-local VRF / VPN-instance name, never a global identity."""
     protocols = row.get("PROTOCOLS")
@@ -736,6 +788,8 @@ ROWS = {
     "vrrp": _vrrp,
     "lag": _lag,
     "stp": _stp_port,
+    "interfaces": _interface_state,
+    "ip": _interface_addresses,
 }
 MERGE = {"routes": _merge_routes, "vrf_detail": _merge_vrfs}
 # Capabilities whose rows form one summary fact (the VRF enumeration scopes collection).
@@ -771,4 +825,5 @@ UNIQUE = {
     "ldp_peers": ("peer_lsr_id", "label_space"),
     "tunnel_interfaces": ("ifname",),
     "stp": ("instance", "ifname"),
+    "interfaces": ("ifname",),
 }

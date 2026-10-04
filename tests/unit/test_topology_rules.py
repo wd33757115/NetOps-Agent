@@ -95,7 +95,7 @@ def test_arp_bad_row_is_rejected_and_the_rest_kept():
     result = run("arp", lab("arp").replace("0c22-57e9-0001", "not-a-mac"))
     assert result.status == "partial" and result.rejected_count == 1
     assert len(result.records) == 3 and "collection_incomplete" not in result.warnings
-    assert "line:5:template_rejected" in result.warnings
+    assert "line:5:template_rejected:unrecognized_display_arp_line" in result.warnings
     assert [s["lines"] for s in result.sources] == [[3], [4], [6]]
     tail = run("arp", lab("arp") + "\nBROKEN ROW unexpected syntax\n")
     assert tail.status == "partial" and len(tail.records) == 4

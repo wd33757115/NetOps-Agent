@@ -291,6 +291,34 @@ check_items:
       IS_ROOT: [text, false, 本桥即根桥（实例头）]
       BRIDGE_PRIORITY: [integer, false, 本桥优先级（实例头）]
       BRIDGE_ADDRESS: [text, false, 本桥 MAC（实例头）]
+  topology.interfaces:
+    name: 拓扑发现：接口状态
+    entity_type: interface
+    keys: [INTERFACE]
+    values:
+      INTERFACE: [text, true, 接口原文]
+      LINK: [text, true, 链路状态原文（含管理关闭）]
+      PROTOCOL: [text, false, 协议状态原文]
+      DESCRIPTION: [text, false, 接口描述]
+      MODE: [text, false, Comware 表的模式（route/bridge）]
+      PRIMARY_IP: [text, false, Comware 路由模式表的主地址]
+      SPEED: [text, false, Comware 桥模式表的速率原文]
+      DUPLEX: [text, false, Comware 桥模式表的双工原文]
+      TYPE: [text, false, Comware 桥模式表的链路类型（A/T/H）]
+      PVID: [text, false, Comware 桥模式表的 PVID]
+  topology.ip_interfaces:
+    name: 拓扑发现：接口地址
+    entity_type: interface_address
+    keys: [INTERFACE]
+    values:
+      INTERFACE: [text, true, 接口原文]
+      ADDRESS: [text, false, Comware 的地址/掩码长度（-- 为无）]
+      ADDRESSES: [text, false, IOS 的主地址与从地址（地址/掩码长度）]
+      VRF: [text, false, 所属 VRF（-- 为公网）]
+      STATUS: [text, false, IOS 的接口状态原文]
+      PHYSICAL: [text, false, Comware 的物理状态原文]
+      PROTOCOL: [text, false, 协议状态原文]
+      DESCRIPTION: [text, false, Comware 的接口描述（可能截断）]
 
 implementations:
   - check_item: topology.arp
@@ -522,6 +550,29 @@ implementations:
     template: Cisco/IOS/show_spanning-tree__topology-1.0.0.textfsm
     sha256: d0929b4656302b2f3a620be255eb41f0963b6c59c1639d9bd205bcf7f8960744
     valid_empty: ['\A\s*No spanning tree instances? exists?\.?\s*\Z']
+  - check_item: topology.interfaces
+    platform: ios
+    command: show interfaces description
+    template: Cisco/IOS/show_interfaces_description__topology-1.0.0.textfsm
+    sha256: 4e1f96363721ad3ebf079146fcba3c1955800c8b6bd0c9b2b568fbadc58bd42e
+    required: ['^Interface\s+Status\s+Protocol\s+Description\s*$']
+  - check_item: topology.interfaces
+    platform: comware
+    command: display interface brief
+    template: H3C/Comware7/display_interface_brief__topology-1.0.0.textfsm
+    sha256: 8ffe80b0df0a35cb9d527f2f2531927afd4a7448aadfc3bf5bfdc576489f7499
+    required: ['^Brief information on interfaces in (route|bridge) mode:']
+  - check_item: topology.ip_interfaces
+    platform: ios
+    command: show ip interface
+    template: Cisco/IOS/show_ip_interface__topology-1.0.0.textfsm
+    sha256: 60b6993667547189f1d868c971ae00a28d503a47b3e4ec554235a9994d4bf910
+  - check_item: topology.ip_interfaces
+    platform: comware
+    command: display ip interface brief
+    template: H3C/Comware7/display_ip_interface_brief__topology-1.0.0.textfsm
+    sha256: e3c4df5fd141da5300087d46bea1070f604a2800aeffbddbe312203226e1d918
+    required: ['^Interface\s+Physical\s+Protocol\s+IP address/Mask\s+VPN instance\s+Description\s*$']
 
 platforms:
   ios: {vendor: Cisco, platforms: [ios, iosxe], family: IOS}

@@ -13,9 +13,9 @@ capabilities:
   version: {command: display version, parser: generic_version}
   lldp_local: {command: display lldp local-information, parser: generic_lldp_local}
   lldp: {command: display lldp neighbor-information verbose, parser: generic_lldp}
-  interfaces: {command: display interface brief, parser: generic_ifbrief}
+  interfaces: {parser: rules}
   inventory: {command: display device manuinfo, parser: null}
-  ip: {command: display ip interface brief, parser: generic_ipif}
+  ip: {parser: rules}
   arp: {parser: rules}
   mac: {command: display mac-address, parser: generic_mac}
   vlan: {command: display vlan brief, parser: template_vlan}
