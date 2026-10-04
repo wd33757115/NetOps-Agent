@@ -448,6 +448,98 @@
    "modules": 12
   },
   {
+   "name": "pe1-routing-default",
+   "kind": "instance",
+   "mode": "get",
+   "expect": "pass",
+   "found": [],
+   "met": true,
+   "errors": [],
+   "warnings": 5,
+   "modules": 36
+  },
+  {
+   "name": "pe1-routing-default",
+   "kind": "instance",
+   "mode": "data",
+   "expect": "pass",
+   "found": [],
+   "met": true,
+   "errors": [],
+   "warnings": 16,
+   "modules": 36
+  },
+  {
+   "name": "pe1-routing-default",
+   "kind": "instance",
+   "mode": "strict",
+   "expect": "complete-or-collection",
+   "found": [
+    "collection/missing-mandatory"
+   ],
+   "met": true,
+   "errors": [
+    "libyang err : Mandatory node \"admin-status\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Ethernet0/1'])",
+    "libyang err : Mandatory node \"if-index\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Ethernet0/1'])",
+    "libyang err : Mandatory node \"discontinuity-time\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Ethernet0/1']/statistics)",
+    "libyang err : Mandatory node \"admin-status\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Loopback0'])",
+    "libyang err : Mandatory node \"if-index\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Loopback0'])",
+    "libyang err : Mandatory node \"discontinuity-time\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Loopback0']/statistics)",
+    "libyang err : Mandatory node \"discontinuity-time\" instance does not exist. (/ietf-routing:routing/control-plane-protocols/control-plane-protocol[type='ietf-mpls-ldp:mpls-ldp'][name='ldp']/ietf-mpls-ldp:mpls-ldp/discovery/interfaces/interface[name='Ethernet0/1']/address-families/ipv4/hello-adjacencies/hello-adjacency[adjacent-address='10.20.12.2']/statistics)",
+    "libyang err : Mandatory node \"discontinuity-time\" instance does not exist. (/ietf-routing:routing/control-plane-protocols/control-plane-protocol[type='ietf-mpls-ldp:mpls-ldp'][name='ldp']/ietf-mpls-ldp:mpls-ldp/peers/peer[lsr-id='10.255.20.2'][label-space-id='0']/statistics)"
+   ],
+   "warnings": 5,
+   "modules": 36
+  },
+  {
+   "name": "spine1-routing-default",
+   "kind": "instance",
+   "mode": "get",
+   "expect": "pass",
+   "found": [],
+   "met": true,
+   "errors": [],
+   "warnings": 5,
+   "modules": 33
+  },
+  {
+   "name": "spine1-routing-default",
+   "kind": "instance",
+   "mode": "data",
+   "expect": "pass",
+   "found": [],
+   "met": true,
+   "errors": [],
+   "warnings": 20,
+   "modules": 33
+  },
+  {
+   "name": "spine1-routing-default",
+   "kind": "instance",
+   "mode": "strict",
+   "expect": "complete-or-collection",
+   "found": [
+    "collection/missing-mandatory"
+   ],
+   "met": true,
+   "errors": [
+    "libyang err : Mandatory node \"admin-status\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Ethernet0/1'])",
+    "libyang err : Mandatory node \"if-index\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Ethernet0/1'])",
+    "libyang err : Mandatory node \"discontinuity-time\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Ethernet0/1']/statistics)",
+    "libyang err : Mandatory node \"admin-status\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Ethernet0/2'])",
+    "libyang err : Mandatory node \"if-index\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Ethernet0/2'])",
+    "libyang err : Mandatory node \"discontinuity-time\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Ethernet0/2']/statistics)",
+    "libyang err : Mandatory node \"admin-status\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Ethernet0/3'])",
+    "libyang err : Mandatory node \"if-index\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Ethernet0/3'])",
+    "libyang err : Mandatory node \"discontinuity-time\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Ethernet0/3']/statistics)",
+    "libyang err : Mandatory node \"admin-status\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Loopback0'])",
+    "libyang err : Mandatory node \"if-index\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Loopback0'])",
+    "libyang err : Mandatory node \"discontinuity-time\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Loopback0']/statistics)"
+   ],
+   "warnings": 5,
+   "modules": 33
+  },
+  {
    "name": "research-vsr-1-routes",
    "kind": "instance",
    "mode": "get",
@@ -644,7 +736,7 @@
    ],
    "met": true,
    "errors": [
-    "libyang err : Invalid enumeration value \"ibgp\". (/ietf-routing:routing/control-plane-protocols/control-plane-protocol[type='ietf-bgp:bgp'][name='65000']/ietf-bgp:bgp/neighbors/neighbor[neighbor-key='10.255.0.3']/peer-type) (line 80)"
+    "libyang err : Invalid enumeration value \"ibgp\". (/ietf-routing:routing/control-plane-protocols/control-plane-protocol[type='ietf-bgp:bgp'][name='65000']/ietf-bgp:bgp/neighbors/neighbor[neighbor-key='10.255.0.3']/peer-type) (line 87)"
    ],
    "warnings": 5,
    "modules": 33
@@ -727,6 +819,62 @@
    ],
    "warnings": 3,
    "modules": 12
+  },
+  {
+   "name": "ldp-interface-without-ipv4",
+   "kind": "instance",
+   "mode": "strict",
+   "expect": "semantic/must",
+   "found": [
+    "collection/missing-mandatory",
+    "semantic/must"
+   ],
+   "met": true,
+   "errors": [
+    "libyang err : Mandatory node \"admin-status\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Ethernet0/1'])",
+    "libyang err : Mandatory node \"if-index\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Ethernet0/1'])",
+    "libyang err : Mandatory node \"discontinuity-time\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Ethernet0/1']/statistics)",
+    "libyang err : Mandatory node \"admin-status\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Loopback0'])",
+    "libyang err : Mandatory node \"if-index\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Loopback0'])",
+    "libyang err : Mandatory node \"discontinuity-time\" instance does not exist. (/ietf-interfaces:interfaces/interface[name='Loopback0']/statistics)",
+    "libyang err : Must condition \"(/if:interfaces/if:interface[if:name=current()]/ip:ipv4) or (/if:interfaces/if:interface[if:name=current()]/ip:ipv6)\" not satisfied. (/ietf-routing:routing/control-plane-protocols/control-plane-protocol[type='ietf-mpls-ldp:mpls-ldp'][name='ldp']/ietf-mpls-ldp:mpls-ldp/discovery/interfaces/interface[name='Ethernet0/1']/name)",
+    "libyang err : Mandatory node \"discontinuity-time\" instance does not exist. (/ietf-routing:routing/control-plane-protocols/control-plane-protocol[type='ietf-mpls-ldp:mpls-ldp'][name='ldp']/ietf-mpls-ldp:mpls-ldp/discovery/interfaces/interface[name='Ethernet0/1']/address-families/ipv4/hello-adjacencies/hello-adjacency[adjacent-address='10.20.12.2']/statistics)",
+    "libyang err : Mandatory node \"discontinuity-time\" instance does not exist. (/ietf-routing:routing/control-plane-protocols/control-plane-protocol[type='ietf-mpls-ldp:mpls-ldp'][name='ldp']/ietf-mpls-ldp:mpls-ldp/peers/peer[lsr-id='10.255.20.2'][label-space-id='0']/statistics)"
+   ],
+   "warnings": 5,
+   "modules": 36
+  },
+  {
+   "name": "ldp-session-state-cli-text",
+   "kind": "instance",
+   "mode": "get",
+   "expect": "semantic/type",
+   "found": [
+    "semantic/type"
+   ],
+   "met": true,
+   "errors": [
+    "libyang err : Invalid enumeration value \"Oper\". (/ietf-routing:routing/control-plane-protocols/control-plane-protocol[type='ietf-mpls-ldp:mpls-ldp'][name='ldp']/ietf-mpls-ldp:mpls-ldp/peers/peer[lsr-id='10.255.20.2'][label-space-id='0']/session-state) (line 113)"
+   ],
+   "warnings": 5,
+   "modules": 36
+  },
+  {
+   "name": "bgp-afi-safi-cli-text",
+   "kind": "instance",
+   "mode": "get",
+   "expect": "semantic/unknown-identity",
+   "found": [
+    "semantic/missing-key",
+    "semantic/unknown-identity"
+   ],
+   "met": true,
+   "errors": [
+    "libyang err : Invalid identityref \"iana-bgp-afi-safi-types:evpn\" value - identity not found in module \"iana-bgp-afi-safi-types\". (/ietf-bgp:afi-safi/name) (line 77)",
+    "libyang err : List instance is missing its key \"name\". (/ietf-bgp:afi-safi) (line 78)"
+   ],
+   "warnings": 5,
+   "modules": 33
   },
   {
    "name": "vxlan-vni-out-of-range",

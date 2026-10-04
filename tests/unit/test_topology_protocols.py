@@ -105,7 +105,11 @@ def test_border_instances_name_the_process_and_the_as(campus):
     assert neighbours == {"10.255.0.2": "full", "10.255.0.3": "full", "10.255.0.4": "full"}
     (bgp,) = instances(facts, "bgp")
     assert bgp["name"] == "65000"
-    assert bgp["ietf-bgp:bgp"]["global"] == {"as": 65000, "identifier": "10.255.0.1"}
+    assert bgp["ietf-bgp:bgp"]["global"] == {
+        "as": 65000,
+        "identifier": "10.255.0.1",
+        "afi-safis": {"afi-safi": [{"name": "iana-bgp-afi-safi-types:ipv4-unicast"}]},
+    }
     types = {
         n["remote-address"]: n["peer-type"] for n in bgp["ietf-bgp:bgp"]["neighbors"]["neighbor"]
     }

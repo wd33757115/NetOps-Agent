@@ -14,8 +14,9 @@ import re
 from collections import defaultdict
 from copy import deepcopy
 
+from .device_ip import enrich_device_ip
 from .device_state import project_device_state
-from .protocols import OSPF, project_protocols
+from .protocols import LDP, MPLS, OSPF, project_protocols
 
 AF = {4: "ietf-ipv4-unicast-routing", 6: "ietf-ipv6-unicast-routing"}
 PROTOCOLS = {
@@ -450,12 +451,20 @@ def _protocols(observation, facts, routing):
 
     An OSPF interface is a reference into the interface list, so the interface is copied
     from the current interface projection; one that is not there is left out with a gap.
+    An LDP interface must carry IPv4 (RFC 9070), so it is copied with its observed IPv4
+    addresses; the MPLS interface list (RFC 8960) references interfaces the same way.
     """
     projected = project_protocols(facts)
     if not projected["instances"]:
         return
     state = project_device_state(observation)
     rows = {row["name"]: row for row in state["tree"]["ietf-interfaces:interfaces"]["interface"]}
+    enriched = enrich_device_ip(state, observation)["tree"]
+    ipv4 = {
+        row["name"]: row["ietf-ip:ipv4"]
+        for row in enriched.get("ietf-interfaces:interfaces", {}).get("interface", [])
+        if row.get("ietf-ip:ipv4")
+    }
     for scope, instances in sorted(projected["instances"].items()):
         entry = next((item for item in routing if item.get("vrf") == scope), None)
         if entry is None:
@@ -480,13 +489,50 @@ def _protocols(observation, facts, routing):
                             interface=interface["name"],
                         )
                 area["interfaces"]["interface"] = kept
+        addressed = set()
+        for instance in instances:
+            discovery = instance.get(LDP + "mpls-ldp", {}).get("discovery", {})
+            if not discovery:
+                continue
+            kept = []
+            for interface in discovery["interfaces"]["interface"]:
+                if interface["name"] in rows and interface["name"] in ipv4:
+                    kept.append(interface)
+                    addressed.add(interface["name"])
+                else:
+                    _gap(entry, "ldp_interface_reference_not_proven", interface=interface["name"])
+            if kept:
+                discovery["interfaces"]["interface"] = kept
+            else:
+                del instance[LDP + "mpls-ldp"]["discovery"]
         tree = entry["tree"]["ietf-routing:routing"]
         tree["control-plane-protocols"] = {"control-plane-protocol": deepcopy(instances)}
+        mpls = []
+        for name in projected["mpls"].get(scope, []):
+            if name in rows:
+                mpls.append({"name": name, "mpls-enabled": True})
+                used.add(name)
+            else:
+                _gap(entry, "mpls_interface_reference_not_proven", interface=name)
+        if mpls:
+            tree[MPLS + "mpls"] = {"interfaces": {"interface": mpls}}
+        used |= addressed
         if used:
             existing = entry["tree"].setdefault("ietf-interfaces:interfaces", {"interface": []})
             names = {row["name"] for row in existing["interface"]}
+            copies = []
+            for name in sorted(used - names):
+                row = deepcopy(rows[name])
+                if name in addressed:
+                    row["ietf-ip:ipv4"] = deepcopy(ipv4[name])
+                copies.append(row)
             existing["interface"] = sorted(
-                existing["interface"] + [deepcopy(rows[name]) for name in used - names],
-                key=lambda row: row["name"],
+                existing["interface"] + copies, key=lambda row: row["name"]
             )
-        entry["metadata"]["standards"] = ["RFC 8349", "RFC 9129", "draft-ietf-idr-bgp-model-21"]
+        entry["metadata"]["standards"] = [
+            "RFC 8349",
+            "RFC 9129",
+            "draft-ietf-idr-bgp-model-21",
+            "RFC 9070",
+            "RFC 8960",
+        ]

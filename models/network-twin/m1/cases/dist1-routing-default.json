@@ -71,7 +71,14 @@
      "ietf-bgp:bgp": {
       "global": {
        "as": 65000,
-       "identifier": "10.255.0.5"
+       "identifier": "10.255.0.5",
+       "afi-safis": {
+        "afi-safi": [
+         {
+          "name": "iana-bgp-afi-safi-types:ipv4-unicast"
+         }
+        ]
+       }
       },
       "neighbors": {
        "neighbor": [
@@ -80,14 +87,30 @@
          "remote-address": "10.255.0.3",
          "peer-as": 65000,
          "peer-type": "internal",
-         "session-state": "established"
+         "session-state": "established",
+         "afi-safis": {
+          "afi-safi": [
+           {
+            "name": "iana-bgp-afi-safi-types:ipv4-unicast",
+            "active": true
+           }
+          ]
+         }
         },
         {
          "neighbor-key": "10.255.0.4",
          "remote-address": "10.255.0.4",
          "peer-as": 65000,
          "peer-type": "internal",
-         "session-state": "established"
+         "session-state": "established",
+         "afi-safis": {
+          "afi-safi": [
+           {
+            "name": "iana-bgp-afi-safi-types:ipv4-unicast",
+            "active": true
+           }
+          ]
+         }
         }
        ]
       }

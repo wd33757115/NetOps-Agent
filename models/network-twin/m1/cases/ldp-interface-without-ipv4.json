@@ -1,0 +1,148 @@
+{
+ "ietf-routing:routing": {
+  "control-plane-protocols": {
+   "control-plane-protocol": [
+    {
+     "type": "ietf-ospf:ospfv2",
+     "name": "1",
+     "ietf-ospf:ospf": {
+      "router-id": "10.255.20.1",
+      "areas": {
+       "area": [
+        {
+         "area-id": "0.0.0.0",
+         "interfaces": {
+          "interface": [
+           {
+            "name": "Ethernet0/1",
+            "cost": 10,
+            "neighbors": {
+             "neighbor": [
+              {
+               "neighbor-router-id": "10.255.20.2",
+               "address": "10.20.12.2",
+               "state": "full"
+              }
+             ]
+            }
+           },
+           {
+            "name": "Loopback0",
+            "cost": 1
+           }
+          ]
+         }
+        }
+       ]
+      }
+     }
+    },
+    {
+     "type": "ietf-bgp:bgp",
+     "name": "65200",
+     "ietf-bgp:bgp": {
+      "global": {
+       "as": 65200,
+       "identifier": "10.255.20.1",
+       "afi-safis": {
+        "afi-safi": [
+         {
+          "name": "iana-bgp-afi-safi-types:l3vpn-ipv4-unicast"
+         }
+        ]
+       }
+      },
+      "neighbors": {
+       "neighbor": [
+        {
+         "neighbor-key": "10.255.20.3",
+         "remote-address": "10.255.20.3",
+         "peer-as": 65200,
+         "peer-type": "internal",
+         "session-state": "established",
+         "afi-safis": {
+          "afi-safi": [
+           {
+            "name": "iana-bgp-afi-safi-types:l3vpn-ipv4-unicast",
+            "active": true
+           }
+          ]
+         }
+        }
+       ]
+      }
+     }
+    },
+    {
+     "type": "ietf-mpls-ldp:mpls-ldp",
+     "name": "ldp",
+     "ietf-mpls-ldp:mpls-ldp": {
+      "global": {
+       "lsr-id": "10.255.20.1"
+      },
+      "discovery": {
+       "interfaces": {
+        "interface": [
+         {
+          "name": "Ethernet0/1",
+          "address-families": {
+           "ipv4": {
+            "hello-adjacencies": {
+             "hello-adjacency": [
+              {
+               "adjacent-address": "10.20.12.2",
+               "peer": {
+                "lsr-id": "10.255.20.2",
+                "label-space-id": 0
+               }
+              }
+             ]
+            }
+           }
+          }
+         }
+        ]
+       }
+      },
+      "peers": {
+       "peer": [
+        {
+         "lsr-id": "10.255.20.2",
+         "label-space-id": 0,
+         "session-state": "operational"
+        }
+       ]
+      }
+     }
+    }
+   ]
+  },
+  "ietf-mpls:mpls": {
+   "interfaces": {
+    "interface": [
+     {
+      "name": "Ethernet0/1",
+      "mpls-enabled": true
+     }
+    ]
+   }
+  }
+ },
+ "ietf-interfaces:interfaces": {
+  "interface": [
+   {
+    "name": "Ethernet0/1",
+    "type": "iana-if-type:ethernetCsmacd",
+    "oper-status": "up",
+    "enabled": true,
+    "description": "to P e0/1"
+   },
+   {
+    "name": "Loopback0",
+    "type": "iana-if-type:softwareLoopback",
+    "oper-status": "up",
+    "enabled": true
+   }
+  ]
+ }
+}

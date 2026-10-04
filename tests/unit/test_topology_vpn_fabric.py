@@ -14,8 +14,10 @@ from test_topology_campus_wan import IDENTITY
 
 from src.apps.topology.backend.collectors.parse import ParseResult, parse
 from src.apps.topology.backend.model.builder import build_topology_layers, device_node_ids
+from src.apps.topology.backend.model.device_control import project_device_control
 from src.apps.topology.backend.model.overlay import egress_instances, prepare
 from src.apps.topology.backend.model.path import trace
+from src.apps.topology.backend.model.protocols import adjacencies, project_protocols
 from src.apps.topology.backend.model.services import project_services, typed
 from src.apps.topology.backend.service import topology_observation
 
@@ -563,3 +565,112 @@ def test_overlay_export_validates_against_the_frozen_modules(fabric):
     model.from_raw(tree).validate(ctype=content)
     # L3NM/L2NM: yangson ignores the when conditions above their mandatory leaves and
     # cannot compile L3NM's leafrefs; libyang validates them in the M1 cases.
+
+
+def bgp_instance(facts):
+    (bgp,) = [
+        i for i in project_protocols(facts)["instances"]["default"] if i["type"] == "ietf-bgp:bgp"
+    ]
+    return bgp["ietf-bgp:bgp"]
+
+
+def test_vpn_routers_run_bgp_in_the_families_they_show(fabric):
+    # The IPv4 unicast table is empty on every router; the VPN families carry BGP.
+    pe1 = bgp_instance(fabric[ADDRESS["pe1"]])
+    assert pe1["global"] == {
+        "as": 65200,
+        "identifier": "10.255.20.1",
+        "afi-safis": {"afi-safi": [{"name": "iana-bgp-afi-safi-types:l3vpn-ipv4-unicast"}]},
+    }
+    (neighbour,) = pe1["neighbors"]["neighbor"]
+    assert (neighbour["remote-address"], neighbour["peer-type"]) == ("10.255.20.3", "internal")
+    assert neighbour["afi-safis"]["afi-safi"] == [
+        {"name": "iana-bgp-afi-safi-types:l3vpn-ipv4-unicast", "active": True}
+    ]
+    spine1 = bgp_instance(fabric[ADDRESS["spine1"]])
+    assert [n["remote-address"] for n in spine1["neighbors"]["neighbor"]] == [
+        "10.255.10.11",
+        "10.255.10.12",
+        "10.255.10.13",
+    ]
+
+
+def test_evpn_sessions_pair_the_leaves_with_both_route_reflectors(fabric):
+    sessions = {
+        tuple(sorted((NAME[x["a"]["device"]], NAME[x["b"]["device"]]))): (
+            x["status"],
+            x["afi_safis"],
+        )
+        for x in adjacencies(fabric)["bgp"]
+        if "b" in x
+    }
+    evpn = ("established", ["l2vpn-evpn"])
+    assert sessions == {
+        ("leaf1", "spine1"): evpn,
+        ("leaf1", "spine2"): evpn,
+        ("leaf2", "spine1"): evpn,
+        ("leaf2", "spine2"): evpn,
+        ("leaf3", "spine1"): evpn,
+        ("leaf3", "spine2"): evpn,
+        ("pe1", "pe2"): ("established", ["l3vpn-ipv4-unicast"]),
+    }
+
+
+def default_routing(device):
+    outcome = observation(device)
+    data = {k: outcome[k] for k in ("facts", "capabilities", "fact_metadata", "platform")}
+    (rib,) = [r for r in project_device_control({"data": data})["routing"] if r["vrf"] == "default"]
+    return rib
+
+
+def test_ldp_sessions_and_hello_adjacencies_with_mpls_interfaces():
+    rib = default_routing("p")
+    routing = rib["tree"]["ietf-routing:routing"]
+    (ldp,) = [
+        c
+        for c in routing["control-plane-protocols"]["control-plane-protocol"]
+        if c["type"] == "ietf-mpls-ldp:mpls-ldp"
+    ]
+    body = ldp["ietf-mpls-ldp:mpls-ldp"]
+    assert body["global"] == {"lsr-id": "10.255.20.2"}
+    assert body["peers"]["peer"] == [
+        {"lsr-id": "10.255.20.1", "label-space-id": 0, "session-state": "operational"},
+        {"lsr-id": "10.255.20.3", "label-space-id": 0, "session-state": "operational"},
+    ]
+    adjacencies = {
+        i["name"]: [
+            (a["adjacent-address"], a["peer"]["lsr-id"])
+            for a in i["address-families"]["ipv4"]["hello-adjacencies"]["hello-adjacency"]
+        ]
+        for i in body["discovery"]["interfaces"]["interface"]
+    }
+    assert adjacencies == {
+        "Ethernet0/1": [("10.20.12.1", "10.255.20.1")],
+        "Ethernet0/2": [("10.20.23.2", "10.255.20.3")],
+    }
+    assert routing["ietf-mpls:mpls"]["interfaces"]["interface"] == [
+        {"name": "Ethernet0/1", "mpls-enabled": True},
+        {"name": "Ethernet0/2", "mpls-enabled": True},
+    ]
+    # An LDP interface must carry IPv4 in the same tree (RFC 9070 must).
+    copied = {i["name"]: i for i in rib["tree"]["ietf-interfaces:interfaces"]["interface"]}
+    assert copied["Ethernet0/1"]["ietf-ip:ipv4"]["address"] == [
+        {"ip": "10.20.12.2", "prefix-length": 30}
+    ]
+
+
+def test_comware_ldp_without_discovery_sources_still_names_its_peer():
+    routing = default_routing("pe2")["tree"]["ietf-routing:routing"]
+    (ldp,) = [
+        c["ietf-mpls-ldp:mpls-ldp"]
+        for c in routing["control-plane-protocols"]["control-plane-protocol"]
+        if c["type"] == "ietf-mpls-ldp:mpls-ldp"
+    ]
+    assert "discovery" not in ldp and "global" not in ldp
+    assert ldp["peers"]["peer"] == [
+        {"lsr-id": "10.255.20.2", "label-space-id": 0, "session-state": "operational"}
+    ]
+    # Labels pushed out of GE2/0 prove MPLS there.
+    assert routing["ietf-mpls:mpls"]["interfaces"]["interface"] == [
+        {"name": "GigabitEthernet2/0", "mpls-enabled": True}
+    ]

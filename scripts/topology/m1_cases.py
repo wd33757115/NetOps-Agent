@@ -151,6 +151,15 @@ def app_outputs() -> dict[str, dict]:
     services = project_services(fabric, base)
     out["vpn-fabric-l3nm"] = services["l3nm"]["tree"]
     out["vpn-fabric-l2nm"] = services["l2nm"]["tree"]
+    # Device level: a PE (OSPF, BGP VPNv4, LDP, MPLS) and an EVPN route reflector.
+    for device in ("pe1", "spine1"):
+        outcome = vpn.observation(device)
+        observation = {
+            "data": {k: outcome[k] for k in ("facts", "capabilities", "fact_metadata", "platform")}
+        }
+        for rib in project_device_control(observation)["routing"]:
+            if rib["vrf"] == "default":
+                out[f"{device}-routing-default"] = rib["tree"]
     return out
 
 
@@ -353,6 +362,40 @@ def build() -> None:
         "RFC 9291 defect: the evpn-bgp case's pbb when names 'pbb-evpn' unprefixed, which "
         "ietf-l2vpn-ntw does not define; no instance of the case validates, so IOS "
         "'vlan-based' is not exported",
+    )
+
+    def ldp(t):
+        return protocol(t, "ietf-mpls-ldp:mpls-ldp")["ietf-mpls-ldp:mpls-ldp"]
+
+    mutate(
+        "pe1-routing-default",
+        "ldp-interface-without-ipv4",
+        lambda t: next(
+            i
+            for i in t["ietf-interfaces:interfaces"]["interface"]
+            if i["name"] == ldp(t)["discovery"]["interfaces"]["interface"][0]["name"]
+        ).pop("ietf-ip:ipv4"),
+        "strict",
+        "semantic/must",
+        "RFC 9070: an LDP interface must have IPv4 or IPv6 in the interface tree",
+    )
+    mutate(
+        "pe1-routing-default",
+        "ldp-session-state-cli-text",
+        lambda t: ldp(t)["peers"]["peer"][0].update({"session-state": "Oper"}),
+        "get",
+        "semantic/type",
+        "the IOS 'Oper' column is not an RFC 9070 session-state enum (operational)",
+    )
+    mutate(
+        "spine1-routing-default",
+        "bgp-afi-safi-cli-text",
+        lambda t: protocol(t, "ietf-bgp:bgp")["ietf-bgp:bgp"]["global"]["afi-safis"]["afi-safi"][
+            0
+        ].update({"name": "iana-bgp-afi-safi-types:evpn"}),
+        "get",
+        "semantic/unknown-identity",
+        "the CLI 'l2vpn evpn' family is IANA identity l2vpn-evpn, not 'evpn'",
     )
     mutate(
         "vpn-fabric-topology",

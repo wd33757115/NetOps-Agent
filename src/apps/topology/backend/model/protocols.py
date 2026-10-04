@@ -8,17 +8,30 @@ Instances, one RFC 8349 control-plane-protocol each, in the routing tree of thei
   facts) and the neighbours seen on each interface (router ID, address, state).
 - BGP (draft-ietf-idr-bgp-model-21): named by the local AS, by which the CLI identifies
   its one BGP process; global AS and identifier; neighbours keyed by their address with
-  peer AS, peer type (internal when the peer AS is the local AS) and session state.
-  "show ip bgp summary" / "display bgp peer ipv4" are the global IPv4 table.
+  peer AS, peer type (internal when the peer AS is the local AS) and session state. Each
+  address-family summary the device shows (IPv4 unicast, VPNv4, EVPN) adds its AFI-SAFI
+  to the global list and to every neighbour it lists, active when that row is
+  established. Prefix counts are not exported: the CLI columns do not say whether they
+  are counted before or after inbound policy, which the model distinguishes.
 
-Interface names in an OSPF instance reference the interface list, so the caller copies
-those interfaces into the same tree. Nothing unobserved (timers, LSDB, statistics) is
-filled in.
+- LDP (RFC 9070): one instance (the CLI shows one LDP process per router, named "ldp"
+  here); the local LSR ID when every session row shows the same one; peers keyed by
+  LSR ID and label space with their session state; per interface, the hello
+  adjacencies the device lists as discovery sources (IOS), each pointing at its peer.
+- MPLS (RFC 8960): the interfaces MPLS is proven enabled on: an LDP discovery source,
+  or the egress of a labelled LFIB entry (an outgoing label is pushed there). The LFIB
+  itself is not a RIB here: RFC 8960 keeps it in an MPLS RIB the App does not name.
+
+Interface names in an OSPF or LDP instance and in the MPLS interface list reference the
+interface list, so the caller copies those interfaces into the same tree. Nothing
+unobserved (timers, LSDB, statistics) is filled in.
 
 Adjacencies are analysis beside the trees, never merged into the L2/L3 graph: an OSPF
 neighbour row is matched to the collected device owning that address in the same scope
 and compared with that device's own view; a BGP peer is matched to the collected device
-owning the peer address, or reported as a peer outside the collected network.
+owning the peer address, or reported as a peer outside the collected network. A BGP
+session is one entry over all its address families (e.g. the EVPN sessions between leaves
+and route reflectors), listing the families either end shows.
 """
 
 from __future__ import annotations
@@ -29,6 +42,16 @@ from .ospf import project_ospf
 
 OSPF = "ietf-ospf:"
 BGP = "ietf-bgp:"
+AFI_SAFI = "iana-bgp-afi-safi-types:"
+LDP = "ietf-mpls-ldp:"
+MPLS = "ietf-mpls:"
+LDP_STATES = {"non-existent", "initialized", "openrec", "opensent", "operational"}
+# Address-family summary facts -> RFC 4760 AFI/SAFI (IANA BGP AFI-SAFI identities).
+BGP_FAMILIES = (
+    ("bgp_peers", "ipv4-unicast"),
+    ("bgp_vpnv4", "l3vpn-ipv4-unicast"),
+    ("bgp_evpn", "l2vpn-evpn"),
+)
 
 
 def _gap(gaps, code, **fields):
@@ -126,45 +149,150 @@ def _ospf_instances(facts, gaps):
     return instances, referenced
 
 
+def bgp_tables(facts):
+    """[(family, summary)] of the BGP address-family summaries the device showed."""
+    return [
+        (family, facts[key])
+        for key, family in BGP_FAMILIES
+        if isinstance(facts.get(key), dict) and "local_as" in facts[key]
+    ]
+
+
 def _bgp_instance(facts, gaps):
-    data = facts.get("bgp_peers")
-    if not isinstance(data, dict) or "local_as" not in data:
+    tables = bgp_tables(facts)
+    if not tables:
         return None  # BGP not running, or not observed
-    local_as = data["local_as"]
-    neighbours = []
-    for row in data.get("peers") or []:
-        neighbours.append(
-            {
-                "neighbor-key": row["peer"],
-                "remote-address": row["peer"],
-                "peer-as": row["peer_as"],
-                "peer-type": "internal" if row["peer_as"] == local_as else "external",
-                "session-state": row["state"],
-            }
-        )
-    keys = [n["neighbor-key"] for n in neighbours]
-    if len(keys) != len(set(keys)):
-        _gap(gaps, "duplicate_bgp_peer")
+    ases = {data["local_as"] for _, data in tables}
+    ids = {data["router_id"] for _, data in tables if data.get("router_id")}
+    if len(ases) > 1 or len(ids) > 1:
+        _gap(gaps, "bgp_tables_disagree")  # one process shows one AS and one ID
         return None
+    local_as = ases.pop()
+    neighbours, families = {}, []
+    for family, data in tables:
+        rows = data.get("peers") or []
+        if len({row["peer"] for row in rows}) != len(rows):
+            _gap(gaps, "duplicate_bgp_peer")
+            return None
+        if rows:
+            families.append(family)
+        for row in rows:
+            neighbour = neighbours.setdefault(
+                row["peer"],
+                {
+                    "neighbor-key": row["peer"],
+                    "remote-address": row["peer"],
+                    "peer-as": row["peer_as"],
+                    "peer-type": "internal" if row["peer_as"] == local_as else "external",
+                    "session-state": row["state"],
+                    "afi-safis": {"afi-safi": []},
+                },
+            )
+            if (neighbour["peer-as"], neighbour.get("session-state")) != (
+                row["peer_as"],
+                row["state"],
+            ):
+                # One session per neighbour: the summaries must agree on it.
+                _gap(gaps, "bgp_session_rows_disagree", peer=row["peer"])
+                neighbour.pop("session-state", None)
+                if neighbour["peer-as"] != row["peer_as"]:
+                    return None
+            neighbour["afi-safis"]["afi-safi"].append(
+                {"name": AFI_SAFI + family, "active": row["state"] == "established"}
+            )
     bgp = {"global": {"as": local_as}}
-    if data.get("router_id"):
-        bgp["global"]["identifier"] = data["router_id"]
+    if ids:
+        bgp["global"]["identifier"] = ids.pop()
+    if families:
+        bgp["global"]["afi-safis"] = {"afi-safi": [{"name": AFI_SAFI + f} for f in families]}
     if neighbours:
-        bgp["neighbors"] = {"neighbor": neighbours}
+        bgp["neighbors"] = {"neighbor": list(neighbours.values())}
     return {"type": BGP + "bgp", "name": str(local_as), BGP + "bgp": bgp}
 
 
+def _ldp_instance(facts, gaps):
+    rows = facts.get("ldp_peers")
+    if not isinstance(rows, list) or not rows:
+        return None  # LDP not running, or not observed
+    peers, discovery = {}, defaultdict(list)
+    for row in rows:
+        key = (row["peer_lsr_id"], row.get("label_space", 0))
+        if key in peers:
+            _gap(gaps, "duplicate_ldp_peer", lsr_id=key[0])
+            return None
+        peer = {"lsr-id": key[0], "label-space-id": key[1]}
+        if row.get("state") in LDP_STATES:
+            peer["session-state"] = row["state"]
+        peers[key] = peer
+        for source in row.get("discovery") or []:
+            discovery[source["ifname"]].append(
+                {
+                    "adjacent-address": source["address"],
+                    "peer": {"lsr-id": key[0], "label-space-id": key[1]},
+                }
+            )
+    ldp = {}
+    local = {row["local_lsr_id"] for row in rows if row.get("local_lsr_id")}
+    if len(local) == 1:
+        ldp["global"] = {"lsr-id": local.pop()}
+    if discovery:
+        ldp["discovery"] = {
+            "interfaces": {
+                "interface": [
+                    {
+                        "name": name,
+                        "address-families": {
+                            "ipv4": {"hello-adjacencies": {"hello-adjacency": adjacencies}}
+                        },
+                    }
+                    for name, adjacencies in sorted(discovery.items())
+                ]
+            }
+        }
+    ldp["peers"] = {"peer": list(peers.values())}
+    return {"type": LDP + "mpls-ldp", "name": "ldp", LDP + "mpls-ldp": ldp}
+
+
+def _mpls_interfaces(facts, ldp):
+    names = set()
+    if ldp:
+        for row in (
+            ldp[LDP + "mpls-ldp"].get("discovery", {}).get("interfaces", {}).get("interface", [])
+        ):
+            names.add(row["name"])
+    for row in facts.get("mpls_lfib") or []:
+        if row.get("vrf", "default") == "default" and type(row.get("out_label")) is int:
+            if row.get("ifname"):
+                names.add(row["ifname"])
+    return sorted(names)
+
+
 def project_protocols(facts):
-    """{instances: {scope: [control-plane-protocol]}, interfaces: {scope: [name]}, gaps}."""
+    """{instances: {scope: [control-plane-protocol]}, interfaces: {scope: [name]},
+    mpls: {scope: [interface name]}, gaps}."""
     gaps = []
     if not isinstance(facts, dict):
-        return {"instances": {}, "interfaces": {}, "gaps": [{"code": "invalid_facts"}]}
+        return {
+            "instances": {},
+            "interfaces": {},
+            "mpls": {},
+            "gaps": [{"code": "invalid_facts"}],
+        }
     instances, referenced = _ospf_instances(facts, gaps)
     bgp = _bgp_instance(facts, gaps)
     if bgp is not None:
         instances["default"].append(bgp)
+    ldp = _ldp_instance(facts, gaps)
+    if ldp is not None:
+        instances["default"].append(ldp)
+    mpls = _mpls_interfaces(facts, ldp)
     interfaces = {scope: sorted(names) for scope, names in referenced.items()}
-    return {"instances": dict(instances), "interfaces": interfaces, "gaps": gaps}
+    return {
+        "instances": dict(instances),
+        "interfaces": interfaces,
+        "mpls": {"default": mpls} if mpls else {},
+        "gaps": gaps,
+    }
 
 
 def _owners(devices):
@@ -248,11 +376,12 @@ def adjacencies(devices):
                 else "not_full",
             }
         )
-    sessions = {}
+    sessions, families = {}, defaultdict(list)
     for key, facts in sorted(devices.items()):
-        data = facts.get("bgp_peers") or {}
-        for row in data.get("peers") or []:
-            sessions[(key, row["peer"])] = (data.get("local_as"), row)
+        for family, data in bgp_tables(facts):
+            for row in data.get("peers") or []:
+                sessions.setdefault((key, row["peer"]), (data.get("local_as"), row))
+                families[(key, row["peer"])].append(family)
     done = set()
     for (key, address), (local_as, row) in sorted(sessions.items()):
         if (key, address) in done:
@@ -266,6 +395,7 @@ def adjacencies(devices):
                     "peer": address,
                     "peer_as": row["peer_as"],
                     "type": kind,
+                    "afi_safis": families[(key, address)],
                     "state": row["state"],
                     "status": "peer_outside_collection" if not peer else "peer_ambiguous",
                 }
@@ -289,6 +419,7 @@ def adjacencies(devices):
                 "a": {"device": key, "address": back[1] if back else None},
                 "b": {"device": peer_key, "address": address},
                 "type": kind,
+                "afi_safis": sorted(set(families[(key, address)]) | set(families.get(back, []))),
                 "states": states,
                 "status": "established"
                 if states == ["established", "established"]
