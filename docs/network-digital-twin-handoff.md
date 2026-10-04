@@ -70,6 +70,16 @@
 - **yangson**：校验不了 L3NM/L2NM（忽略 when 条件下的 mandatory 叶子、编译不了 L3NM 的 leafref），这两个模型只用 libyang 校验；叠加网络在 App 冻结模块集下用 yangson 校验通过。
 - **实验网主机仍在持续 ping**（保持 ARP/MAC/EVPN 表）。需要停止时运行 `venv/Scripts/python.exe scripts/topology/vpn_fabric/lab.py traffic --stop`。
 
+### 厂商无关化（2026-10-05，负责人决定）
+- **方向**：拓扑只回答"数据包从源到目的经过哪些设备"，其余交给 LLM；OSPF/BGP/LDP 建模保留现状，不再深化。路径上出现策略路由或 NAT 时，只标注"可能改变走向"（待设计卡）。
+- **完成**：家族差异全部改为数据，新增家族的步骤见 `docs/topology-rule-consumption.md` 第 7 节。
+  - 守卫测试 `test_topology_vendor_neutral.py` 禁止拓扑代码出现家族名，豁免清单只剩 #3 和 #12。
+  - Comware ARP 改用 verbose；三套实验网夹具已重采。
+- **实验网**：
+  - VSR 实验网是 GNS3 工程 `untitled`，两台 VSR 的 admin 已由负责人改为统一实验口令。
+  - vpn-fabric 重启后需要按 README 重绑 LEAF2 的 L3VNI。
+  - 负责人已授权实验环境内除口令以外的操作无需再问（2026-10-05）。
+
 ### M5 后续（未开始）
 - L3SM/L2SM 与 SAP/AC 绑定：需要服务订单或部署事实，不从 VRF 猜。
 - ACL、NAT、QoS、IPsec 与流条件分析；服务保障（RFC 9418）、告警与 OAM。

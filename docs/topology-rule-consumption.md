@@ -145,6 +145,14 @@ commands(check_item_ids) -> [{implementation_id, platforms, command, scoped_comm
 - **已部署（2026-10-04）**：
   - 规则治理 1.5.0 的 `bootstrap_version` 升到 3，部署时把系统基础检查项写入目录数据库；topology 0.7.0 声明依赖规则治理 ≥1.5.0，以 `published` 读取。
   - vpn-fabric 实机发现中，8 台设备的 M5 命令全部按已发布实现执行；输出用同一组钉住的模板复读，结果完整（见 `models/network-twin/m5/README.md`）。
+- **厂商无关化（2026-10-05，topology 0.7.2、规则治理 1.5.1）**：按负责人认可的分支清单逐项改为数据或通用规则，见第 7 节。
+  - #1/#2 Comware ARP 改用 `display arp verbose`：每个条目自带实例、VSI、VSI 接口和带单位的老化时间。ARP 检查项和 Comware 实现都升到 v2，`overlay.py` 不再推断实例。
+  - #5 按 VRF 输出的实例名：由实现声明 `scope_header`，未声明的输出按接口绑定校验。
+  - #6 字段单位：由实现声明 `units`。
+  - #7 是否先列举 VRF：按能力是否有按 VRF 的命令形式推出。
+  - #8–#11 家族、厂商、CLI 方言、验证过的主版本、接口名：都改为数据。
+  - 三套实验网的夹具（vpn-fabric、VSR、campus-wan）已用新命令重采，同时采回 Comware 的 `display ospf interface verbose` 原文。
+  - 未完成：#3/#4 OSPF 整表（改用 verbose 原文）、#12 NX-OS。
 - **待做**：
   - 系统模板登记到规则治理的模板库（数据库），让页面可见、可评审；目前模板文件由资产清单按 sha256 钉住；
   - NX-OS 等家族在有实机样本后补实现，届时删掉对应的通用解析器；
