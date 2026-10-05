@@ -20,6 +20,7 @@ from src.apps.topology.backend.model.path import trace
 from src.apps.topology.backend.model.protocols import adjacencies, project_protocols
 from src.apps.topology.backend.model.services import project_services, typed
 from src.apps.topology.backend.service import topology_observation
+from tests.unit.test_topology_path import without_policies
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures/topology/vpn-fabric"
 MANIFEST = json.loads((FIXTURES / "manifest.json").read_text(encoding="utf-8"))
@@ -140,7 +141,7 @@ def observation(device):
 @pytest.fixture(scope="module")
 def fabric():
     return {
-        address: {**observation(name)["facts"], "platform": DEVICES[name][1]}
+        address: without_policies({**observation(name)["facts"], "platform": DEVICES[name][1]})
         for name, address in ADDRESS.items()
     }
 

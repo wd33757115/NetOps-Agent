@@ -14,6 +14,7 @@ import pytest
 
 from src.apps.topology.backend.collectors.parse import parse
 from src.apps.topology.backend.model.path import trace
+from tests.unit.test_topology_path import without_policies
 from tests.unit.test_topology_policy_bindings import BASE, IDENTITY, INTERNET, PC1, observe
 
 NAT = Path(__file__).parents[1] / "fixtures/topology/campus-wan/nat"
@@ -31,7 +32,7 @@ def read(device, cap, text=None):
 
 @pytest.fixture(scope="module")
 def lab():
-    return observe(
+    observed = observe(
         {
             ADDRESS[device]: {
                 cap: read(device, cap)
@@ -41,6 +42,8 @@ def lab():
             for device in ("br1", "core1")
         }
     )
+    # NAT is on BR1 and CORE1; the other devices have no ACL, NAT or policy routing.
+    return {address: without_policies(facts) for address, facts in observed.items()}
 
 
 def names(path):

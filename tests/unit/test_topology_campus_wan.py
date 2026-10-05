@@ -25,6 +25,7 @@ from src.apps.topology.backend.model.builder import (
 from src.apps.topology.backend.model.locate import locate
 from src.apps.topology.backend.model.path import trace
 from src.apps.topology.backend.service import topology_observation
+from tests.unit.test_topology_path import without_policies
 
 FIXTURES = Path(__file__).resolve().parents[2] / "tests/fixtures/topology/campus-wan"
 MANIFEST = json.loads((FIXTURES / "manifest.json").read_text(encoding="utf-8"))
@@ -124,7 +125,9 @@ def devices():
             )
         )
         assert outcome["complete"] and outcome["failure_code"] is None
-        result[spec["management"]] = {**outcome["facts"], "platform": spec["platform"]}
+        result[spec["management"]] = without_policies(
+            {**outcome["facts"], "platform": spec["platform"]}
+        )
     return result
 
 

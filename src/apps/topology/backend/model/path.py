@@ -61,9 +61,12 @@ tunnel the packet is encapsulated, so the core's ACLs (which see the outer heade
 not checked; a device does not filter what it originates on the way out.
 
 A hop on a device whose ACL, binding or zone tables were not all observed completely lists
-them (``not_observed``) without changing the status: absent evidence is not evidence of a
-policy. A direction is ``complete`` when every path is delivered with no gap, ``blocked``
-when every path ends at an ACL deny with no gap, otherwise ``partial``.
+them (``not_observed``). Absent evidence is not evidence of a policy either way: when a
+table the walk computes (ACL, NAT, policy routing) is among them, the hop carries
+``policy_not_computed``, so the direction is never ``complete`` on it (an assistant once
+read "complete" there as "no ACL"). Security zones stay a note: their policy is not
+evaluated even when observed. A direction is ``complete`` when every path is delivered with
+no gap, ``blocked`` when every path ends at an ACL deny with no gap, otherwise ``partial``.
 
 A source host starts at the gateway of its subnet (every candidate when several could
 be its gateway); a source that is a device starts at that device. Equal-cost next hops
@@ -96,6 +99,8 @@ POLICY_TABLES = (
     "nat_bindings",
     "nat_rules",
 )
+# Of those, the ones the walk computes with: without them the hop is not computed.
+COMPUTED_TABLES = ("acl_bindings", "acl_rules", "pbr_bindings", "nat_bindings", "nat_rules")
 PROTOCOLS = {"tcp": TCP, "udp": UDP, "icmp": ICMP}
 ECHO_REQUEST, ECHO_REPLY = (8, 0), (0, 0)
 # The host's own gateway setting is not observed; the VRRP master is the inferred gateway.
@@ -523,6 +528,10 @@ class _Tracer:
                 return
             if missing := [name for name in POLICY_TABLES if name not in self.devices[key]]:
                 hop["not_observed"] = missing
+                if uncomputed := [name for name in missing if name in COMPUTED_TABLES]:
+                    hop.setdefault("gaps", []).append(
+                        {"status": "policy_not_computed", "tables": uncomputed}
+                    )
             if tunnel is not None:
                 hop["encapsulated"] = True  # arrived inside a tunnel: the outer header
             elif denied := self.filters(key, in_if, "in", packet, hop):
@@ -859,6 +868,22 @@ class _Tracer:
         return result
 
 
+def _routed(direction):
+    """Every path delivered, nothing truncated, no gap but an uncomputed policy table: the
+    routing is settled (symmetry compares routes, which ACLs and NAT do not change)."""
+    return (
+        bool(direction["paths"])
+        and not direction["truncated"]
+        and all(path["end"]["status"] == "delivered" for path in direction["paths"])
+        and all(
+            gap["status"] == "policy_not_computed"
+            for path in direction["paths"]
+            for hop in path["hops"]
+            for gap in hop.get("gaps", [])
+        )
+    )
+
+
 def _in_instance(source, vrf):
     """The locate answer narrowed to the ends in one network instance."""
 
@@ -1077,9 +1102,8 @@ def trace(
     reverse = _reverse(tracer, forward, destination, src, dst_vrf, src_vrf, request, reply)
     # Candidate first hops are not observed choices, so they cannot show asymmetry.
     routed = (
-        forward["paths"]
-        and reverse["paths"]
-        and forward["status"] == reverse["status"] == "complete"
+        _routed(forward)
+        and _routed(reverse)
         and "ambiguous" not in (forward["first_hop"], reverse["first_hop"])
     )
     gaps = (

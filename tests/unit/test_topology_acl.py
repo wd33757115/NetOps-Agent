@@ -22,6 +22,7 @@ from src.apps.topology.backend.collectors.parse import parse
 from src.apps.topology.backend.model.acl import entry_matches, evaluate
 from src.apps.topology.backend.model.device_acl import project_device_acl
 from src.apps.topology.backend.model.path import trace
+from tests.unit.test_topology_path import without_policies
 from tests.unit.test_topology_policy_bindings import BASE, IDENTITY, INTERNET, PC1, PC4, observe
 from tests.unit.test_topology_vrf_collection import ios  # noqa: F401  (fixture)
 
@@ -223,7 +224,8 @@ def test_fragment_and_inactive_time_range_entries():
 
 @pytest.fixture(scope="module")
 def scenario():
-    return observe(
+    # The scenario's ACLs are on BR1 and DIST1; no device had NAT or policy routing then.
+    observed = observe(
         {
             ADDRESS[device]: {
                 cap: read(SCENARIO, device, cap)
@@ -233,6 +235,7 @@ def scenario():
             for device in ("br1", "dist1")
         }
     )
+    return {address: without_policies(facts) for address, facts in observed.items()}
 
 
 def names(path):
@@ -356,8 +359,9 @@ def test_a_bound_acl_whose_entries_were_not_read_stays_open(scenario):
     forward = trace(unread, BASE, PC1, PC4, protocol="icmp")["forward"]
     [path] = forward["paths"]
     assert forward["status"] == "partial"
-    gap = path["hops"][0]["gaps"][0]
-    assert (gap["status"], gap["needs"]) == ("filter_undetermined", ["acl_entries"])
+    gaps = {gap["status"]: gap for gap in path["hops"][0]["gaps"]}
+    assert gaps["filter_undetermined"]["needs"] == ["acl_entries"]
+    assert gaps["policy_not_computed"]["tables"] == ["acl_rules"]
     assert "acl_rules" in path["hops"][0]["not_observed"]
 
 

@@ -4,7 +4,7 @@ import pytest
 
 from src.apps.topology.backend.collectors.parse import parse
 from src.apps.topology.backend.model import path as paths
-from src.apps.topology.backend.model.path import trace
+from src.apps.topology.backend.model.path import COMPUTED_TABLES, trace
 
 LAB = Path(__file__).resolve().parents[1] / "fixtures/topology/h3c/vsr1000-7.1.064"
 FILES = {
@@ -19,6 +19,12 @@ FILES = {
 BASE = "urn:netops:topology:test:"
 
 
+def without_policies(facts):
+    """A device known to have no ACL, NAT or policy routing: each table observed, empty.
+    Routing fixtures predate their collection; without them no hop is computed."""
+    return {**{table: [] for table in COMPUTED_TABLES}, **facts}
+
+
 def lab():
     devices = {}
     for address, name in (("10.10.1.1", "vsr-1"), ("10.10.1.2", "vsr-2")):
@@ -31,7 +37,7 @@ def lab():
             )
             assert parsed.status == "complete", (name, cap)
             facts[cap] = parsed.summary if cap == "lldp_local" else parsed.records
-        devices[address] = facts
+        devices[address] = without_policies(facts)
     return devices
 
 
@@ -130,7 +136,7 @@ def router(chassis, ips, routes=None):
     }
     if routes is not None:
         facts["routes"] = routes
-    return facts
+    return without_policies(facts)
 
 
 def route(prefix, *next_hops, protocol="Static", preference=60):

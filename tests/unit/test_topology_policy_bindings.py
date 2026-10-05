@@ -16,6 +16,7 @@ from src.apps.topology.backend.collectors.parse import parse
 from src.apps.topology.backend.model.path import trace
 from src.apps.topology.backend.service import topology_observation
 from tests.unit.test_topology_campus_wan import BASE, EXPECTED, IDENTITY, parsed
+from tests.unit.test_topology_path import without_policies
 
 POLICIES = Path(__file__).parents[1] / "fixtures/topology/campus-wan/policies"
 OBSERVED = {"10.10.1.11": ("br1", "comware"), "10.10.1.13": ("core1", "ios")}
@@ -71,13 +72,14 @@ def by_core(direction):
     }
 
 
-def gaps(path, device):
-    [hop] = [h for h in path["hops"] if h["device"]["name"].split(".")[0] == device]
-    return hop.get("gaps", [])
-
-
 PBR = "policy_may_redirect"
 NAT = "nat_may_translate"
+
+
+def gaps(path, device):
+    """The binding flags of a device's hop (an uncomputed table is tested on its own)."""
+    [hop] = [h for h in path["hops"] if h["device"]["name"].split(".")[0] == device]
+    return [gap for gap in hop.get("gaps", []) if gap["status"] in {PBR, NAT}]
 
 
 @pytest.mark.parametrize(
@@ -216,14 +218,15 @@ def test_hops_through_bound_interfaces_are_flagged(plain, bound):
 
 
 def test_a_flag_makes_a_delivered_direction_partial(plain, bound):
-    assert trace(plain, BASE, PC1, BR1_LOOPBACK)["forward"]["status"] == "complete"
+    none = {address: without_policies(facts) for address, facts in plain.items()}
+    assert trace(none, BASE, PC1, BR1_LOOPBACK)["forward"]["status"] == "complete"
     result = trace(bound, BASE, PC1, BR1_LOOPBACK)
     assert result["forward"]["status"] == "partial"
     assert {p["end"]["status"] for p in result["forward"]["paths"]} == {"delivered"}
     flagged = {
         (g["device"]["name"].split(".")[0], g["interface"], g["status"])
         for g in result["gaps"]
-        if g["direction"] == "forward"
+        if g["direction"] == "forward" and g["status"] in {PBR, NAT}
     }
     assert flagged == {
         ("CORE1", "Ethernet1/0", PBR),
@@ -246,12 +249,18 @@ def test_a_policy_route_is_read_on_ingress_only(bound):
     ]
 
 
-def test_unobserved_bindings_are_noted_without_changing_the_status(plain, bound):
+def test_unobserved_policy_tables_leave_the_direction_uncomputed(plain, bound):
+    # Absent tables are no evidence of "no ACL": the hop says what it did not compute, and
+    # the direction is not complete (an assistant once read "complete" as "no ACL").
     result = trace(plain, BASE, PC1, PC4)["forward"]
-    assert result["status"] == "complete"
+    assert result["status"] == "partial"
     [path] = result["paths"]
     [hop] = path["hops"]
-    assert {"pbr_bindings", "nat_bindings"} <= set(hop["not_observed"]) and not hop.get("gaps")
+    assert path["end"]["status"] == "delivered"
+    assert {"pbr_bindings", "nat_bindings"} <= set(hop["not_observed"])
+    [gap] = hop["gaps"]
+    assert gap["status"] == "policy_not_computed"
+    assert set(gap["tables"]) == set(hop["not_observed"]) - {"security_zones"}
     # Where both tables were read completely there is nothing to note.
     paths = by_core(trace(bound, BASE, PC1, BR1_LOOPBACK)["forward"])
     assert all(

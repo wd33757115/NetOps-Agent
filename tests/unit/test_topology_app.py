@@ -889,7 +889,16 @@ def test_trace_answers_both_directions_from_a_snapshot(world):
     assert found["snapshot_id"] == result["snapshot_id"]
     assert found["analysis_profile"] == service.MODEL_PROFILE
     assert found["snapshot_model_profile"] == result["graph"]["model_profile"]
-    assert found["forward"]["status"] == found["reverse"]["status"] == "complete"
+    # The lab fixtures predate ACL, NAT and policy-routing collection: the routing is settled
+    # but no hop is computed for them, so neither direction is complete.
+    for direction in (found["forward"], found["reverse"]):
+        assert direction["status"] == "partial"
+        assert {
+            gap["status"]
+            for path in direction["paths"]
+            for hop in path["hops"]
+            for gap in hop.get("gaps", [])
+        } == {"policy_not_computed"}
     first = found["forward"]["paths"][0]["hops"][0]
     assert (first["device"]["address"], first["route"]["next_hop"]) == ("10.10.1.2", "2.2.2.2")
     # Each hop carries the observation it came from, like located ports do.
