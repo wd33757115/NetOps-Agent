@@ -293,3 +293,18 @@ def test_an_arp_entry_tied_to_no_interface_does_not_stop_the_analysis(lab):
     br1["arp"] = [*br1["arp"], {"vrf": "default", "ip": "192.168.20.14", "mac": "00:50:79:66:68:00", "vsi": "BLUE-20", "type": "dynamic"}]
     assert trace(devices, BASE, PC1, INTERNET, protocol="icmp")["forward"]["paths"]
     assert answer(_Locator(devices, BASE, {}), "ip", PC1)["status"] != "not_found"
+
+
+def test_the_assistant_reads_a_path_without_internal_identifiers(lab):
+    import json
+
+    from src.apps.topology.backend.tools import _model_view
+
+    full = trace(lab, BASE, PC1, INTERNET, protocol="icmp")
+    view = _model_view(full)
+    hop = view["forward"]["paths"][0]["hops"][-1]
+    assert hop["device"] == "BR1 (10.10.1.11)"
+    assert "interface_states" not in hop  # both of BR1's interfaces are up
+    assert hop["translations"] == full["forward"]["paths"][0]["hops"][-1]["translations"]
+    assert "node_id" not in json.dumps(view) and "evidence_id" not in json.dumps(view)
+    assert len(json.dumps(view, ensure_ascii=False, indent=2)) < len(json.dumps(full, ensure_ascii=False, indent=2)) / 1.5

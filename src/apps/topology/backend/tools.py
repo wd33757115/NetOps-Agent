@@ -4,6 +4,36 @@ from src.platform.tools.registry import Tool
 
 from . import service
 
+# Internal identifiers a model does not reason with; a path answer for an assistant must
+# fit its evidence budget, so they are left out of what the tool returns (the API keeps them).
+INTERNAL = frozenset({"node_id", "collected", "platform", "evidence_id", "observed_at", "link_id"})
+
+
+def _model_view(value):
+    """A path answer as a model reads it: a device as "name (address)", only the interface
+    states that are not plainly up, no internal identifiers. Nothing else is dropped."""
+    if isinstance(value, list):
+        return [_model_view(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    view = {}
+    for key, item in value.items():
+        if key in INTERNAL:
+            continue
+        if key == "device" and isinstance(item, dict) and "name" in item:
+            view[key] = f"{item['name']} ({item['address']})" if item.get("address") else item["name"]
+        elif key == "interface_states" and isinstance(item, dict):
+            unusual = {
+                role: _model_view(state)
+                for role, state in item.items()
+                if state.get("oper_status") != "up" or state.get("admin_status")
+            }
+            if unusual:
+                view[key] = unusual
+        else:
+            view[key] = _model_view(item)
+    return view
+
 
 class Read(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -99,13 +129,19 @@ TOOLS = [
         "未检查二层设备上的 ACL 和二层转发规则。"
         "现场不一致也可能源于覆盖或推导限制；只读，不登录设备。",
         Trace,
-        lambda user, body: service.trace_current(
-            user.user_id,
-            body.src,
-            body.dst,
-            body.src_vrf,
-            body.dst_vrf,
-            flow={"protocol": body.protocol, "src_port": body.src_port, "dst_port": body.dst_port},
+        lambda user, body: _model_view(
+            service.trace_current(
+                user.user_id,
+                body.src,
+                body.dst,
+                body.src_vrf,
+                body.dst_vrf,
+                flow={
+                    "protocol": body.protocol,
+                    "src_port": body.src_port,
+                    "dst_port": body.dst_port,
+                },
+            )
         ),
         evidence=True,
     ),
