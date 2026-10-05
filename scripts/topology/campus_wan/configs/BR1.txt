@@ -56,6 +56,7 @@ bgp 65000
   quit
  quit
 ssh server enable
+netconf ssh server enable
 line vty 0 63
  authentication-mode scheme
  protocol inbound ssh
