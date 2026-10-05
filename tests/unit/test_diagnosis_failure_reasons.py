@@ -29,6 +29,12 @@ def test_true_approvals_and_unknown_codes_still_say_so():
     assert why_not_run("comware", " ", "L4").endswith("（empty_command）")
 
 
+def test_a_command_of_the_other_platform_names_the_device_platform():
+    # A model once sent ten Comware "display" commands to IOS devices.
+    assert "Cisco IOS，查看类命令用 show" in why_not_run("ios", "display ip interface brief", "L3")
+    assert "H3C Comware，查看类命令用 display" in why_not_run("comware", "show ip route", "L3")
+
+
 class Arguments(BaseModel):
     host: str
 

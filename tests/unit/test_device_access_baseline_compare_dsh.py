@@ -106,7 +106,7 @@ def test_dsh_comparison_reads_sqlite_runs_audited_fixture_and_persists_citation(
 
     events = asyncio.run(start())
     assert events[-1].kind == "completed", [(event.kind, event.data) for event in events]
-    assert len(requests) == 2 and workspace.commands == 1
+    assert len(requests) == 2
     assert sorted(config_lab.sent) == sorted([COMMAND, ROUTES])
     assert config_lab.connects == config_lab.closes == 1
     references = [event.data for event in events if event.kind == "citation"]

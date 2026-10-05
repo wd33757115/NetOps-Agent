@@ -71,6 +71,9 @@ def tool_failure(exc, seconds):
 NATIVE = {"read", "glob", "grep"}
 SUBMIT_ANSWER = "mcp__netops__submit_answer"
 MAX_OUTPUT_TOKENS = 8192
+# Shares of a run's token budget: past the first the model is asked to converge, past the
+# second only the answer may be submitted (the rest is left for that last request).
+TOKEN_NOTICE, TOKEN_CLOSING = 0.6, 0.8
 # Reasoning is output too: a thinking run gets room for it before the answer.
 THINKING_OUTPUT_TOKENS = 32768
 
@@ -131,6 +134,10 @@ class Bridge:
             with self.request_log.open("a", encoding="utf-8") as file:
                 file.write(json.dumps(row, ensure_ascii=False) + "\n")
 
+    def tokens_used(self):
+        """Tokens the provider reported for this run, else an estimate from what was sent."""
+        return self.usage.get("total_tokens") or self.input_characters // 3
+
     def measured(self, name, started):
         self.timings[name] = self.timings.get(name, 0) + (time.monotonic() - started) * 1000
 
@@ -146,6 +153,7 @@ class Bridge:
             "model_finish_reason": self.model_finish_reason,
             "sdk_finish_reason": self.sdk_finish_reason,
             "max_output_tokens": output_cap(self.context),
+            "max_total_tokens": self.context.max_total_tokens,
             "model": self.model_id,
             "reasoning_effort": self.context.reasoning_effort,
         }
@@ -191,7 +199,8 @@ class Bridge:
             data = await request.json()
             if self.closing and data["name"] != SUBMIT_ANSWER:
                 raise PermissionError("Run is reserved for answer submission")
-            if data["name"] not in self.allowed or self.calls >= self.context.max_tool_calls:
+            calls = self.context.max_tool_calls
+            if data["name"] not in self.allowed or (calls is not None and self.calls >= calls):
                 raise PermissionError("Tool budget or scope exceeded")
             self.calls += 1
             self.tool_starts[data["call_id"]] = time.monotonic()
@@ -284,9 +293,16 @@ class Bridge:
             body = await request.json()
             # Server-owned read locations guide the SDK's next decision, without another loop.
             guidance = self.catalog.citation_guidance()
-            if self.rounds >= self.context.max_model_rounds - 2:
+            rounds, calls = self.context.max_model_rounds, self.context.max_tool_calls
+            budget, used = self.context.max_total_tokens, self.tokens_used()
+            if rounds is not None and self.rounds >= rounds - 2:
                 guidance += (
                     "\n本轮剩余模型调用不超过2次，请完成必要引用检查或明确资料不足，避免重复搜索。"
+                )
+            elif budget is not None and used >= budget * TOKEN_NOTICE:
+                guidance += (
+                    "\n本轮 token 预算已用过半，请完成必要核查后提交答案，"
+                    "未取得的证据列入待验证，避免重复查询。"
                 )
             messages = [dict(message) for message in body.get("messages", [])]
             if (
@@ -301,7 +317,9 @@ class Bridge:
             if len(json.dumps(body, ensure_ascii=False)) > MAX_CONTEXT_CHARACTERS:
                 self.failure_code = "session_context_full"
                 raise ValueError("Session context budget exceeded")
-            if self.rounds >= self.context.max_model_rounds:
+            if (rounds is not None and self.rounds >= rounds) or (
+                budget is not None and used >= budget
+            ):
                 self.failure_code = self.catalog.validation_issue or "run_budget_exceeded"
                 raise ValueError("Model request budget exceeded")
             self.rounds += 1
@@ -314,8 +332,9 @@ class Bridge:
             if not NATIVE <= offered:
                 raise ValueError("Official file tools are missing")
             self.closing = self.closing or (
-                self.rounds >= self.context.max_model_rounds - 1
-                or self.calls >= self.context.max_tool_calls - 2
+                (rounds is not None and self.rounds >= rounds - 1)
+                or (calls is not None and self.calls >= calls - 2)
+                or (budget is not None and used >= budget * TOKEN_CLOSING)
             )
             if self.closing:
                 # Reserve the end of the same SDK run for a checked answer (or insufficiency).

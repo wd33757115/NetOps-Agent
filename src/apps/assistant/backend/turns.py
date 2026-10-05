@@ -26,6 +26,10 @@ ACTIVE = ("running", "cancel_requested")
 
 
 TURN_SECONDS = 300
+# A turn is limited by the tokens it spends alone (owner, 2026-10-05): no count of model
+# rounds, tool calls, devices or commands. The per-request context limit and the turn's
+# time limit still hold.
+TURN_TOKENS = 600_000
 
 class Question(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -290,8 +294,9 @@ async def _execute(actor_id, run, body, *, agent_runtime=None, on_event=None):
         actor_id,
         run["conversation_id"],
         timeout_seconds=TURN_SECONDS,
-        max_tool_calls=30,
-        max_model_rounds=15,
+        max_tool_calls=None,
+        max_model_rounds=None,
+        max_total_tokens=TURN_TOKENS,
         model=model,
         reasoning_effort=effort,
     )

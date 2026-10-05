@@ -34,6 +34,10 @@ PROBE_EXAMPLE = {
     "ios": "ping 目标地址 source 源地址 repeat 3（选项写在目标地址之后）",
     "nxos": "ping 目标地址 source 源地址 count 3（选项写在目标地址之后）",
 }
+# What a show command starts with on each platform; a model once sent ten Comware
+# "display" commands to IOS devices before reading their platform.
+PLATFORM_NAMES = {"comware": "H3C Comware", "vrp": "Huawei VRP", "ios": "Cisco IOS", "nxos": "Cisco NX-OS"}
+SHOW_VERBS = {"comware": "display", "vrp": "display", "ios": "show", "nxos": "show"}
 # Refusals the model can correct are said plainly; "approval" was once reported
 # for a ping whose option was merely out of place, and the model gave up on it.
 REASONS = {
@@ -48,7 +52,7 @@ REASONS = {
     ),
     "probe_filters_require_review": "探测命令不能加管道过滤，去掉过滤后可直接执行",
     "unknown_command_requires_review": (
-        "不在只读命令库中，需要人工审批；可改用标准的 display/show 命令"
+        "不在只读命令库中，需要人工审批；该设备是 {name}，查看类命令用 {verb}"
     ),
     "configuration_or_mutation": "配置或变更类命令，不执行",
     "unsafe_pipe": "不允许的管道用法，去掉后重试",
@@ -61,7 +65,11 @@ def why_not_run(platform, text, level):
     reason = classify(platform, text).reason
     message = REASONS.get(reason)
     if message:
-        return message.format(example=PROBE_EXAMPLE.get(platform, "见设备手册"))
+        return message.format(
+            example=PROBE_EXAMPLE.get(platform, "见设备手册"),
+            name=PLATFORM_NAMES.get(platform, platform),
+            verb=SHOW_VERBS.get(platform, "display/show"),
+        )
     return NOT_RUN.get(level, NOT_RUN["L4"]) + f"（{reason}）"
 
 

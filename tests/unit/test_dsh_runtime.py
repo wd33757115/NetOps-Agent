@@ -798,6 +798,71 @@ def test_tool_budget_closing_starts_at_next_model_request_and_stays_closed(works
     asyncio.run(run())
 
 
+def test_a_token_budget_alone_limits_a_run(workspace, tmp_path):
+    from types import SimpleNamespace
+    from src.platform.agent_runtime.dsh import Bridge, NATIVE, SUBMIT_ANSWER
+
+    workspace.prepare(tmp_path / "prepared")
+
+    async def run():
+        requests = []
+
+        async def model(body):
+            requests.append(body)
+            return response({"content": ""}, "stop")
+
+        context = RunContext(
+            "tokens", "alice", "conv",
+            max_tool_calls=None, max_model_rounds=None, max_total_tokens=100_000,
+        )
+        bridge = Bridge(context, workspace, asyncio.Queue(), transport=model)
+        bridge.allowed.add(SUBMIT_ANSWER)
+
+        def request(data):
+            async def request_json():
+                return json.loads(json.dumps(data))
+            return SimpleNamespace(json=request_json)
+
+        # No count of tool calls or model rounds, far past the former ceilings.
+        bridge.calls, bridge.rounds = 100, 40
+        reply = await bridge.before(request({"name": "glob", "call_id": "1",
+                                              "arguments": {"pattern": "*.txt"}}))
+        assert reply.status_code == 200
+        original = {"messages": [], "tools": [
+            {"type": "function", "function": {"name": name}} for name in NATIVE | {SUBMIT_ANSWER}
+        ]}
+
+        def offered():
+            return {t["function"]["name"] for t in requests[-1]["tools"]}
+
+        def system():
+            return requests[-1]["messages"][0]["content"]
+
+        bridge.usage = {"total_tokens": 50_000}
+        assert (await bridge.model(request(original))).status_code == 200
+        assert offered() == NATIVE | {SUBMIT_ANSWER} and "token 预算" not in system()
+        bridge.usage = {"total_tokens": 65_000}  # past the notice share
+        assert (await bridge.model(request(original))).status_code == 200
+        assert "token 预算已用过半" in system() and not bridge.closing
+        bridge.usage = {"total_tokens": 85_000}  # past the closing share
+        assert (await bridge.model(request(original))).status_code == 200
+        assert bridge.closing and offered() == {SUBMIT_ANSWER}
+        bridge.usage = {"total_tokens": 100_000}
+        assert (await bridge.model(request(original))).status_code == 503
+        assert bridge.failure_code == "run_budget_exceeded" and len(requests) == 3
+        assert bridge.statistics()["max_total_tokens"] == 100_000
+
+    asyncio.run(run())
+
+
+def test_a_run_needs_a_round_or_token_limit():
+    with pytest.raises(ValueError):
+        RunContext("r", "alice", "c", max_model_rounds=None)
+    with pytest.raises(ValueError):
+        RunContext("r", "alice", "c", max_model_rounds=None, max_total_tokens=1_000)
+    RunContext("r", "alice", "c", max_tool_calls=None, max_model_rounds=None, max_total_tokens=600_000)
+
+
 def test_disconnect_after_started_reaps_pending_run(workspace):
     async def run():
         runtime = DshRuntime()

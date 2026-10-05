@@ -429,21 +429,20 @@ def test_diagnosis_can_only_reach_devices_this_turns_topology_answer_named(works
         space.invoke("device_access__run", {**run, "platform": "ios"})
 
 
-def test_diagnosis_budgets_commands_and_devices_per_turn(workspace):
+def test_a_turn_counts_no_commands_or_devices(workspace):
+    # The run's token budget is the only limit (owner, 2026-10-05); the scope still holds.
     space = workspace.space
     space.invoke("topology__trace_path", {"src": "1.1.1.2", "dst": "192.168.1.2"})
     five = {"host": "10.0.0.1", "commands": ["display version"] * 5, "purpose": "核对"}
-    for _ in range(workspace.module.MAX_COMMANDS // 5):
+    for _ in range(10):
         space.invoke("device_access__run", five)
-    with pytest.raises(PermissionError):
-        space.invoke("device_access__run", {**five, "commands": ["display version"]})
     many = [device(f"10.1.0.{n}") for n in range(20)]
     space.scope.clear()
     space.widen(trace_answer(*many))
-    assert len(space.scope) == workspace.module.MAX_DEVICES
+    assert len(space.scope) == 20
 
 
-def test_baseline_comparison_uses_the_same_scope_and_command_budget(workspace):
+def test_baseline_comparison_uses_the_same_scope(workspace):
     space = workspace.space
     query = {"hosts": ["10.0.0.1", "10.0.0.4"], "purpose": "看路径上的设备变了什么"}
     with pytest.raises(PermissionError):
@@ -463,17 +462,12 @@ def test_baseline_comparison_uses_the_same_scope_and_command_budget(workspace):
     outside = {**query, "hosts": ["10.0.0.1", "10.0.0.2"]}
     with pytest.raises(PermissionError, match="10.0.0.2"):
         space.invoke("device_access__compare_baseline", outside)
-    assert space.commands == 0
     result = space.invoke("device_access__compare_baseline", query)
-    # One per device: the commands are the device's own fixed baselines.
-    assert result["citation"] and space.commands == 2
+    assert result["citation"]
     name, arguments = workspace.calls[-1]
     assert arguments["turn_id"] == "turn-1"
     assert arguments["platforms"] == {"10.0.0.1": "comware", "10.0.0.4": "comware"}
     assert arguments["hosts"] == ["10.0.0.1", "10.0.0.4"]
-    space.commands = workspace.module.MAX_COMMANDS - 1
-    with pytest.raises(PermissionError):
-        space.invoke("device_access__compare_baseline", query)
 
 
 def test_the_model_never_sees_server_owned_run_fields(workspace, monkeypatch):
@@ -524,7 +518,7 @@ def test_comparison_requires_authorized_baseline_provider_and_hides_internal_fie
         assert set(offered[0]["input_schema"]["properties"]) == {"hosts", "purpose"}
 
 
-def test_row_lookups_stay_in_scope_but_need_no_login_or_budget(workspace):
+def test_row_lookups_stay_in_scope_but_need_no_login(workspace):
     space = workspace.space
     query = {"host": "10.0.0.1", "command": "display arp", "match": "GE2/0"}
     with pytest.raises(PermissionError, match="不在本轮"):
@@ -533,5 +527,5 @@ def test_row_lookups_stay_in_scope_but_need_no_login_or_budget(workspace):
     with pytest.raises(PermissionError):
         space.invoke("device_access__compare_rows", {**query, "turn_id": "another"})
     result = space.invoke("device_access__compare_rows", query)
-    assert result["citation"] and space.commands == 0
+    assert result["citation"]
     assert workspace.calls[-1] == ("device_access__compare_rows", {**query, "turn_id": "turn-1"})

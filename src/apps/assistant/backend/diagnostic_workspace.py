@@ -3,7 +3,8 @@
 A turn may log into a device only after topology__trace_path or topology__locate
 returned it in this same turn (a collected device with an identified platform). The
 device-access App runs every call through a platform-controlled, audited session;
-this workspace adds that scope, the per-turn budgets and the evidence citation.
+this workspace adds that scope and the evidence citation. A turn has no device or command
+count: it is limited by the tokens it spends (the run's budget).
 """
 
 import ipaddress
@@ -22,8 +23,6 @@ BASELINE = "inspection__read_baseline"
 SCOPE_TOOLS = frozenset({"topology__trace_path", "topology__locate"})
 PLATFORMS = frozenset({"comware", "nxos", "ios", "vrp"})
 SERVER_FIELDS = ("platform", "platforms", "turn_id")
-MAX_DEVICES = 8
-MAX_COMMANDS = 20
 
 
 def devices_in(value):
@@ -43,7 +42,6 @@ class DiagnosticWorkspace(DocumentWorkspace):
         super().__init__(actor_id, **kwargs)
         self.run_id = run_id
         self.scope = {}  # management address -> identified platform
-        self.commands = 0
         self.lock = Lock()
 
     def definitions(self):
@@ -64,16 +62,14 @@ class DiagnosticWorkspace(DocumentWorkspace):
             tool["description"] += (
                 f"。只查{scope}设备，不登录设备，不占命令预算"
                 if tool["name"] == ROWS
-                else f"。只能登录{scope}已采集设备，每轮最多 {MAX_DEVICES} 台、"
-                f"共 {MAX_COMMANDS} 条命令（基线对比每台设备计 1 条）"
+                else f"。只能登录{scope}已采集设备；按设备平台写命令（comware/vrp 用 display，"
+                "ios/nxos 用 show）"
             )
         return definitions + extra
 
     def widen(self, result):
         with self.lock:
             for device in devices_in(result):
-                if len(self.scope) >= MAX_DEVICES:
-                    break
                 if device.get("platform") in PLATFORMS:
                     self.scope.setdefault(device["address"], device["platform"])
 
@@ -97,20 +93,12 @@ class DiagnosticWorkspace(DocumentWorkspace):
             raise PermissionError("需要设备管理地址") from None
         if not hosts:
             raise PermissionError("需要设备管理地址")
-        # A comparison runs the device's own fixed baseline commands: one per device.
-        command_count = len(arguments.get("commands") or []) if name == RUN else len(hosts)
         with self.lock:
             outside = [host for host in hosts if host not in self.scope]
             if outside:
                 raise PermissionError(
                     f"{'、'.join(outside)} 不在本轮路径计算或终端定位的结果中，不能登录"
                 )
-            if self.commands + command_count > MAX_COMMANDS:
-                raise PermissionError(
-                    f"本轮诊断命令预算已用完（每轮最多 {MAX_COMMANDS} 条），不能再登录设备；"
-                    "请基于已有证据作答，未取得的证据列入待验证"
-                )
-            self.commands += command_count
             platforms = {host: self.scope[host] for host in hosts}
         server = (
             {"host": hosts[0], "platform": platforms[hosts[0]]}
@@ -132,7 +120,7 @@ class DiagnosticWorkspace(DocumentWorkspace):
         }
 
     def rows(self, arguments):
-        """Look rows up in this turn's reads of a scoped device; no login, no budget."""
+        """Look rows up in this turn's reads of a scoped device; no login."""
         self.check()
         if set(arguments) - {"host", "command", "match", "limit"}:
             raise PermissionError("Turn is filled by the server")
