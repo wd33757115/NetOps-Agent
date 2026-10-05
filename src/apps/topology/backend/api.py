@@ -107,9 +107,20 @@ def trace(
     dst: str = Query(min_length=1, max_length=64),
     src_vrf: str | None = Query(default=None, min_length=1, max_length=64),
     dst_vrf: str | None = Query(default=None, min_length=1, max_length=64),
+    protocol: str | None = Query(default=None, min_length=1, max_length=8),
+    src_port: int | None = Query(default=None, ge=1, le=65535),
+    dst_port: int | None = Query(default=None, ge=1, le=65535),
     user: CurrentUser = Depends(actor),
 ):
-    return service.trace(user.user_id, snapshot_id, src, dst, src_vrf, dst_vrf)
+    return service.trace(
+        user.user_id,
+        snapshot_id,
+        src,
+        dst,
+        src_vrf,
+        dst_vrf,
+        flow={"protocol": protocol, "src_port": src_port, "dst_port": dst_port},
+    )
 
 
 @router.get("/snapshots/{snapshot_id}/services")

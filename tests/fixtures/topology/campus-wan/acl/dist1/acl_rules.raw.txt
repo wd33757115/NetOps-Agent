@@ -1,0 +1,11 @@
+show ip access-lists
+Extended IP access list PC-IN
+    10 deny icmp host 172.16.10.11 host 172.16.20.14 echo (3 matches)
+    20 deny tcp 172.16.10.0 0.0.0.255 172.16.20.0 0.0.0.255 eq telnet (1 match)
+    30 permit ip any any (23 matches)
+Extended IP access list implicit_deny
+    10 deny ip any any
+Extended IP access list implicit_permit
+    10 permit ip any any
+Extended IP access list meraki-fqdn-dns
+DIST1#

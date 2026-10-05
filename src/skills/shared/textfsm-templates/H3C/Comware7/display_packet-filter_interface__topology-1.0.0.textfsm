@@ -1,0 +1,17 @@
+Value Filldown,Required INTERFACE (\S+)
+Value Filldown,Required DIRECTION (Inbound|Outbound)
+Value ADDRESS_FAMILY (IPv4|IPv6|MAC)
+Value ACL_NAME (\S+)
+Value STATUS ([^)]+)
+Value DEFAULT_ACTION (Permit|Deny)
+
+# "display packet-filter interface": for each interface and direction, the ACL applied
+# per address family ("IPv4 ACL 3998", with "(Failed)" when it is not in effect) and the
+# action for packets no rule matches ("IPv4 default action: Permit"), one row each.
+Start
+  ^Interface:\s+${INTERFACE}\s*$$
+  ^\s+${DIRECTION}\s+policy:\s*$$
+  ^\s+${ADDRESS_FAMILY}\s+ACL\s+${ACL_NAME}(?:\s+\(${STATUS}\))?\s*$$ -> Record
+  ^\s+${ADDRESS_FAMILY}\s+default\s+action:\s+${DEFAULT_ACTION}\s*$$ -> Record
+  ^\s*$$
+  ^.* -> Error "unrecognized display packet-filter interface line"

@@ -36,6 +36,7 @@ OSPF_BR1 = Path(__file__).parents[1] / "fixtures/topology/campus-wan/ospf/br1"
 PROTOCOLS_BR1 = Path(__file__).parents[1] / "fixtures/topology/campus-wan/protocols/br1"
 VPN_LEAF3 = Path(__file__).parents[1] / "fixtures/topology/vpn-fabric/leaf3"
 POLICIES_BR1 = Path(__file__).parents[1] / "fixtures/topology/campus-wan/policies/br1"
+ACL_BR1 = Path(__file__).parents[1] / "fixtures/topology/campus-wan/acl-syntax/br1"
 
 
 def identity(text=None):
@@ -205,6 +206,7 @@ def setup(monkeypatch):
                 PROTOCOLS_BR1 / f"{mapping.get(cap, cap)}.txt",
                 VPN_LEAF3 / f"{mapping.get(cap, cap)}.txt",
                 POLICIES_BR1 / f"{cap}.txt",
+                ACL_BR1 / f"{cap}.txt",
             )
             if path.exists()
         ).read_text()

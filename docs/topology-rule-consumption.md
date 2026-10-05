@@ -28,7 +28,7 @@
 - **语义自带**：每个 Value 的语义由检查项自己定义（`semantic_definition`），冻结在 `topology-system` 目录下，不依赖共享的标准观测目录。
 - **实现可自由增改**：各厂商、各型号的采集实现（命令 + 模板）可以随时新增或替换。
 
-**清单**（由 `system_check_items.yaml` 生成；共 31 项，全部已在 IOS/IOS-XE 与 Comware 7 上接入）
+**清单**（由 `system_check_items.yaml` 生成；共 34 项，除安全域只有 Comware 7 的实现外，全部已在 IOS/IOS-XE 与 Comware 7 上接入）
 
 | 检查项 | 名称 | Value（★ 为键/必填） | 已发布的采集实现 |
 |---|---|---|---|
@@ -63,10 +63,14 @@
 | `topology.ospf_process` | OSPF 进程与接口映射（按行） | ★PROCESS_ID, ROUTER_ID, AREA, VRF_EVIDENCE, CONFIRMED_ROUTER_ID, ADDRESS, INTERFACE, COST, STATE | ios: `show ip ospf`<br>comware: `display ospf` |
 | `topology.pbr_bindings` | 策略路由的接口绑定 | ★INTERFACE, ★POLICY, TYPE | ios: `show ip policy`<br>comware: `display ip policy-based-route setup` |
 | `topology.nat_bindings` | NAT 的接口绑定 | ★INTERFACE, ★KIND, RULE | ios: `show ip nat statistics`<br>comware: `display nat all` |
+| `topology.acl_rules` | IPv4 ACL 规则（按设备的匹配顺序） | ★ACL_NAME, ★LINE_NUM, ACL_TYPE, ADDRESS_FAMILY, MATCH_ORDER, ACTION, PROTOCOL, SRC_/DST_ HOST、ANY、NETWORK、WILDCARD、NETWORK_OBJECT_GROUP_NAME、PORT_MATCH、PORT、PORT_RANGE_START/END, ICMP_TYPE, ICMP_CODE, TCP_FLAG, FRAGMENTS, TIME, STATE, VRF, OTHER, MATCHES | ios: `show ip access-lists`<br>comware: `display acl all` |
+| `topology.acl_bindings` | ACL 的接口绑定 | ★INTERFACE, ★DIRECTION, ADDRESS_FAMILY, ACL_NAME, SCOPE, STATUS, DEFAULT_ACTION | ios: `show ip interface`<br>comware: `display packet-filter interface` |
+| `topology.security_zones` | 安全域成员 | ★ZONE, ★INTERFACE | comware: `display security-zone` |
 
 说明：
 
 - **字段类型**：Value 的类型（text、interface、ipv4、mac、integer、label、route_target）写在契约里。拓扑只按类型做统一规范化，例如接口名补全、MAC 统一格式、`Pop Label` 转为 `implicit-null`，不出现按厂商的分支。
+- **平台固定、设备不打印的值写在实现上**（`defaults`）：IOS 的 ACL 末尾隐含拒绝（`DEFAULT_ACTION: Deny`）；Comware 不带 vpn-instance 的规则只匹配公网报文（`VRF: '--'`）。设备打印了的以设备为准。
 - **"未配置"的含义写在实现上**：例如设备不跑 BGP 时输出空白或提示语，属于有效的空表。这由采集实现的输出质量策略声明，即规则治理已有的 `output_quality_policy`。
 
 ## 3. 采集实现与模板
@@ -163,6 +167,14 @@ commands(check_item_ids) -> [{implementation_id, platforms, command, scoped_comm
   - 未覆盖、无样本：IOS 的 NAT 虚拟接口（`ip nat enable`），防火墙按安全域或安全策略配置的 NAT。
   - 实机验收（campus-wan，2026-10-05）：在 CORE1、BR1 上临时配置只匹配 192.0.2.0/24 的测试策略，部署后经平台发现。8 台设备的两条命令都按已发布实现执行，观测完整；PC1 → 198.51.100.10 经 CORE1 的路径标出 CORE1 E1/0（策略路由、NAT inside）、E0/1（NAT outside）和 BR1 GE3/0（策略路由）、GE2/0（三种 NAT），经 CORE2 的路径只在 BR1 GE2/0 标 NAT。随后删除配置并重新发现，路径上已无标注。
   - 配置过又删除后，两家都不再输出"未配置"，而是输出空的表头或全局段落；这些原文也作为夹具保留（`campus-wan/policies/removed`）。
+- **路径按流检查 ACL（第一期，2026-10-05，topology 0.8.0、规则治理 1.6.0）**：负责人决定把 ACL、策略路由、NAT 纳入路径计算（"不做这些你无法确定流量怎么走"），分三期，本期为 ACL。
+  - 新增 `topology.acl_rules`、`topology.acl_bindings`、`topology.security_zones`。规则按设备列出的顺序（即匹配顺序，Comware 深度优先时设备已排好）读成条件；端口、ICMP、协议的名称按方言查表（`collectors/aclnames.yaml`），表里没有的不猜。模板不认识的条件（dscp、对象组等）原样放进 OTHER，该规则判断不了，不当作没有这个条件。
+  - 实现可声明 `defaults`（见第 2 节）。IOS 的 ACL 绑定与接口地址共用 `show ip interface`，采集时同一命令只执行一次，两个能力各读一遍。
+  - 路径按一条流判断（`trace_path` 新增 protocol、src_port、dst_port；ICMP 按 echo，反方向按应答：TCP 带 ACK、ICMP echo-reply）。每跳查入接口、出接口上的 IPv4 ACL（`model/acl.py`）：拒绝时以 `denied_in`/`denied_out` 结束，给出 ACL 名和规则序号；所有路径都被拒绝时该方向为 `blocked`。规则判断不了时，若所有可能结果一致仍给出结论（`undecided_before`），否则记 `filter_undetermined` 并写明缺什么（端口、协议或该规则的条件）。
+  - 接口在安全域里记 `security_policy_not_evaluated`（域间默认拒绝，安全策略本期不计算）；MPLS/VXLAN 隧道内不查核心 ACL（看到的是外层头）；设备自己发出的报文不查其出接口 ACL（IOS 与 Comware 都不过滤本机报文）。跳上的 `not_observed` 列出没完整采到的表。
+  - 实机验收（campus-wan）：DIST1 Vlan10 入向禁止 PC1 ping PC4 和到 172.16.20.0/24 的 telnet，BR1 GE2/0 出向禁止到 198.51.100.0/24 的 UDP 53。VPCS 实际打流的结果与推导一致，设备命中计数对得上（ping 3 次、telnet 1 次、DNS 2 次；web、echo-reply、NTP 通过）；原文作为夹具保留（`campus-wan/acl`，语法覆盖样本在 `campus-wan/acl-syntax`）。
+  - 未覆盖：二层设备端口上的 ACL、安全策略内容、对象组展开、IPv6、IOS ZBF（IOL 不支持，无样本）。
+  - 第二期策略路由：节点内容（`show route-map`、`display ip policy-based-route`）、下一跳可达性、动作优先级、deny 节点按路由表转发。第三期 NAT：规则内容、两个方向的改写、回程按去程的翻译推导。Comware 的出方向 NAT 与包过滤、入方向 nat server 与策略路由谁先，文档未写明，届时在实验网用流量和命中计数实测，写成家族数据。
 - **待做**：
   - 系统模板登记到规则治理的模板库（数据库），让页面可见、可评审；目前模板文件由资产清单按 sha256 钉住；
   - NX-OS 等家族在有实机样本后补实现，届时删掉对应的通用解析器；

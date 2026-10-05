@@ -195,6 +195,7 @@ def templates() -> dict[str, dict[str, Any]]:
             "scoped_command": row.get("scoped_command"),
             "scope_header": row.get("scope_header"),
             "units": dict(row.get("units") or {}),
+            "defaults": dict(row.get("defaults") or {}),
             "template": row["template"],
             "sha256": row["sha256"],
             "vendor": platforms[row["platform"]]["vendor"],

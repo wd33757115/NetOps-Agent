@@ -33,6 +33,18 @@ class Trace(BaseModel):
         max_length=64,
         description="目的所在的网络实例（VRF，在其第一跳设备上的本地名称），用于反方向",
     )
+    protocol: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=8,
+        description="协议：tcp、udp、icmp 或协议号；不填时 ACL 中看协议的规则判断不了",
+    )
+    src_port: int | None = Field(
+        default=None, ge=1, le=65535, description="源端口（仅 TCP/UDP）；不填时看源端口的规则判断不了"
+    )
+    dst_port: int | None = Field(
+        default=None, ge=1, le=65535, description="目的端口（仅 TCP/UDP），如 80、443"
+    )
 
 
 class Services(BaseModel):
@@ -68,16 +80,27 @@ TOOLS = [
         "MPLS 每跳需观察到到端点的标签，VXLAN 入口需观察到隧道 Up。"
         "同一地址在多个 VPN 中重复时，用 src_vrf/dst_vrf 指定实例，否则各实例都作为候选。"
         "complete 表示这套推导所需的观测证据齐备，不是数据面实测成功；"
+        "每跳按设备自己的 ACL 规则检查入接口和出接口上绑定的 IPv4 ACL：被拒绝时该路径以 "
+        "denied_in/denied_out 结束并给出 ACL 名和规则序号（default 表示末尾的默认动作），"
+        "所有路径都被拒绝时该方向为 blocked；规则要看的字段没给（如端口）或有判断不了的条件时"
+        "记 filter_undetermined 并写明缺什么，此时补上 protocol/dst_port 再查；"
+        "反方向按应答报文检查（TCP 带 ACK，ICMP 为 echo-reply）；接口在安全域里时记 "
+        "security_policy_not_evaluated，域间策略需到设备上看；隧道内（MPLS/VXLAN）不检查核心 ACL；"
+        "跳上 not_observed 列出该设备没完整采到的 ACL/绑定/安全域/策略路由/NAT 表，不等于没有。"
         "入接口绑定策略路由（policy_may_redirect）或入/出接口绑定 NAT（nat_may_translate）"
         "的跳带缺口、该方向为 partial，缺口给出设备、接口和策略名或 NAT 方式："
         "路径仍是路由表推导的，策略内容未计算，需到该设备查看该策略是否匹配这条流量、"
         "把它改到哪里或改写成什么地址；"
-        "跳上 policy_bindings: not_observed 表示该设备的绑定未完整采集，不等于没有策略。"
-        "未计算 ACL 和二层转发规则。"
+        "未检查二层设备上的 ACL 和二层转发规则。"
         "现场不一致也可能源于覆盖或推导限制；只读，不登录设备。",
         Trace,
         lambda user, body: service.trace_current(
-            user.user_id, body.src, body.dst, body.src_vrf, body.dst_vrf
+            user.user_id,
+            body.src,
+            body.dst,
+            body.src_vrf,
+            body.dst_vrf,
+            flow={"protocol": body.protocol, "src_port": body.src_port, "dst_port": body.dst_port},
         ),
         evidence=True,
     ),

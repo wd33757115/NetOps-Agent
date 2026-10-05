@@ -16,7 +16,9 @@ Where the data ends, a branch ends with a reason instead of a guess:
 - ``tunnel_egress_unresolved`` / ``tunnel_egress_ambiguous``: where a VPN tunnel ends,
   no (or more than one) instance is proven to receive the packet;
 - ``other_instance``: delivered, but in another instance than the one named for that end
-  (the address is reused by another VPN, e.g. two customers' 10.1.1.0/24).
+  (the address is reused by another VPN, e.g. two customers' 10.1.1.0/24);
+- ``denied_in`` / ``denied_out``: an ACL applied to the interface the packet enters or
+  leaves by drops it (the entry, or "default" for the ACL's action for unmatched packets).
 
 A next hop marked as a tunnel (``overlay.prepare``: MPLS VPN or VXLAN L3 VNI) is routed
 in the underlay toward the tunnel endpoint; at the device owning the endpoint the packet
@@ -32,9 +34,21 @@ read that policy on the device; its content is not evaluated here:
   ingress interface;
 - ``nat_may_translate``: NAT is bound to the hop's ingress or egress interface.
 
-A hop on a device whose bindings were not observed completely says so
-(``policy_bindings: not_observed``) without changing the status: absent evidence is not
-evidence of a policy.
+A traced packet is one flow: its addresses and, as far as the caller gives them, the
+protocol and ports (an ICMP flow is an echo request; the reverse direction is its reply,
+for TCP a segment with ACK set). Each hop checks the IPv4 ACL applied to the interface the
+packet enters by and the one it leaves by (model/acl.py), as the device's own entries
+say. Where the entries cannot decide (an open port, an object group, a condition not
+evaluated) the hop carries ``filter_undetermined`` and the walk goes on. An interface in a
+security zone carries ``security_policy_not_evaluated``: between zones the device denies
+what no security policy permits, which is not evaluated here. Inside an MPLS or VXLAN
+tunnel the packet is encapsulated, so the core's ACLs (which see the outer header) are
+not checked; a device does not filter what it originates on the way out.
+
+A hop on a device whose ACL, binding or zone tables were not all observed completely lists
+them (``not_observed``) without changing the status: absent evidence is not evidence of a
+policy. A direction is ``complete`` when every path is delivered with no gap, ``blocked``
+when every path ends at an ACL deny with no gap, otherwise ``partial``.
 
 A source host starts at the gateway of its subnet (every candidate when several could
 be its gateway); a source that is a device starts at that device. Equal-cost next hops
@@ -46,6 +60,7 @@ from __future__ import annotations
 
 import ipaddress
 
+from .acl import ICMP, TCP, UDP, evaluate
 from .builder import NT, ST
 from .device_state import project_interfaces, read_interface_state
 from .locate import _Locator, answer
@@ -55,6 +70,10 @@ from .retained_links import UNAVAILABLE_OPER_STATUSES
 MAX_PATHS = 8
 MAX_HOPS = 32
 MAX_RECURSION = 4  # next-hop lookups before a next hop counts as unresolved
+# Tables a hop checks a packet against; a device without one of them is noted, not a gap.
+POLICY_TABLES = ("acl_bindings", "acl_rules", "security_zones", "pbr_bindings", "nat_bindings")
+PROTOCOLS = {"tcp": TCP, "udp": UDP, "icmp": ICMP}
+ECHO_REQUEST, ECHO_REPLY = (8, 0), (0, 0)
 # The host's own gateway setting is not observed; the VRRP master is the inferred gateway.
 VRRP_FIRST_HOP = (
     "终端自己配置的网关看不到；该网段有 VRRP，按采集时的主设备（state=master）作为第一跳"
@@ -277,6 +296,59 @@ class _Tracer:
         ]
         return gaps
 
+    def filters(self, key, ifname, direction, packet, hop):
+        """Check the packet against the ACL applied to this direction of the interface.
+
+        Returns the deny (end status details) when the ACL drops it; an undecided ACL, a
+        binding that cannot be evaluated and a security zone are gaps of the hop.
+        """
+        facts = self.devices[key]
+        if not ifname or "src" not in packet:
+            return None
+        zones = sorted(
+            {row["zone"] for row in facts.get("security_zones") or [] if row["ifname"] == ifname}
+        )
+        if zones:
+            hop.setdefault("gaps", []).append(
+                {"status": "security_policy_not_evaluated", "interface": ifname, "zones": zones}
+            )
+        for binding in facts.get("acl_bindings") or []:
+            if (
+                binding["ifname"] != ifname
+                or binding["direction"] != direction
+                or binding.get("family") not in {None, "ipv4"}
+                or "acl" not in binding
+            ):
+                continue
+            check = {"interface": ifname, "direction": direction, "acl": binding["acl"]}
+            entries = [row for row in facts.get("acl_rules") or [] if row["acl"] == binding["acl"]]
+            if binding.get("scope") or binding.get("status"):
+                # A common ACL, or a binding the device reports as not in effect.
+                outcome = {
+                    "result": "undetermined",
+                    "rules": [],
+                    "needs": [f"binding:{binding.get('scope') or binding.get('status')}"],
+                }
+            elif "acl_rules" not in facts or not entries:
+                outcome = {"result": "undetermined", "rules": [], "needs": ["acl_entries"]}
+            else:
+                outcome = evaluate(
+                    entries, {**packet, "vrf": hop["vrf"]}, binding.get("default_action")
+                )
+            hop.setdefault("filters", []).append({**check, **outcome})
+            if outcome["result"] == "deny":
+                return {**check, "rule": outcome["rule"]}
+            if outcome["result"] == "undetermined":
+                hop.setdefault("gaps", []).append(
+                    {
+                        "status": "filter_undetermined",
+                        **check,
+                        "rules": outcome["rules"],
+                        "needs": outcome["needs"],
+                    }
+                )
+        return None
+
     def vxlan_state(self, key, tunnel):
         """The observed state of the tunnel to a VTEP: IOS NVE peers, Comware tunnels."""
         facts = self.devices[key]
@@ -294,9 +366,17 @@ class _Tracer:
         return "up" if states == {"up"} else "down"
 
     def walk(
-        self, start, first_in, dst, start_vrf="default", initial_gaps=(), source_interface=None
+        self,
+        start,
+        first_in,
+        dst,
+        start_vrf="default",
+        initial_gaps=(),
+        source_interface=None,
+        packet=None,
     ):
         paths, truncated = [], False
+        packet = packet or {"dst": dst}
 
         def end(trail, status, **extra):
             nonlocal truncated
@@ -342,8 +422,15 @@ class _Tracer:
             if unavailable:
                 end([*trail, hop], "interface_unavailable", **unavailable)
                 return
-            if not {"pbr_bindings", "nat_bindings"} <= self.devices[key].keys():
-                hop["policy_bindings"] = "not_observed"
+            if missing := [name for name in POLICY_TABLES if name not in self.devices[key]]:
+                hop["not_observed"] = missing
+            if tunnel is not None:
+                hop["encapsulated"] = True  # arrived inside a tunnel: the outer header
+            elif denied := self.filters(key, in_if, "in", packet, hop):
+                end([*trail, hop], "denied_in", **denied)
+                return
+            # What it originates is not filtered on its way out of the device.
+            originated = not trail and in_if is None
             if ingress := self.policy_gaps(key, in_if, "in"):
                 hop.setdefault("gaps", []).extend(ingress)
             if tunnel is not None and self.topo.ip_candidates(
@@ -435,6 +522,11 @@ class _Tracer:
                         continue
                     if egress := self.policy_gaps(key, out, "out"):
                         current.setdefault("gaps", []).extend(egress)
+                    if not originated and (
+                        denied := self.filters(key, out, "out", packet, current)
+                    ):
+                        end(here, "denied_out", **denied)
+                        continue
                     evidence = self.endpoint_evidence(key, next_vrf, out, dst)
                     if not evidence or len({row["mac"] for row in evidence}) != 1:
                         end(here, "endpoint_unresolved", interface=out, destination=dst)
@@ -465,6 +557,8 @@ class _Tracer:
                         current["resolved_via"] = chain
                     if egress := self.policy_gaps(key, neighbour_out, "out"):
                         current.setdefault("gaps", []).extend(egress)
+                    if carried:
+                        current["encapsulated"] = True  # leaves inside the tunnel
                     here = [*trail, current]
                     if neighbour_out.upper().startswith("NULL"):
                         end(here, "blackhole")
@@ -476,6 +570,11 @@ class _Tracer:
                     unavailable = self.interface_state(key, "out", neighbour_out, current)
                     if unavailable:
                         end(here, "interface_unavailable", **unavailable)
+                        continue
+                    if not carried and not originated and (
+                        denied := self.filters(key, neighbour_out, "out", packet, current)
+                    ):
+                        end(here, "denied_out", **denied)
                         continue
                     proven = self.topo.neighbour_candidates(
                         key, next_vrf, neighbour_ip, neighbour_out
@@ -514,10 +613,10 @@ class _Tracer:
         step(start, start_vrf, first_in, [], frozenset())
         return paths, truncated
 
-    def direction(self, source, dst, vrf=None, dst_vrf=None):
+    def direction(self, source, dst, vrf=None, dst_vrf=None, packet=None):
         """source is the locate answer for the start address; ``vrf`` keeps only starts in
         that network instance of their first-hop device (device-local name); ``dst_vrf`` is
-        the instance the destination is named in."""
+        the instance the destination is named in; ``packet`` the flow ACLs are checked with."""
         result = {"to": dst, "first_hop": "none", "paths": [], "truncated": False}
         if vrf is not None:
             # The named instance decides which of several same-address ends is meant.
@@ -589,7 +688,9 @@ class _Tracer:
                         "source": source["query"],
                     }
                 )
-            paths, truncated = self.walk(key, first_in, dst, vrf, initial_gaps, source_interface)
+            paths, truncated = self.walk(
+                key, first_in, dst, vrf, initial_gaps, source_interface, packet
+            )
             room = MAX_PATHS - len(result["paths"])
             result["paths"].extend(paths[:room])
             result["truncated"] |= truncated or len(paths) > room
@@ -602,13 +703,15 @@ class _Tracer:
                     "instance": reached,
                     "expected": dst_vrf,
                 }
-        delivered = bool(result["paths"]) and all(
-            p["end"]["status"] == "delivered" for p in result["paths"]
-        )
+        ends = {p["end"]["status"] for p in result["paths"]}
         state_gaps = any(hop.get("gaps") for path in result["paths"] for hop in path["hops"])
-        result["status"] = (
-            "complete" if delivered and not result["truncated"] and not state_gaps else "partial"
-        )
+        settled = bool(result["paths"]) and not result["truncated"] and not state_gaps
+        if settled and ends == {"delivered"}:
+            result["status"] = "complete"
+        elif settled and ends <= {"denied_in", "denied_out"}:
+            result["status"] = "blocked"
+        else:
+            result["status"] = "partial"
         return result
 
 
@@ -647,19 +750,62 @@ def _sequences(direction, reverse=False):
     }
 
 
-def trace(devices, base, src, dst, observed=None, src_vrf=None, dst_vrf=None):
+def _flow(protocol, src_port, dst_port):
+    """(protocol number or None, source port, destination port) a caller asked for."""
+    if protocol in (None, ""):
+        if src_port is not None or dst_port is not None:
+            raise ValueError("端口只适用于 TCP 或 UDP，请同时指定协议")
+        return None, None, None
+    name = str(protocol).strip().lower()
+    number = PROTOCOLS.get(name, int(name) if name.isdigit() else -1)
+    if not 0 <= number <= 255:
+        raise ValueError("协议应为 tcp、udp、icmp 或 0-255 的协议号")
+    for port in (src_port, dst_port):
+        if port is None:
+            continue
+        if number not in {TCP, UDP}:
+            raise ValueError("端口只适用于 TCP 或 UDP")
+        if not isinstance(port, int) or not 1 <= port <= 65535:
+            raise ValueError("端口应为 1-65535")
+    return number, src_port, dst_port
+
+
+def trace(
+    devices,
+    base,
+    src,
+    dst,
+    observed=None,
+    src_vrf=None,
+    dst_vrf=None,
+    protocol=None,
+    src_port=None,
+    dst_port=None,
+):
     """devices: builder input keyed by collected address; observed: {address: evidence}.
 
     ``src_vrf``/``dst_vrf`` name the network instance an end is in on its first-hop device,
-    for addresses that several VPNs reuse.
+    for addresses that several VPNs reuse. ``protocol`` (tcp, udp, icmp or a number) and
+    the ports describe the flow ACLs are checked with; what is not given is left open.
     """
     src, dst = _unicast(src), _unicast(dst)
     if src == dst:
         raise ValueError("源和目的地址相同")
+    number, sport, dport = _flow(protocol, src_port, dst_port)
+    flow = {
+        name: value
+        for name, value in (("protocol", number), ("src_port", sport), ("dst_port", dport))
+        if value is not None
+    }
     tracer = _Tracer(devices, base, observed or {})
     source, destination = answer(tracer.loc, "ip", src), answer(tracer.loc, "ip", dst)
-    forward = tracer.direction(source, dst, src_vrf, dst_vrf)
-    reverse = tracer.direction(destination, src, dst_vrf, src_vrf)
+    request = {"src": src, "dst": dst, "protocol": number, "src_port": sport, "dst_port": dport}
+    reply = {"src": dst, "dst": src, "protocol": number, "src_port": dport, "dst_port": sport}
+    if number == ICMP:
+        request["icmp"], reply["icmp"] = ECHO_REQUEST, ECHO_REPLY
+    reply["reply"] = True
+    forward = tracer.direction(source, dst, src_vrf, dst_vrf, request)
+    reverse = tracer.direction(destination, src, dst_vrf, src_vrf, reply)
     forward["from"], reverse["from"] = src, dst
     # Candidate first hops are not observed choices, so they cannot show asymmetry.
     routed = (
@@ -701,6 +847,7 @@ def trace(devices, base, src, dst, observed=None, src_vrf=None, dst_vrf=None):
     return {
         "src": src,
         "dst": dst,
+        "flow": flow,
         "source": source,
         "destination": destination,
         "forward": forward,

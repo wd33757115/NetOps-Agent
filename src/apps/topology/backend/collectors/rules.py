@@ -24,6 +24,7 @@ import re
 import time
 from collections import Counter
 
+from .aclnames import names as acl_names
 from .families import cli
 from .normalize import (
     interface_address,
@@ -70,6 +71,9 @@ CHECK_ITEMS = {
     "ospf_process": "topology.ospf_process",
     "pbr_bindings": "topology.pbr_bindings",
     "nat_bindings": "topology.nat_bindings",
+    "acl_rules": "topology.acl_rules",
+    "acl_bindings": "topology.acl_bindings",
+    "security_zones": "topology.security_zones",
 }
 WHOLE_TABLES = frozenset({"routes"})
 SOURCE = "published"  # tests read the catalog shipped with rule governance ("shipped")
@@ -211,8 +215,10 @@ def parse(identity, capability, raw, *, complete=True, model=None):
         return result
     projected = []
     for row, lines in zip(parsed.rows, parsed.lines):
-        # A bare number in a Value whose unit the implementation declares gets that unit.
+        # A bare number in a Value whose unit the implementation declares gets that unit;
+        # a Value fixed for the platform (and never printed) gets the declared value.
         row = {
+            **chosen.defaults,
             **row,
             **{
                 name: f"{row[name]} {unit}"
@@ -1012,7 +1018,169 @@ def _nat_binding(row, family, lines, warnings):
     ]
 
 
+ADDRESS_FAMILIES = {"ip": "ipv4", "ipv4": "ipv4", "ipv6": "ipv6", "mac": "mac"}
+ACL_DIRECTIONS = {"inbound": "in", "outgoing": "out", "outbound": "out"}
+PORT_MATCHES = frozenset({"eq", "neq", "lt", "gt"})
+
+
+def _acl_family(value):
+    return ADDRESS_FAMILIES.get(str(value or "").lower())
+
+
+def _acl_address(row, side):
+    """{address, wildcard} of one end, None for any; the device prints a host as "host A"
+    (IOS), as the bare address (IOS standard) or with wildcard "0" (Comware)."""
+    if row.get(f"{side}_HOST"):
+        return {"address": ip_address(row[f"{side}_HOST"]), "wildcard": "0.0.0.0"}
+    if row.get(f"{side}_NETWORK"):
+        wildcard = row.get(f"{side}_WILDCARD")
+        if wildcard is None:
+            raise ValueError("acl_address_without_wildcard")
+        wildcard = "0.0.0.0" if wildcard == "0" else ip_address(wildcard)
+        return {"address": ip_address(row[f"{side}_NETWORK"]), "wildcard": wildcard}
+    return None
+
+
+def _acl_port(value, protocol, tables, unsupported):
+    if value.isdigit() and 0 <= int(value) <= 65535:
+        return int(value)
+    port = tables["ports"].get(protocol, {}).get(value.lower())
+    if port is None:
+        unsupported.append(f"port_name:{value}")
+    return port
+
+
+def _acl_ports(row, side, protocol, tables, unsupported):
+    """{op, ports} of one end (op eq: any of the ports; range: [low, high]), or None."""
+    if row.get(f"{side}_PORT_RANGE_START"):
+        bounds = [
+            _acl_port(row[f"{side}_PORT_RANGE_{edge}"], protocol, tables, unsupported)
+            for edge in ("START", "END")
+        ]
+        return {"op": "range", "ports": bounds}
+    if row.get(f"{side}_PORT_MATCH"):
+        op = row[f"{side}_PORT_MATCH"].lower()
+        if op not in PORT_MATCHES:
+            raise ValueError("acl_port_operator")
+        ports = [
+            _acl_port(value, protocol, tables, unsupported)
+            for value in str(row.get(f"{side}_PORT") or "").split()
+        ]
+        if not ports or (op != "eq" and len(ports) != 1):
+            raise ValueError("acl_port_value")
+        return {"op": op, "ports": ports}
+    return None
+
+
+def _acl_rule(row, family, lines, warnings):
+    """One ACL entry, in the device's match order, as conditions a packet is checked
+    against. A condition the entry has but this projection cannot evaluate (an object
+    group, an unknown name or keyword) is listed in "unsupported": such an entry is
+    never treated as if the condition were absent."""
+    tables = acl_names(cli(family))
+    unsupported = []
+    record = {
+        "acl": row["ACL_NAME"],
+        "seq": int(row["LINE_NUM"]),
+        "family": _acl_family(row.get("ADDRESS_FAMILY")) or "ipv4",
+    }
+    action = str(row.get("ACTION") or "").lower()
+    if action in {"permit", "deny"}:
+        record["action"] = action
+    else:
+        unsupported.append("unknown_entry")
+    if other := row.get("OTHER"):
+        unsupported.append(f"condition:{other}")
+    protocol = str(row.get("PROTOCOL") or "").lower()
+    if protocol:
+        number = int(protocol) if protocol.isdigit() else tables["protocols"].get(protocol, -1)
+        if number == -1 or (number is not None and not 0 <= number <= 255):
+            unsupported.append(f"protocol:{protocol}")
+            number = None
+        if number is not None:
+            record["protocol"] = number
+    for side, key in (("SRC", "src"), ("DST", "dst")):
+        if group := row.get(f"{side}_NETWORK_OBJECT_GROUP_NAME"):
+            unsupported.append(f"object_group:{group}")
+        elif address := _acl_address(row, side):
+            record[key] = address
+        if ports := _acl_ports(row, side, record.get("protocol"), tables, unsupported):
+            record[f"{key}_ports"] = ports
+    if kind := row.get("ICMP_TYPE"):
+        if kind.isdigit():
+            code = row.get("ICMP_CODE")
+            record["icmp"] = [int(kind), int(code) if code else None]
+        elif kind.lower() in {name.lower() for name in tables["icmp"]}:
+            found = next(v for n, v in tables["icmp"].items() if n.lower() == kind.lower())
+            record["icmp"] = list(found)
+        else:
+            unsupported.append(f"icmp_type:{kind}")
+    if flag := row.get("TCP_FLAG"):
+        if flag.lower() == "established":
+            record["established"] = True
+        else:
+            unsupported.append(f"tcp_flag:{flag}")
+    if row.get("FRAGMENTS"):
+        record["fragments"] = True
+    if name := row.get("TIME"):
+        state = str(row.get("STATE") or "").lower()
+        if state not in {"active", "inactive"}:
+            unsupported.append(f"time_range:{name}")
+        record["time_range"] = {"name": name, "active": state == "active"}
+    if "VRF" in row:
+        record["vrf"] = vrf_name(row["VRF"], family)
+    if row.get("MATCHES"):
+        record["matches"] = int(row["MATCHES"])
+    if unsupported:
+        record["unsupported"] = unsupported
+    return record
+
+
+def _acl_binding(row, family, lines, warnings):
+    """The ACL that filters one direction of an interface, or that direction's action for
+    packets no entry matches; rows of one interface, direction and family are merged."""
+    record = {
+        "ifname": interface(row["INTERFACE"], family).name,
+        "direction": ACL_DIRECTIONS[row["DIRECTION"].lower()],
+        "family": _acl_family(row.get("ADDRESS_FAMILY")),
+    }
+    if name := row.get("ACL_NAME"):
+        record["acl"] = name
+    if scope := row.get("SCOPE"):
+        record["scope"] = scope.lower()
+    if status := row.get("STATUS"):
+        record["status"] = status
+    if default := row.get("DEFAULT_ACTION"):
+        record["default_action"] = {"permit": "permit", "deny": "deny"}[default.lower()]
+    return record
+
+
+def _merge_acl_bindings(projected):
+    merged, order = {}, []
+    for record, lines in projected:
+        key = (record["ifname"], record["direction"], record["family"], record.get("scope"))
+        if key not in merged:
+            merged[key] = ({}, [])
+            order.append(key)
+        target, target_lines = merged[key]
+        for name, value in record.items():
+            if name in target and target[name] != value:
+                # Two rows disagree: the binding is not one a path can rely on.
+                target["status"] = "conflicting"
+                continue
+            target[name] = value
+        target_lines.extend(lines)
+    return [merged[key] for key in order]
+
+
+def _security_zone(row, family, lines, warnings):
+    return {"zone": row["ZONE"], "ifname": interface(row["INTERFACE"], family).name}
+
+
 ROWS = {
+    "acl_rules": _acl_rule,
+    "acl_bindings": _acl_binding,
+    "security_zones": _security_zone,
     "pbr_bindings": _pbr_binding,
     "nat_bindings": _nat_binding,
     "arp": _arp,
@@ -1041,7 +1209,11 @@ ROWS = {
     "version": _version,
     "lldp_local": _lldp_local_row,
 }
-MERGE = {"routes": _merge_routes, "vrf_detail": _merge_vrfs}
+MERGE = {
+    "routes": _merge_routes,
+    "vrf_detail": _merge_vrfs,
+    "acl_bindings": _merge_acl_bindings,
+}
 # Capabilities whose rows form one summary fact (the VRF enumeration scopes collection).
 SUMMARIES = {
     "vrfs": lambda rows: {"instances": rows},
@@ -1078,6 +1250,8 @@ HEADERS = {
 # Tables listing each entity once: a repeated entity is a contradiction, not a new row.
 UNIQUE = {
     "vrfs": ("name",),
+    "acl_rules": ("acl", "seq"),
+    "security_zones": ("zone", "ifname"),
     "ldp_peers": ("peer_lsr_id", "label_space"),
     "tunnel_interfaces": ("ifname",),
     "stp": ("instance", "ifname"),

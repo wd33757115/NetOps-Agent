@@ -58,7 +58,10 @@ from .repository import owned, sessions
 APP_ID = "topology"
 MODEL_PROFILE = "rfc8345+simap-yang-03:l2-l3:scoped-v2"
 ACTIVE = ("queued", "running", "waiting_for_input")
-POLICY_FACTS = frozenset({"pbr_bindings", "nat_bindings"})
+# Tables a path checks a packet against: only a complete one says what is not there.
+POLICY_FACTS = frozenset(
+    {"pbr_bindings", "nat_bindings", "acl_rules", "acl_bindings", "security_zones"}
+)
 TOPOLOGY_FACTS = (
     "version",
     "lldp_local",
@@ -91,6 +94,9 @@ TOPOLOGY_FACTS = (
     "evpn_mac",
     "pbr_bindings",
     "nat_bindings",
+    "acl_rules",
+    "acl_bindings",
+    "security_zones",
 )
 NODE_BUDGET_SECONDS = 240
 # A lease outlives the node budget, so a live collection is never reclaimed mid-way.
@@ -596,9 +602,11 @@ def locate_current(owner, query):
 
 
 PATH_MEANING = (
-    "这是根据 {when} 的路由、接口和邻居观测推导的候选路径，用于确定后续查证的设备和接口。"
-    "complete 仅表示当前推导所需的观测齐备，partial 表示存在缺口；"
-    "结果没有验证全部二层转发规则、ACL/PBR/NAT 或数据面流量，也不等于物理接线。"
+    "这是根据 {when} 的路由、接口、邻居和 ACL 观测推导的候选路径，用于确定后续查证的设备和接口。"
+    "complete 仅表示当前推导所需的观测齐备，blocked 表示每条路径都被 ACL 拒绝，"
+    "partial 表示存在缺口；三层设备接口上的 IPv4 ACL 已按设备自己的规则判断，"
+    "策略路由和 NAT 只标出可能改变走向的位置；没有验证二层设备上的 ACL、安全策略、"
+    "其余二层转发规则或数据面流量，也不等于物理接线。"
     "与现场不同可能来自网络变化、采集覆盖或推导限制，不能单凭差异断定发生了变更。"
 )
 
@@ -622,19 +630,29 @@ def _as_history(result):
     return {**result, "meaning": PATH_MEANING.format(when=when)}
 
 
-def trace(owner, snapshot_id, src, dst, src_vrf=None, dst_vrf=None):
-    """Forwarding paths src->dst and dst->src in one snapshot, ending at data gaps."""
+def trace(owner, snapshot_id, src, dst, src_vrf=None, dst_vrf=None, flow=None):
+    """Forwarding paths src->dst and dst->src in one snapshot, ending at data gaps;
+    ``flow``: the protocol and ports ACLs are checked with ({} leaves them open)."""
     with sessions() as session:
         snap = session.get(Snapshot, snapshot_id)
         if not snap:
             raise HTTPException(404, "快照不存在")
         owned(session, Network, snap.network_id, owner)
         return _as_history(
-            _analyse(session, snap, trace_in, src, dst, src_vrf=src_vrf, dst_vrf=dst_vrf)
+            _analyse(
+                session,
+                snap,
+                trace_in,
+                src,
+                dst,
+                src_vrf=src_vrf,
+                dst_vrf=dst_vrf,
+                **(flow or {}),
+            )
         )
 
 
-def trace_current(owner, src, dst, src_vrf=None, dst_vrf=None):
+def trace_current(owner, src, dst, src_vrf=None, dst_vrf=None, flow=None):
     """The same question over the current snapshot of every network that knows either end."""
     with sessions() as session:
         found = []
@@ -647,7 +665,14 @@ def trace_current(owner, src, dst, src_vrf=None, dst_vrf=None):
             snap = session.get(Snapshot, network.current_snapshot)
             if snap and "simap" in snap.graph:
                 result = _analyse(
-                    session, snap, trace_in, src, dst, src_vrf=src_vrf, dst_vrf=dst_vrf
+                    session,
+                    snap,
+                    trace_in,
+                    src,
+                    dst,
+                    src_vrf=src_vrf,
+                    dst_vrf=dst_vrf,
+                    **(flow or {}),
                 )
                 if {result["forward"]["status"], result["reverse"]["status"]} != {"no_gateway"}:
                     found.append(_as_history(result))

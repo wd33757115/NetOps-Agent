@@ -259,7 +259,36 @@ CAMPUS_POLICIES_REMOVED = Lab(
     ROOT / "tests/fixtures/topology/campus-wan/policies/removed",
     frozenset(),
 )
+# ACL syntax (2026-10-05): test ACLs on CORE1 (IOS) and BR1 (Comware) covering hosts,
+# wildcards, port operators and ranges, ICMP names, established, fragments, dscp, object
+# groups, time ranges, depth-first order and named ACLs, bound both ways on one interface,
+# and a security zone of an unused loopback; matching only 192.0.2.0/24, then removed.
+CAMPUS_ACL_SYNTAX = Lab(
+    "20261005-103247",
+    {"10.10.1.11": "br1", "10.10.1.13": "core1"},
+    {
+        "10.10.1.11": frozenset({"acl_rules", "acl_bindings", "security_zones"}),
+        "10.10.1.13": frozenset({"acl_rules", "acl_bindings"}),
+    },
+    ROOT / "tests/fixtures/topology/campus-wan/acl-syntax",
+    frozenset(),
+)
+# ACL scenario (2026-10-05): DIST1 Vlan10 inbound denies PC1's ping to PC4 and telnet to
+# 172.16.20.0/24; BR1 GE2/0 outbound denies UDP 53 to 198.51.100.0/24. The VPCS traffic
+# behind the hit counters: 3 pings, 1 telnet, 2 DNS probes denied; then removed.
+CAMPUS_ACL = Lab(
+    "20261005-105546",
+    {"10.10.1.11": "br1", "10.10.1.15": "dist1"},
+    {
+        "10.10.1.11": frozenset({"acl_rules", "acl_bindings", "security_zones"}),
+        "10.10.1.15": frozenset({"acl_rules", "acl_bindings"}),
+    },
+    ROOT / "tests/fixtures/topology/campus-wan/acl",
+    frozenset(),
+)
 LABS = {
+    "campus-acl-syntax": CAMPUS_ACL_SYNTAX,
+    "campus-acl": CAMPUS_ACL,
     "campus-policies": CAMPUS_POLICIES,
     "campus-policies-removed": CAMPUS_POLICIES_REMOVED,
     "vpn-fabric": VPN_FABRIC,

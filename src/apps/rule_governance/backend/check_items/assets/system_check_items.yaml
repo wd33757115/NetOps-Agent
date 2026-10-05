@@ -14,7 +14,9 @@
 # instance name carries {vrf} directly. scope_header is the line (first group: the name) by
 # which a per-VRF output names its instance; without it the consumer checks the output
 # against the device's interface bindings instead. units names the unit of a Value the
-# device prints as a bare number ({AGE: min}). valid_empty lists outputs that mean "none
+# device prints as a bare number ({AGE: min}). defaults gives a Value the device never
+# prints because it is fixed for the platform (the action for packets no IOS ACL entry
+# matches); a row that has the Value keeps its own. valid_empty lists outputs that mean "none
 # configured" (BLANK: an empty output). required lists lines every data output has (a
 # table header); counts are totals the device prints ({pattern, of}: the pattern's first
 # group counts the rows read, or the distinct keys). An output missing a required line
@@ -481,6 +483,72 @@ check_items:
       KIND: [text, true, 绑定方式原文（Inside、Outside、outbound、internal server、static、inbound）]
       RULE: [text, false, 规则引用原文（如 ACL 编号）]
 
+  topology.acl_rules:
+    # 2026-10-05: the IPv4 ACL entries a path is checked against, in match order.
+    name: 拓扑发现：IPv4 ACL 规则
+    entity_type: acl_rule
+    keys: [ACL_NAME, LINE_NUM]
+    values:
+      ACL_TYPE: [text, false, ACL 类型原文（Standard、Extended、Basic、Advanced）]
+      ADDRESS_FAMILY: [text, false, 地址族原文（IP、IPv4）]
+      ACL_NAME: [text, true, ACL 名或编号]
+      MATCH_ORDER: [text, false, 匹配顺序（auto 表示按深度优先排列，设备已按匹配顺序列出）]
+      LINE_NUM: [integer, true, 规则序号（IOS 序号、Comware rule 编号）]
+      ACTION: [text, false, 动作（permit、deny）；无法识别的规则没有]
+      PROTOCOL: [text, false, 协议名或号码；没有表示任意 IP 报文]
+      SRC_HOST: [ip_or_unassigned, false, 源主机地址]
+      SRC_ANY: [text, false, 源为任意（any）]
+      SRC_NETWORK: [ip_or_unassigned, false, 源地址]
+      SRC_WILDCARD: [text, false, 源通配符（Comware 主机为 0）]
+      SRC_NETWORK_OBJECT_GROUP_NAME: [text, false, 源地址对象组名]
+      SRC_PORT_MATCH: [text, false, 源端口比较（eq、neq、lt、gt）]
+      SRC_PORT: [text, false, 源端口：名称（www、domain、dns 等）或号码，eq 后可有多个，以空格分隔]
+      SRC_PORT_RANGE_START: [text, false, 源端口范围起点]
+      SRC_PORT_RANGE_END: [text, false, 源端口范围终点]
+      DST_HOST: [ip_or_unassigned, false, 目的主机地址]
+      DST_ANY: [text, false, 目的为任意（any）]
+      DST_NETWORK: [ip_or_unassigned, false, 目的地址]
+      DST_WILDCARD: [text, false, 目的通配符（Comware 主机为 0）]
+      DST_NETWORK_OBJECT_GROUP_NAME: [text, false, 目的地址对象组名]
+      DST_PORT_MATCH: [text, false, 目的端口比较（eq、neq、lt、gt）]
+      DST_PORT: [text, false, 目的端口：名称（www、domain、dns 等）或号码，eq 后可有多个，以空格分隔]
+      DST_PORT_RANGE_START: [text, false, 目的端口范围起点]
+      DST_PORT_RANGE_END: [text, false, 目的端口范围终点]
+      ICMP_TYPE: [text, false, ICMP 类型名或号码（名称可同时代表代码）]
+      ICMP_CODE: [text, false, ICMP 代码号]
+      TCP_FLAG: [text, false, TCP 标志条件（established：带 ACK 或 RST 的报文）]
+      FRAGMENTS: [text, false, 只匹配非首片分片]
+      TIME: [text, false, 时间段名]
+      STATE: [text, false, 采集时时间段是否生效（active、inactive）]
+      VRF: [text, false, 规则限定的 VPN 实例；没有时的含义由实现声明]
+      OTHER: [text, false, 模板不认识的条件原文；有它的规则不按缺省条件计算]
+      MATCHES: [integer, false, 命中次数]
+
+  topology.acl_bindings:
+    # 2026-10-05: which ACL filters which direction of an interface, and what it does with
+    # packets no entry matches.
+    name: 拓扑发现：ACL 的接口绑定
+    entity_type: acl_binding
+    keys: [INTERFACE, DIRECTION]
+    values:
+      INTERFACE: [text, true, 接口]
+      DIRECTION: [text, true, 方向原文（Inbound、Outgoing、Outbound）]
+      ADDRESS_FAMILY: [text, false, 地址族原文（IPv4、IPv6、MAC）]
+      ACL_NAME: [text, false, 绑定的 ACL 名或编号]
+      SCOPE: [text, false, ACL 的作用范围（Common：与接口自己的 ACL 一起生效）]
+      STATUS: [text, false, 绑定状态原文（如 Failed：未生效）]
+      DEFAULT_ACTION: [text, false, 没有规则命中时的动作（Permit、Deny）]
+
+  topology.security_zones:
+    # 2026-10-05: between security zones traffic is denied unless a security policy
+    # permits it, which a path does not evaluate.
+    name: 拓扑发现：安全域成员
+    entity_type: security_zone_member
+    keys: [ZONE, INTERFACE]
+    values:
+      ZONE: [text, true, 安全域名]
+      INTERFACE: [text, true, 成员接口]
+
 implementations:
   - check_item: topology.arp
     platform: ios
@@ -867,6 +935,41 @@ implementations:
     template: H3C/Comware7/display_nat_all__topology-1.0.0.textfsm
     sha256: 653e5f7b2f37f762af918849ba31dfec5bab6da31eba5d524fdc6fcc098fa237
     valid_empty: ['\A\s*NAT is not configured\.\s*\Z']
+  - check_item: topology.acl_rules
+    platform: ios
+    command: show ip access-lists
+    template: Cisco/IOS/show_ip_access-lists__topology-1.0.0.textfsm
+    sha256: 55d078b33932472a01ae694f654812743eb9babfb7c2d3029a2d4334226342d8
+    valid_empty: [BLANK]  # no ACL configured
+  - check_item: topology.acl_rules
+    platform: comware
+    command: display acl all
+    template: H3C/Comware7/display_acl_all__topology-1.0.0.textfsm
+    sha256: 6584ca9ec9e3402877c04a039e1c8d5b7ee2b440d20b89a1b20206101d9c1229
+    valid_empty: [BLANK]  # no ACL configured
+    # A Comware rule without vpn-instance applies only to non-VPN packets ("--": the
+    # public network); an IOS entry has no instance condition.
+    defaults: {VRF: '--'}
+  - check_item: topology.acl_bindings
+    platform: ios
+    command: show ip interface
+    template: Cisco/IOS/show_ip_interface_acl__topology-1.0.0.textfsm
+    sha256: 418be122a68bfb7b3c5d6da29fa6c0a520b52cbfc81e62347509494b4e7b55d3
+    required: ['^\S+ is .*, line protocol is ']
+    # IPv4 only; an IOS ACL ends with an implicit deny.
+    defaults: {ADDRESS_FAMILY: IPv4, DEFAULT_ACTION: Deny}
+  - check_item: topology.acl_bindings
+    platform: comware
+    command: display packet-filter interface
+    template: H3C/Comware7/display_packet-filter_interface__topology-1.0.0.textfsm
+    sha256: bd9ea585a63425e31818e04113e6412aa8b195c13c773af14d638d0b4c96d0f9
+    valid_empty: [BLANK]  # no packet filter applied
+  - check_item: topology.security_zones
+    platform: comware
+    command: display security-zone
+    template: H3C/Comware7/display_security-zone__topology-1.0.0.textfsm
+    sha256: 33fbdf5c7b348a5afab2e172f7eaf191c995c63e7c1f31b0b2b782db00c05e29
+    valid_empty: ['\A\s*There is no zone\.\s*\Z']
 platforms:
   ios: {vendor: Cisco, platforms: [ios, iosxe], family: IOS}
   comware: {vendor: H3C, platforms: [comware], family: Comware7}

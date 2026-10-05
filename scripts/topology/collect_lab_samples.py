@@ -59,6 +59,9 @@ COMMANDS = [
     # interface bindings of policy routing and NAT (path hops they may redirect)
     ("pbr_bindings", "display ip policy-based-route setup"),
     ("nat_bindings", "display nat all"),
+    ("acl_rules", "display acl all"),
+    ("acl_bindings", "display packet-filter interface"),
+    ("security_zones", "display security-zone"),
     # VPN / EVPN / VXLAN (plan §8 M5)
     ("bgp_vpnv4", "display bgp peer vpnv4"),
     ("bgp_evpn", "display bgp peer l2vpn evpn"),
@@ -106,6 +109,8 @@ CISCO_COMMANDS = [
     ("bgp", "show ip bgp summary"),
     ("pbr_bindings", "show ip policy"),
     ("nat_bindings", "show ip nat statistics"),
+    ("acl_rules", "show ip access-lists"),
+    ("acl_bindings", "show ip interface"),
     # VPN / EVPN / VXLAN (plan §8 M5)
     ("vrf_detail", "show vrf detail"),
     ("bgp_vpnv4", "show bgp vpnv4 unicast all summary"),

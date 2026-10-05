@@ -186,7 +186,7 @@ def test_a_partial_binding_table_is_not_stored():
     assert "pbr_bindings" in devices["10.10.1.11"] and "nat_bindings" not in devices["10.10.1.11"]
     path = by_core(trace(devices, BASE, PC1, BR1_LOOPBACK)["forward"])["CORE2"]
     [br1] = [h for h in path["hops"] if h["device"]["name"] == "BR1"]
-    assert br1["policy_bindings"] == "not_observed"
+    assert "nat_bindings" in br1["not_observed"] and "pbr_bindings" not in br1["not_observed"]
 
 
 def test_hops_through_bound_interfaces_are_flagged(plain, bound):
@@ -250,7 +250,11 @@ def test_unobserved_bindings_are_noted_without_changing_the_status(plain, bound)
     result = trace(plain, BASE, PC1, PC4)["forward"]
     assert result["status"] == "complete"
     [path] = result["paths"]
-    assert [(h["policy_bindings"], h.get("gaps", [])) for h in path["hops"]] == [("not_observed", [])]
+    [hop] = path["hops"]
+    assert {"pbr_bindings", "nat_bindings"} <= set(hop["not_observed"]) and not hop.get("gaps")
     # Where both tables were read completely there is nothing to note.
     paths = by_core(trace(bound, BASE, PC1, BR1_LOOPBACK)["forward"])
-    assert all("policy_bindings" not in h for h in paths["CORE1"]["hops"][1:])
+    assert all(
+        not {"pbr_bindings", "nat_bindings"} & set(h.get("not_observed", ()))
+        for h in paths["CORE1"]["hops"][1:]
+    )

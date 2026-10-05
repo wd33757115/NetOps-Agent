@@ -97,6 +97,9 @@ class Selection:
     scope_header: str | None = None
     # {Value: unit} for Values the device prints as bare numbers ("Age (min)").
     units: dict[str, str] = field(default_factory=dict)
+    # {Value: value} for Values the device never prints because they are fixed for the
+    # platform (an IOS ACL's implicit deny); a row that has the Value keeps its own.
+    defaults: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -375,6 +378,11 @@ def _selection(check_item, implementation) -> Selection:
             f"{implementation.id}: template Values differ from {check_item.id} "
             f"(outside the contract: {outside}, required but absent: {missing})"
         )
+    if undeclared := sorted(set(bound.get("defaults") or {}) - set(fields)):
+        raise SelectionError(
+            f"{implementation.id}: defaults for Values {check_item.id} does not declare: "
+            f"{undeclared}"
+        )
     return Selection(
         check_item_id=check_item.id,
         check_item_version_id=check_item.version_id,
@@ -389,6 +397,7 @@ def _selection(check_item, implementation) -> Selection:
         template_sha256=digest,
         scope_header=bound.get("scope_header"),
         units=dict(bound.get("units") or {}),
+        defaults={name: str(value) for name, value in (bound.get("defaults") or {}).items()},
     )
 
 

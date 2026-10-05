@@ -1,0 +1,34 @@
+Basic IPv4 ACL 2998, 3 rules,
+ACL's step is 5
+ rule 0 permit source 10.1.1.1 0
+ rule 5 deny source 10.0.0.0 0.255.255.255 logging counting
+ rule 10 permit
+
+Advanced IPv4 ACL 3997, 3 rules, match-order is auto,
+ACL's step is 5
+ rule 10 permit tcp source 10.1.2.0 0.0.0.255 destination-port eq 443
+ rule 5 deny ip source 10.1.0.0 0.0.255.255
+ rule 0 permit ip source 10.0.0.0 0.255.255.255
+
+Advanced IPv4 ACL 3998, 16 rules,
+ACL's step is 5
+ rule 5 permit tcp source 192.0.2.1 0 source-port eq 22
+ rule 10 permit udp destination 192.0.2.0 0.0.0.255 source-port range 1000 2000 destination-port eq dns
+ rule 15 permit tcp destination-port eq www
+ rule 20 permit icmp icmp-type echo-reply
+ rule 25 permit icmp icmp-type fragmentneed-DFset
+ rule 30 permit tcp established (22 times matched)
+ rule 35 deny ip source 192.0.2.0 0.0.0.255 fragment
+ rule 40 permit tcp destination 192.0.2.0 0.0.0.255 source-port neq www destination-port lt 1024
+ rule 45 permit tcp destination 192.0.2.0 0.0.0.255 source-port gt 1023
+ rule 50 permit gre
+ rule 55 permit ospf (72 times matched)
+ rule 60 deny ip source 192.0.2.0 0.0.0.255 dscp ef
+ rule 65 permit ip source object-group OG-T
+ rule 70 deny ip source 192.0.2.0 0.0.0.255 time-range TR-DAY (Active)
+ rule 75 permit 51
+ rule 85 permit ip
+
+Advanced IPv4 ACL named T-NAMED, 1 rule,
+ACL's step is 5
+ rule 5 deny ip destination 192.0.2.0 0.0.0.255

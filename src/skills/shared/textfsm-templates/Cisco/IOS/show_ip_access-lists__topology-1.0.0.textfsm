@@ -1,0 +1,60 @@
+Value Filldown ACL_TYPE (Standard|Extended)
+Value Filldown ADDRESS_FAMILY (IP)
+Value Filldown,Required ACL_NAME (\S+)
+Value Required LINE_NUM (\d+)
+Value ACTION (permit|deny)
+Value PROTOCOL ([a-z][a-z0-9]*|\d+)
+Value SRC_HOST (\d+\.\d+\.\d+\.\d+)
+Value SRC_ANY (any)
+Value SRC_NETWORK (\d+\.\d+\.\d+\.\d+)
+Value SRC_WILDCARD (\d+\.\d+\.\d+\.\d+)
+Value SRC_NETWORK_OBJECT_GROUP_NAME (\S+)
+Value SRC_PORT_MATCH (eq|neq|lt|gt)
+Value SRC_PORT ((?:[a-z][\w-]*|\d+(?![\d.]))(?:\s+(?!(?:any|host|object-group|established|fragments|log|log-input|time-range|dscp|precedence|tos|ttl|option|ack|fin|psh|rst|syn|urg|match-all|match-any)\b)(?:[a-z][\w-]*|\d+(?![\d.])))*)
+Value SRC_PORT_RANGE_START ([\w-]+)
+Value SRC_PORT_RANGE_END ([\w-]+)
+Value DST_HOST (\d+\.\d+\.\d+\.\d+)
+Value DST_ANY (any)
+Value DST_NETWORK (\d+\.\d+\.\d+\.\d+)
+Value DST_WILDCARD (\d+\.\d+\.\d+\.\d+)
+Value DST_NETWORK_OBJECT_GROUP_NAME (\S+)
+Value DST_PORT_MATCH (eq|neq|lt|gt)
+Value DST_PORT ((?:[a-z][\w-]*|\d+(?![\d.]))(?:\s+(?!(?:established|fragments|log|log-input|time-range|dscp|precedence|tos|ttl|option|ack|fin|psh|rst|syn|urg|match-all|match-any)\b)(?:[a-z][\w-]*|\d+(?![\d.])))*)
+Value DST_PORT_RANGE_START ([\w-]+)
+Value DST_PORT_RANGE_END ([\w-]+)
+Value ICMP_TYPE ((?!(?:log|log-input|fragments|time-range|dscp|precedence|tos|ttl|option)\b)(?:[a-z][\w-]*|\d+))
+Value ICMP_CODE (\d+)
+Value TCP_FLAG (established)
+Value FRAGMENTS (fragments)
+Value TIME (\S+)
+Value STATE (active|inactive)
+Value OTHER ((?!\()\S.*?)
+Value MATCHES (\d+)
+
+# "show ip access-lists": each IPv4 ACL ("Standard|Extended IP access list NAME") and its
+# entries in the order the device evaluates them, one row per entry. IOS prints well-known
+# ports, ICMP types and protocols by name (53 as "domain", ICMP 3/4 as "packet-too-big").
+# "log" and the hit counter are read past; any other condition this template does not
+# know (dscp, precedence, ttl, other TCP flags, ...) is kept whole in OTHER, and a
+# numbered entry of any other form is kept with OTHER only, so the entry is never
+# evaluated as if the condition were absent. Other ACL kinds (IPv6, MAC, reflexive) are
+# passed over: an interface bound to one of them finds no IPv4 entries under its name.
+Start
+  ^(?:Standard|Extended)\s+IP\s+access\s+list\s+\S+\s*$$ -> Continue.Clearall
+  ^${ACL_TYPE}\s+${ADDRESS_FAMILY}\s+access\s+list\s+${ACL_NAME}\s*$$
+  ^\S.*\baccess\s+list\b.*$$ -> Other
+  ^\s+${LINE_NUM}\s+${ACTION}\s+(?=icmp\s)${PROTOCOL}\s+(?:host\s+${SRC_HOST}|${SRC_ANY}|object-group\s+${SRC_NETWORK_OBJECT_GROUP_NAME}|${SRC_NETWORK}\s+${SRC_WILDCARD})\s+(?:host\s+${DST_HOST}|${DST_ANY}|object-group\s+${DST_NETWORK_OBJECT_GROUP_NAME}|${DST_NETWORK}\s+${DST_WILDCARD})(?:\s+${ICMP_TYPE}(?:\s+${ICMP_CODE})?)?(?:\s+${FRAGMENTS})?(?:\s+time-range\s+${TIME}(?:\s+\(${STATE}\))?)?(?:\s+(?!log(?:-input)?(?:\s|$$))${OTHER})?(?:\s+log(?:-input)?)?(?:\s+\(${MATCHES}\s+match(?:es)?\))?\s*$$ -> Record
+  ^\s+${LINE_NUM}\s+${ACTION}\s+(?=(?:tcp|udp)\s)${PROTOCOL}\s+(?:host\s+${SRC_HOST}|${SRC_ANY}|object-group\s+${SRC_NETWORK_OBJECT_GROUP_NAME}|${SRC_NETWORK}\s+${SRC_WILDCARD})(?:\s+(?:${SRC_PORT_MATCH}\s+${SRC_PORT}|range\s+${SRC_PORT_RANGE_START}\s+${SRC_PORT_RANGE_END}))?\s+(?:host\s+${DST_HOST}|${DST_ANY}|object-group\s+${DST_NETWORK_OBJECT_GROUP_NAME}|${DST_NETWORK}\s+${DST_WILDCARD})(?:\s+(?:${DST_PORT_MATCH}\s+${DST_PORT}|range\s+${DST_PORT_RANGE_START}\s+${DST_PORT_RANGE_END}))?(?:\s+${TCP_FLAG})?(?:\s+${FRAGMENTS})?(?:\s+time-range\s+${TIME}(?:\s+\(${STATE}\))?)?(?:\s+(?!log(?:-input)?(?:\s|$$))${OTHER})?(?:\s+log(?:-input)?)?(?:\s+\(${MATCHES}\s+match(?:es)?\))?\s*$$ -> Record
+  ^\s+${LINE_NUM}\s+${ACTION}\s+(?!(?:tcp|udp|icmp)\s)${PROTOCOL}\s+(?:host\s+${SRC_HOST}|${SRC_ANY}|object-group\s+${SRC_NETWORK_OBJECT_GROUP_NAME}|${SRC_NETWORK}\s+${SRC_WILDCARD})\s+(?:host\s+${DST_HOST}|${DST_ANY}|object-group\s+${DST_NETWORK_OBJECT_GROUP_NAME}|${DST_NETWORK}\s+${DST_WILDCARD})(?:\s+${FRAGMENTS})?(?:\s+time-range\s+${TIME}(?:\s+\(${STATE}\))?)?(?:\s+(?!log(?:-input)?(?:\s|$$))${OTHER})?(?:\s+log(?:-input)?)?(?:\s+\(${MATCHES}\s+match(?:es)?\))?\s*$$ -> Record
+  ^\s+${LINE_NUM}\s+${ACTION}\s+(?:${SRC_ANY}|${SRC_NETWORK},\s+wildcard\s+bits\s+${SRC_WILDCARD}|${SRC_HOST})(?:\s+log(?:-input)?)?(?:\s+\(${MATCHES}\s+match(?:es)?\))?\s*$$ -> Record
+  ^\s+${LINE_NUM}\s+${OTHER}\s*$$ -> Record
+  ^\s*$$
+  ^.* -> Error "unrecognized show ip access-lists line"
+
+Other
+  ^(?=(?:Standard|Extended)\s+IP\s+access\s+list\s+\S+\s*$$) -> Continue.Clearall
+  ^${ACL_TYPE}\s+${ADDRESS_FAMILY}\s+access\s+list\s+${ACL_NAME}\s*$$ -> Start
+  ^\S.*\baccess\s+list\b.*$$
+  ^\s+\S.*$$
+  ^\s*$$
+  ^.* -> Error "unrecognized show ip access-lists line"

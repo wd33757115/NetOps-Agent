@@ -482,11 +482,17 @@ def collect_node(
         reason, command_of[cap] = published_command(identity, cap, model)
         if reason:
             missing[cap] = reason
+    # Capabilities published with the same command (IOS interface addresses and ACL
+    # bindings: "show ip interface") run it once; each reads the one output.
+    readers = {}
+    for cap in selected:
+        if cap != "version" and command_of.get(cap) and (cap != "routes" or not defer_routes):
+            readers.setdefault(command_of[cap], []).append(cap)
     commands = tuple(
-        Command(cap, command_of[cap], read_timeout=spec.timeout)
-        for cap, spec in selected.items()
-        if cap != "version" and command_of.get(cap) and (cap != "routes" or not defer_routes)
+        Command(caps[0], text, read_timeout=max(selected[cap].timeout for cap in caps))
+        for text, caps in readers.items()
     )
+    readers = {caps[0]: caps for caps in readers.values()}
     batch = collector.execute_batch(
         context,
         BatchRequest(
@@ -511,23 +517,24 @@ def collect_node(
     )
 
     def record(item):
-        cap = item.command_id
-        result.results[cap] = item
-        # Even capabilities awaiting templates must classify unsupported/verified-empty output.
-        parsed = parse(
-            identity,
-            cap,
-            item.output,
-            complete=item.output_complete and not item.failure_code,
-            model=model,
-        )
-        if (
-            selected[cap].parser is None
-            and parsed.status not in {"failed", "unsupported"}
-            and (parsed.records or parsed.summary)
-        ):
-            parsed = ParseResult(parser_ref=f"pending:{cap}", warnings=["parser_not_declared"])
-        result.parsed[cap] = parsed
+        for cap in readers.get(item.command_id, [item.command_id]):
+            result.results[cap] = item
+            # Even capabilities awaiting templates must classify unsupported/verified-empty
+            # output.
+            parsed = parse(
+                identity,
+                cap,
+                item.output,
+                complete=item.output_complete and not item.failure_code,
+                model=model,
+            )
+            if (
+                selected[cap].parser is None
+                and parsed.status not in {"failed", "unsupported"}
+                and (parsed.records or parsed.summary)
+            ):
+                parsed = ParseResult(parser_ref=f"pending:{cap}", warnings=["parser_not_declared"])
+            result.parsed[cap] = parsed
 
     for item in batch.results:
         record(item)

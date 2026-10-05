@@ -1,0 +1,15 @@
+Value Filldown,Required INTERFACE (\S+)
+Value Required DIRECTION (Outgoing|Inbound)
+Value SCOPE (Common)
+Value ACL_NAME ([^\s,]+)
+
+# "show ip interface": the IPv4 ACL applied in each direction of each interface
+# ("Inbound  access list is NAME"), one row per applied ACL; "not set" is no row. A
+# "Common" access list (evaluated with the interface's own) is a row of its own scope.
+# Every other line of the interface blocks is read past.
+Start
+  ^\S+\s+is\s+.*,\s+line\s+protocol\s+is\s+.*$$ -> Continue.Clearall
+  ^${INTERFACE}\s+is\s+.*,\s+line\s+protocol\s+is\s+.*$$
+  ^\s+(?:Outgoing|Inbound)\s+(?:Common\s+)?access\s+list\s+is\s+not\s+set\b.*$$
+  ^\s+${DIRECTION}\s+(?:${SCOPE}\s+)?access\s+list\s+is\s+${ACL_NAME}(?:,.*)?\s*$$ -> Record
+  ^.*$$
