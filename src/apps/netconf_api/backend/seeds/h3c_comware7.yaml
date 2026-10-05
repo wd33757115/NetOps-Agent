@@ -52,6 +52,8 @@ definitions:
           1/0: Direct
           1/1: Direct
           1/4: Direct
+          1/8: Direct  # a NAT global address (to NULL0), BR1 with NAT
+          1/9: Direct  # an interface address a NAT server maps, BR1 with NAT
           2/1: Static
           4/1: O_INTRA
           4/2: O_INTER

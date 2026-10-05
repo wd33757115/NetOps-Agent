@@ -118,6 +118,38 @@ def test_ibgp_routes_on_br2_match_the_cli(definitions, selections):
     assert Counter(row["PROTOCOL"] for row in mapped.rows)["BGP"] == 3
 
 
+def test_routes_a_nat_configuration_adds_match_the_cli(definitions, selections):
+    """NAT on BR1 installs its global addresses (1/8, to NULL0) and marks the interface
+    address a server maps (1/9); the CLI prints both as Direct."""
+    selection = selections["topology.routes"]
+    policy = BR1.parent / "br1-policy"
+    data = (policy / "route.xml").read_text(encoding="utf-8")
+    mapped = mapping.map_rows(definitions["h3c-comware7.routes"], data, fields=selection.fields)
+    assert mapped.problems == [] and mapped.read == len(mapped.rows) == 50
+    parsed = CheckItemSelectionReader(source="shipped").parse(
+        selection, (policy / "cli-display-ip-routing-table.txt").read_text(encoding="utf-8")
+    )
+    assert parsed.status == "complete" and len(parsed.rows) == 50
+    interfaces = mapping._elements(
+        definitions["h3c-comware7.interfaces"], (BR1 / "ifmgr-interfaces.xml").read_text("utf-8")
+    )
+    short = {
+        e.findtext(f"{{{NS}}}Name"): e.findtext(f"{{{NS}}}AbbreviatedName") for e in interfaces
+    }
+    names = ("NETWORK", "PREFIX_LENGTH", "PROTOCOL", "DISTANCE", "METRIC", "NEXTHOP_IP")
+    netconf = Counter(
+        (*(row[name] for name in names), short[row["NEXTHOP_IF"]]) for row in mapped.rows
+    )
+    cli = Counter((*(row[name] for name in names), row["NEXTHOP_IF"]) for row in parsed.rows)
+    assert netconf == cli
+    nat = {
+        row["NETWORK"]: row["PROTOCOL"]
+        for row in mapped.rows
+        if row["NETWORK"].startswith("203.0.113.")
+    }
+    assert nat == {"203.0.113.20": "Direct", "203.0.113.53": "Direct", "203.0.113.100": "Direct"}
+
+
 def test_an_unlisted_code_is_reported_not_guessed(definitions, selections):
     data = reply("route.xml").replace(
         "<ProtocolID>6</ProtocolID><SubProtocolID>6</SubProtocolID>",
