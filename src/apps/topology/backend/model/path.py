@@ -363,7 +363,14 @@ class _Tracer:
                 )
             hop.setdefault("filters", []).append({**check, **outcome})
             if outcome["result"] == "deny":
-                return {**check, "rule": outcome["rule"]}
+                # What the refusing entry matches (and its hit count when collected), so a
+                # reader can tell which traffic it stops without asking the device again.
+                entry = next((row for row in entries if row["seq"] == outcome["rule"]), None)
+                return {
+                    **check,
+                    "rule": outcome["rule"],
+                    **({"entry": _conditions(entry)} if entry else {}),
+                }
             if outcome["result"] == "undetermined":
                 hop.setdefault("gaps", []).append(
                     {
@@ -991,6 +998,10 @@ def _flow(protocol, src_port, dst_port):
         if not isinstance(port, int) or not 1 <= port <= 65535:
             raise ValueError("端口应为 1-65535")
     return number, src_port, dst_port
+
+
+def _conditions(entry):
+    return {key: value for key, value in entry.items() if key not in {"acl", "seq", "family"}}
 
 
 def trace(

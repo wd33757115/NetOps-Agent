@@ -255,6 +255,14 @@ def test_pc1_pinging_pc4_is_refused_where_dist1_refused_it(scenario):
         "direction": "in",
         "acl": "PC-IN",
         "rule": 10,
+        "entry": {  # what the refusing entry matches, with its hit count
+            "action": "deny",
+            "protocol": 1,
+            "src": {"address": "172.16.10.11", "wildcard": "0.0.0.0"},
+            "dst": {"address": "172.16.20.14", "wildcard": "0.0.0.0"},
+            "icmp": [8, None],
+            "matches": 3,
+        },
     }
     assert hits("dist1", "PC-IN", 10) == 3  # the three VPCS pings
 
@@ -301,6 +309,14 @@ def test_dns_to_the_internet_is_refused_on_every_path(scenario):
             "direction": "out",
             "acl": "3990",
             "rule": 5,
+            "entry": {
+                "action": "deny",
+                "protocol": 17,
+                "dst": {"address": "198.51.100.0", "wildcard": "0.0.0.255"},
+                "dst_ports": {"op": "eq", "ports": [53]},
+                "vrf": "default",
+                "matches": 2,
+            },
         }
     assert hits("br1", "3990", 5) == 2  # the two VPCS probes
     ntp = trace(scenario, BASE, PC1, INTERNET, protocol="udp", dst_port=123)["forward"]
