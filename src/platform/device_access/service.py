@@ -13,6 +13,7 @@ from .contracts import BatchResult, CommandResult, DeviceAccessError
 from .drivers.paramiko_driver import ParamikoDriver
 from .errors import failure_code
 from .governance import operation_for
+from .netconf import NetconfConnector
 from .policy import authorize, validate_profile
 
 
@@ -21,11 +22,17 @@ def _now():
 
 
 class DeviceAccessService:
-    def __init__(self, *, target_resolver, profile_resolver, driver=None, admission=None):
+    def __init__(
+        self, *, target_resolver, profile_resolver, driver=None, admission=None, netconf=None
+    ):
         self.target_resolver = target_resolver
         self.profile_resolver = profile_resolver
         self.driver = driver or ParamikoDriver()
         self.admission = admission or SSHAdmission()
+        # NETCONF pins host keys with the same verifier as the CLI driver (per port).
+        self.netconf_connector = netconf or NetconfConnector(
+            host_key_verifier=getattr(self.driver, "host_key_verifier", None)
+        )
 
     def open_session(self, context, target_ref, **kwargs):
         from .sessions import open_session
@@ -84,6 +91,63 @@ class DeviceAccessService:
                     connection.disconnect()
                 finally:
                     operation.event("disconnected", mode="human")
+
+    @contextmanager
+    def netconf(self, context, target_ref, profile_id, *, should_continue=None):
+        """A read-only NETCONF session (netconf.py) under its own grant, "device.netconf".
+
+        Yields (session, guard); the session sends only filtered <get>/<get-config>.
+        """
+        if (
+            not context.actor_id
+            or not context.source_app
+            or not any(
+                g.action == "device.netconf"
+                and g.target_ref == target_ref
+                and g.connection_profile_id == profile_id
+                for g in context.grants
+            )
+        ):
+            raise DeviceAccessError("not_authorized", "NETCONF grant required")
+        target, profile = self.target_resolver(target_ref), self.profile_resolver(profile_id)
+        if target.target_ref != target_ref or profile.profile_id != profile_id:
+            raise DeviceAccessError("not_authorized", "resolved reference mismatch")
+        validate_profile(profile)
+        operation = operation_for(context, target, profile)
+        with self.admission.hold(target, profile) as lease:
+
+            def guard():
+                lease()
+                if should_continue is not None and should_continue() is False:
+                    raise DeviceAccessError("cancelled", "NETCONF session was cancelled")
+
+            guard()
+            session = None
+            try:
+                operation.event("connecting", mode="netconf")
+                with operation.activate():
+                    session = self.netconf_connector.connect(target, profile, operation)
+                operation.event(
+                    "connected", mode="netconf", capabilities=len(session.capabilities)
+                )
+            except Exception as exc:
+                try:
+                    operation.event(
+                        "connection_failed", status="failed", failure_code=failure_code(exc)
+                    )
+                finally:
+                    if session is not None:
+                        session.close()
+                    operation.event("disconnected", mode="netconf")
+                raise DeviceAccessError(failure_code(exc), self._safe_error(exc, profile)) from None
+            try:
+                guard()
+                yield session, guard
+            finally:
+                try:
+                    session.close()
+                finally:
+                    operation.event("disconnected", mode="netconf")
 
     def execute_batch(
         self, context, request, *, on_result=None, should_continue=None, command_filter=None
