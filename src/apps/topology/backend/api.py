@@ -138,6 +138,15 @@ def compare(snapshot_id: str, before_id: str, user: CurrentUser = Depends(actor)
     return service.compare(user.user_id, before_id, snapshot_id)
 
 
+@router.get("/issues")
+def collection_issues(
+    network_id: str | None = None,
+    include_cleared: bool = False,
+    user: CurrentUser = Depends(actor),
+):
+    return service.collection_issues(user.user_id, network_id, include_cleared)
+
+
 @router.get("/evidence/{observation_id}")
 def evidence(observation_id: str, user: CurrentUser = Depends(actor)):
     return call(service.evidence, user.user_id, observation_id)

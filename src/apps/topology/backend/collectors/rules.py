@@ -214,19 +214,66 @@ def parse(identity, capability, raw, *, complete=True, model=None):
     if parsed.status == "failed":
         result.warnings.append("unparsed_output" if parsed.reason == "data" else parsed.reason)
         return result
+    text = raw.splitlines()
+    return _project(
+        result,
+        chosen,
+        parsed,
+        capability,
+        family,
+        incomplete,
+        lambda lines: {
+            "check_item": chosen.check_item_id,
+            "text": "\n".join(text[n - 1] for n in lines),
+        },
+    )
+
+
+def project_netconf(identity, capability, chosen, data, ref):
+    """A ParseResult from a NETCONF read of the check item (collectors/netconf.py).
+
+    ``data`` is netconf-api's NetconfRead: the same-name Value rows the CLI template
+    would give, so the same projections apply. A row's "lines" are the device rows it
+    came from. A problem the definition reports (an unlisted code, a lookup miss) is a
+    defect like a rejected CLI line, and a row it could not output is a rejected row.
+    """
+    from src.apps.rule_governance.runtime import ParsedRows
+
+    result = ParseResult(tier="netconf", parser_ref=f"netconf:{ref}", confidence="high")
+    problems = tuple(f"row:{p['row']}:{p['kind']}:{p['value']}" for p in data.problems)
+    result.warnings += list(problems)
+    result.candidate_count = data.read
+    result.rejected_count = data.read - len(data.rows)
+    parsed = ParsedRows("complete", data.rows, "data", [[n] for n in data.refs], problems=problems)
+    return _project(
+        result,
+        chosen,
+        parsed,
+        capability,
+        _family(identity),
+        False,
+        lambda rows: {"check_item": chosen.check_item_id, "netconf": ref, "rows": rows},
+        cli=False,
+    )
+
+
+def _project(result, chosen, parsed, capability, family, incomplete, source, *, cli=True):
+    """Project Value rows into facts; ``source(lines)`` is a row's raw evidence."""
     projected = []
     for row, lines in zip(parsed.rows, parsed.lines):
-        # A bare number in a Value whose unit the implementation declares gets that unit;
-        # a Value fixed for the platform (and never printed) gets the declared value.
-        row = {
-            **chosen.defaults,
-            **row,
-            **{
-                name: f"{row[name]} {unit}"
-                for name, unit in chosen.units.items()
-                if str(row.get(name) or "").isdigit()
-            },
-        }
+        if cli:
+            # A bare number in a Value whose unit the implementation declares gets that
+            # unit; a Value fixed for the platform (and never printed) gets the declared
+            # value. Both describe the CLI implementation, not a NETCONF definition.
+            row = {
+                **chosen.defaults,
+                **row,
+                **{
+                    name: f"{row[name]} {unit}"
+                    for name, unit in chosen.units.items()
+                    if str(row.get(name) or "").isdigit()
+                },
+            }
         try:
             record = ROWS[capability](row, family, lines, result.warnings)
         except (KeyError, ValueError) as exc:
@@ -251,18 +298,8 @@ def parse(identity, capability, raw, *, complete=True, model=None):
     if capability in WHOLE_TABLES and defects:
         return result  # a route table with an unread or invalid line is not used
     merged = MERGE.get(capability, lambda rows: rows)(projected)
-    text = raw.splitlines()
     result.records = [record for record, _ in merged]
-    result.sources = [
-        {
-            "lines": lines,
-            "raw": {
-                "check_item": chosen.check_item_id,
-                "text": "\n".join(text[n - 1] for n in lines),
-            },
-        }
-        for _, lines in merged
-    ]
+    result.sources = [{"lines": lines, "raw": source(lines)} for _, lines in merged]
     if not result.records and (defects or incomplete):
         # Nothing read: a defect or a cut-off output cannot prove an empty table.
         result.records, result.sources = [], []

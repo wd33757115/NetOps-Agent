@@ -26,7 +26,7 @@ from src.platform.device_access.contracts import (
 from src.platform.device_access.drivers.paramiko_driver import ParamikoDriver
 from src.platform.device_access.security import CredentialStore
 
-from . import logins, storage
+from . import issues, logins, storage
 from .collectors.collect import collect_node, command_allowlist, scope_base, scoped_command
 from .collectors.families import discovery_families
 from .collectors.identify import TopologyDiscoveryPlan as DiscoveryPlan
@@ -761,6 +761,16 @@ def export(owner, snapshot_id):
     return graph["simap"] if "simap" in graph else rfc8345(graph)
 
 
+def collection_issues(owner, network_id=None, include_cleared=False):
+    """What nodes could not give over SSH or NETCONF, newest first (issues.py)."""
+    with sessions() as session:
+        if network_id:
+            owned(session, Network, network_id, owner)
+        return issues.listing(
+            session, owner, network_id=network_id, include_cleared=include_cleared
+        )
+
+
 def evidence(owner, observation_id):
     with sessions() as session:
         row = session.get(Observation, observation_id)
@@ -926,7 +936,11 @@ def _collect_topology(job, choice):
         context = AccessContext(
             job.owner,
             APP_ID,
-            (AccessGrant(job.target_id, job.target_id, command_allowlist()),),
+            (
+                AccessGrant(job.target_id, job.target_id, command_allowlist()),
+                # NETCONF first for the tables netconf-api publishes, on the same login.
+                AccessGrant(job.target_id, job.target_id, action="device.netconf"),
+            ),
             job.run_id,
         )
         trust = HostKeyStore()
@@ -943,6 +957,7 @@ def _collect_topology(job, choice):
             scoped_context=lambda capability, scopes, family: _scoped_context(
                 context, job.target_id, job.target_id, scopes, capability, family
             ),
+            netconf=job.settings.get("netconf", "prefer"),
         )
         data = topology_observation(result)
         reason = data.get("failure_code")
@@ -1043,6 +1058,8 @@ def topology_observation(result):
                     if "scope_coverage" in parsed.summary
                     else {}
                 ),
+                # Read over NETCONF, fallen back from it, or compared with it.
+                **({"netconf": parsed.netconf} if parsed.netconf else {}),
             }
             for cap, parsed in result.parsed.items()
             if cap in TOPOLOGY_FACTS
@@ -1198,10 +1215,11 @@ def execute_run(run_id, authority):
         target.status, target.reason = (
             ("waiting_for_input", reason) if reason else ("succeeded", None)
         )
+        observation_id = uuid4().hex if key else None
         if key:
             session.add(
                 Observation(
-                    id=uuid4().hex,
+                    id=observation_id,
                     run_id=run_id,
                     target_id=target_id,
                     attempt=attempt,
@@ -1210,6 +1228,16 @@ def execute_run(run_id, authority):
                     evidence_key=key,
                 )
             )
+        issues.record(
+            session,
+            owner=owner,
+            network_id=run.network_id,
+            run_id=run_id,
+            observation_id=observation_id,
+            address=address,
+            data=data,
+            reason=reason,
+        )
         if not reason:
             count = session.scalar(
                 select(func.count()).select_from(Target).where(Target.run_id == run_id)

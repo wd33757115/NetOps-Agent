@@ -24,6 +24,9 @@ class Discovery(Schema):
     profile_id: Literal["auto", "comware-lldp-v1", "nxos-lldp-v1"] = "auto"
     max_depth: int = Field(default=8, ge=0, le=16)
     max_targets: int = Field(default=200, ge=1, le=200)
+    # NETCONF first for the tables netconf-api publishes ("prefer"), never ("off"), or
+    # as well as the CLI, compared fact by fact ("compare").
+    netconf: Literal["prefer", "off", "compare"] = "prefer"
     # A temporary login for this run only, never saved; empty uses the default login.
     credentials: Credentials | None = None
 

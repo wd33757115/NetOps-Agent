@@ -11,7 +11,8 @@
 | 实测数据 | BR1 的 NETCONF 回包和 CLI 对照已存为测试夹具，见第 4 节 |
 | 映射模块 | 已完成（2026-10-05，负责人要求 Claude 直接实现）：`src/apps/netconf_api/backend/mapping.py`，种子定义 `backend/seeds/h3c_comware7.yaml`，测试 `tests/unit/test_netconf_api_mapping.py`（29 个通过）。第 5.4 节的验收全部通过，过滤条件已在 BR1 上实测 |
 | App 骨架、服务和接口 | 已完成，未部署（2026-10-05）：`src/apps/netconf_api`，测试 `tests/unit/test_netconf_api_service.py`。见第 6 节 |
-| 拓扑接入、完整前端 | 未开始，见第 6 节 |
+| 拓扑接入 | 已完成（2026-10-05）：拓扑 0.10.0，依赖 netconf-api 0.2.0 的运行时契约；采集故障记录。见第 6 节 |
+| 完整前端 | 未开始 |
 
 ## 2. 负责人已定的决定
 
@@ -183,12 +184,12 @@ CLI 的 42 个目的、47 条路由全部对上，管理距离（`Preference`）
 
 ## 6. 映射模块之后由 Claude 继续的部分
 
-状态：第 1、2 项已完成，第 3 项完成第一批，第 4、5 项未开始。
+状态：第 1、2、4 项已完成，第 3 项完成第一批，第 5 项未开始。
 
 1. **App 骨架**（已完成）：`app.yaml`（依赖 device-access 和 rule-governance）、数据表和迁移（定义及版本、设备能力、试运行记录）、`bootstrap` 导入种子定义、最小的前端占位页。
 2. **服务和接口**（已完成）：定义的草稿、发布、版本；读取设备 hello、发现能力；试运行（经平台打开 NETCONF 会话 → 调用映射模块 → 保存行和问题）；发布时检查是否覆盖了检查项的必填值。
 3. **种子定义**（第一批已完成）：第一批是接口、ARP、路由，依据就是第 4.3 节。之后在实验室配置样例后，逐个采样对照，再加 OSPF 邻居、接口 IP、LLDP、MAC/VLAN、ACL、NAT。
-4. **拓扑接入**：NETCONF 优先，失败回退 CLI；另加一个"两边都采、在事实层比对"的一致性模式。
+4. **拓扑接入**（已完成，要点见下文）：NETCONF 优先，失败回退 CLI；另加一个"两边都采、在事实层比对"的一致性模式。
 5. **前端**：后端测完后设计，沿用防火墙策略 App 的外壳和视觉规范。目前只有一个只读的定义列表占位页。
 
 **第 1、2 项的实现要点**
@@ -215,6 +216,31 @@ CLI 的 42 个目的、47 条路由全部对上，管理距离（`Preference`）
   - 830 端口的主机密钥第一次见到时自动记录（和拓扑发现一致），密钥变化时停止。
 - **能力**：定义可以写 `module`（设备 hello 里通告的模块名，H3C 种子是 `Ifmgr`、`ARP`、`Route`）。设备能力页据此列出这台设备能用哪些已发布的定义。
 - **种子**：`bootstrap` 以 `system` 身份发布种子版本。种子更新时只替换原来的种子版本，不覆盖用户自己发布的版本。
+
+**第 4 项（拓扑接入）的实现要点**
+- **契约**：netconf-api 新增运行时契约 `src/apps/netconf_api/runtime.py`（`DefinitionReader.select/read`、`announced`），只读，拓扑只通过它使用定义。拓扑在 `app.yaml` 里声明依赖 netconf-api。
+- **会话**：拓扑自己打开 NETCONF 会话，用该节点的登录、830 端口、`device.netconf` 授权；一个节点只开一个会话。值行用和 CLI 相同的投影代码（`rules.project_netconf`）转成事实。读到的回包和 CLI 输出存在一起，作为证据。
+- **模式**（发现任务的 `netconf` 参数）：
+  - `prefer`（默认）：NETCONF 能取的表先走 NETCONF；
+  - `off`：不用 NETCONF；
+  - `compare`：两边都采，在事实层比对，仍以 CLI 的结果为准。只有一方给出的字段（例如 CLI 的 ARP 老化时间）会单独列出，不参与比对。
+- **回退到 CLI 的情况**：一张表只有完整、干净地读下来才用 NETCONF 的结果，否则回退到 CLI，原因记在 `fact_metadata.<能力>.netconf.reason` 里：
+  - `session:<失败码>`：登录、授权或超时等会话失败；
+  - `module_not_announced`：设备 hello 里没有通告定义的模块；
+  - `problems`：映射有问题，比如未映射代码、关联未命中；
+  - `empty_unverified`：空表，空回包分不清是"没有表项"还是过滤条件没匹配上；
+  - `per_vrf_unverified`：这张表在 CLI 里是按 VRF 分别采的，而设备上有 VRF，NETCONF 定义还没按实例验证过；
+  - `rpc_error`、`reply_unreadable`、`definition_invalid`、`no_contract`。
+- **故障记录**：新表 `app_topology_collection_issues`，接口是 `GET /apps/topology/issues?network_id=&include_cleared=`。
+  - 每次观测之后，按"设备 + 数据项 + 方式（ssh/netconf）+ 问题类型"去重记录，保存最近一次的详情、首次和最近出现的时间、次数；
+  - 每次出现都写一条 warning 日志；
+  - 之后某次采集正常读到这项数据，就自动清除；
+  - 记录的内容：节点整体失败；CLI 表读不全（`failed`、`partial`，详情里有被模板拒绝的行等）；NETCONF 回退的原因；比对不一致（`comparison_mismatch`）；
+  - 不记的内容：设备本身不支持的命令（`unsupported`，例如路由器上没有交换功能），以及 `empty_unverified`。
+- **实测**（BR1 夹具，`tests/unit/test_topology_netconf.py`）：
+  - `prefer` 模式下 ARP 和路由都走 NETCONF，CLI 不再执行这两条命令；
+  - `compare` 模式下两边的事实完全一致，ARP 只差 CLI 独有的 `age_s`；
+  - 未映射代码、登录失败、会话中途断开、没有授权、模块没有通告、设备上有 VRF 这几种情况，都按预期回退到 CLI，并留下了故障记录。
 
 ## 7. 注意事项
 

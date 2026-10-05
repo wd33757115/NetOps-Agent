@@ -12,6 +12,7 @@ from src.platform.device_access.policy import authorize
 from src.platform.device_access.service import DeviceAccessService
 
 from . import families, rules
+from . import netconf as nc
 from .identify import PROBES, Identity, Probe, identify
 from .parse import ParseResult, parse
 from .profiles import MODE_CAPABILITIES, load_profiles, select_profile, verified_driver
@@ -313,6 +314,106 @@ def _collect_scoped(
     result.parsed[capability] = combined
 
 
+def _has_instances(result):
+    """Whether the device may have VRFs besides the default (an incomplete enumeration
+    cannot say it has none)."""
+    enumeration = result.parsed.get("vrfs")
+    if enumeration is None or enumeration.status != "complete":
+        return True
+    names = {row["name"] for row in enumeration.summary.get("instances", [])}
+    ip = result.parsed.get("ip")
+    if ip is not None and ip.status == "complete":
+        names.update(row.get("vrf", "default") for row in ip.records)
+    return bool(names - {"default"})
+
+
+def _session_lost(selection, exc):
+    return None, {"definition": selection.ref, "reason": f"session:{exc.failure_code}"}
+
+
+def _collect_netconf(
+    result,
+    via_netconf,
+    mode,
+    access,
+    context,
+    target_ref,
+    connection_profile_id,
+    original_profile,
+    model,
+    remaining,
+    should_continue,
+    on_result,
+):
+    """Read the NETCONF-served tables in one session on the node's login.
+
+    Preferred: a table read whole and clean replaces the CLI's; the others are returned
+    as {capability: metadata} for the CLI to collect. Compared: the CLI's facts stay, and
+    each carries how NETCONF's differ. Every capability keeps its NETCONF metadata.
+    """
+    from src.platform.device_access.netconf import NETCONF_PORT
+
+    family = result.identity.os_family
+    pending, fallback = {}, {}
+    for cap, selection in via_netconf.items():
+        if (
+            mode == "prefer"
+            and _has_scoped_form(cap, family)
+            and not per_instance(cap, family)
+            and _has_instances(result)
+        ):
+            fallback[cap] = {"definition": selection.ref, "reason": "per_vrf_unverified"}
+        else:
+            pending[cap] = selection
+    read = {}
+    if pending:
+        profile = replace(original_profile, port=NETCONF_PORT, connection_attempts=1)
+        service = DeviceAccessService(
+            target_resolver=access.target_resolver,
+            profile_resolver=lambda _: profile,
+            driver=access.driver,
+            admission=access.admission,
+            netconf=access.netconf_connector,
+        )
+        try:
+            remaining()
+            with service.netconf(
+                context, target_ref, connection_profile_id, should_continue=should_continue
+            ) as (session, guard):
+
+                def checked():
+                    guard()
+                    remaining()
+
+                order = list(pending)
+                for index, cap in enumerate(order):
+                    try:
+                        read[cap] = nc.read(
+                            session, checked, result.identity, cap, pending[cap], model, on_result
+                        )
+                    except DeviceAccessError as exc:
+                        # The session is gone: this table and the rest go to the CLI.
+                        for rest in order[index:]:
+                            read[rest] = _session_lost(pending[rest], exc)
+                        break
+        except DeviceAccessError as exc:
+            for cap, selection in pending.items():
+                read.setdefault(cap, _session_lost(selection, exc))
+    for cap, (parsed, meta) in read.items():
+        if mode == "compare":
+            cli = result.parsed.get(cap)
+            if cli is not None:
+                cli.netconf = {**meta, "status": "compared", "comparison": nc.compare(cli, parsed)}
+        elif parsed is not None and meta["reason"] is None:
+            parsed.netconf = {**meta, "status": "used"}
+            result.parsed[cap] = parsed
+        else:
+            fallback[cap] = {**meta, "status": "fallback"}
+    for cap, meta in fallback.items():
+        meta.setdefault("status", "fallback")
+    return fallback if mode == "prefer" else {}
+
+
 @dataclass
 class CollectionResult:
     identity: Identity
@@ -359,15 +460,22 @@ def collect_node(
     on_result=None,
     known_hosts_provider=None,
     scoped_context=None,
+    netconf="prefer",
 ):
     """Backend only. Caller supplies authenticated grants, revocation guard and evidence sink.
 
     Probe connection always uses Paramiko; a second connection with the same login
-    is initialized for the confirmed platform. Both share a hard budget.
+    is initialized for the confirmed platform. Both share a hard budget. ``netconf``
+    (collectors/netconf.py): the tables a published NETCONF definition serves are read
+    over NETCONF on the same login first ("prefer"), not at all ("off"), or as well as
+    over the CLI and compared ("compare"); the context then needs a "device.netconf"
+    grant.
     """
     profiles = profiles if profiles is not None else load_profiles()
     if mode not in MODE_CAPABILITIES:
         raise ValueError("unknown collection mode")
+    if netconf not in nc.MODES:
+        raise ValueError("unknown NETCONF mode")
     limit = (
         budget_seconds
         if budget_seconds is not None
@@ -482,11 +590,23 @@ def collect_node(
         reason, command_of[cap] = published_command(identity, cap, model)
         if reason:
             missing[cap] = reason
+    via_netconf = (
+        nc.selections(identity, [cap for cap in selected if command_of.get(cap)], model)
+        if netconf != "off"
+        else {}
+    )
+    # Preferred: a table NETCONF serves waits for it, and runs on the CLI only if it fails.
+    later = set(via_netconf) if netconf == "prefer" else set()
     # Capabilities published with the same command (IOS interface addresses and ACL
     # bindings: "show ip interface") run it once; each reads the one output.
     readers = {}
     for cap in selected:
-        if cap != "version" and command_of.get(cap) and (cap != "routes" or not defer_routes):
+        if (
+            cap != "version"
+            and command_of.get(cap)
+            and (cap != "routes" or not defer_routes)
+            and cap not in later
+        ):
             readers.setdefault(command_of[cap], []).append(cap)
     commands = tuple(
         Command(caps[0], text, read_timeout=max(selected[cap].timeout for cap in caps))
@@ -549,8 +669,53 @@ def collect_node(
         should_continue,
         on_result,
     )
+    kept = {}
+    if via_netconf and netconf == "prefer":
+        fallback = _collect_netconf(
+            result,
+            via_netconf,
+            netconf,
+            access,
+            context,
+            target_ref,
+            connection_profile_id,
+            original_profile,
+            model,
+            remaining,
+            should_continue,
+            on_result,
+        )
+        caps = [cap for cap in fallback if command_of.get(cap)]
+        if caps:
+            try:
+                batch = collector.execute_batch(
+                    context,
+                    BatchRequest(
+                        target_ref,
+                        connection_profile_id,
+                        tuple(
+                            Command(cap, command_of[cap], read_timeout=selected[cap].timeout)
+                            for cap in caps
+                        ),
+                        stop_on_error=False,
+                        budget_seconds=remaining(),
+                    ),
+                    should_continue=should_continue,
+                    on_result=on_result,
+                )
+                for item in batch.results:
+                    record(item)
+            except DeviceAccessError as exc:
+                if exc.failure_code != "budget_exceeded":
+                    raise
+                for cap in caps:
+                    result.parsed[cap] = ParseResult(warnings=[exc.failure_code])
+            for cap in caps:
+                if cap in result.parsed:
+                    result.parsed[cap].netconf = fallback[cap]
+        kept = {cap: result.parsed[cap].netconf for cap in via_netconf if cap in result.parsed}
     # Large route tables come last, after VRF adjacency evidence, within the same deadline.
-    if defer_routes and command_of.get("routes"):
+    if defer_routes and command_of.get("routes") and "routes" not in later:
         spec = selected["routes"]
         try:
             batch = collector.execute_batch(
@@ -595,4 +760,24 @@ def collect_node(
             should_continue,
             on_result,
         )
+    if via_netconf and netconf == "compare":
+        # Compared with the CLI's final tables, per-VRF scopes merged.
+        _collect_netconf(
+            result,
+            via_netconf,
+            netconf,
+            access,
+            context,
+            target_ref,
+            connection_profile_id,
+            original_profile,
+            model,
+            remaining,
+            should_continue,
+            on_result,
+        )
+    for cap, meta in kept.items():
+        # A per-VRF merge rebuilds a table; how NETCONF served it stays with it.
+        if cap in result.parsed and meta and not result.parsed[cap].netconf:
+            result.parsed[cap].netconf = meta
     return result

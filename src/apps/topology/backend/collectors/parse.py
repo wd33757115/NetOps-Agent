@@ -45,6 +45,8 @@ class ParseResult:
     sources: list[dict] = field(default_factory=list)
     candidate_count: int = 0
     rejected_count: int = 0
+    # How NETCONF served this capability (collectors/netconf.py), when it was tried.
+    netconf: dict = field(default_factory=dict)
 
     def fact_summary(self):
         """Sidecar fits the existing FactSet summary; typed row schemas stay unchanged."""

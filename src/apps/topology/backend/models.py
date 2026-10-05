@@ -159,3 +159,31 @@ class Resolution(Base):
     target_id = Column(String(32), ForeignKey(Target.id), primary_key=True)
     request_id = Column(String(100), primary_key=True)
     input_hash = Column(String(64), nullable=False)
+
+
+class CollectionIssue(Base):
+    """What a node could not give over SSH (the CLI) or NETCONF, for a human to fix.
+
+    One row per device, capability, transport and kind; each observation updates it,
+    and a later clean collection of the capability over that transport clears it.
+    """
+
+    __tablename__ = "app_topology_collection_issues"
+    id = Column(String(32), primary_key=True)
+    owner_id = Column(String(64), nullable=False, index=True)
+    network_id = Column(String(32), nullable=False, index=True)
+    address = Column(String(64), nullable=False)
+    device = Column(String(255))  # the hostname the device gave, if any
+    capability = Column(String(64), nullable=False)
+    transport = Column(String(16), nullable=False)  # ssh, netconf
+    kind = Column(String(128), nullable=False)
+    detail = Column(JSON, nullable=False, default=dict)  # the latest occurrence
+    count = Column(Integer, nullable=False, default=1)
+    first_seen = Column(DateTime(timezone=True), nullable=False, default=now)
+    last_seen = Column(DateTime(timezone=True), nullable=False, default=now)
+    last_run_id = Column(String(32), nullable=False)
+    last_observation_id = Column(String(32))
+    cleared_at = Column(DateTime(timezone=True))  # None: still open
+    __table_args__ = (
+        UniqueConstraint("owner_id", "network_id", "address", "capability", "transport", "kind"),
+    )

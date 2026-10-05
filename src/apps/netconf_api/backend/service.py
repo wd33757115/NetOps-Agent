@@ -101,6 +101,16 @@ def published(session=None):
     return mapping.load_all(row.body for row in _published_bodies(session).values())
 
 
+def published_versions(session=None):
+    """{id: (definition, version, sha256)} of the published definitions."""
+    if session is None:
+        with sessions() as session:
+            return published_versions(session)
+    rows = _published_bodies(session)
+    definitions = mapping.load_all(row.body for row in rows.values())
+    return {key: (definitions[key], row.version, row.sha256) for key, row in rows.items()}
+
+
 def _owned(session, definition_id, *, lock=False):
     row = session.get(Definition, definition_id, with_for_update=lock)
     if row is None:
@@ -229,6 +239,17 @@ def publish(actor, definition_id, payload: Publish):
         except mapping.DefinitionError as exc:
             raise HTTPException(422, f"定义不可用：{exc}") from None
         if definition.check_item:
+            # One definition serves a check item on a device family: consumers pick it.
+            for other in mapping.load_all(bodies.values()).values():
+                if (
+                    other.id != definition_id
+                    and other.check_item == definition.check_item
+                    and other.vendor.casefold() == definition.vendor.casefold()
+                    and set(other.platforms) & set(definition.platforms)
+                ):
+                    raise HTTPException(
+                        409, f"{other.id} 已为同一设备平台提供 {definition.check_item}"
+                    )
             gaps = []
             for platform in definition.platforms:
                 fields = contract_fields(definition, platform)

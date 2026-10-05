@@ -262,3 +262,16 @@ def test_a_large_table_keeps_its_first_rows_and_whole_counts(monkeypatch, device
     result = service.trial(ALICE, request)
     assert (result["read_count"], result["row_count"], len(result["rows"])) == (47, 47, 10)
     assert [row["ref"] for row in result["rows"]] == list(range(1, 11))
+
+
+def test_a_second_definition_for_the_same_family_is_not_published(database):
+    body = service.read_definition(ALICE, "h3c-comware7.arp")["published"]["body"]
+    copy = {**body, "id": "h3c-comware7.arp-copy"}
+    service.save_draft(ALICE, copy["id"], service.Draft(body=copy, revision=0))
+    with pytest.raises(HTTPException) as refused:
+        service.publish(ALICE, copy["id"], service.Publish(revision=1))
+    assert refused.value.status_code == 409 and "h3c-comware7.arp" in refused.value.detail
+    # Another family is no conflict, but it still needs the check item there (no_contract).
+    other = {**copy, "platforms": ["comware5"]}
+    service.save_draft(ALICE, copy["id"], service.Draft(body=other, revision=1))
+    assert status(lambda: service.publish(ALICE, copy["id"], service.Publish(revision=2))) == 409
