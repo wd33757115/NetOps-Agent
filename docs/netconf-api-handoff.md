@@ -110,9 +110,12 @@ CLI 的 42 个目的、47 条路由全部对上，管理距离（`Preference`）
 | 2/1 | Static | 1 |
 | 4/1 | O_INTRA | 12 |
 | 4/2 | O_INTER | 2 |
-| 6/6 | BGP | 3 |
+| 6/1 | BGP（IBGP，BR2 实测） | 3 |
+| 6/6 | BGP（EBGP，BR1 实测） | 3 |
 
-其他代码（OSPF 外部路由、IBGP 等）没有实测到。遇到时必须报"未映射"，不能猜。
+6/1 是部署后在 BR2 上试运行时发现的：种子定义里原来没有这个代码，映射模块按设计报了"未映射"，没有去猜。之后经控制台对照 CLI（`display ip routing-table 8.8.8.0 24 verbose` 显示 `SubProtID: 0x1`、`LastAs` 为本 AS），确认是 IBGP，CLI 写作 `BGP`，于是补进种子定义（v2）。BR2 的回包和 CLI 存在 `tests/fixtures/netconf/h3c-comware7/br2/`。
+
+其他代码（OSPF 外部路由等）还没有实测到。遇到时必须报"未映射"，不能猜。
 
 ## 5. 映射模块
 

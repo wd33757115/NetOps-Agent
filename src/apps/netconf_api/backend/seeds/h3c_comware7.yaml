@@ -1,6 +1,6 @@
 # H3C Comware 7 NETCONF definitions, the first ones (docs/netconf-api-handoff.md §4.3).
-# Measured on BR1 (VSR1000, 7.1.064 R1362P12) against the CLI on 2026-10-05; the replies
-# are tests/fixtures/netconf/h3c-comware7/br1. A code listed here was seen on a device
+# Measured on BR1 and BR2 (VSR1000, 7.1.064 R1362P12) against the CLI on 2026-10-05; the
+# replies are tests/fixtures/netconf/h3c-comware7/br1 and br2. A code listed here was seen on a device
 # next to the CLI's text for it; any other code is reported as unmapped, not guessed.
 definitions:
   - id: h3c-comware7.interfaces
@@ -55,7 +55,8 @@ definitions:
           2/1: Static
           4/1: O_INTRA
           4/2: O_INTER
-          6/6: BGP
+          6/1: BGP  # IBGP (BR2: SubProtID 0x1, learned from its own AS)
+          6/6: BGP  # EBGP (BR1, from the ISP)
       DISTANCE: Preference
       METRIC: Metric
       NEXTHOP_IP: Nexthop
