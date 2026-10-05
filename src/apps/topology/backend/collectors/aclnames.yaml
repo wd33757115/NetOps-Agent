@@ -1,10 +1,13 @@
 # Names a CLI dialect prints in ACL entries instead of numbers (collectors/families.py: a
 # family's "cli"): IP protocols ("any": every IP packet), TCP and UDP ports, ICMP types
 # with the code a name implies (null: any code). A name no table holds makes the entry
-# one a path cannot evaluate; it is never guessed. Adding a dialect is adding a block here.
+# one a path cannot evaluate; it is never guessed. nat_roles: the NAT binding kinds
+# (topology.nat_bindings) that make an interface "inside" or "outside" for NAT rules that
+# are not bound to an interface of their own. Adding a dialect is adding a block here.
 schema_version: 1
 dialects:
   ios:
+    nat_roles: {inside: inside, outside: outside}
     protocols: {ip: any, icmp: 1, igmp: 2, ipinip: 4, tcp: 6, udp: 17, gre: 47, esp: 50,
                 ahp: 51, eigrp: 88, ospf: 89, nos: 94, pim: 103, pcp: 108}
     ports:
@@ -36,6 +39,7 @@ dialects:
            information-reply: [16, null], mask-request: [17, null], mask-reply: [18, null],
            traceroute: [30, null], conversion-error: [31, null], mobile-redirect: [32, null]}
   comware:
+    nat_roles: {static: outside}  # where static mappings apply ("nat static enable")
     protocols: {ip: any, icmp: 1, igmp: 2, ipinip: 4, tcp: 6, udp: 17, gre: 47, ospf: 89}
     ports:
       tcp: {echo: 7, discard: 9, daytime: 13, chargen: 19, ftp-data: 20, ftp: 21, telnet: 23,

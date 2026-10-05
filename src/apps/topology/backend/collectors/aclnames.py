@@ -24,11 +24,13 @@ def _tables():
             for kind, names in raw["ports"].items()
         }
         icmp = {name: (int(kind), code) for name, (kind, code) in raw["icmp"].items()}
-        tables[dialect] = {"protocols": protocols, "ports": ports, "icmp": icmp}
+        roles = {kind.lower(): role for kind, role in (raw.get("nat_roles") or {}).items()}
+        tables[dialect] = {"protocols": protocols, "ports": ports, "icmp": icmp, "nat_roles": roles}
     return tables
 
 
 def names(dialect):
     """{"protocols": {name: number or None}, "ports": {protocol: {name: port}},
-    "icmp": {name: (type, code or None)}} for a dialect; empty tables for an unknown one."""
-    return _tables().get(dialect) or {"protocols": {}, "ports": {}, "icmp": {}}
+    "icmp": {name: (type, code or None)}, "nat_roles": {binding kind: role}} for a
+    dialect; empty tables for an unknown one."""
+    return _tables().get(dialect) or {"protocols": {}, "ports": {}, "icmp": {}, "nat_roles": {}}

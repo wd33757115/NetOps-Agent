@@ -73,6 +73,7 @@ MODE_CAPABILITIES = {
         "acl_rules",
         "acl_bindings",
         "security_zones",
+        "nat_rules",
         "routes",
     ),
     "standard": (

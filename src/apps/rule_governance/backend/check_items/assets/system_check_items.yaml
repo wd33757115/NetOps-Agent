@@ -549,6 +549,32 @@ check_items:
       ZONE: [text, true, 安全域名]
       INTERFACE: [text, true, 成员接口]
 
+  topology.nat_rules:
+    # 2026-10-05: the NAT rules a path applies (source NAT by ACL, static mappings, port
+    # mappings) and the address pools they translate to.
+    name: 拓扑发现：NAT 规则
+    entity_type: nat_rule
+    keys: [KIND]
+    values:
+      KIND: [text, true, 规则种类原文（pool、inside source list、inside source static、address group、outbound、internal server、Static 等）]
+      POOL: [text, false, 地址池名或地址组号（--- 表示不用地址池）]
+      POOL_START: [ip_or_unassigned, false, 地址池起始地址]
+      POOL_END: [ip_or_unassigned, false, 地址池结束地址]
+      INTERFACE: [text, false, 规则绑定的接口（Comware）]
+      ACL_NAME: [text, false, 决定哪些报文转换的 ACL（--- 表示全部）]
+      TO_INTERFACE: [text, false, 转换成该接口的地址（IOS interface）]
+      OVERLOAD: [text, false, 端口复用（IOS overload）]
+      NO_PAT: [text, false, 不做端口转换（Comware NO-PAT：Y、N）]
+      PROTOCOL: [text, false, 端口映射的协议名或号码]
+      LOCAL_ADDRESS: [ip_or_unassigned, false, 内部地址]
+      LOCAL_PORT: [text, false, 内部端口]
+      GLOBAL_ADDRESS: [ip_or_unassigned, false, 外部地址]
+      GLOBAL_INTERFACE: [text, false, 以该接口的地址为外部地址（IOS interface）]
+      GLOBAL_PORT: [text, false, 外部端口]
+      VRF: [text, false, 规则所在的 VPN 实例]
+      STATUS: [text, false, 规则状态原文（如 Active）]
+      OTHER: [text, false, 模板不认识的规则内容；有它的规则不计算]
+
 implementations:
   - check_item: topology.arp
     platform: ios
@@ -933,7 +959,7 @@ implementations:
     platform: comware
     command: display nat all
     template: H3C/Comware7/display_nat_all__topology-1.0.0.textfsm
-    sha256: 653e5f7b2f37f762af918849ba31dfec5bab6da31eba5d524fdc6fcc098fa237
+    sha256: 25bf5f5a09b1cf3e96ed60a391cdb23e8c8bbad89a864be9e72c91d27d7be045
     valid_empty: ['\A\s*NAT is not configured\.\s*\Z']
   - check_item: topology.acl_rules
     platform: ios
@@ -970,6 +996,18 @@ implementations:
     template: H3C/Comware7/display_security-zone__topology-1.0.0.textfsm
     sha256: 33fbdf5c7b348a5afab2e172f7eaf191c995c63e7c1f31b0b2b782db00c05e29
     valid_empty: ['\A\s*There is no zone\.\s*\Z']
+  - check_item: topology.nat_rules
+    platform: ios
+    command: show running-config | include ip nat
+    template: Cisco/IOS/show_running-config_include_ip_nat__topology-1.0.0.textfsm
+    sha256: 2dc2b53d3287233dd1ffc7cf7fe43332d1fe10a89ac30c7d9dc8c46d3aeef297
+    valid_empty: [BLANK]  # no NAT statement
+  - check_item: topology.nat_rules
+    platform: comware
+    command: display nat all
+    template: H3C/Comware7/display_nat_all_rules__topology-1.0.0.textfsm
+    sha256: 16a2a5a23f769bb8e13b74d1a48e38cbd2c378a4bc7fa43c4757e22349dbd24e
+    valid_empty: ['\A\s*NAT is not configured\.\s*\Z']
 platforms:
   ios: {vendor: Cisco, platforms: [ios, iosxe], family: IOS}
   comware: {vendor: H3C, platforms: [comware], family: Comware7}

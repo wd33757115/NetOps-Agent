@@ -63,7 +63,11 @@ def entry_matches(entry, packet):
         elif protocol != entry["protocol"]:
             return False, []
     for key in ("src", "dst"):
-        if key in entry and not _covers(packet[key], entry[key]):
+        if key not in entry:
+            continue
+        if packet.get(key) is None:
+            open_.append(key)  # an address NAT left open (an address of a pool)
+        elif not _covers(packet[key], entry[key]):
             return False, []
     for key in ("src_port", "dst_port"):
         if f"{key}s" not in entry:

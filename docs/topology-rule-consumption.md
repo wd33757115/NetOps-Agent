@@ -28,7 +28,7 @@
 - **语义自带**：每个 Value 的语义由检查项自己定义（`semantic_definition`），冻结在 `topology-system` 目录下，不依赖共享的标准观测目录。
 - **实现可自由增改**：各厂商、各型号的采集实现（命令 + 模板）可以随时新增或替换。
 
-**清单**（由 `system_check_items.yaml` 生成；共 34 项，除安全域只有 Comware 7 的实现外，全部已在 IOS/IOS-XE 与 Comware 7 上接入）
+**清单**（由 `system_check_items.yaml` 生成；共 35 项，除安全域只有 Comware 7 的实现外，全部已在 IOS/IOS-XE 与 Comware 7 上接入）
 
 | 检查项 | 名称 | Value（★ 为键/必填） | 已发布的采集实现 |
 |---|---|---|---|
@@ -66,6 +66,7 @@
 | `topology.acl_rules` | IPv4 ACL 规则（按设备的匹配顺序） | ★ACL_NAME, ★LINE_NUM, ACL_TYPE, ADDRESS_FAMILY, MATCH_ORDER, ACTION, PROTOCOL, SRC_/DST_ HOST、ANY、NETWORK、WILDCARD、NETWORK_OBJECT_GROUP_NAME、PORT_MATCH、PORT、PORT_RANGE_START/END, ICMP_TYPE, ICMP_CODE, TCP_FLAG, FRAGMENTS, TIME, STATE, VRF, OTHER, MATCHES | ios: `show ip access-lists`<br>comware: `display acl all` |
 | `topology.acl_bindings` | ACL 的接口绑定 | ★INTERFACE, ★DIRECTION, ADDRESS_FAMILY, ACL_NAME, SCOPE, STATUS, DEFAULT_ACTION | ios: `show ip interface`<br>comware: `display packet-filter interface` |
 | `topology.security_zones` | 安全域成员 | ★ZONE, ★INTERFACE | comware: `display security-zone` |
+| `topology.nat_rules` | NAT 规则（地址池、按 ACL 的源 NAT、静态映射、端口映射） | ★KIND, POOL, POOL_START, POOL_END, INTERFACE, ACL_NAME, TO_INTERFACE, OVERLOAD, NO_PAT, PROTOCOL, LOCAL_ADDRESS, LOCAL_PORT, GLOBAL_ADDRESS, GLOBAL_INTERFACE, GLOBAL_PORT, VRF, STATUS, OTHER | ios: `show running-config \| include ip nat`<br>comware: `display nat all` |
 
 说明：
 
@@ -176,6 +177,13 @@ commands(check_item_ids) -> [{implementation_id, platforms, command, scoped_comm
   - 部署后经平台发现与路径接口复验 12 项全部通过：两台设备的 ACL 命令按已发布实现执行，IOS 的 `show ip interface` 每台只执行一次；六条流的结论与上面一致。随后删除配置并重新发现，路径上已无过滤，PC1 ping PC4 恢复。
   - 未覆盖：二层设备端口上的 ACL、安全策略内容、对象组展开、IPv6、IOS ZBF（IOL 不支持，无样本）。
   - 按 RFC 8519 导出（topology 0.8.1）：设备级导出新增 `acl` 一节（`model/device_acl.py`），`ietf-access-control-list` 树用冻结模块校验（模块取自 IANA，与 M1 policy-security 集同一字节；只启用设备上看到的特性：IPv4/TCP/UDP/ICMP 匹配、接口绑定、规则命中计数）。只导出能精确表达的规则：连续通配符转前缀，lt/gt 等价换成 lte/gte；一条规则多个端口、established、fragments、时间段、不连续通配符、模板不认识的条件都不导出，写进缺口。默认动作不是 RFC 8519 的字段，也不造一条规则，放在 metadata；Comware 只匹配公网的规则绑在 VPN 接口上时，该绑定不导出、记缺口。路径计算仍用内部结构，和路由表一样。
+- **路径按流计算 NAT（第二期，2026-10-05，topology 0.9.0、规则治理 1.7.0）**：负责人决定先做 NAT 再做策略路由。
+  - 处理顺序实测：Comware 与 IOS 相同——入方向包过滤看到转换前的地址，出方向包过滤看到转换后的地址（BR1、CORE1 上用只计数的 ACL 实测）。每跳顺序为入向 ACL → 目的 NAT → 查路由 → 源 NAT → 出向 ACL，不分家族。
+  - 新增 `topology.nat_rules`：IOS 读 `show running-config | include ip nat`（每条 NAT 规则一行；`show ip nat translations` 里静态规则与动态会话分不开），Comware 读 `display nat all`（与 NAT 绑定同一命令，采集时只执行一次）。规则含义按字段结构判断（地址池、按 ACL 的源 NAT、静态映射、端口映射），不认识厂商用词；IOS 的 inside/outside、Comware 的 static 绑定按方言数据映射为接口角色（`aclnames.yaml` 的 `nat_roles`）。route-map、outside source、VRF、Comware inbound 与非 IP-to-IP 的静态映射不计算（记 OTHER 或模板判失败）。
+  - 顺带修正：Comware 绑定模板在一个段落里有多条规则时会判失败（旧缺陷）。
+  - 路径：跳上 `translations` 给出转换前后的地址和端口；转成地址池时地址未知（`nat_address_unknown`），规则判断不了时 `nat_undetermined`。去程做了转换时，回程从转换后的目的回到转换后的源，在原设备原接口按会话还原。源地址不在已采网络里时，按设备回送它的出口推断进入点（`external_entry_assumed`，目的在某个入口的子网上时只取那里）。目的地址若是经 ARP/LLDP 证明的邻接设备自己的地址，路径继续走进那台设备（在它那里做 ACL、NAT 和本机送达）。
+  - 实机验收（campus-wan）：BR1 源 NAT（PC1 访问外网）、`nat server`（外网访问 100.64.1.2:8080 到 PC4:80）、CORE1 静态一对一（10.99.1.12 ↔ PC2）、接口 PAT（PC1 访问 BR1 环回口）。推导与 VPCS 实际打流、设备 NAT 会话表一致，原文作为夹具保留（`campus-wan/nat`）。
+  - 不按 RFC 8512 导出：它的实例、策略、地址池、映射条目都要求设备不打印的数字键（实例号、策略号、池号、条目序号；IOS 地址池只有名字），按"不编造设备没给出的列表键"不导出，NAT 只作为路径计算的内部证据。
   - 第二期策略路由：节点内容（`show route-map`、`display ip policy-based-route`）、下一跳可达性、动作优先级、deny 节点按路由表转发。第三期 NAT：规则内容、两个方向的改写、回程按去程的翻译推导。Comware 的出方向 NAT 与包过滤、入方向 nat server 与策略路由谁先，文档未写明，届时在实验网用流量和命中计数实测，写成家族数据。
 - **待做**：
   - 系统模板登记到规则治理的模板库（数据库），让页面可见、可评审；目前模板文件由资产清单按 sha256 钉住；

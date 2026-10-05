@@ -74,6 +74,7 @@ CHECK_ITEMS = {
     "acl_rules": "topology.acl_rules",
     "acl_bindings": "topology.acl_bindings",
     "security_zones": "topology.security_zones",
+    "nat_rules": "topology.nat_rules",
 }
 WHOLE_TABLES = frozenset({"routes"})
 SOURCE = "published"  # tests read the catalog shipped with rule governance ("shipped")
@@ -1008,14 +1009,88 @@ def _pbr_binding(row, family, lines, warnings):
 
 
 def _nat_binding(row, family, lines, warnings):
-    """NAT on interfaces: how each is bound (inside, outside, outbound, ...), one record each."""
+    """NAT on interfaces: how each is bound (inside, outside, outbound, ...), one record each,
+    with the role ("inside", "outside") the kind gives for rules of no interface of their own."""
     kind = " ".join(row["KIND"].lower().split())
     rule = row.get("RULE") if str(row.get("RULE") or "").strip("-") else None
+    role = acl_names(cli(family))["nat_roles"].get(kind)
     return [
-        {"ifname": interface(name, family).name, "kind": kind, **({"rule": rule} if rule else {})}
+        {
+            "ifname": interface(name, family).name,
+            "kind": kind,
+            **({"rule": rule} if rule else {}),
+            **({"role": role} if role else {}),
+        }
         for name in re.split(r"\s*,\s*", row["INTERFACE"].strip())
         if name
     ]
+
+
+def _nat_port(value):
+    port = int(value)
+    if not 0 < port <= 65535:
+        raise ValueError("nat_port")
+    return port
+
+
+def _nat_rule(row, family, lines, warnings):
+    """One NAT rule, or one address range of a pool, read from its fields: a range is a pool;
+    a local and a global address make a static mapping (of one protocol port when ports are
+    given); anything else is source NAT by ACL ("---" or none: every packet) to an interface
+    address or a pool. What the reading does not know is "unsupported": such a rule is not
+    applied as if it were complete."""
+    record = {"kind": " ".join(row["KIND"].split())}
+    unsupported = []
+    if other := row.get("OTHER"):
+        unsupported.append("rule:" + (" | ".join(other) if isinstance(other, list) else other))
+    if vrf := row.get("VRF"):
+        unsupported.append(f"vrf:{vrf}")
+    if (status := row.get("STATUS")) and status.lower() != "active":
+        unsupported.append(f"status:{status}")
+    if name := row.get("INTERFACE"):
+        record["interface"] = interface(name, family).name
+    if (pool := row.get("POOL")) and pool.strip("-"):
+        record["pool"] = pool
+    if row.get("POOL_START"):
+        record.update(
+            type="pool", start=ip_address(row["POOL_START"]), end=ip_address(row["POOL_END"])
+        )
+    elif row.get("LOCAL_ADDRESS"):
+        record.update(type="static", local=ip_address(row["LOCAL_ADDRESS"]))
+        if row.get("GLOBAL_ADDRESS"):
+            record["global"] = ip_address(row["GLOBAL_ADDRESS"])
+        elif row.get("GLOBAL_INTERFACE"):
+            record["global_interface"] = interface(row["GLOBAL_INTERFACE"], family).name
+        else:
+            raise ValueError("nat_static_without_global")
+        if protocol := str(row.get("PROTOCOL") or "").lower():
+            number = (
+                int(protocol)
+                if protocol.isdigit()
+                else acl_names(cli(family))["protocols"].get(protocol, -1)
+            )
+            if number not in {6, 17}:
+                unsupported.append(f"protocol:{protocol}")
+            else:
+                record["protocol"] = number
+        if row.get("LOCAL_PORT") or row.get("GLOBAL_PORT"):
+            record["local_port"] = _nat_port(row["LOCAL_PORT"])
+            record["global_port"] = _nat_port(row["GLOBAL_PORT"])
+            if "protocol" not in record:
+                unsupported.append("port_without_protocol")
+    else:
+        record["type"] = "source"
+        if (acl := row.get("ACL_NAME")) and acl.strip("-"):
+            record["acl"] = acl
+        if row.get("TO_INTERFACE"):
+            record["to_interface"] = interface(row["TO_INTERFACE"], family).name
+        # Port translation: IOS "overload"; Comware unless NO-PAT.
+        record["port_translation"] = bool(row.get("OVERLOAD")) or row.get("NO_PAT") == "N"
+        if not ("acl" in record or row.get("ACL_NAME") or row.get("INTERFACE")):
+            unsupported.append("rule_without_match")
+    if unsupported:
+        record["unsupported"] = unsupported
+    return record
 
 
 ADDRESS_FAMILIES = {"ip": "ipv4", "ipv4": "ipv4", "ipv6": "ipv6", "mac": "mac"}
@@ -1181,6 +1256,7 @@ ROWS = {
     "acl_rules": _acl_rule,
     "acl_bindings": _acl_binding,
     "security_zones": _security_zone,
+    "nat_rules": _nat_rule,
     "pbr_bindings": _pbr_binding,
     "nat_bindings": _nat_binding,
     "arp": _arp,

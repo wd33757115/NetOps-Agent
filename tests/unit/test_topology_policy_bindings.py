@@ -91,7 +91,7 @@ NAT = "nat_may_translate"
             [
                 {"ifname": "GigabitEthernet2/0", "kind": "outbound", "rule": "2999"},
                 {"ifname": "GigabitEthernet2/0", "kind": "internal server"},
-                {"ifname": "GigabitEthernet2/0", "kind": "static"},
+                {"ifname": "GigabitEthernet2/0", "kind": "static", "role": "outside"},
             ],
         ),
         ("core1", "ios", "pbr_bindings", [{"ifname": "Ethernet1/0", "policy": "PBR-TEST"}]),
@@ -101,10 +101,10 @@ NAT = "nat_may_translate"
             "nat_bindings",
             # "Ethernet0/1, Ethernet0/2" on one line: one record per interface.
             [
-                {"ifname": "Ethernet0/1", "kind": "outside"},
-                {"ifname": "Ethernet0/2", "kind": "outside"},
-                {"ifname": "Ethernet1/0", "kind": "inside"},
-                {"ifname": "Ethernet1/1", "kind": "inside"},
+                {"ifname": "Ethernet0/1", "kind": "outside", "role": "outside"},
+                {"ifname": "Ethernet0/2", "kind": "outside", "role": "outside"},
+                {"ifname": "Ethernet1/0", "kind": "inside", "role": "inside"},
+                {"ifname": "Ethernet1/1", "kind": "inside", "role": "inside"},
             ],
         ),
     ],

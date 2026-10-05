@@ -1,0 +1,206 @@
+{
+  "schema_version": 1,
+  "batch": "20261005-125715",
+  "source": "GNS3 authorized lab capture",
+  "raw_format": "UTF-8 text saved by collector before CLI cleanup; original line endings",
+  "limitations": [
+    "Not an arbitrary-encoding wire capture",
+    "No initial login banner saved"
+  ],
+  "secret_scan": {
+    "literal_matches": 0,
+    "sensitive_config_matches": 0,
+    "scanner": "scripts/scan_sensitive_device_data.py + direct byte check"
+  },
+  "observations": [
+    {
+      "device": "br1",
+      "host": "10.10.1.11",
+      "capability": "routes",
+      "command": "display ip routing-table",
+      "observed_at": "2026-10-05T04:57:19.366050+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "br1/routes.txt",
+          "sha256": "79232ea74b19614dce57fb85c63cfd50c6e49dbb8c833febea1dadf50b1981b8",
+          "bytes": 3699
+        },
+        "raw.txt": {
+          "path": "br1/routes.raw.txt",
+          "sha256": "482dd2ccdda034b0846e9bde67458fa61ab01410d53f7b98a782821dc231e93d",
+          "bytes": 3850
+        }
+      }
+    },
+    {
+      "device": "br1",
+      "host": "10.10.1.11",
+      "capability": "nat_bindings",
+      "command": "display nat all",
+      "observed_at": "2026-10-05T04:57:19.880517+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "br1/nat_bindings.txt",
+          "sha256": "b566633c226664bc3a0355bcdb7e84516e6790d815267b25835ef34665365dae",
+          "bytes": 2218
+        },
+        "raw.txt": {
+          "path": "br1/nat_bindings.raw.txt",
+          "sha256": "fc204e57759eeec86bfc934d9b93a1d37968ebf03d32eb0d593916c0f65e9836",
+          "bytes": 2416
+        }
+      }
+    },
+    {
+      "device": "br1",
+      "host": "10.10.1.11",
+      "capability": "acl_rules",
+      "command": "display acl all",
+      "observed_at": "2026-10-05T04:57:19.932178+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "br1/acl_rules.txt",
+          "sha256": "f38fa4f00678dc864be6d3804e453505df1c3abee1c6c17686693b274381fea8",
+          "bytes": 195
+        },
+        "raw.txt": {
+          "path": "br1/acl_rules.raw.txt",
+          "sha256": "3aae0969ceca7fd06309acbbe154d7425906df38b6e4c191f6e98877158b6433",
+          "bytes": 235
+        }
+      }
+    },
+    {
+      "device": "br1",
+      "host": "10.10.1.11",
+      "capability": "acl_bindings",
+      "command": "display packet-filter interface",
+      "observed_at": "2026-10-05T04:57:19.983958+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "br1/acl_bindings.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "br1/acl_bindings.raw.txt",
+          "sha256": "c8eeb455bac7503bdf60f570552a46f8e4f49e1ec52a04f11c7b3c3e119a29a8",
+          "bytes": 39
+        }
+      }
+    },
+    {
+      "device": "br1",
+      "host": "10.10.1.11",
+      "capability": "nat_rules",
+      "command": "display nat all",
+      "observed_at": "2026-10-05T04:57:20.086815+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "br1/nat_rules.txt",
+          "sha256": "b566633c226664bc3a0355bcdb7e84516e6790d815267b25835ef34665365dae",
+          "bytes": 2218
+        },
+        "raw.txt": {
+          "path": "br1/nat_rules.raw.txt",
+          "sha256": "fc204e57759eeec86bfc934d9b93a1d37968ebf03d32eb0d593916c0f65e9836",
+          "bytes": 2416
+        }
+      }
+    },
+    {
+      "device": "core1",
+      "host": "10.10.1.13",
+      "capability": "nat_bindings",
+      "command": "show ip nat statistics",
+      "observed_at": "2026-10-05T04:57:23.159233+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "core1/nat_bindings.txt",
+          "sha256": "117bb24045b60c89705daa9bed2d541b8c683635cdc10b1c93c6f1262b69a7b1",
+          "bytes": 662
+        },
+        "raw.txt": {
+          "path": "core1/nat_bindings.raw.txt",
+          "sha256": "fcd5b5c054914b03188f2a06ec98d370fa0780693a58732e79cdd40ca70919d3",
+          "bytes": 711
+        }
+      }
+    },
+    {
+      "device": "core1",
+      "host": "10.10.1.13",
+      "capability": "acl_rules",
+      "command": "show ip access-lists",
+      "observed_at": "2026-10-05T04:57:23.210485+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "core1/acl_rules.txt",
+          "sha256": "cbef1a8481eb88bdffab4d406401628dbf44420aff90cfb469d2b4e4696b79b6",
+          "bytes": 176
+        },
+        "raw.txt": {
+          "path": "core1/acl_rules.raw.txt",
+          "sha256": "185b9c336248fe46e18d34a47dcf2b748e14bf5b31b6a5550189de404480b888",
+          "bytes": 208
+        }
+      }
+    },
+    {
+      "device": "core1",
+      "host": "10.10.1.13",
+      "capability": "acl_bindings",
+      "command": "show ip interface",
+      "observed_at": "2026-10-05T04:57:23.262129+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "core1/acl_bindings.txt",
+          "sha256": "4bc08f402b93be59dfd7b659344f815192430d63103532759fbf3eb4dc5e98a8",
+          "bytes": 11324
+        },
+        "raw.txt": {
+          "path": "core1/acl_bindings.raw.txt",
+          "sha256": "7c900bc36d3175030d53128e63a59e0958fa15da0cc86f758ba0ef233aef6574",
+          "bytes": 11657
+        }
+      }
+    },
+    {
+      "device": "core1",
+      "host": "10.10.1.13",
+      "capability": "nat_rules",
+      "command": "show running-config | include ip nat",
+      "observed_at": "2026-10-05T04:57:23.414925+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "core1/nat_rules.txt",
+          "sha256": "c17f6735e78442bde331b1e451a98f8bcac860f6f796bd480c27e11dcc95c1fe",
+          "bytes": 335
+        },
+        "raw.txt": {
+          "path": "core1/nat_rules.raw.txt",
+          "sha256": "e01c6c8d7e631616ed55f32bc9f7ac6bfdd746314474768355d68bd588891047",
+          "bytes": 387
+        }
+      }
+    }
+  ]
+}

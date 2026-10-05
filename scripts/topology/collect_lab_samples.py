@@ -62,6 +62,7 @@ COMMANDS = [
     ("acl_rules", "display acl all"),
     ("acl_bindings", "display packet-filter interface"),
     ("security_zones", "display security-zone"),
+    ("nat_rules", "display nat all"),
     # VPN / EVPN / VXLAN (plan §8 M5)
     ("bgp_vpnv4", "display bgp peer vpnv4"),
     ("bgp_evpn", "display bgp peer l2vpn evpn"),
@@ -111,6 +112,7 @@ CISCO_COMMANDS = [
     ("nat_bindings", "show ip nat statistics"),
     ("acl_rules", "show ip access-lists"),
     ("acl_bindings", "show ip interface"),
+    ("nat_rules", "show running-config | include ip nat"),
     # VPN / EVPN / VXLAN (plan §8 M5)
     ("vrf_detail", "show vrf detail"),
     ("bgp_vpnv4", "show bgp vpnv4 unicast all summary"),
@@ -164,8 +166,10 @@ def vrf_commands(names, cisco: bool) -> list[tuple[str, str]]:
 
 
 # Refuse anything that is not a pure display/show command (defence in depth).
+# An output filter ("| include ...") only narrows what a read-only command prints.
 READ_ONLY = re.compile(
-    r"^((?:display|show)\s+[^;|\r\n]+|screen-length disable|terminal (?:length 0|width 511))$"
+    r"^((?:display|show)\s+[^;|\r\n]+(?:\|\s*include\s+[^;|\r\n]+)?"
+    r"|screen-length disable|terminal (?:length 0|width 511))$"
 )
 PROMPT = re.compile(r"(?m)^(?:[<\[][^\r\n<>\[\]]{1,64}[>\]]|[\w.\-]{1,64}[#>])\s*$")
 MORE = re.compile(r"-{2,}\s*More\s*-{2,}")

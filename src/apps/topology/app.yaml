@@ -1,12 +1,12 @@
 manifest_version: 1
 id: topology
 name: 网络拓扑
-version: 0.8.1
+version: 0.9.0
 platform_api: '>=1.0,<2.0'
 icon: network
 dependencies:
   device-access: '>=0.7.0,<1.0.0'
-  rule-governance: '>=1.6.0,<2.0.0'
+  rule-governance: '>=1.7.0,<2.0.0'
 backend:
   router: src.apps.topology.backend.api:router
   task_modules: [src.apps.topology.backend.tasks]

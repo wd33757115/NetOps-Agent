@@ -60,7 +60,7 @@ MODEL_PROFILE = "rfc8345+simap-yang-03:l2-l3:scoped-v2"
 ACTIVE = ("queued", "running", "waiting_for_input")
 # Tables a path checks a packet against: only a complete one says what is not there.
 POLICY_FACTS = frozenset(
-    {"pbr_bindings", "nat_bindings", "acl_rules", "acl_bindings", "security_zones"}
+    {"pbr_bindings", "nat_bindings", "nat_rules", "acl_rules", "acl_bindings", "security_zones"}
 )
 TOPOLOGY_FACTS = (
     "version",
@@ -97,6 +97,7 @@ TOPOLOGY_FACTS = (
     "acl_rules",
     "acl_bindings",
     "security_zones",
+    "nat_rules",
 )
 NODE_BUDGET_SECONDS = 240
 # A lease outlives the node budget, so a live collection is never reclaimed mid-way.
@@ -602,10 +603,10 @@ def locate_current(owner, query):
 
 
 PATH_MEANING = (
-    "这是根据 {when} 的路由、接口、邻居和 ACL 观测推导的候选路径，用于确定后续查证的设备和接口。"
+    "这是根据 {when} 的路由、接口、邻居、ACL 和 NAT 观测推导的候选路径，用于确定后续查证的设备和接口。"
     "complete 仅表示当前推导所需的观测齐备，blocked 表示每条路径都被 ACL 拒绝，"
-    "partial 表示存在缺口；三层设备接口上的 IPv4 ACL 已按设备自己的规则判断，"
-    "策略路由和 NAT 只标出可能改变走向的位置；没有验证二层设备上的 ACL、安全策略、"
+    "partial 表示存在缺口；三层设备接口上的 IPv4 ACL 和 NAT 已按设备自己的规则计算，"
+    "策略路由只标出可能改变走向的位置；没有验证二层设备上的 ACL、安全策略、"
     "其余二层转发规则或数据面流量，也不等于物理接线。"
     "与现场不同可能来自网络变化、采集覆盖或推导限制，不能单凭差异断定发生了变更。"
 )

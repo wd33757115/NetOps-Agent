@@ -32,7 +32,22 @@ read that policy on the device; its content is not evaluated here:
 
 - ``policy_may_redirect``: a policy route is applied to packets arriving on the hop's
   ingress interface;
-- ``nat_may_translate``: NAT is bound to the hop's ingress or egress interface.
+- ``nat_may_translate``: NAT is bound to the hop's ingress or egress interface of a device
+  whose NAT rules were not read (where they were, NAT is applied, below).
+
+NAT is applied to the packet from the device's own rules (model/nat.py): destination NAT
+on the interface it arrives by, after the inbound ACL and before the lookup; source NAT
+on the interface it leaves by, after the lookup and before the outbound ACL. Each hop
+lists its ``translations``; a rule that cannot be applied is ``nat_undetermined``, an
+address a pool gives is ``nat_address_unknown``. The reply is sent from the translated
+destination to the translated source and each translation is undone where it was made
+(the device's session), so where the forward direction translated, the reverse one is
+derived from it rather than traced on its own.
+
+A source outside the collected network (no collected device or subnet has it) comes in
+where the devices would send to it through a next hop no collected device owns, the way
+back assumed to be the way in; when the destination is on one of those interfaces'
+subnets, there. Such a start is ``external_entry_assumed``.
 
 A traced packet is one flow: its addresses and, as far as the caller gives them, the
 protocol and ports (an ICMP flow is an echo request; the reverse direction is its reply,
@@ -61,6 +76,8 @@ from __future__ import annotations
 import ipaddress
 
 from .acl import ICMP, TCP, UDP, evaluate
+from .nat import destination as nat_destination
+from .nat import source as nat_source
 from .builder import NT, ST
 from .device_state import project_interfaces, read_interface_state
 from .locate import _Locator, answer
@@ -71,7 +88,14 @@ MAX_PATHS = 8
 MAX_HOPS = 32
 MAX_RECURSION = 4  # next-hop lookups before a next hop counts as unresolved
 # Tables a hop checks a packet against; a device without one of them is noted, not a gap.
-POLICY_TABLES = ("acl_bindings", "acl_rules", "security_zones", "pbr_bindings", "nat_bindings")
+POLICY_TABLES = (
+    "acl_bindings",
+    "acl_rules",
+    "security_zones",
+    "pbr_bindings",
+    "nat_bindings",
+    "nat_rules",
+)
 PROTOCOLS = {"tcp": TCP, "udp": UDP, "icmp": ICMP}
 ECHO_REQUEST, ECHO_REPLY = (8, 0), (0, 0)
 # The host's own gateway setting is not observed; the VRRP master is the inferred gateway.
@@ -284,6 +308,8 @@ class _Tracer:
                 for row in facts.get("pbr_bindings") or []
                 if row.get("ifname") == ifname
             ]
+        if "nat_rules" in facts:
+            return gaps  # NAT is applied to the packet itself (translate)
         gaps += [
             {
                 "status": "nat_may_translate",
@@ -349,6 +375,68 @@ class _Tracer:
                 )
         return None
 
+    def translate(self, key, in_if, out_if, packet, hop, sessions):
+        """NAT of a packet arriving (no out_if) or leaving by out_if: the session of the
+        traced flow first (undoing a translation the forward direction made there), else
+        the device's rules. Returns the packet as it goes on."""
+        stage, ifname = ("in", in_if) if out_if is None else ("out", out_if)
+        for session in sessions:
+            if (session["key"], session["interface"], session["stage"]) != (key, ifname, stage):
+                continue
+            if any(
+                value is not None and packet.get(field) != value
+                for field, value in session["match"].items()
+            ):
+                continue
+            undone = {
+                "nat": "session",
+                "interface": ifname,
+                "before": {field: packet.get(field) for field in session["set"]},
+                "after": dict(session["set"]),
+            }
+            hop["translations"] = [*hop.get("translations", []), undone]
+            return {**packet, **session["set"]}
+        facts = self.devices[key]
+        if "nat_rules" not in facts:
+            return packet
+        if stage == "in":
+            outcome = nat_destination(facts, ifname, packet)
+        else:
+            outcome = nat_source(facts, in_if, ifname, packet, hop["vrf"])
+        if outcome is None:
+            return packet
+        if "undetermined" in outcome:
+            gap = {"status": "nat_undetermined", "interface": ifname, **outcome["undetermined"]}
+            hop["gaps"] = [*hop.get("gaps", []), gap]
+            return packet
+        hop["translations"] = [*hop.get("translations", []), outcome["translation"]]
+        if outcome["packet"].get("src") is None:
+            gap = {
+                "status": "nat_address_unknown",
+                "interface": ifname,
+                "pool": outcome["translation"].get("pool"),
+            }
+            hop["gaps"] = [*hop.get("gaps", []), gap]
+        return outcome["packet"]
+
+    def entries(self, src, dst):
+        """Where a packet from an address outside the collected network comes in: the
+        interfaces by which the devices send to it through a next hop no collected device
+        owns. When the destination is on one of those interfaces' subnets, only there."""
+        found = set()
+        for key in sorted(self.devices):
+            route = self.lookup(key, "default", src) if "routes" in self.devices[key] else None
+            for next_hop in (route or {}).get("next_hops") or []:
+                ip = next_hop.get("ip")
+                if not ip or next_hop.get("tunnel") or self.topo.ip_candidates(ip):
+                    continue
+                resolved = self.resolve(key, "default", ip, egress=next_hop.get("ifname"))
+                if not resolved and next_hop.get("ifname"):
+                    resolved = [(ip, next_hop["ifname"], [])]
+                found |= {(key, out, ip) for _, out, _ in resolved}
+        on_subnet = {entry for entry in found if entry[1] in self.connected(entry[0], "default", dst)}
+        return sorted(on_subnet or found)
+
     def vxlan_state(self, key, tunnel):
         """The observed state of the tunnel to a VTEP: IOS NVE peers, Comware tunnels."""
         facts = self.devices[key]
@@ -374,6 +462,7 @@ class _Tracer:
         initial_gaps=(),
         source_interface=None,
         packet=None,
+        sessions=(),
     ):
         paths, truncated = [], False
         packet = packet or {"dst": dst}
@@ -385,8 +474,8 @@ class _Tracer:
                 return
             paths.append({"hops": trail, "end": {"status": status, **extra}})
 
-        def deliver_local(key, vrf, trail):
-            own = self.topo.ip_candidates(dst, device=key, vrf=vrf)
+        def deliver_local(key, vrf, trail, address):
+            own = self.topo.ip_candidates(address, device=key, vrf=vrf)
             if len(own) != 1:
                 return False
             unavailable = self.interface_state(key, "destination", own[0][1], trail[-1])
@@ -396,7 +485,7 @@ class _Tracer:
                 end(trail, "delivered", to="device", interface=own[0][1])
             return True
 
-        def step(key, vrf, in_if, trail, visited, tunnel=None):
+        def step(key, vrf, in_if, trail, visited, tunnel=None, packet=packet):
             nonlocal truncated
             if len(paths) >= MAX_PATHS:
                 truncated = True
@@ -429,7 +518,11 @@ class _Tracer:
             elif denied := self.filters(key, in_if, "in", packet, hop):
                 end([*trail, hop], "denied_in", **denied)
                 return
-            # What it originates is not filtered on its way out of the device.
+            elif in_if is not None:
+                # Destination NAT, or the way back of the flow's source NAT, before the lookup.
+                packet = self.translate(key, in_if, None, packet, hop, sessions)
+            dst = packet["dst"]
+            # What it originates is neither filtered nor translated on its way out.
             originated = not trail and in_if is None
             if ingress := self.policy_gaps(key, in_if, "in"):
                 hop.setdefault("gaps", []).extend(ingress)
@@ -445,7 +538,7 @@ class _Tracer:
                     return
                 vrf = hop["vrf"] = egress[0]
                 tunnel = None
-            if tunnel is None and deliver_local(key, vrf, [*trail, hop]):
+            if tunnel is None and deliver_local(key, vrf, [*trail, hop], dst):
                 return
             target = tunnel["endpoint"] if tunnel else dst
             if (key, vrf, target) in visited or len(trail) >= MAX_HOPS:
@@ -511,10 +604,22 @@ class _Tracer:
                     end(here, "blackhole")
                     continue
                 if out.lower().startswith("inloop"):
-                    if not deliver_local(key, next_vrf, here):
+                    if not deliver_local(key, next_vrf, here, dst):
                         end(here, "endpoint_unresolved", interface=out, destination=dst)
                     continue
-                if not ip or ip in {"0.0.0.0", "::"} or own:
+                connected = not ip or ip in {"0.0.0.0", "::"} or own
+                if connected and any(
+                    candidate[0] != key
+                    for candidate in self.topo.neighbour_candidates(key, next_vrf, dst, out)
+                ):
+                    # The destination is the address of a collected device proven on this
+                    # subnet (ARP or LLDP): the packet goes on into that device (its ACL,
+                    # NAT and local delivery).
+                    ip, connected = dst, False
+                    resolved = [(dst, out, [])]
+                elif not connected:
+                    resolved = None
+                if connected:
                     # A connected route: the device's own address on the egress interface.
                     unavailable = self.interface_state(key, "out", out, current)
                     if unavailable:
@@ -522,8 +627,13 @@ class _Tracer:
                         continue
                     if egress := self.policy_gaps(key, out, "out"):
                         current.setdefault("gaps", []).extend(egress)
+                    leaving = (
+                        packet
+                        if originated
+                        else self.translate(key, in_if, out, packet, current, sessions)
+                    )
                     if not originated and (
-                        denied := self.filters(key, out, "out", packet, current)
+                        denied := self.filters(key, out, "out", leaving, current)
                     ):
                         end(here, "denied_out", **denied)
                         continue
@@ -534,7 +644,8 @@ class _Tracer:
                     current["endpoint_evidence"] = evidence
                     end(here, "delivered", to="subnet", interface=out)
                     continue
-                resolved = self.resolve(key, next_vrf, ip, egress=out or None)
+                if resolved is None:
+                    resolved = self.resolve(key, next_vrf, ip, egress=out or None)
                 if not resolved and out:
                     # Address and outgoing interface both given (RFC 8349 simple next hop)
                     # and no route to the address: it is reached on that interface.
@@ -564,15 +675,20 @@ class _Tracer:
                         end(here, "blackhole")
                         continue
                     if neighbour_out.lower().startswith("inloop"):
-                        if not deliver_local(key, next_vrf, here):
+                        if not deliver_local(key, next_vrf, here, dst):
                             end(here, "unresolved_next_hop", next_hop=neighbour_ip)
                         continue
                     unavailable = self.interface_state(key, "out", neighbour_out, current)
                     if unavailable:
                         end(here, "interface_unavailable", **unavailable)
                         continue
+                    leaving = (
+                        packet
+                        if carried or originated
+                        else self.translate(key, in_if, neighbour_out, packet, current, sessions)
+                    )
                     if not carried and not originated and (
-                        denied := self.filters(key, neighbour_out, "out", packet, current)
+                        denied := self.filters(key, neighbour_out, "out", leaving, current)
                     ):
                         end(here, "denied_out", **denied)
                         continue
@@ -608,12 +724,13 @@ class _Tracer:
                             [*trail, branch],
                             visited | {(key, vrf, target)},
                             carried,
+                            leaving,
                         )
 
         step(start, start_vrf, first_in, [], frozenset())
         return paths, truncated
 
-    def direction(self, source, dst, vrf=None, dst_vrf=None, packet=None):
+    def direction(self, source, dst, vrf=None, dst_vrf=None, packet=None, sessions=()):
         """source is the locate answer for the start address; ``vrf`` keeps only starts in
         that network instance of their first-hop device (device-local name); ``dst_vrf`` is
         the instance the destination is named in; ``packet`` the flow ACLs are checked with."""
@@ -621,7 +738,7 @@ class _Tracer:
         if vrf is not None:
             # The named instance decides which of several same-address ends is meant.
             source = _in_instance(source, vrf)
-        masters = []
+        masters, external = [], {}
         device_locations = [
             location for location in source["locations"] if location["status"] == "device"
         ]
@@ -659,6 +776,13 @@ class _Tracer:
                 result["vrrp"] = groups
             if masters:
                 starts = masters
+            if not gateways and not source["locations"]:
+                # Not in the collected network: it comes in from outside (entries).
+                external = {
+                    (key, ifname): next_hop
+                    for key, ifname, next_hop in self.entries(source["query"], dst)
+                }
+                starts = [(key, ifname, "default", None) for key, ifname in external]
         if vrf is not None:
             starts = [start for start in starts if start[2] == vrf]
             masters = [start for start in masters if start[2] == vrf]
@@ -666,7 +790,9 @@ class _Tracer:
         if not starts:
             result["status"] = "no_gateway"
             return result
-        if len(starts) > 1:
+        if external:
+            result["first_hop"] = "external"
+        elif len(starts) > 1:
             result["first_hop"] = "ambiguous"
         elif not device_locations and masters:
             result["first_hop"] = "vrrp_master"
@@ -677,7 +803,15 @@ class _Tracer:
             initial_gaps = []
             if source["status"] == "conflict":
                 initial_gaps.append({"status": "source_identity_ambiguous"})
-            if not device_locations and (
+            if external:
+                initial_gaps.append(
+                    {
+                        "status": "external_entry_assumed",
+                        "interface": first_in,
+                        "next_hop": external[(key, first_in)],
+                    }
+                )
+            elif not device_locations and (
                 not self.endpoint_evidence(key, vrf, first_in, source["query"])
                 or (len(starts) > 1 and not masters)
             ):
@@ -689,7 +823,7 @@ class _Tracer:
                     }
                 )
             paths, truncated = self.walk(
-                key, first_in, dst, vrf, initial_gaps, source_interface, packet
+                key, first_in, dst, vrf, initial_gaps, source_interface, packet, sessions
             )
             room = MAX_PATHS - len(result["paths"])
             result["paths"].extend(paths[:room])
@@ -750,6 +884,95 @@ def _sequences(direction, reverse=False):
     }
 
 
+def _translations(path):
+    return [
+        (hop["device"]["address"], step)
+        for hop in path["hops"]
+        for step in hop.get("translations", [])
+        if step["nat"] in {"source", "destination"}
+    ]
+
+
+def _undo(key, step):
+    """The session a translation leaves: how the reply is translated back, where."""
+    before, after = step["before"], step["after"]
+    if step["nat"] == "source":
+        match = {"dst": after.get("src"), "dst_port": after.get("src_port")}
+        undone = {"dst": before["src"]} if "src" in before else {}
+        if "src_port" in before:
+            undone["dst_port"] = before["src_port"]
+        stage = "in"
+    else:
+        match = {"src": after.get("dst"), "src_port": after.get("dst_port")}
+        undone = {"src": before["dst"]} if "dst" in before else {}
+        if "dst_port" in before:
+            undone["src_port"] = before["dst_port"]
+        stage = "out"
+    return {"key": key, "interface": step["interface"], "stage": stage, "match": match, "set": undone}
+
+
+def _reverse(tracer, forward, destination, src, dst_vrf, src_vrf, request, reply):
+    """The reply's paths. Where the forward direction translated, the reply goes from its
+    translated destination to its translated source and each translation is undone where
+    it was made; otherwise it is the reply between the original addresses."""
+    plans = []
+    for path in forward["paths"]:
+        steps = _translations(path)
+        if steps not in plans:
+            plans.append(steps)
+    if not plans:
+        plans = [[]]
+    parts = []
+    for steps in plans:
+        if not steps:
+            part = tracer.direction(destination, src, dst_vrf, src_vrf, reply)
+            part["from"] = reply["src"]
+            parts.append(part)
+            continue
+        final = dict(request)
+        for _, step in steps:
+            final.update(step["after"])
+        if final["src"] is None or final["dst"] is None:
+            parts.append(
+                {
+                    "to": final["src"],
+                    "from": final["dst"],
+                    "first_hop": "none",
+                    "paths": [],
+                    "truncated": False,
+                    "status": "partial",
+                    "gaps": [{"status": "reverse_not_derived", "reason": "nat_address_unknown"}],
+                }
+            )
+            continue
+        back = {
+            **reply,
+            "src": final["dst"],
+            "dst": final["src"],
+            "src_port": final.get("dst_port"),
+            "dst_port": final.get("src_port"),
+        }
+        sessions = [_undo(key, step) for key, step in steps]
+        part = tracer.direction(
+            answer(tracer.loc, "ip", back["src"]), back["dst"], dst_vrf, src_vrf, back, sessions
+        )
+        part["from"] = back["src"]
+        part["translated"] = {"src": back["src"], "dst": back["dst"]}
+        parts.append(part)
+    if len(parts) == 1:
+        return parts[0]
+    statuses = {part["status"] for part in parts}
+    hops = {part["first_hop"] for part in parts}
+    return {
+        **parts[0],
+        "paths": [path for part in parts for path in part["paths"]][:MAX_PATHS],
+        "truncated": any(part["truncated"] for part in parts),
+        "status": statuses.pop() if len(statuses) == 1 else "partial",
+        "first_hop": hops.pop() if len(hops) == 1 else "ambiguous",
+        "gaps": [gap for part in parts for gap in part.get("gaps", [])],
+    }
+
+
 def _flow(protocol, src_port, dst_port):
     """(protocol number or None, source port, destination port) a caller asked for."""
     if protocol in (None, ""):
@@ -805,8 +1028,8 @@ def trace(
         request["icmp"], reply["icmp"] = ECHO_REQUEST, ECHO_REPLY
     reply["reply"] = True
     forward = tracer.direction(source, dst, src_vrf, dst_vrf, request)
-    reverse = tracer.direction(destination, src, dst_vrf, src_vrf, reply)
-    forward["from"], reverse["from"] = src, dst
+    forward["from"] = src
+    reverse = _reverse(tracer, forward, destination, src, dst_vrf, src_vrf, request, reply)
     # Candidate first hops are not observed choices, so they cannot show asymmetry.
     routed = (
         forward["paths"]

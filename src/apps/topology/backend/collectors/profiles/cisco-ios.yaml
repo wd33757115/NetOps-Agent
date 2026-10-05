@@ -43,4 +43,5 @@ capabilities:
   nat_bindings: {parser: rules}
   acl_rules: {parser: rules}
   acl_bindings: {parser: rules}
+  nat_rules: {parser: rules}
 verified: []

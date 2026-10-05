@@ -286,7 +286,24 @@ CAMPUS_ACL = Lab(
     ROOT / "tests/fixtures/topology/campus-wan/acl",
     frozenset(),
 )
+# NAT scenario (2026-10-05): BR1 (Comware) translates PC1's subnet to its GE2/0 address,
+# maps 100.64.1.2:8080 to PC4:80 ("nat server") and has an address group and an IP-to-IP
+# static mapping of unused addresses, plus a static route to 10.99.1.0/24 via CORE1;
+# CORE1 (IOS) translates PC1's traffic to BR1's loopback to its Ethernet0/1 address, maps
+# PC2 to 10.99.1.12 and PC5's port 80 to Ethernet0/1:8081, and has a pool rule. The VPCS
+# traffic through them matched the device NAT tables; then removed.
+CAMPUS_NAT = Lab(
+    "20261005-125715",
+    {"10.10.1.11": "br1", "10.10.1.13": "core1"},
+    {
+        "10.10.1.11": frozenset({"nat_rules", "nat_bindings", "acl_rules", "acl_bindings", "routes"}),
+        "10.10.1.13": frozenset({"nat_rules", "nat_bindings", "acl_rules", "acl_bindings"}),
+    },
+    ROOT / "tests/fixtures/topology/campus-wan/nat",
+    frozenset(),
+)
 LABS = {
+    "campus-nat": CAMPUS_NAT,
     "campus-acl-syntax": CAMPUS_ACL_SYNTAX,
     "campus-acl": CAMPUS_ACL,
     "campus-policies": CAMPUS_POLICIES,
