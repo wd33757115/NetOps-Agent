@@ -1,7 +1,7 @@
 manifest_version: 1
 id: topology
 name: 网络拓扑
-version: 0.9.0
+version: 0.9.1
 platform_api: '>=1.0,<2.0'
 icon: network
 dependencies:

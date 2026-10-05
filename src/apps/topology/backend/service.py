@@ -4,6 +4,7 @@ import hashlib
 import ipaddress
 import json
 import logging
+import os
 from dataclasses import asdict, replace
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -545,13 +546,24 @@ def device_model(owner, snapshot_id, address):
     return {"network_id": state["network_id"], "snapshot_id": snapshot_id, **devices[0]}
 
 
+def _hidden_facts():
+    """Fact tables left out of analysis (NETOPS_TOPOLOGY_HIDE_FACTS, comma-separated): an
+    evaluation control that answers as if they had not been collected. Unset by default."""
+    names = os.environ.get("NETOPS_TOPOLOGY_HIDE_FACTS", "")
+    return frozenset(name.strip() for name in names.split(",") if name.strip())
+
+
 def _analyse(session, snap, question, *args, **options):
     """Rebuild the snapshot's facts and answer one read-only question over them."""
     network = session.get(Network, snap.network_id)
     if "simap" not in snap.graph:
         raise HTTPException(422, "该快照格式较旧，不支持定位与路径计算，请重新发现")
     observations = _observations(session, snap.run_id)
-    devices = {o["address"]: _facts(o["data"]) for o in observations}
+    hidden = _hidden_facts()
+    devices = {
+        o["address"]: {name: value for name, value in _facts(o["data"]).items() if name not in hidden}
+        for o in observations
+    }
     observed = {
         o["address"]: {"evidence_id": o["id"], "observed_at": o["observed_at"]}
         for o in observations

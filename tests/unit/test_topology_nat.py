@@ -273,3 +273,12 @@ def test_a_device_without_nat_rules_keeps_the_may_translate_flag(lab):
     for path in forward["paths"]:
         assert not translations(path)
         assert any(gap["status"] == "nat_may_translate" for gap in path["hops"][-1]["gaps"])
+
+
+def test_hidden_fact_tables_are_an_explicit_evaluation_control(monkeypatch):
+    from src.apps.topology.backend import service
+
+    monkeypatch.delenv("NETOPS_TOPOLOGY_HIDE_FACTS", raising=False)
+    assert service._hidden_facts() == frozenset()
+    monkeypatch.setenv("NETOPS_TOPOLOGY_HIDE_FACTS", " acl_rules, nat_rules ,")
+    assert service._hidden_facts() == {"acl_rules", "nat_rules"}
