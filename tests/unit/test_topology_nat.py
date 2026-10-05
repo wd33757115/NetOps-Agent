@@ -298,12 +298,18 @@ def test_an_arp_entry_tied_to_no_interface_does_not_stop_the_analysis(lab):
 def test_the_assistant_reads_a_path_without_internal_identifiers(lab):
     import json
 
-    from src.apps.topology.backend.tools import _model_view
+    from src.apps.assistant.backend.diagnostic_workspace import devices_in
+    from src.apps.topology.backend.tools import _path_view
 
     full = trace(lab, BASE, PC1, INTERNET, protocol="icmp")
-    view = _model_view(full)
+    [view] = _path_view([full])
     hop = view["forward"]["paths"][0]["hops"][-1]
     assert hop["device"] == "BR1 (10.10.1.11)"
+    # Each device once, with what the assistant scopes its logins by (and picks commands by).
+    assert {"name": "BR1", "address": "10.10.1.11", "platform": "comware", "collected": True} in (
+        view["devices"]
+    )
+    assert {d["address"] for d in devices_in(view)} == {d["address"] for d in devices_in(full)}
     assert "interface_states" not in hop  # both of BR1's interfaces are up
     assert hop["translations"] == full["forward"]["paths"][0]["hops"][-1]["translations"]
     assert "node_id" not in json.dumps(view) and "evidence_id" not in json.dumps(view)

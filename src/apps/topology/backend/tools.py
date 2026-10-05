@@ -7,6 +7,30 @@ from . import service
 # Internal identifiers a model does not reason with; a path answer for an assistant must
 # fit its evidence budget, so they are left out of what the tool returns (the API keeps them).
 INTERNAL = frozenset({"node_id", "collected", "platform", "evidence_id", "observed_at", "link_id"})
+DEVICE = ("name", "address", "platform", "collected")
+
+
+def _devices(value, found):
+    """Every device a topology answer names, once, in order of appearance."""
+    if isinstance(value, dict):
+        if value.get("address") and "collected" in value and "node_id" in value:
+            found.setdefault(value["address"], {key: value.get(key) for key in DEVICE})
+        for item in value.values():
+            _devices(item, found)
+    elif isinstance(value, list):
+        for item in value:
+            _devices(item, found)
+    return found
+
+
+def _path_view(results):
+    """Each network's path answer in its model view, with the devices it names listed once
+    (name, address, platform, collected): the hops name them as "name (address)", and the
+    assistant scopes its device logins by this list."""
+    return [
+        {**_model_view(result), "devices": list(_devices(result, {}).values())}
+        for result in results
+    ]
 
 
 def _model_view(value):
@@ -130,7 +154,7 @@ TOOLS = [
         "未检查二层设备上的 ACL 和二层转发规则。"
         "现场不一致也可能源于覆盖或推导限制；只读，不登录设备。",
         Trace,
-        lambda user, body: _model_view(
+        lambda user, body: _path_view(
             service.trace_current(
                 user.user_id,
                 body.src,
