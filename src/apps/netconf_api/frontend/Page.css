@@ -1,0 +1,40 @@
+/* The firewall-policy shell (FirewallPolicyPage.css), scoped with "nc-". */
+.nc-app { --nc-ink: #242b38; --nc-muted: #697586; --nc-blue: #1671e8; height: 100dvh; overflow: auto; background: #e9edf3; color: var(--nc-ink); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif; -webkit-font-smoothing: antialiased; }
+.nc-app * { box-sizing: border-box; }
+.nc-app a { color: var(--nc-blue); text-decoration: none; }
+.nc-app :focus-visible { outline: 3px solid #1671e8; outline-offset: 3px; }
+.nc-toolbar { width: 100%; height: 68px; padding: 0 32px; display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.nc-breadcrumb { display: flex; align-items: center; gap: 22px; }
+.nc-breadcrumb-divider { color: #a7afbb; font-size: 16px; }
+.nc-toolbar-title { color: #434d5e; font-size: 13px; font-weight: 500; }
+.nc-toolbar .nc-back { color: #5c687a; display: flex; align-items: center; gap: 9px; font-size: 13px; transition: color .18s; }
+.nc-toolbar .nc-back:hover { color: #1671e8; }
+.nc-account { width: 30px; height: 30px; border-radius: 50%; background: #d7dfe9; color: #526074; display: grid; place-items: center; font-size: 13px; font-weight: 600; box-shadow: inset 0 0 0 1px #bac7d540; }
+.nc-window { display: grid; grid-template-columns: clamp(228px, 12vw, 280px) minmax(0, 1fr); width: calc(100% - 48px); min-height: calc(100dvh - 92px); margin: 0 auto 24px; background: #fff; border: 1px solid #dce3ed; border-radius: 18px; overflow: clip; box-shadow: 0 10px 35px -25px #253b5d60; }
+.nc-sidebar { background: #f0f3f8e8; border-right: 1px solid #dee4ed; padding: 30px 15px 20px; display: flex; flex-direction: column; min-width: 0; }
+.nc-product { display: flex; align-items: center; gap: 12px; margin: 0 10px 42px; }
+.nc-product-icon { width: 43px; height: 43px; border-radius: 12px; background: linear-gradient(155deg, #4599fb, #1874e9 55%, #0961cf); color: #fff; font-size: 24px; display: grid; place-items: center; box-shadow: inset 0 1px 1px #ffffff8c, 0 5px 11px #106be730, 0 0 0 1px #1265d233; flex-shrink: 0; }
+.nc-product strong { font-size: 15px; font-weight: 600; letter-spacing: -.4px; display: block; }
+.nc-product > div > span { display: block; margin-top: 6px; font-size: 9px; letter-spacing: 1px; color: #5d6c82; }
+.nc-nav-label { color: #5d6c82; font-size: 12px; font-weight: 500; padding: 0 13px; margin-bottom: 10px; }
+.nc-workflow { display: grid; gap: 5px; }
+.nc-workflow button { display: flex; align-items: center; gap: 11px; border: 1px solid transparent; padding: 13px 11px; width: 100%; border-radius: 11px; text-align: left; color: #667386; background: transparent; cursor: pointer; transition: background .18s, box-shadow .18s, color .18s; }
+.nc-workflow button > .anticon { font-size: 18px; }
+.nc-workflow button strong { font-size: 13px; font-weight: 500; display: block; }
+.nc-workflow button small { display: block; font-size: 11px; margin-top: 6px; color: #5d6c82; }
+.nc-workflow button em { font-size: 11px; font-style: normal; margin-left: auto; color: #5d6c82; }
+.nc-workflow button.active { background: #fff; border-color: #e0e6ef; box-shadow: 0 2px 4px #34486408; color: #136ee1; }
+.nc-workflow button:disabled:not(.active) { opacity: .55; cursor: default; }
+.nc-main { min-width: 0; padding: 38px 42px 24px; }
+.nc-heading { margin-bottom: 34px; }
+.nc-eyebrow { font-size: 11px; color: #5d6c82; margin-bottom: 13px; letter-spacing: .7px; }
+.nc-heading h1 { margin: 0; font-size: 31px; font-weight: 600; letter-spacing: -1px; line-height: 1.25; color: #202836; }
+.nc-heading p { margin: 12px 0 0; color: var(--nc-muted); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.nc-muted { color: var(--nc-muted); font-size: 12px; }
+.nc-mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+@media (max-width: 760px) {
+  .nc-toolbar { padding: 0 16px; }
+  .nc-window { grid-template-columns: 1fr; width: calc(100% - 32px); }
+  .nc-sidebar { border-right: 0; border-bottom: 1px solid #dee4ed; }
+  .nc-main { padding: 28px 16px; overflow-x: auto; }
+}

@@ -37,6 +37,7 @@ FIELDS = frozenset(
     {
         "id",
         "description",
+        "module",
         "vendor",
         "platforms",
         "check_item",
@@ -107,6 +108,7 @@ class Definition:
     check_item: str | None = None  # None: a table only read through lookups
     values: tuple[Rule, ...] = ()
     description: str = ""
+    module: str | None = None  # the YANG module the device announces for the table
 
     def leaves(self):
         """The leaves the definition reads itself, keys first."""
@@ -255,6 +257,9 @@ def load(raw: Mapping[str, Any]) -> Definition:
     )
     if any(rule.lookup and rule.lookup.definition == definition_id for rule in rules):
         raise DefinitionError(f"{where} cannot look up its own table")
+    module = raw.get("module")
+    if module is not None:
+        module = _text(module, f"{where}.module", NAME)
     description = raw.get("description") or ""
     if not isinstance(description, str):
         raise DefinitionError(f"{where}.description must be text")
@@ -269,6 +274,7 @@ def load(raw: Mapping[str, Any]) -> Definition:
         check_item=check_item,
         values=rules,
         description=description,
+        module=module,
     )
 
 

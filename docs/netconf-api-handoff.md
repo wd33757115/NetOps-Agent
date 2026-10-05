@@ -9,8 +9,9 @@
 | 平台 NETCONF 传输层 | 已完成，已合入 `feat/network-twin`（c3d684a）。设备访问相关测试 173 个通过（含 NETCONF 新增的 13 个）。还没有调用方，下次 `start.ps1` 重启时随平台一起加载 |
 | 实验室 | BR1、BR2 已开启 NETCONF over SSH（830 端口）并保存，配置文件已提交（c638dd6）。vpn-fabric 当前未运行 |
 | 实测数据 | BR1 的 NETCONF 回包和 CLI 对照已存为测试夹具，见第 4 节 |
-| 映射模块 | 已完成（2026-10-05，负责人要求 Claude 直接实现）：`src/apps/netconf_api/backend/mapping.py`，种子定义 `backend/seeds/h3c_comware7.yaml`，测试 `tests/unit/test_netconf_api_mapping.py`（29 个通过）。第 5.4 节的验收里，只有过滤条件发给设备看回包大小这一项还没在 BR1 上实测，见第 5 节 |
-| App 其余部分 | 未开始。映射模块的接口已定，下一步做第 6 节 |
+| 映射模块 | 已完成（2026-10-05，负责人要求 Claude 直接实现）：`src/apps/netconf_api/backend/mapping.py`，种子定义 `backend/seeds/h3c_comware7.yaml`，测试 `tests/unit/test_netconf_api_mapping.py`（29 个通过）。第 5.4 节的验收全部通过，过滤条件已在 BR1 上实测 |
+| App 骨架、服务和接口 | 已完成，未部署（2026-10-05）：`src/apps/netconf_api`，测试 `tests/unit/test_netconf_api_service.py`。见第 6 节 |
+| 拓扑接入、完整前端 | 未开始，见第 6 节 |
 
 ## 2. 负责人已定的决定
 
@@ -72,7 +73,7 @@ with service.netconf(context, target_ref, "netconf") as (session, guard):
 |---|---|
 | `arp.xml`、`route.xml`、`ospf.xml`、`ipv4address.xml`、`lldp.xml`、`mac.xml`、`vlan.xml`、`nat.xml`、`acl.xml` | 各模块整模块 `<get>` 的回包（`rpc-reply`）。BR1 当前没有配置 ACL 和 NAT，这两个文件里只有能力和开关类的表 |
 | `ifmgr-interfaces.xml` | 接口表按字段过滤后的回包（IfIndex、Name、AbbreviatedName、AdminStatus、OperStatus、Description）。整模块是 213 KB，过滤后 2 KB |
-| `hello-capabilities.txt` | 设备 hello 通告的 384 项能力：164 个 H3C 数据模块，IETF 只有 `ietf-netconf-monitoring` |
+| `hello-capabilities.txt` | 设备 hello 通告的 384 项能力：165 个 H3C 数据模块、6 个 action 模块（Ping、Tracert 等），IETF 只有 `ietf-netconf-monitoring` |
 | `cli-display-arp.txt`、`cli-display-ip-routing-table.txt` | 同一时刻的 CLI 输出，作为对照依据 |
 
 **几个结论**
@@ -169,18 +170,48 @@ CLI 的 42 个目的、47 条路由全部对上，管理距离（`Preference`）
   - 不带 `fields` 时，这一行照常输出，PROTOCOL 为空。
   
   这是按第 6 条"必填缺失则不输出"处理的。
-- **过滤条件**：离线检查通过。ARP 执行时接口表的过滤条件只选 `IfIndex` 和 `AbbreviatedName` 两个叶子，比 2 KB 夹具里的 6 个叶子还少，平台的 `check_filter` 原样接受。**还没发给 BR1 看实际回包大小**。
+- **过滤条件**：通过，平台的 `check_filter` 原样接受。2026-10-05 经控制台 XML 视图发给 BR1，回包大小如下：
+  - 接口表（只选 `IfIndex`、`AbbreviatedName`）：955 字节，整模块是 213 KB；
+  - ARP：1.1 KB，整模块是 4.3 KB；
+  - 路由：16 KB，整模块是 28 KB。
+  
+  拿这三份实测回包映射，ARP 得到 6 行、路由得到 47 行，都没有问题。
 - **安全**：通过。非法元素名、带前缀的名称、注入命名空间、未知字段、自关联、多种翻译方式混用、多个叶子却不给代码表，这些情况在加载时都会被拒绝。
 
 ## 6. 映射模块之后由 Claude 继续的部分
 
-接口约定（函数名、参数、返回值）确定后，Claude 在本次对话中可以继续做下面这些：
+状态：第 1、2 项已完成，第 3 项完成第一批，第 4、5 项未开始。
 
-1. **App 骨架**：`app.yaml`（依赖 device-access 和 rule-governance）、数据表和迁移（定义及版本、设备能力、试运行记录）、`bootstrap` 导入种子定义、最小的前端占位页。
-2. **服务和接口**：定义的草稿、发布、版本；读取设备 hello、发现能力；试运行（经平台打开 NETCONF 会话 → 调用映射模块 → 保存行和问题）；发布时检查是否覆盖了检查项的必填值。
-3. **种子定义**：第一批是接口、ARP、路由，依据就是第 4.3 节。之后在实验室配置样例后，逐个采样对照，再加 OSPF 邻居、接口 IP、LLDP、MAC/VLAN、ACL、NAT。
+1. **App 骨架**（已完成）：`app.yaml`（依赖 device-access 和 rule-governance）、数据表和迁移（定义及版本、设备能力、试运行记录）、`bootstrap` 导入种子定义、最小的前端占位页。
+2. **服务和接口**（已完成）：定义的草稿、发布、版本；读取设备 hello、发现能力；试运行（经平台打开 NETCONF 会话 → 调用映射模块 → 保存行和问题）；发布时检查是否覆盖了检查项的必填值。
+3. **种子定义**（第一批已完成）：第一批是接口、ARP、路由，依据就是第 4.3 节。之后在实验室配置样例后，逐个采样对照，再加 OSPF 邻居、接口 IP、LLDP、MAC/VLAN、ACL、NAT。
 4. **拓扑接入**：NETCONF 优先，失败回退 CLI；另加一个"两边都采、在事实层比对"的一致性模式。
-5. **前端**：后端测完后设计，沿用防火墙策略 App 的外壳和视觉规范。
+5. **前端**：后端测完后设计，沿用防火墙策略 App 的外壳和视觉规范。目前只有一个只读的定义列表占位页。
+
+**第 1、2 项的实现要点**
+- **数据表**：
+  - `app_netconf_definitions`：草稿和当前使用的版本，用 `revision` 防止并发覆盖；
+  - `app_netconf_definition_versions`：已发布的版本，发布后不再修改；
+  - `app_netconf_capabilities`：每台设备最近一次 hello；
+  - `app_netconf_trials`：试运行的值行、问题、过滤条件，以及完整的行数和问题数。值行最多保存 5000 行。
+- **接口**（`/apps/netconf-api`）：
+  - `GET /definitions`、`GET /definitions/{id}`
+  - `PUT /definitions/{id}/draft`、`POST /definitions/{id}/discard`、`POST /definitions/{id}/publish`
+  - `POST`/`GET /devices/{device_id}/capabilities`
+  - `POST /trials`、`GET /trials`、`GET /trials/{id}`
+  
+  所有接口都需要 `netconf-api` 的使用授权。
+- **发布检查**：
+  - 草稿保存时就用映射模块校验；
+  - 发布时再检查两件事：关联是否指向已发布的定义；按规则治理已发布的检查项，每个平台的值是否在检查项之内、必填值是否都映射了。
+  
+  现在的限制：检查项的值从规则治理的 `Selection.fields` 读取，所以只有该平台已经有 CLI 实现的检查项才能发布。以后要支持只有 NETCONF 的平台，需要规则治理的运行时契约直接提供检查项的值定义。
+- **设备和凭据**：
+  - 设备取自平台设备清单，必须是启用状态，并且有管理地址、用户名和凭据引用；
+  - App 只传凭据引用，密码由平台解析；
+  - 830 端口的主机密钥第一次见到时自动记录（和拓扑发现一致），密钥变化时停止。
+- **能力**：定义可以写 `module`（设备 hello 里通告的模块名，H3C 种子是 `Ifmgr`、`ARP`、`Route`）。设备能力页据此列出这台设备能用哪些已发布的定义。
+- **种子**：`bootstrap` 以 `system` 身份发布种子版本。种子更新时只替换原来的种子版本，不覆盖用户自己发布的版本。
 
 ## 7. 注意事项
 

@@ -10,6 +10,7 @@ definitions:
     namespace: http://www.h3c.com/netconf/data:1.0
     datastore: state
     path: top/Ifmgr/Interfaces/Interface
+    module: Ifmgr
     keys: [IfIndex]
 
   - id: h3c-comware7.arp
@@ -20,6 +21,7 @@ definitions:
     namespace: http://www.h3c.com/netconf/data:1.0
     datastore: state
     path: top/ARP/ArpTable/ArpEntry
+    module: ARP
     keys: [Ipv4Address, VrfIndex]
     values:
       IP_ADDRESS: Ipv4Address
@@ -39,6 +41,7 @@ definitions:
     namespace: http://www.h3c.com/netconf/data:1.0
     datastore: state
     path: top/Route/Ipv4Routes/RouteEntry
+    module: Route
     keys: [VRF, Ipv4/Ipv4Address, Ipv4/Ipv4PrefixLength, Nexthop, IfName]
     values:
       NETWORK: Ipv4/Ipv4Address
