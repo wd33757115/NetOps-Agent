@@ -51,8 +51,8 @@ def reader():
 def selections(identity, capabilities, model=None):
     """{capability: NetconfSelection} a published definition serves on this device.
 
-    Tables assembled with vetoes (ACL, NAT, zones) stay on the CLI: their assembly reads
-    CLI blocks, not rows.
+    Tables assembled with vetoes (trunk, switchport, OSPF) stay on the CLI: their
+    assembly reads CLI blocks, not rows.
     """
     wanted = {
         rules.CHECK_ITEMS[cap]: cap

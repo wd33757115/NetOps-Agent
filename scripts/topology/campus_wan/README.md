@@ -39,3 +39,5 @@ VRRP 虚地址：172.16.10.1、172.16.20.1。终端：PC1 172.16.10.11、PC2 172
 3. VSR：`lab.py type BR1` 在 VNC 控制台给 aux 口授 network-admin，`lab.py push BR1` 经串口推送 `configs/BR1.txt` 并保存；BR2 同理。`lab.py screen BR1 --out x.png` 截 VNC 屏幕。
 4. 负责人运行 `lab.py account`：从 `NETOPS_LAB_PASSWORD` 在 8 台纳管设备上建实验账号（密码不进配置文件、不打印）。
 5. `lab.py traffic` 让每台 PC 持续 ping，ARP/MAC 表保持有内容；`--stop` 停止。
+
+BR1 的配置末尾是一套 ACL、NAT、策略路由样例（2026-10-05，NETCONF 接口对照用，见 `docs/netconf-api-handoff.md` 第 6 节）。规则只匹配文档保留地址 192.0.2.0/24、203.0.113.0/24，不影响实验网流量；实验或注入故障时注意这些规则一直存在。

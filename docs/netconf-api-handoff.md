@@ -141,7 +141,23 @@ CLI 的 42 个目的、47 条路由全部对上，管理距离（`Preference`）
 - `problems`：`Problem(row, key, value, kind, raw)` 的列表，`kind` 是 `unmapped_code`、`lookup_miss`、`lookup_ambiguous`、`type_mismatch` 或 `required_missing`；
 - `read`：设备返回的行数。
 
-定义的写法见种子文件。每个值只能用一种方式取：直接取叶子，或用 `codes`（多个叶子用 `/` 拼成一个代码）、`lookup: {definition, match, take}`、`format`（目前有 `mac_dash4`、`mac_dot4`）中的一种翻译。
+定义的写法见种子文件。每个值的取法：
+- 直接取叶子；
+- 用 `codes` 翻译（多个叶子用 `/` 拼成一个代码）；
+- 用 `lookup: {definition, match, take}` 关联，之后还可以再接 `codes` 或 `format`。`match` 可以是多个叶子；省略 `match` 表示取那张表唯一的一行；
+- 用 `format` 转换写法（目前有 `mac_dash4`、`mac_dot4`）。
+
+2026-10-05 为 ACL、NAT、PBR 增加了以下写法，都是定义里的数据，不涉及厂商代码：
+- `parts`：一个检查项分散在设备的多张表里时，每张表写一个 part，各表的行依次输出；所有 part 合进同一个过滤条件，一次 RPC 读回。
+- `const`：常量值。
+- `when`：只有条件满足时才读这个值。
+- `where`：哪些行算这张表的实体。
+- `expect`：对行的断言，不满足时记一条 `unexpected_value` 问题，这一行不输出。
+- `default`：叶子缺失时写入的值。
+- `none`：设备给出、但 CLI 不打印的值（例如命中次数 0）。
+- `rest`：定义没读、也没在 `ignore` 里声明的叶子，写进一个值（OTHER），拓扑把这条规则标为"无法计算"，防止不认识的条件被悄悄忽略。带 `rest` 的表会按整行读取。
+- `order`：组内按某个叶子排序（auto 顺序的 ACL 按 MatchIndex）。
+- 叶子 `.`：取行元素自身的文本（每行只有一个叶子的表）。
 
 ### 5.3 原始需求
 
@@ -188,7 +204,10 @@ CLI 的 42 个目的、47 条路由全部对上，管理距离（`Preference`）
 
 1. **App 骨架**（已完成）：`app.yaml`（依赖 device-access 和 rule-governance）、数据表和迁移（定义及版本、设备能力、试运行记录）、`bootstrap` 导入种子定义、最小的前端占位页。
 2. **服务和接口**（已完成）：定义的草稿、发布、版本；读取设备 hello、发现能力；试运行（经平台打开 NETCONF 会话 → 调用映射模块 → 保存行和问题）；发布时检查是否覆盖了检查项的必填值。
-3. **种子定义**（第一批已完成）：第一批是接口、ARP、路由，依据就是第 4.3 节。之后在实验室配置样例后，逐个采样对照，再加 OSPF 邻居、接口 IP、LLDP、MAC/VLAN、ACL、NAT。
+3. **种子定义**：
+   - 第一批（已完成）：接口、ARP、路由，依据是第 4.3 节；
+   - 第二批（2026-10-05 已完成）：ACL 规则、ACL 绑定、NAT 规则、NAT 绑定、PBR 绑定，见下文；
+   - 待做：OSPF 邻居、接口 IP、LLDP、MAC/VLAN。做法同样是先在实验室配置样例，再逐个采样对照。
 4. **拓扑接入**（已完成，要点见下文）：NETCONF 优先，失败回退 CLI；另加一个"两边都采、在事实层比对"的一致性模式。
 5. **前端**：后端测完后设计，沿用防火墙策略 App 的外壳和视觉规范。目前只有一个只读的定义列表占位页。
 
@@ -241,6 +260,35 @@ CLI 的 42 个目的、47 条路由全部对上，管理距离（`Preference`）
   - `prefer` 模式下 ARP 和路由都走 NETCONF，CLI 不再执行这两条命令；
   - `compare` 模式下两边的事实完全一致，ARP 只差 CLI 独有的 `age_s`；
   - 未映射代码、登录失败、会话中途断开、没有授权、模块没有通告、设备上有 VRF 这几种情况，都按预期回退到 CLI，并留下了故障记录。
+
+**第二批种子（ACL、NAT、PBR）**
+- **样例配置**：BR1 原来没有这些配置，于是设计了一套样例下发并保存，内容见 `scripts/topology/campus_wan/configs/BR1.txt` 末尾。
+  - 规则只匹配文档保留地址（源 `192.0.2.0/24`，目的和地址池 `203.0.113.0/24`），所以实验网现有流量、BGP/OSPF 会话和拓扑路径都不受影响。下发后核对过：3 个 BGP 邻居 Established，3 个 OSPF 邻居 Full，PC1 到 8.8.8.8 可达。
+  - 覆盖的内容：
+    - 基本、高级、命名 ACL，含 auto 匹配顺序；
+    - 端口 eq/neq/lt/gt/range、ICMP 类型、established、分片、DSCP、对象组、协议号 51；
+    - 生效和失效的时间段；
+    - GE5/0 入、出方向的包过滤；
+    - 地址组加 no-pat、Easy IP、两条内部服务器、一条静态一对一映射；
+    - PBR 的 permit 和 deny 节点，接口和本机两种应用。
+  - VPN 实例这个条件是在 BR2 上临时配置测的（叶子名是 `VRF`），测完已撤销，没有保存。
+- **夹具**：
+  - `tests/fixtures/netconf/h3c-comware7/br1-policy/`：ACL、NAT、PBR 三个模块的回包，和同一时刻的 4 条 CLI 输出；
+  - `br2-acl-vrf/`：VPN 实例条件的那次测量。
+- **对照结论**（`tests/unit/test_netconf_api_policy.py`，用拓扑的投影代码比对事实）：
+  - ACL 绑定、NAT 规则、NAT 绑定、PBR 绑定，事实完全相同；
+  - ACL 规则 23 条里只有 rule 50（DSCP）一条不同。两边都把这条规则标为"无法计算"，只是写法不同：CLI 是 `dscp ef`，NETCONF 是 `DSCP=46`。
+- **实测到的代码和对应关系**：
+  - Action：1 deny，2 permit；
+  - ProtocolType：1 icmp，6 tcp，17 udp，47 gre，51，256 ip；
+  - 端口操作符：1 lt，2 eq，3 gt，4 neq，5 range（第二个端口值 65536 表示没有）；
+  - 组表的 MatchOrder：1 配置顺序，2 auto；auto 时规则按 RuleID 返回，`MatchIndex` 才是匹配顺序；
+  - 规则 Status：时间段生效 1，失效 2；
+  - 包过滤缺省动作 1 是 Permit；PfilterApply 里 `AppAclType` 为 5 的行是每个方向的缺省动作项；
+  - 包过滤运行状态 AclGroupStatus：1 表示生效；
+  - 静态映射：只认前缀长度 32（一对一），其他前缀记 `unexpected_value`。
+
+  没有列出的代码一律报"未映射"，表回退到 CLI。
 
 ## 7. 注意事项
 

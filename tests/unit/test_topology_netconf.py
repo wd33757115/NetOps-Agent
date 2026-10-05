@@ -32,7 +32,23 @@ ROOT = Path(__file__).resolve().parents[2]
 CLI = ROOT / "tests/fixtures/topology/campus-wan"
 NETCONF = ROOT / "tests/fixtures/netconf/h3c-comware7/br1"
 SEEDS = ROOT / "src/apps/netconf_api/backend/seeds/h3c_comware7.yaml"
-REPLIES = {"Ifmgr": "ifmgr-interfaces.xml", "ARP": "arp.xml", "Route": "route.xml"}
+POLICY = ROOT / "tests/fixtures/netconf/h3c-comware7/br1-policy"
+REPLIES = {
+    "Ifmgr": NETCONF / "ifmgr-interfaces.xml",
+    "ARP": NETCONF / "arp.xml",
+    "Route": NETCONF / "route.xml",
+    "ACL": POLICY / "acl.xml",
+    "NAT": POLICY / "nat.xml",
+    "PBR": POLICY / "pbr.xml",
+}
+# The policy tables of the same moment as POLICY's replies.
+POLICY_CLI = {
+    "display acl all": "cli-display-acl-all.txt",
+    "display packet-filter interface": "cli-display-packet-filter-interface.txt",
+    "display nat all": "cli-display-nat-all.txt",
+    "display ip policy-based-route setup": "cli-display-ip-policy-based-route-setup.txt",
+}
+POLICY_CAPS = ("acl_rules", "acl_bindings", "nat_rules", "nat_bindings", "pbr_bindings")
 NO_VRFS = "L3VPN is not configured."
 
 
@@ -44,6 +60,8 @@ def cli_outputs():
         if row["device"] == "br1"
     }
     outputs["display ip vpn-instance"] = NO_VRFS
+    for command, name in POLICY_CLI.items():
+        outputs[command] = (POLICY / name).read_text(encoding="utf-8")
     return outputs
 
 
@@ -65,7 +83,7 @@ def br1():
         replies={},  # module -> reply text overriding the fixture
         hello=tuple((NETCONF / "hello-capabilities.txt").read_text("utf-8").split()),
         refuse=None,  # a failure code for the NETCONF login
-        fail_after=None,  # an RPC count after which the session breaks
+        fail_on=None,  # a module whose read breaks the session
         asked=[],
         sessions=0,
     )
@@ -94,11 +112,11 @@ def br1():
             self.capabilities = state.hello
 
         def get(self, subtree):
-            if state.fail_after is not None and len(state.asked) >= state.fail_after:
+            module = subtree.split("><", 1)[1].split(">", 1)[0].lstrip("<")
+            if module == state.fail_on:
                 raise DeviceAccessError("timeout", "NETCONF reply was not received before timeout")
             state.asked.append(subtree)
-            module = subtree.split("><", 1)[1].split(">", 1)[0].lstrip("<")
-            return state.replies.get(module) or (NETCONF / REPLIES[module]).read_text("utf-8")
+            return state.replies.get(module) or REPLIES[module].read_text("utf-8")
 
         def close(self):
             pass
@@ -152,9 +170,18 @@ def test_tables_netconf_serves_are_read_over_netconf_and_kept_as_evidence(br1):
     assert "display arp verbose" not in br1.commands
     assert "display ip routing-table" not in br1.commands
     assert "display lldp neighbor-information verbose" in br1.commands
-    assert br1.sessions == 1  # one NETCONF session for both tables
+    for cap in POLICY_CAPS:
+        parsed = result.parsed[cap]
+        assert (parsed.tier, parsed.status, parsed.netconf["status"]) == (
+            "netconf",
+            "complete",
+            "used",
+        ), (cap, parsed.warnings, parsed.netconf)
+    assert not set(POLICY_CLI) & set(br1.commands)
+    assert br1.sessions == 1  # one NETCONF session for every table
     evidence = {e.command_id: e for e in br1.evidence if e.driver == "netconf"}
-    assert set(evidence) == {"netconf-arp-0", "netconf-arp-1", "netconf-routes-0"}
+    assert {"netconf-arp-0", "netconf-arp-1", "netconf-routes-0"} <= set(evidence)
+    assert {cap for cap in POLICY_CAPS if f"netconf-{cap}-0" in evidence} == set(POLICY_CAPS)
     assert evidence["netconf-arp-0"].driver_version == "h3c-comware7.interfaces"
     hop = next(r for r in result.parsed["arp"].records if r["ip"] == "10.0.13.2")
     assert hop["ifname"] == "GigabitEthernet3/0" and hop["mac"] == "aa:bb:cc:00:02:10"
@@ -177,6 +204,14 @@ def test_netconf_facts_are_the_cli_facts(br1):
         assert comparison["status"] == "same", comparison
     assert result.parsed["arp"].netconf["comparison"]["cli_only_fields"] == ["age_s"]
     assert "display arp verbose" in br1.commands and br1.sessions == 1
+    # The policy tables of one moment agree but for how one unknown condition is written
+    # (dscp ef: both leave that rule out of the computation).
+    for cap in POLICY_CAPS:
+        comparison = result.parsed[cap].netconf["comparison"]
+        expected = "different" if cap == "acl_rules" else "same"
+        assert comparison["status"] == expected, (cap, comparison)
+    acl = result.parsed["acl_rules"].netconf["comparison"]
+    assert acl["differing"] == 2 and acl["only_cli"][0]["unsupported"] == ["condition:dscp ef"]
 
 
 def test_an_unmapped_code_sends_the_table_to_the_cli(br1):
@@ -206,9 +241,10 @@ def test_a_netconf_login_failure_sends_every_table_to_the_cli(br1):
 
 
 def test_a_session_lost_midway_sends_the_rest_to_the_cli(br1):
-    br1.fail_after = 2  # the interface and ARP tables are read, then the session breaks
+    br1.fail_on = "Route"  # the route table is read last (by definition id)
     result = br1.collect()
     assert result.parsed["arp"].tier == "netconf"
+    assert all(result.parsed[cap].tier == "netconf" for cap in POLICY_CAPS)
     assert result.parsed["routes"].netconf["reason"] == "session:timeout"
     assert result.parsed["routes"].tier == "rules"
 
@@ -318,7 +354,7 @@ def test_an_issue_is_counted_and_cleared_by_a_clean_collection(br1, database):
     assert open_issues(database) == []
     with database() as session:
         cleared = issues.listing(session, "alice", include_cleared=True)
-    assert {i["capability"] for i in cleared} == {"arp", "routes"}
+    assert {i["capability"] for i in cleared} == {"arp", "routes", *POLICY_CAPS}
     assert all(i["cleared_at"] for i in cleared)
 
 

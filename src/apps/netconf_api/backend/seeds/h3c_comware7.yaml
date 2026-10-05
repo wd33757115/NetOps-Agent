@@ -62,3 +62,243 @@ definitions:
       NEXTHOP_IP: Nexthop
       NEXTHOP_IF: IfName  # the full name (GigabitEthernet2/0); topology normalizes it
       VRF: VRF  # empty for the public table
+
+  # --- ACL, NAT and policy-based routing (measured on BR1 against the CLI, 2026-10-05:
+  # tests/fixtures/netconf/h3c-comware7/br1-policy; the VPN-instance condition on BR2,
+  # br2-acl-vrf). Conditions a definition does not read go into OTHER (rest), so a rule
+  # with one is never computed as if it were absent.
+  - id: h3c-comware7.acl-groups
+    description: ACL 组表，供规则取匹配顺序
+    vendor: H3C
+    platforms: [comware]
+    namespace: http://www.h3c.com/netconf/data:1.0
+    datastore: state
+    path: top/ACL/NamedGroups/Group
+    module: ACL
+    keys: [GroupIndex]
+
+  - id: h3c-comware7.acl-rules
+    description: IPv4 基本和高级 ACL 规则（含命名 ACL），按设备的匹配顺序
+    vendor: H3C
+    platforms: [comware]
+    check_item: topology.acl_rules
+    namespace: http://www.h3c.com/netconf/data:1.0
+    datastore: state
+    module: ACL
+    parts:
+      - path: top/ACL/IPv4NamedBasicRules/Rule
+        keys: [GroupIndex, RuleID]
+        # Auto match order: rules come by RuleID, MatchIndex numbers the match order.
+        order: {group: GroupIndex, by: MatchIndex}
+        values:
+          ACL_TYPE: {const: Basic}
+          ADDRESS_FAMILY: {const: IPv4}
+          ACL_NAME: GroupIndex
+          MATCH_ORDER: &match-order
+            leaf: GroupIndex
+            lookup: {definition: h3c-comware7.acl-groups, match: GroupIndex, take: MatchOrder}
+            codes: {"1": "", "2": auto}  # config, auto (depth first)
+          LINE_NUM: RuleID
+          ACTION: &action {leaf: Action, codes: {"1": deny, "2": permit}}
+          SRC_NETWORK: SrcIPv4/SrcIPv4Addr
+          SRC_WILDCARD: SrcIPv4/SrcIPv4Wildcard  # a host is 0.0.0.0 (the CLI prints 0)
+          FRAGMENTS: &fragments {leaf: Fragment, codes: {"true": fragment, "false": ""}}
+          TIME: TimeRange
+          STATE: &state {leaf: Status, when: {TimeRange: "*"}, codes: {"1": Active, "2": Inactive}}
+          VRF: &vrf {leaf: VRF, default: "--"}  # no instance: the public network
+          MATCHES: &matches {leaf: Count, none: ["0"]}  # the CLI prints no zero count
+        rest: {value: OTHER, ignore: [SrcAny, Counting, Logging, Status]}
+      - path: top/ACL/IPv4NamedAdvanceRules/Rule
+        keys: [GroupIndex, RuleID]
+        order: {group: GroupIndex, by: MatchIndex}
+        values:
+          ACL_TYPE: {const: Advanced}
+          ADDRESS_FAMILY: {const: IPv4}
+          ACL_NAME: GroupIndex
+          MATCH_ORDER: *match-order
+          LINE_NUM: RuleID
+          ACTION: *action
+          # 256 is any IP packet; a protocol not listed was not seen next to the CLI.
+          PROTOCOL: {leaf: ProtocolType, codes: {"1": icmp, "6": tcp, "17": udp, "47": gre, "51": "51", "256": ip}}
+          SRC_NETWORK: SrcIPv4/SrcIPv4Addr
+          SRC_WILDCARD: SrcIPv4/SrcIPv4Wildcard
+          SRC_NETWORK_OBJECT_GROUP_NAME: SrcObjectGroup
+          # Port operators: 1 lt, 2 eq, 3 gt, 4 neq, 5 range (Value2 65536: none).
+          SRC_PORT_MATCH: {leaf: SrcPort/SrcPortOp, codes: {"1": lt, "2": eq, "3": gt, "4": neq, "5": ""}}
+          SRC_PORT: {leaf: SrcPort/SrcPortValue1, when: {SrcPort/SrcPortOp: ["1", "2", "3", "4"]}}
+          SRC_PORT_RANGE_START: {leaf: SrcPort/SrcPortValue1, when: {SrcPort/SrcPortOp: "5"}}
+          SRC_PORT_RANGE_END: {leaf: SrcPort/SrcPortValue2, when: {SrcPort/SrcPortOp: "5"}}
+          DST_NETWORK: DstIPv4/DstIPv4Addr
+          DST_WILDCARD: DstIPv4/DstIPv4Wildcard
+          DST_PORT_MATCH: {leaf: DstPort/DstPortOp, codes: {"1": lt, "2": eq, "3": gt, "4": neq, "5": ""}}
+          DST_PORT: {leaf: DstPort/DstPortValue1, when: {DstPort/DstPortOp: ["1", "2", "3", "4"]}}
+          DST_PORT_RANGE_START: {leaf: DstPort/DstPortValue1, when: {DstPort/DstPortOp: "5"}}
+          DST_PORT_RANGE_END: {leaf: DstPort/DstPortValue2, when: {DstPort/DstPortOp: "5"}}
+          ICMP_TYPE: ICMP/ICMPType
+          ICMP_CODE: ICMP/ICMPCode
+          TCP_FLAG: {leaf: Established, codes: {"true": established, "false": ""}}
+          FRAGMENTS: *fragments
+          TIME: TimeRange
+          STATE: *state
+          VRF: *vrf
+          MATCHES: *matches
+        rest: {value: OTHER, ignore: [SrcAny, DstAny, Counting, Logging, Status]}
+
+  - id: h3c-comware7.packet-filter-default
+    description: 包过滤的缺省动作（全局一行）
+    vendor: H3C
+    platforms: [comware]
+    namespace: http://www.h3c.com/netconf/data:1.0
+    datastore: state
+    path: top/ACL/PfilterDefAction/DefaultAction
+    module: ACL
+    keys: ["."]
+
+  - id: h3c-comware7.packet-filter-run
+    description: 包过滤在接口上的生效状态
+    vendor: H3C
+    platforms: [comware]
+    namespace: http://www.h3c.com/netconf/data:1.0
+    datastore: state
+    path: top/ACL/PfilterGroupRunInfo/GroupRunInfo
+    module: ACL
+    keys: [AppObjType, AppObjIndex, AppDirection, AppAclType, AppAclGroup]
+
+  - id: h3c-comware7.acl-bindings
+    description: 接口包过滤绑定的 ACL 和缺省动作
+    vendor: H3C
+    platforms: [comware]
+    check_item: topology.acl_bindings
+    namespace: http://www.h3c.com/netconf/data:1.0
+    datastore: state
+    module: ACL
+    parts:
+      - path: top/ACL/PfilterApply/Pfilter
+        keys: [AppObjIndex, AppDirection, AppAclType, AppAclGroup]
+        where: {AppAclType: "!5"}  # 5: the default-action entry of a direction (next part)
+        expect: {AppObjType: "1"}  # applied on an interface
+        values:
+          INTERFACE: &pfilter-interface
+            leaf: AppObjIndex
+            lookup: {definition: h3c-comware7.interfaces, match: IfIndex, take: Name}
+          DIRECTION: &direction {leaf: AppDirection, codes: {"1": Inbound, "2": Outbound}}
+          ADDRESS_FAMILY: {leaf: AppAclType, codes: {"1": IPv4}}
+          ACL_NAME: AppAclGroup
+          STATUS:
+            leaf: [AppObjType, AppObjIndex, AppDirection, AppAclType, AppAclGroup]
+            lookup:
+              definition: h3c-comware7.packet-filter-run
+              match: [AppObjType, AppObjIndex, AppDirection, AppAclType, AppAclGroup]
+              take: AclGroupStatus
+            codes: {"1": ""}  # in effect; the CLI prints a status only when it is not
+      - path: top/ACL/PfilterApply/Pfilter
+        keys: [AppObjIndex, AppDirection]
+        where: {AppAclType: "5"}
+        expect: {AppObjType: "1"}
+        values:
+          INTERFACE: *pfilter-interface
+          DIRECTION: *direction
+          ADDRESS_FAMILY: {const: IPv4}
+          DEFAULT_ACTION:
+            lookup: {definition: h3c-comware7.packet-filter-default, take: "."}
+            codes: {"1": Permit}
+
+  - id: h3c-comware7.nat-rules
+    description: NAT 地址组、出方向动态 NAT、内部服务器和出方向静态映射
+    vendor: H3C
+    platforms: [comware]
+    check_item: topology.nat_rules
+    namespace: http://www.h3c.com/netconf/data:1.0
+    datastore: state
+    module: NAT
+    parts:
+      - path: top/NAT/AddrGroupMembers/GroupMember
+        keys: [GroupNumber, StartIpv4Address]
+        values:
+          KIND: {const: address group}
+          POOL: GroupNumber
+          POOL_START: StartIpv4Address
+          POOL_END: EndIpv4Address
+        rest: {value: OTHER}
+      - path: top/NAT/OutboundDynamicRules/Interface
+        keys: [IfIndex, ACLNumber]
+        values:
+          KIND: {const: outbound}
+          POOL: {leaf: AddrGroupNumber, default: "---"}  # none: the interface address
+          INTERFACE: &nat-interface
+            leaf: IfIndex
+            lookup: {definition: h3c-comware7.interfaces, match: IfIndex, take: Name}
+          ACL_NAME: {leaf: ACLNumber, default: "---"}
+          NO_PAT: {leaf: NoPAT, codes: {"true": "Y", "false": "N"}}
+        rest: {value: OTHER, ignore: [MatchingCount, WhetherPersistConfig]}
+      - path: top/NAT/ServerOnInterfaces/Interface
+        keys: [IfIndex, ProtocolType, GlobalInfo/GlobalStartIpv4Address, GlobalInfo/GlobalStartPortNumber]
+        values:
+          KIND: {const: internal server}
+          INTERFACE: *nat-interface
+          PROTOCOL: ProtocolType
+          LOCAL_ADDRESS: LocalInfo/LocalStartIpv4Address
+          LOCAL_PORT: LocalInfo/LocalStartPortNumber
+          GLOBAL_ADDRESS: GlobalInfo/GlobalStartIpv4Address
+          GLOBAL_PORT: GlobalInfo/GlobalStartPortNumber
+        rest: {value: OTHER, ignore: [MatchingCount, WhetherPersistConfig]}
+      - path: top/NAT/OutboundStaticMappings/Mapping
+        keys: [LocalInfo/StartIpv4Address]
+        expect: {GlobalInfo/Ipv4PrefixLength: "32"}  # one address to one address
+        values:
+          KIND: {const: Static}
+          LOCAL_ADDRESS: LocalInfo/StartIpv4Address
+          GLOBAL_ADDRESS: GlobalInfo/Ipv4Address
+        rest: {value: OTHER, ignore: [LocalInfo/EndIpv4Address, MatchingCount, Counting]}
+
+  - id: h3c-comware7.nat-bindings
+    description: 接口上的出方向动态 NAT、内部服务器和静态 NAT
+    vendor: H3C
+    platforms: [comware]
+    check_item: topology.nat_bindings
+    namespace: http://www.h3c.com/netconf/data:1.0
+    datastore: state
+    module: NAT
+    parts:
+      - path: top/NAT/OutboundDynamicRules/Interface
+        keys: [IfIndex, ACLNumber]
+        values:
+          KIND: {const: outbound}
+          INTERFACE: *nat-interface
+          RULE: ACLNumber
+      - path: top/NAT/ServerOnInterfaces/Interface
+        keys: [IfIndex, ProtocolType, GlobalInfo/GlobalStartIpv4Address, GlobalInfo/GlobalStartPortNumber]
+        values:
+          KIND: {const: internal server}
+          INTERFACE: *nat-interface
+      - path: top/NAT/StaticOnInterfaces/Interface
+        keys: [IfIndex]
+        where: {EnableStatic: "true"}
+        values:
+          KIND: {const: static}
+          INTERFACE: *nat-interface
+
+  - id: h3c-comware7.pbr-bindings
+    description: 接口和本机的 IPv4 策略路由
+    vendor: H3C
+    platforms: [comware]
+    check_item: topology.pbr_bindings
+    namespace: http://www.h3c.com/netconf/data:1.0
+    datastore: state
+    module: PBR
+    parts:
+      - path: top/PBR/PBRIfPolicy/IfPolicy
+        keys: [IfIndex, PolicyName]
+        where: {AddressType: "0"}  # IPv4
+        values:
+          POLICY: PolicyName
+          TYPE: {const: Forward}
+          INTERFACE:
+            leaf: IfIndex
+            lookup: {definition: h3c-comware7.interfaces, match: IfIndex, take: Name}
+      - path: top/PBR/PBRLocalPolicy/Ipv4PolicyName
+        keys: ["."]
+        values:
+          POLICY: "."
+          TYPE: {const: Local}
+          INTERFACE: {const: N/A}

@@ -62,3 +62,71 @@ line vty 0 63
  protocol inbound ssh
  quit
 public-key local create ecdsa secp256r1
+time-range TR-DAY 08:00 to 18:00 working-day
+time-range TR-OFF from 00:00 1/1/2020 to 00:00 1/2/2020
+object-group ip address OG-T
+ 0 network subnet 192.0.2.0 255.255.255.0
+ quit
+acl basic 2990
+ rule 0 permit source 192.0.2.1 0
+ rule 5 deny source 192.0.2.0 0.0.0.255 counting
+ quit
+acl basic 2991
+ rule 5 permit source 192.0.2.0 0.0.0.127
+ quit
+acl basic 2992
+ rule 5 permit source 192.0.2.128 0.0.0.127
+ quit
+acl advanced 3990
+ rule 5 permit tcp source 192.0.2.1 0 source-port eq 22
+ rule 10 permit udp destination 203.0.113.0 0.0.0.255 source-port range 1000 2000 destination-port eq dns
+ rule 15 permit tcp destination 203.0.113.10 0 destination-port eq www
+ rule 20 permit icmp destination 203.0.113.0 0.0.0.255 icmp-type echo-reply
+ rule 25 permit tcp destination 203.0.113.0 0.0.0.255 established
+ rule 30 deny ip source 192.0.2.0 0.0.0.255 fragment
+ rule 35 permit tcp destination 203.0.113.0 0.0.0.255 source-port neq www destination-port lt 1024
+ rule 40 permit tcp destination 203.0.113.0 0.0.0.255 source-port gt 1023
+ rule 45 permit gre destination 203.0.113.0 0.0.0.255
+ rule 50 deny ip source 192.0.2.0 0.0.0.255 dscp ef
+ rule 55 permit ip source object-group OG-T destination 203.0.113.0 0.0.0.255
+ rule 60 deny ip source 192.0.2.0 0.0.0.255 time-range TR-DAY
+ rule 65 deny 51 destination 203.0.113.0 0.0.0.255
+ rule 70 deny ip source 192.0.2.0 0.0.0.255 time-range TR-OFF
+ quit
+acl advanced 3991 match-order auto
+ rule 0 permit ip source 192.0.2.0 0.0.0.255
+ rule 5 deny ip source 192.0.2.128 0.0.0.127
+ quit
+acl advanced 3992
+ rule 5 permit ip source 192.0.2.0 0.0.0.255 destination 203.0.113.0 0.0.0.255
+ quit
+acl advanced 3993
+ rule 5 permit ip source 192.0.2.64 0.0.0.63
+ quit
+acl advanced name T-NAMED
+ rule 5 deny ip destination 203.0.113.99 0
+ quit
+nat address-group 9
+ address 203.0.113.100 203.0.113.103
+ quit
+nat static outbound 192.0.2.20 203.0.113.20
+policy-based-route TEST-PBR permit node 10
+ if-match acl 3992
+ apply next-hop 10.0.13.2
+ quit
+policy-based-route TEST-PBR deny node 20
+ if-match acl 3993
+ quit
+interface GigabitEthernet2/0
+ nat outbound 2991 address-group 9 no-pat
+ nat outbound 2992
+ nat server protocol tcp global 100.64.1.2 8080 inside 192.0.2.80 80
+ nat server protocol udp global 203.0.113.53 53 inside 192.0.2.53 53
+ nat static enable
+ quit
+interface GigabitEthernet5/0
+ packet-filter 3990 inbound
+ packet-filter name T-NAMED outbound
+ ip policy-based-route TEST-PBR
+ quit
+ip local policy-based-route TEST-PBR
