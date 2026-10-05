@@ -429,13 +429,16 @@ class _Tracer:
     def entries(self, src, dst):
         """Where a packet from an address outside the collected network comes in: the
         interfaces by which the devices send to it through a next hop no collected device
-        owns. When the destination is on one of those interfaces' subnets, only there."""
+        owns. When the destination is on one of those interfaces' subnets, only there. A
+        route to a NULL interface discards what is sent to the address: no way in there."""
         found = set()
         for key in sorted(self.devices):
             route = self.lookup(key, "default", src) if "routes" in self.devices[key] else None
             for next_hop in (route or {}).get("next_hops") or []:
                 ip = next_hop.get("ip")
                 if not ip or next_hop.get("tunnel") or self.topo.ip_candidates(ip):
+                    continue
+                if str(next_hop.get("ifname") or "").upper().startswith("NULL"):
                     continue
                 resolved = self.resolve(key, "default", ip, egress=next_hop.get("ifname"))
                 if not resolved and next_hop.get("ifname"):

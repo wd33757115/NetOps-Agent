@@ -284,6 +284,24 @@ def test_hidden_fact_tables_are_an_explicit_evaluation_control(monkeypatch):
     assert service._hidden_facts() == {"acl_rules", "nat_rules"}
 
 
+def test_a_source_the_edge_blackholes_is_not_assumed_to_come_in_through_null0(lab):
+    # BR1 discards traffic to the server (a static route to NULL0, case C5 of the
+    # ACL/NAT diagnosis experiment): the request ends there, and the server's packets are
+    # not assumed to come in by NULL0.
+    devices = {key: dict(facts) for key, facts in lab.items()}
+    br1 = devices[ADDRESS["br1"]]
+    null = {"ip": "0.0.0.0", "ifname": "NULL0", "vrf": "default"}
+    br1["routes"] = [
+        *br1["routes"],
+        {"vrf": "default", "prefix": f"{INTERNET}/32", "protocol": "Static", "preference": 60, "metric": 0, "next_hops": [null]},
+    ]
+    result = trace(devices, BASE, PC1, INTERNET, protocol="icmp")
+    assert {path["end"]["status"] for path in result["forward"]["paths"]} == {"blackhole"}
+    assert not any(
+        hop.get("in_interface") == "NULL0" for path in result["reverse"]["paths"] for hop in path["hops"]
+    )
+
+
 def test_an_arp_entry_tied_to_no_interface_does_not_stop_the_analysis(lab):
     # LEAF3 (vpn-fabric) printed a VSI entry learned over a tunnel link with no interface.
     from src.apps.topology.backend.model.locate import _Locator, answer
