@@ -173,6 +173,7 @@ commands(check_item_ids) -> [{implementation_id, platforms, command, scoped_comm
   - 路径按一条流判断（`trace_path` 新增 protocol、src_port、dst_port；ICMP 按 echo，反方向按应答：TCP 带 ACK、ICMP echo-reply）。每跳查入接口、出接口上的 IPv4 ACL（`model/acl.py`）：拒绝时以 `denied_in`/`denied_out` 结束，给出 ACL 名和规则序号；所有路径都被拒绝时该方向为 `blocked`。规则判断不了时，若所有可能结果一致仍给出结论（`undecided_before`），否则记 `filter_undetermined` 并写明缺什么（端口、协议或该规则的条件）。
   - 接口在安全域里记 `security_policy_not_evaluated`（域间默认拒绝，安全策略本期不计算）；MPLS/VXLAN 隧道内不查核心 ACL（看到的是外层头）；设备自己发出的报文不查其出接口 ACL（IOS 与 Comware 都不过滤本机报文）。跳上的 `not_observed` 列出没完整采到的表。
   - 实机验收（campus-wan）：DIST1 Vlan10 入向禁止 PC1 ping PC4 和到 172.16.20.0/24 的 telnet，BR1 GE2/0 出向禁止到 198.51.100.0/24 的 UDP 53。VPCS 实际打流的结果与推导一致，设备命中计数对得上（ping 3 次、telnet 1 次、DNS 2 次；web、echo-reply、NTP 通过）；原文作为夹具保留（`campus-wan/acl`，语法覆盖样本在 `campus-wan/acl-syntax`）。
+  - 部署后经平台发现与路径接口复验 12 项全部通过：两台设备的 ACL 命令按已发布实现执行，IOS 的 `show ip interface` 每台只执行一次；六条流的结论与上面一致。随后删除配置并重新发现，路径上已无过滤，PC1 ping PC4 恢复。
   - 未覆盖：二层设备端口上的 ACL、安全策略内容、对象组展开、IPv6、IOS ZBF（IOL 不支持，无样本）。
   - 第二期策略路由：节点内容（`show route-map`、`display ip policy-based-route`）、下一跳可达性、动作优先级、deny 节点按路由表转发。第三期 NAT：规则内容、两个方向的改写、回程按去程的翻译推导。Comware 的出方向 NAT 与包过滤、入方向 nat server 与策略路由谁先，文档未写明，届时在实验网用流量和命中计数实测，写成家族数据。
 - **待做**：
