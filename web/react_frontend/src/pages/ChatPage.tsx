@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { Alert, message } from 'antd'
-import GrokShellLayout from '../components/layout/GrokShellLayout'
+import GrokShellLayout from '../components/Layout/GrokShellLayout'
 import ChatMessage from '../components/ChatMessage'
 import EvidenceLinks from '../components/EvidenceLinks'
 import InputArea from '../components/InputArea'

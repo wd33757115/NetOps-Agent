@@ -37,7 +37,7 @@ import {
   UserAddOutlined,
 } from '@ant-design/icons'
 import { useQuery, useQueryClient } from 'react-query'
-import GrokShellLayout from '../components/layout/GrokShellLayout'
+import GrokShellLayout from '../components/Layout/GrokShellLayout'
 import { GrokChip, GrokInfoBar, GrokRowAction, GrokToolBtn } from '../components/ui/GrokUi'
 import { useAuth } from '../context/AuthContext'
 import { useIsMobile } from '../hooks/useIsMobile'

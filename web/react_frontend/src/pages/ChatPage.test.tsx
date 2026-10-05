@@ -7,7 +7,7 @@ import type { AgentProgress } from '../components/TraceProgress'
 const mocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), stream: vi.fn() }))
 vi.mock('../config/api', () => ({ api: mocks }))
 vi.mock('../services/chatStream', () => ({ streamChatMessage: mocks.stream }))
-vi.mock('../components/layout/GrokShellLayout', () => ({ default: ({ children, footer }: any) => <div>{children}{footer}</div> }))
+vi.mock('../components/Layout/GrokShellLayout', () => ({ default: ({ children, footer }: any) => <div>{children}{footer}</div> }))
 vi.mock('../components/InputArea', () => ({ default: ({ onSend, loading }: any) => <button disabled={loading} onClick={() => onSend('查找 BGP EVPN')}>发送</button> }))
 const progress: AgentProgress = { run_id: 'r', status: 'running', message: '正在分析问题', started_at: new Date().toISOString(), steps: [] }
 beforeEach(() => {

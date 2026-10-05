@@ -4,7 +4,7 @@
 import React, { useCallback, useMemo, useState } from 'react'
 import { Tabs } from 'antd'
 import { useNavigate, useParams } from 'react-router-dom'
-import GrokShellLayout from '../components/layout/GrokShellLayout'
+import GrokShellLayout from '../components/Layout/GrokShellLayout'
 import { useIsMobile } from '../hooks/useBreakpoint'
 import SkillManageTab from '../components/skills/SkillManageTab'
 import WorkflowPluginList from '../components/skills/WorkflowPluginList'

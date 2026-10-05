@@ -12,7 +12,7 @@ import {
 } from 'antd'
 import { useQuery } from 'react-query'
 import { ReloadOutlined, MedicineBoxOutlined } from '@ant-design/icons'
-import GrokShellLayout from '../components/layout/GrokShellLayout'
+import GrokShellLayout from '../components/Layout/GrokShellLayout'
 import { GrokChip, GrokToolBtn, statusChipTone } from '../components/ui/GrokUi'
 import { chatApi, skillApi, type DiagnosticsResponse, type ServiceCheck } from '../services/api'
 import { useIsMobile } from '../hooks/useIsMobile'
