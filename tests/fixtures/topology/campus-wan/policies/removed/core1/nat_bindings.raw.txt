@@ -1,0 +1,13 @@
+show ip nat statistics
+Total active translations: 0 (0 static, 0 dynamic; 0 extended)
+Outside interfaces:
+Inside interfaces: 
+Hits: 0  Misses: 0
+CEF Translated packets: 0, CEF Punted packets: 0
+ Reserved port setting disabled provisioned no
+ Dynamic overload mapping configured: 0
+Expired translations: 0
+Dynamic mappings:
+nat-limit statistics:
+ max entry: max allowed 0, used 0, missed 0
+CORE1#

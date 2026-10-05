@@ -250,8 +250,18 @@ CAMPUS_POLICIES = Lab(
     ROOT / "tests/fixtures/topology/campus-wan/policies",
     frozenset(),
 )
+# The same devices after the test policies were removed: once configured, both platforms
+# print the empty forms (headings, global NAT sections) instead of "not configured".
+CAMPUS_POLICIES_REMOVED = Lab(
+    "20261005-080417",
+    {"10.10.1.11": "br1", "10.10.1.13": "core1"},
+    dict.fromkeys(("10.10.1.11", "10.10.1.13"), frozenset({"pbr_bindings", "nat_bindings"})),
+    ROOT / "tests/fixtures/topology/campus-wan/policies/removed",
+    frozenset(),
+)
 LABS = {
     "campus-policies": CAMPUS_POLICIES,
+    "campus-policies-removed": CAMPUS_POLICIES_REMOVED,
     "vpn-fabric": VPN_FABRIC,
     "vsr1000": VSR,
     "campus-vrf-routes": CAMPUS_VRF_ROUTES,

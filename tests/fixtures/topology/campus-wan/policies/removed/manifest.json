@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "batch": "20261005-080417",
+  "source": "GNS3 authorized lab capture",
+  "raw_format": "UTF-8 text saved by collector before CLI cleanup; original line endings",
+  "limitations": [
+    "Not an arbitrary-encoding wire capture",
+    "No initial login banner saved"
+  ],
+  "secret_scan": {
+    "literal_matches": 0,
+    "sensitive_config_matches": 0,
+    "scanner": "scripts/scan_sensitive_device_data.py + direct byte check"
+  },
+  "observations": [
+    {
+      "device": "br1",
+      "host": "10.10.1.11",
+      "capability": "pbr_bindings",
+      "command": "display ip policy-based-route setup",
+      "observed_at": "2026-10-05T00:04:21.517829+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "br1/pbr_bindings.txt",
+          "sha256": "bc38db12386cb059fcb7983f98973bf3af675eb1c64a91c8a59396c05a5ce9eb",
+          "bytes": 45
+        },
+        "raw.txt": {
+          "path": "br1/pbr_bindings.raw.txt",
+          "sha256": "edd9388446306ea8cfcb77b7adee0f0ba7c9cd6ab277d93b508fb5adeced96ac",
+          "bytes": 90
+        }
+      }
+    },
+    {
+      "device": "br1",
+      "host": "10.10.1.11",
+      "capability": "nat_bindings",
+      "command": "display nat all",
+      "observed_at": "2026-10-05T00:04:21.569383+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "br1/nat_bindings.txt",
+          "sha256": "b2f4ab4c8e3d3c69b4333cea808dc9776e1313902f4469bdf6d9d97810359528",
+          "bytes": 1020
+        },
+        "raw.txt": {
+          "path": "br1/nat_bindings.raw.txt",
+          "sha256": "f0001aad78e4b69aef71ae76c1378c66a02b79df9c5d66a6fc20ae716eea4ecd",
+          "bytes": 1126
+        }
+      }
+    },
+    {
+      "device": "core1",
+      "host": "10.10.1.13",
+      "capability": "pbr_bindings",
+      "command": "show ip policy",
+      "observed_at": "2026-10-05T00:04:24.488099+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "core1/pbr_bindings.txt",
+          "sha256": "35501c6482074831aaf7976517b31d480978e38a7a2f2f69dfce2d1bd2299400",
+          "bytes": 25
+        },
+        "raw.txt": {
+          "path": "core1/pbr_bindings.raw.txt",
+          "sha256": "23b92e4cc06eff8f0462d0008f37f966a74a4970ecbfa77ab8544a053d147d2c",
+          "bytes": 48
+        }
+      }
+    },
+    {
+      "device": "core1",
+      "host": "10.10.1.13",
+      "capability": "nat_bindings",
+      "command": "show ip nat statistics",
+      "observed_at": "2026-10-05T00:04:24.539321+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "core1/nat_bindings.txt",
+          "sha256": "5094295d3b942d6881ea82d69f9730709f32f812f3d5eb29e46bb2fb540094a3",
+          "bytes": 366
+        },
+        "raw.txt": {
+          "path": "core1/nat_bindings.raw.txt",
+          "sha256": "60280e910d7d044e565816e2bb3944d33cd7d062bb5161cbdfa58b25e5c171d7",
+          "bytes": 407
+        }
+      }
+    }
+  ]
+}

@@ -130,6 +130,16 @@ def test_unconfigured_output_is_an_empty_table_not_a_failure(family, cap, text):
     assert (result.status, result.records) == ("complete", [])
 
 
+@pytest.mark.parametrize("device,family", [("br1", "comware"), ("core1", "ios")])
+@pytest.mark.parametrize("cap", CAPS)
+def test_output_after_the_policies_were_removed_is_an_empty_table(device, family, cap):
+    # Once configured, neither platform says "not configured" again: IOS keeps the empty
+    # interface headings, Comware the PBR heading and the global NAT sections.
+    text = (POLICIES / "removed" / device / f"{cap}.txt").read_text("utf-8")
+    result = parse(IDENTITY[family], cap, text)
+    assert (result.status, result.records) == ("complete", [])
+
+
 @pytest.mark.parametrize(
     "family,text",
     [
