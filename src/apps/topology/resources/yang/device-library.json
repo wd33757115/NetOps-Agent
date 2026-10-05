@@ -39,9 +39,30 @@
         "conformance-type": "import"
       },
       {
+        "name": "ietf-access-control-list",
+        "revision": "2019-03-04",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-access-control-list",
+        "conformance-type": "implement",
+        "feature": [
+          "match-on-ipv4",
+          "match-on-tcp",
+          "match-on-udp",
+          "match-on-icmp",
+          "ipv4",
+          "interface-attachment",
+          "acl-aggregate-stats"
+        ]
+      },
+      {
         "name": "ietf-bfd-types",
         "revision": "2022-09-22",
         "namespace": "urn:ietf:params:xml:ns:yang:ietf-bfd-types",
+        "conformance-type": "import"
+      },
+      {
+        "name": "ietf-ethertypes",
+        "revision": "2019-03-04",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-ethertypes",
         "conformance-type": "import"
       },
       {
@@ -103,6 +124,12 @@
         "revision": "2022-10-19",
         "namespace": "urn:ietf:params:xml:ns:yang:ietf-ospf",
         "conformance-type": "implement"
+      },
+      {
+        "name": "ietf-packet-fields",
+        "revision": "2019-03-04",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-packet-fields",
+        "conformance-type": "import"
       },
       {
         "name": "ietf-routing",

@@ -31,6 +31,11 @@
     "sha256": "c88ae16c9c9b2bd58d781f84de8252c7c866b3c65554aba195befd9c6c28d7de",
     "source": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ieee/published/802/ieee802-types.yang"
   },
+  "ietf-access-control-list@2019-03-04.yang": {
+    "source": "https://www.iana.org/assignments/yang-parameters/ietf-access-control-list@2019-03-04.yang",
+    "sha256": "d32d1c4c8a4bef34d86295d78aa9aadb888a7a0c38b56048f71fea4b1962d2f1",
+    "reference": "https://www.rfc-editor.org/rfc/rfc8519.html"
+  },
   "ietf-bfd-types@2022-09-22.yang": {
     "sha256": "65abd568987103be19342cdfb1611970f59577b97cf760455a553a6149c0fb88",
     "source": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ietf/RFC/ietf-bfd-types@2022-09-22.yang"
@@ -42,6 +47,11 @@
   "ietf-dc-fabric-types@2019-02-25.yang": {
     "sha256": "06b806f90c2f9fed01c0a02f996bf164b66dfbabe5395063af72c505cd262a9c",
     "source": "https://www.iana.org/assignments/yang-parameters/ietf-dc-fabric-types@2019-02-25.yang"
+  },
+  "ietf-ethertypes@2019-03-04.yang": {
+    "source": "https://www.iana.org/assignments/yang-parameters/ietf-ethertypes@2019-03-04.yang",
+    "sha256": "952dcb78026852e77ef01a7acdc38aab2bae81f7c4142a2dbd862c640c23cc20",
+    "reference": "https://www.rfc-editor.org/rfc/rfc8519.html"
   },
   "ietf-inet-types@2025-12-22.yang": {
     "sha256": "2fb39c45cd28d95f60838e5f74ac509d780d18f3c5bf78db251049a4d022e266",
@@ -108,6 +118,11 @@
   "ietf-ospf@2022-10-19.yang": {
     "sha256": "5b544e4753ffd1da9e7236f556a8b21524112223d70e3349cffbeaf5e6c92d7f",
     "source": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ietf/RFC/ietf-ospf@2022-10-19.yang"
+  },
+  "ietf-packet-fields@2019-03-04.yang": {
+    "source": "https://www.iana.org/assignments/yang-parameters/ietf-packet-fields@2019-03-04.yang",
+    "sha256": "312a4b58a55714411ff9a3a36088be3aeaabe720fb663a56fea70fa00b4bcd03",
+    "reference": "https://www.rfc-editor.org/rfc/rfc8519.html"
   },
   "ietf-routing-types@2017-12-04.yang": {
     "sha256": "bfa3d48b34f76ed544006a4c5d8773620e164574b24f6395adef10c2ecb6cfbe",

@@ -631,7 +631,7 @@ def test_device_library_has_complete_sources_and_no_trimming_or_unobserved_featu
     sources = json.loads((YANG / "sources.json").read_text("utf-8"))
     library = json.loads((YANG / "device-library.json").read_text("utf-8"))
     modules = library["ietf-yang-library:modules-state"]["module"]
-    assert len(modules) == 21
+    assert len(modules) == 24
     expected = {
         "ietf-ip",
         "ietf-routing",
@@ -650,7 +650,20 @@ def test_device_library_has_complete_sources_and_no_trimming_or_unobserved_featu
         "ietf-yang-schema-mount",
     }
     assert expected <= {entry["name"] for entry in modules}
-    assert not any(entry.get("feature") for entry in modules)
+    # Only features the collected devices show: IPv4 ACL entries matching IPv4, TCP,
+    # UDP and ICMP fields, applied to interfaces, with per-entry hit counters.
+    features = {entry["name"]: entry["feature"] for entry in modules if entry.get("feature")}
+    assert features == {
+        "ietf-access-control-list": [
+            "match-on-ipv4",
+            "match-on-tcp",
+            "match-on-udp",
+            "match-on-icmp",
+            "ipv4",
+            "interface-attachment",
+            "acl-aggregate-stats",
+        ]
+    }
     entries = [(entry["name"], entry["revision"]) for entry in modules]
     entries.extend(
         (sub["name"], sub["revision"]) for entry in modules for sub in entry.get("submodule", [])

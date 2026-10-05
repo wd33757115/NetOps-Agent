@@ -175,6 +175,7 @@ commands(check_item_ids) -> [{implementation_id, platforms, command, scoped_comm
   - 实机验收（campus-wan）：DIST1 Vlan10 入向禁止 PC1 ping PC4 和到 172.16.20.0/24 的 telnet，BR1 GE2/0 出向禁止到 198.51.100.0/24 的 UDP 53。VPCS 实际打流的结果与推导一致，设备命中计数对得上（ping 3 次、telnet 1 次、DNS 2 次；web、echo-reply、NTP 通过）；原文作为夹具保留（`campus-wan/acl`，语法覆盖样本在 `campus-wan/acl-syntax`）。
   - 部署后经平台发现与路径接口复验 12 项全部通过：两台设备的 ACL 命令按已发布实现执行，IOS 的 `show ip interface` 每台只执行一次；六条流的结论与上面一致。随后删除配置并重新发现，路径上已无过滤，PC1 ping PC4 恢复。
   - 未覆盖：二层设备端口上的 ACL、安全策略内容、对象组展开、IPv6、IOS ZBF（IOL 不支持，无样本）。
+  - 按 RFC 8519 导出（topology 0.8.1）：设备级导出新增 `acl` 一节（`model/device_acl.py`），`ietf-access-control-list` 树用冻结模块校验（模块取自 IANA，与 M1 policy-security 集同一字节；只启用设备上看到的特性：IPv4/TCP/UDP/ICMP 匹配、接口绑定、规则命中计数）。只导出能精确表达的规则：连续通配符转前缀，lt/gt 等价换成 lte/gte；一条规则多个端口、established、fragments、时间段、不连续通配符、模板不认识的条件都不导出，写进缺口。默认动作不是 RFC 8519 的字段，也不造一条规则，放在 metadata；Comware 只匹配公网的规则绑在 VPN 接口上时，该绑定不导出、记缺口。路径计算仍用内部结构，和路由表一样。
   - 第二期策略路由：节点内容（`show route-map`、`display ip policy-based-route`）、下一跳可达性、动作优先级、deny 节点按路由表转发。第三期 NAT：规则内容、两个方向的改写、回程按去程的翻译推导。Comware 的出方向 NAT 与包过滤、入方向 nat server 与策略路由谁先，文档未写明，届时在实验网用流量和命中计数实测，写成家族数据。
 - **待做**：
   - 系统模板登记到规则治理的模板库（数据库），让页面可见、可评审；目前模板文件由资产清单按 sha256 钉住；

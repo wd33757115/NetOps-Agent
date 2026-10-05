@@ -11,6 +11,7 @@ Real outputs from the campus lab (tests/fixtures/topology/campus-wan):
   probes) are that traffic, and the web, echo-reply and NTP flows passed.
 """
 
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,7 @@ from src.apps.rule_governance.backend.check_items import system_items
 from src.apps.rule_governance.runtime import CheckItemSelectionReader, SelectionError
 from src.apps.topology.backend.collectors.parse import parse
 from src.apps.topology.backend.model.acl import entry_matches, evaluate
+from src.apps.topology.backend.model.device_acl import project_device_acl
 from src.apps.topology.backend.model.path import trace
 from tests.unit.test_topology_policy_bindings import BASE, IDENTITY, INTERNET, PC1, PC4, observe
 from tests.unit.test_topology_vrf_collection import ios  # noqa: F401  (fixture)
@@ -383,3 +385,126 @@ def test_defaults_for_a_value_the_check_item_does_not_declare_are_refused(monkey
         CheckItemSelectionReader(source="shipped").select(
             ["topology.acl_bindings"], {"vendor": "Cisco", "platform": "ios"}
         )
+
+
+# --- RFC 8519 ------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def device_model():
+    yangson = pytest.importorskip("yangson", reason="Install tests/topology-requirements.txt")
+    root = Path(__file__).parents[2] / "src/apps/topology/resources/yang"
+    return yangson.DataModel((root / "device-library.json").read_text("utf-8"), [str(root)])
+
+
+def rfc8519(devices, device):
+    result = project_device_acl({"facts": devices[ADDRESS[device]]})
+    return result, result["tree"].get("ietf-access-control-list:acls", {})
+
+
+def validate(model, tree):
+    content = pytest.importorskip("yangson.enumerations").ContentType.all
+    tree = deepcopy(tree)
+    # Test-only completion of the interface counters the CLI never gives.
+    for interface in tree.get("ietf-interfaces:interfaces", {}).get("interface", []):
+        interface["statistics"] = {"discontinuity-time": "2000-01-01T00:00:00Z"}
+    model.from_raw(tree).validate(ctype=content)
+
+
+def test_the_scenario_acls_are_rfc8519_trees(scenario, device_model):
+    result, acls = rfc8519(scenario, "dist1")
+    validate(device_model, result["tree"])
+    assert result["gaps"] == []
+    [pc_in] = [acl for acl in acls["acl"] if acl["name"] == "PC-IN"]
+    assert pc_in["type"] == "ietf-access-control-list:ipv4-acl-type"
+    assert pc_in["aces"]["ace"][0] == {
+        "name": "10",
+        "actions": {"forwarding": "ietf-access-control-list:drop"},
+        "matches": {
+            "ipv4": {
+                "protocol": 1,
+                "source-ipv4-network": "172.16.10.11/32",
+                "destination-ipv4-network": "172.16.20.14/32",
+            },
+            "icmp": {"type": 8},
+        },
+        "statistics": {"matched-packets": "3"},
+    }
+    assert acls["attachment-points"]["interface"] == [
+        {"interface-id": "Vlan10", "ingress": {"acl-sets": {"acl-set": [{"name": "PC-IN"}]}}}
+    ]
+    # The attachment references the interface, which comes with it (RFC 8343).
+    assert [row["name"] for row in result["tree"]["ietf-interfaces:interfaces"]["interface"]] == [
+        "Vlan10"
+    ]
+    # The action for unmatched packets is metadata; no entry is made up for it.
+    assert result["metadata"]["default_actions"] == [
+        {"interface": "Vlan10", "direction": "in", "acl": "PC-IN", "default_action": "deny"}
+    ]
+    result, acls = rfc8519(scenario, "br1")
+    validate(device_model, result["tree"])
+    assert acls["attachment-points"]["interface"] == [
+        {
+            "interface-id": "GigabitEthernet2/0",
+            "egress": {"acl-sets": {"acl-set": [{"name": "3990"}]}},
+        }
+    ]
+
+
+@pytest.fixture(scope="module")
+def syntax():
+    return observe(
+        {
+            ADDRESS[device]: {cap: read(SYNTAX, device, cap) for cap in ("acl_rules", "acl_bindings")}
+            for device in ("br1", "core1")
+        }
+    )
+
+
+def test_what_rfc8519_cannot_express_is_left_out_with_a_gap(syntax, device_model):
+    result, acls = rfc8519(syntax, "core1")
+    validate(device_model, result["tree"])
+    assert [(g["acl"], g["entry"], g["reasons"]) for g in result["gaps"]] == [
+        ("10", 20, ["src_wildcard"]),  # 0.255.0.255 is not a prefix
+        ("T-ALL", 30, ["dst_ports"]),  # "eq www 443": one entry holds one port or range
+        ("T-ALL", 60, ["established"]),
+        ("T-ALL", 70, ["fragments"]),
+        ("T-ALL", 120, ["condition:dscp ef"]),
+        ("T-ALL", 130, ["object_group:OG-T"]),
+        ("T-ALL", 140, ["time_range"]),
+    ]
+    aces = {
+        ace["name"]: ace for acl in acls["acl"] if acl["name"] == "T-ALL" for ace in acl["aces"]["ace"]
+    }
+    # "lt 1024" and "gt 1023" are the same ports as "lte 1023" and "gte 1024".
+    assert aces["80"]["matches"]["tcp"] == {
+        "source-port": {"operator": "neq", "port": 80},
+        "destination-port": {"operator": "lte", "port": 1023},
+    }
+    assert aces["90"]["matches"]["tcp"] == {"source-port": {"operator": "gte", "port": 1024}}
+    assert aces["20"]["matches"]["udp"]["source-port"] == {"lower-port": 1000, "upper-port": 2000}
+    # Exported entries keep the device's match order.
+    assert list(aces) == ["10", "20", "40", "50", "80", "90", "100", "110", "150", "160"]
+    result, acls = rfc8519(syntax, "br1")
+    validate(device_model, result["tree"])
+    [auto] = [acl for acl in acls["acl"] if acl["name"] == "3997"]
+    assert [ace["name"] for ace in auto["aces"]["ace"]] == ["10", "5", "0"]
+
+
+def test_a_public_only_rule_is_not_attached_to_a_vpn_interface(scenario, device_model):
+    facts = dict(scenario[ADDRESS["br1"]])
+    facts["ip"] = [
+        {**row, "vrf": "RED"} if row["ifname"] == "GigabitEthernet2/0" else row
+        for row in facts["ip"]
+    ]
+    result = project_device_acl({"facts": facts})
+    validate(device_model, result["tree"])
+    assert "attachment-points" not in result["tree"]["ietf-access-control-list:acls"]
+    assert result["gaps"] == [
+        {
+            "code": "acl_instance_condition_not_expressible",
+            "interface": "GigabitEthernet2/0",
+            "direction": "out",
+            "acl": "3990",
+        }
+    ]

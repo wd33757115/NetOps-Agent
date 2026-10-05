@@ -14,6 +14,7 @@ import re
 from collections import defaultdict
 from copy import deepcopy
 
+from .device_acl import project_device_acl
 from .device_ip import enrich_device_ip
 from .device_state import project_device_state
 from .protocols import LDP, MPLS, OSPF, project_protocols
@@ -439,6 +440,8 @@ def project_device_control(observation):
     result = {
         "routing": _routing(observation, data, facts),
         "lldp": _lldp(observation, data, facts),
+        # RFC 8519 ACLs: independent of the routing trees, like LLDP.
+        "acl": project_device_acl(observation if isinstance(observation, dict) else {}),
     }
     _protocols(observation, facts, result["routing"])
     if invalid:
