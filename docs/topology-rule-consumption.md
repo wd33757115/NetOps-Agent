@@ -183,6 +183,7 @@ commands(check_item_ids) -> [{implementation_id, platforms, command, scoped_comm
   - 顺带修正：Comware 绑定模板在一个段落里有多条规则时会判失败（旧缺陷）。
   - 路径：跳上 `translations` 给出转换前后的地址和端口；转成地址池时地址未知（`nat_address_unknown`），规则判断不了时 `nat_undetermined`。去程做了转换时，回程从转换后的目的回到转换后的源，在原设备原接口按会话还原。源地址不在已采网络里时，按设备回送它的出口推断进入点（`external_entry_assumed`，目的在某个入口的子网上时只取那里）。目的地址若是经 ARP/LLDP 证明的邻接设备自己的地址，路径继续走进那台设备（在它那里做 ACL、NAT 和本机送达）。
   - 实机验收（campus-wan）：BR1 源 NAT（PC1 访问外网）、`nat server`（外网访问 100.64.1.2:8080 到 PC4:80）、CORE1 静态一对一（10.99.1.12 ↔ PC2）、接口 PAT（PC1 访问 BR1 环回口）。推导与 VPCS 实际打流、设备 NAT 会话表一致，原文作为夹具保留（`campus-wan/nat`）。
+  - 部署后经平台发现与路径接口复验 11 项全部通过（四个场景的转换、回程还原、外部入口，Comware 规则与绑定共用一次 `display nat all`）；随后删除配置并重新发现，路径上已无转换。
   - 不按 RFC 8512 导出：它的实例、策略、地址池、映射条目都要求设备不打印的数字键（实例号、策略号、池号、条目序号；IOS 地址池只有名字），按"不编造设备没给出的列表键"不导出，NAT 只作为路径计算的内部证据。
   - 第二期策略路由：节点内容（`show route-map`、`display ip policy-based-route`）、下一跳可达性、动作优先级、deny 节点按路由表转发。第三期 NAT：规则内容、两个方向的改写、回程按去程的翻译推导。Comware 的出方向 NAT 与包过滤、入方向 nat server 与策略路由谁先，文档未写明，届时在实验网用流量和命中计数实测，写成家族数据。
 - **待做**：
