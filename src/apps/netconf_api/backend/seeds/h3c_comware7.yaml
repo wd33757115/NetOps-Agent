@@ -1,0 +1,60 @@
+# H3C Comware 7 NETCONF definitions, the first ones (docs/netconf-api-handoff.md §4.3).
+# Measured on BR1 (VSR1000, 7.1.064 R1362P12) against the CLI on 2026-10-05; the replies
+# are tests/fixtures/netconf/h3c-comware7/br1. A code listed here was seen on a device
+# next to the CLI's text for it; any other code is reported as unmapped, not guessed.
+definitions:
+  - id: h3c-comware7.interfaces
+    description: 接口表，供其他定义把 IfIndex 翻译成接口名
+    vendor: H3C
+    platforms: [comware]
+    namespace: http://www.h3c.com/netconf/data:1.0
+    datastore: state
+    path: top/Ifmgr/Interfaces/Interface
+    keys: [IfIndex]
+
+  - id: h3c-comware7.arp
+    description: ARP 表（ARP/ArpTable/ArpEntry）
+    vendor: H3C
+    platforms: [comware]
+    check_item: topology.arp
+    namespace: http://www.h3c.com/netconf/data:1.0
+    datastore: state
+    path: top/ARP/ArpTable/ArpEntry
+    keys: [Ipv4Address, VrfIndex]
+    values:
+      IP_ADDRESS: Ipv4Address
+      MAC_ADDRESS: {leaf: MacAddress, format: mac_dash4}
+      INTERFACE:
+        leaf: IfIndex
+        lookup: {definition: h3c-comware7.interfaces, match: IfIndex, take: AbbreviatedName}
+      TYPE: {leaf: ArpType, codes: {"0": D}}
+      # A non-zero index names a VPN instance (L3vpn module); none was seen on BR1.
+      VRF: {leaf: VrfIndex, codes: {"0": "--"}}
+
+  - id: h3c-comware7.routes
+    description: IPv4 路由表，每个下一跳一行（Route/Ipv4Routes/RouteEntry）
+    vendor: H3C
+    platforms: [comware]
+    check_item: topology.routes
+    namespace: http://www.h3c.com/netconf/data:1.0
+    datastore: state
+    path: top/Route/Ipv4Routes/RouteEntry
+    keys: [VRF, Ipv4/Ipv4Address, Ipv4/Ipv4PrefixLength, Nexthop, IfName]
+    values:
+      NETWORK: Ipv4/Ipv4Address
+      PREFIX_LENGTH: Ipv4/Ipv4PrefixLength
+      PROTOCOL:
+        leaf: [Protocol/ProtocolID, Protocol/SubProtocolID]
+        codes:
+          1/0: Direct
+          1/1: Direct
+          1/4: Direct
+          2/1: Static
+          4/1: O_INTRA
+          4/2: O_INTER
+          6/6: BGP
+      DISTANCE: Preference
+      METRIC: Metric
+      NEXTHOP_IP: Nexthop
+      NEXTHOP_IF: IfName  # the full name (GigabitEthernet2/0); topology normalizes it
+      VRF: VRF  # empty for the public table
