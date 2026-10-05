@@ -162,6 +162,10 @@ def prepare(devices):
         copy = dict(facts)
         if facts.get("routes"):
             copy["routes"] = _routes(facts, bound)
+        if any(not row.get("ifname") for row in facts.get("arp") or []):
+            # An entry the device ties to no interface (a VSI entry learned over a tunnel
+            # link) supports no interface-based reasoning; it is left out here.
+            copy["arp"] = [row for row in facts["arp"] if row.get("ifname")]
         prepared[key] = copy
     return prepared
 

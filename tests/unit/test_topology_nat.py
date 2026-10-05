@@ -282,3 +282,14 @@ def test_hidden_fact_tables_are_an_explicit_evaluation_control(monkeypatch):
     assert service._hidden_facts() == frozenset()
     monkeypatch.setenv("NETOPS_TOPOLOGY_HIDE_FACTS", " acl_rules, nat_rules ,")
     assert service._hidden_facts() == {"acl_rules", "nat_rules"}
+
+
+def test_an_arp_entry_tied_to_no_interface_does_not_stop_the_analysis(lab):
+    # LEAF3 (vpn-fabric) printed a VSI entry learned over a tunnel link with no interface.
+    from src.apps.topology.backend.model.locate import _Locator, answer
+
+    devices = {key: dict(facts) for key, facts in lab.items()}
+    br1 = devices[ADDRESS["br1"]]
+    br1["arp"] = [*br1["arp"], {"vrf": "default", "ip": "192.168.20.14", "mac": "00:50:79:66:68:00", "vsi": "BLUE-20", "type": "dynamic"}]
+    assert trace(devices, BASE, PC1, INTERNET, protocol="icmp")["forward"]["paths"]
+    assert answer(_Locator(devices, BASE, {}), "ip", PC1)["status"] != "not_found"

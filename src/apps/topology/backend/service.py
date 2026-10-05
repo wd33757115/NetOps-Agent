@@ -608,10 +608,26 @@ def locate_current(owner, query):
         ):
             snap = session.get(Snapshot, network.current_snapshot)
             if snap and "simap" in snap.graph:
-                result = _locate(session, snap, query)
+                try:
+                    result = _locate(session, snap, query)
+                except Exception:
+                    # One network's data must not take every other network's answer down.
+                    logger.exception("locate failed", extra={"network_id": network.id})
+                    found.append(_unanswered(network, snap))
+                    continue
                 if result["status"] != "not_found":
                     found.append(result)
         return found
+
+
+def _unanswered(network, snap):
+    return {
+        "network_id": network.id,
+        "network": network.name,
+        "snapshot_id": snap.id,
+        "status": "analysis_failed",
+        "note": "该网络的快照分析失败，这里没有它的答案；不能据此推断正常或故障",
+    }
 
 
 PATH_MEANING = (
@@ -677,16 +693,23 @@ def trace_current(owner, src, dst, src_vrf=None, dst_vrf=None, flow=None):
         ):
             snap = session.get(Snapshot, network.current_snapshot)
             if snap and "simap" in snap.graph:
-                result = _analyse(
-                    session,
-                    snap,
-                    trace_in,
-                    src,
-                    dst,
-                    src_vrf=src_vrf,
-                    dst_vrf=dst_vrf,
-                    **(flow or {}),
-                )
+                try:
+                    result = _analyse(
+                        session,
+                        snap,
+                        trace_in,
+                        src,
+                        dst,
+                        src_vrf=src_vrf,
+                        dst_vrf=dst_vrf,
+                        **(flow or {}),
+                    )
+                except HTTPException:
+                    raise  # the question itself is invalid (an address, a port)
+                except Exception:
+                    logger.exception("trace failed", extra={"network_id": network.id})
+                    found.append(_unanswered(network, snap))
+                    continue
                 if {result["forward"]["status"], result["reverse"]["status"]} != {"no_gateway"}:
                     found.append(_as_history(result))
         return found
