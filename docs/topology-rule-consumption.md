@@ -161,6 +161,8 @@ commands(check_item_ids) -> [{implementation_id, platforms, command, scoped_comm
   - 绑定表完整才保存。未完整采集的设备在跳上标 `policy_bindings: not_observed`，不改变状态。
   - 模板只认已知格式：Comware 策略类型只认 Forward/Local；`display nat all` 中未知段落里出现接口行即判失败。宁可"未观察"，不误报"没有策略"。
   - 未覆盖、无样本：IOS 的 NAT 虚拟接口（`ip nat enable`），防火墙按安全域或安全策略配置的 NAT。
+  - 实机验收（campus-wan，2026-10-05）：在 CORE1、BR1 上临时配置只匹配 192.0.2.0/24 的测试策略，部署后经平台发现。8 台设备的两条命令都按已发布实现执行，观测完整；PC1 → 198.51.100.10 经 CORE1 的路径标出 CORE1 E1/0（策略路由、NAT inside）、E0/1（NAT outside）和 BR1 GE3/0（策略路由）、GE2/0（三种 NAT），经 CORE2 的路径只在 BR1 GE2/0 标 NAT。随后删除配置并重新发现，路径上已无标注。
+  - 配置过又删除后，两家都不再输出"未配置"，而是输出空的表头或全局段落；这些原文也作为夹具保留（`campus-wan/policies/removed`）。
 - **待做**：
   - 系统模板登记到规则治理的模板库（数据库），让页面可见、可评审；目前模板文件由资产清单按 sha256 钉住；
   - NX-OS 等家族在有实机样本后补实现，届时删掉对应的通用解析器；
