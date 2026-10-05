@@ -34,7 +34,7 @@ from .collectors.tiers.common import valid_mac
 from .logins import DOMAIN
 from .model.builder import build_topology_layers, device_node_ids
 from .model.l2_forwarding import analyse as analyse_l2_forwarding
-from .model.locate import locate as locate_in
+from .model.path import locate_with_exits as locate_in
 from .model.path import trace as trace_in
 from .model.protocols import adjacencies as protocol_adjacencies
 from .model.services import project_services

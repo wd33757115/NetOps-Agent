@@ -332,3 +332,16 @@ def test_the_assistant_reads_a_path_without_internal_identifiers(lab):
     assert hop["translations"] == full["forward"]["paths"][0]["hops"][-1]["translations"]
     assert "node_id" not in json.dumps(view) and "evidence_id" not in json.dumps(view)
     assert len(json.dumps(view, ensure_ascii=False, indent=2)) < len(json.dumps(full, ensure_ascii=False, indent=2)) / 1.5
+
+
+def test_an_internet_address_is_placed_where_the_network_sends_to_it(lab):
+    from src.apps.topology.backend.model.path import locate_with_exits
+
+    result = locate_with_exits(lab, BASE, INTERNET)
+    assert result["status"] == "external"
+    [exit_] = result["exits"]
+    assert exit_["device"]["name"].startswith("BR1")
+    assert (exit_["interface"], exit_["next_hop"]) == ("GigabitEthernet2/0", "100.64.1.1")
+    assert exit_["route"] == {"prefix": "198.51.100.0/24", "protocol": "BGP"}
+    # An address of the network itself is still located as before.
+    assert locate_with_exits(lab, BASE, PC1)["status"] != "external"

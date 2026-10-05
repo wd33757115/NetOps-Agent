@@ -80,7 +80,7 @@ from .nat import destination as nat_destination
 from .nat import source as nat_source
 from .builder import NT, ST
 from .device_state import project_interfaces, read_interface_state
-from .locate import _Locator, answer
+from .locate import _Locator, answer, locate
 from .overlay import egress_instances, prepare
 from .retained_links import UNAVAILABLE_OPER_STATUSES
 
@@ -1005,6 +1005,37 @@ def _flow(protocol, src_port, dst_port):
 
 def _conditions(entry):
     return {key: value for key, value in entry.items() if key not in {"acl", "seq", "family"}}
+
+
+EXTERNAL_NOTE = (
+    "该地址不在已采网络里（没有已采设备或网段拥有它）；exits 是已采设备发往它的出口："
+    "出接口、不属于已采设备的下一跳和命中的路由。这是它相对本网络的位置，不是它本身在哪；"
+    "出口之外的转发看不到"
+)
+
+
+def locate_with_exits(devices, base, query, observed=None):
+    """Where an IP or MAC attaches (model/locate.py). An IP no collected device or subnet
+    has (an internet address) is placed where the collected devices send to it instead:
+    ``external``, with each exit's device, interface, next hop and route."""
+    result = locate(devices, base, query, observed)
+    if result["kind"] != "ip" or result["status"] != "not_found" or result["router_interfaces"]:
+        return result
+    tracer = _Tracer(devices, base, observed or {})
+    exits = []
+    for key, ifname, next_hop in tracer.entries(result["query"], result["query"]):
+        route = tracer.lookup(key, "default", result["query"]) or {}
+        exits.append(
+            {
+                "device": tracer.device(key),
+                "interface": ifname,
+                "next_hop": next_hop,
+                "route": {name: route.get(name) for name in ("prefix", "protocol")},
+            }
+        )
+    if exits:
+        result.update(status="external", exits=exits, note=EXTERNAL_NOTE)
+    return result
 
 
 def trace(
