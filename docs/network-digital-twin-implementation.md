@@ -272,3 +272,5 @@ IEEE 桥实例、component、FDB/FID、VID、端口为二层查找上下文；�
 3. **PBR 采用 OpenConfig `openconfig-policy-forwarding`。** IETF 与 IEEE 均无 PBR 标准模型，故采用这一公开模型，固定版本并纳入 M1 的来源锁和校验；仍不增加项目自定义 YANG。ACL 用 RFC 8519，NAT 用 RFC 8512。PBR 的承载采用最小 OpenConfig 宿主树（负责人 2026-10-06 确认）：只生成网络实例、接口名称及必填项和 policy-forwarding，名称与 IETF 树一致，权威数据仍以 IETF 树为准，按钉住的完整依赖闭包校验。三者按 M5 实施，进入路径流水线：入接口 → 入方向 ACL → PBR → NAT → 路由 → 出方向 ACL → ARP/ND → 二层转发；NAT 与路由的先后由平台档案声明。
 
 **进展（2026-10-06，PBR）。** 第 3 条已在 topology 0.11.0、规则治理 1.8.0、netconf-api 0.4.0 落地，PBR 是第一个完整走第 1 条流水线的领域：Comware 的策略内容（CLI `display ip policy-based-route` 与 NETCONF `PBR` 模块，同一样本值行一致）→ 最小 OpenConfig 宿主树（`model/device_pbr.py`，openconfig/public 固定提交的完整依赖闭包，见 `models/network-twin/m5/README.md`，pyang/yangson 校验）→ 从标准树抽取的查询表（`model/pbr.py`）→ 路径在入向 ACL 之后、NAT 和路由之前计算。按 ACL 匹配、deny 节点、下一跳不可达、本机策略四个建模问题的查证结论记在 M5 README；组织方式与 ACL、NAT 照着改的办法见 [topology-standard-tree-pipeline.md](topology-standard-tree-pipeline.md)。IOS 仍只采绑定。待本地会话在 BR1 上实采并用路径工具核对。
+
+**进展（2026-10-06，ACL）。** ACL 也改走第 1 条流水线（topology 0.12.0）：RFC 8519 加 RFC 9899（负责人决定接入）的标准树 → 从树抽查询表（`model/acl_table.py`）→ 路径读查询表；树表达不了的规则在查询表中占位，路径上标为判断不了（负责人决定）。查证与差异见 `docs/topology-rule-consumption.md`。

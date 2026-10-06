@@ -21,9 +21,9 @@
 
 ## 3. ACL、NAT 以后怎么照着改
 
-本次不改 ACL 和 NAT，只说明路线：
+- **ACL**（2026-10-06 已改，topology 0.12.0）：标准树是 RFC 8519 加 RFC 9899（`model/device_acl.py`），查询表 `model/acl_table.py` 只从树和缺口取（按接口和方向：按设备匹配顺序排好的 ace，字段用标准节点名，默认动作取自 metadata），路径改读查询表。树表达不了的规则在查询表里占住原来的位置，记为 `undetermined`（负责人决定：无法处理的标为判断不了），报文走到它时，后面的规则不能替它下结论；它前后的规则结论一致时仍能判定，并在 `undecided_before` 里写明。
+以后照着改的：
 
-- **ACL**：第 2 步已有（`model/device_acl.py`，RFC 8519）。要做的是第 3 步：从 RFC 8519 树抽查询表（按接口和方向：有序的 ace、matches、forwarding 动作），`model/acl.py` 的 `evaluate` 改为读查询表；现在路径直接读 `acl_rules`/`acl_bindings` 事实。树里表达不了的规则（已记在 `acl_entry_not_expressible` 缺口里）在查询表中按 PBR 的方式处理：该 ACL 标不完整，计算到它时决定不了就是 `undetermined`。
 - **NAT**：第 2 步还没有。RFC 8512 的列表要求设备不打印的数字键（实例号、策略号、池号），按"不编造列表键"目前不导出（见 `docs/topology-rule-consumption.md` NAT 一节）。要先由负责人决定键的来源（例如按平台固定规则分配，并在 metadata 写明），再照 PBR 的方式做第 2、3 步。
 - **其他 CLI 采集**：同样先有标准树（M1—M5 已有的 RFC 8343/8344/8349/8529 等导出），再从树抽查询表，最后让路径改读查询表。可以一个领域一个领域地换，每换一个都用同一份样本对比换前换后的路径结论。
 

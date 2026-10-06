@@ -9,10 +9,28 @@
         "conformance-type": "import"
       },
       {
+        "name": "iana-icmpv4-types",
+        "revision": "2025-12-22",
+        "namespace": "urn:ietf:params:xml:ns:yang:iana-icmpv4-types",
+        "conformance-type": "import"
+      },
+      {
+        "name": "iana-icmpv6-types",
+        "revision": "2025-12-22",
+        "namespace": "urn:ietf:params:xml:ns:yang:iana-icmpv6-types",
+        "conformance-type": "import"
+      },
+      {
         "name": "iana-if-type",
         "revision": "2014-05-08",
         "namespace": "urn:ietf:params:xml:ns:yang:iana-if-type",
         "conformance-type": "implement"
+      },
+      {
+        "name": "iana-ipv6-ext-types",
+        "revision": "2025-12-22",
+        "namespace": "urn:ietf:params:xml:ns:yang:iana-ipv6-ext-types",
+        "conformance-type": "import"
       },
       {
         "name": "iana-routing-types",
@@ -52,6 +70,12 @@
           "interface-attachment",
           "acl-aggregate-stats"
         ]
+      },
+      {
+        "name": "ietf-acl-enh",
+        "revision": "2025-12-22",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-acl-enh",
+        "conformance-type": "implement"
       },
       {
         "name": "ietf-bfd-types",

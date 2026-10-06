@@ -631,8 +631,12 @@ def test_device_library_has_complete_sources_and_no_trimming_or_unobserved_featu
     sources = json.loads((YANG / "sources.json").read_text("utf-8"))
     library = json.loads((YANG / "device-library.json").read_text("utf-8"))
     modules = library["ietf-yang-library:modules-state"]["module"]
-    assert len(modules) == 24
+    assert len(modules) == 28  # 24, and RFC 9899 with the IANA modules it imports
     expected = {
+        "ietf-acl-enh",
+        "iana-icmpv4-types",
+        "iana-icmpv6-types",
+        "iana-ipv6-ext-types",
         "ietf-ip",
         "ietf-routing",
         "ietf-ipv4-unicast-routing",

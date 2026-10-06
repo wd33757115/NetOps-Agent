@@ -20,6 +20,8 @@ from src.apps.rule_governance.backend.check_items import system_items
 from src.apps.rule_governance.runtime import CheckItemSelectionReader, SelectionError
 from src.apps.topology.backend.collectors.parse import parse
 from src.apps.topology.backend.model.acl import entry_matches, evaluate
+from src.apps.topology.backend.model.acl_table import acl_tables
+from src.apps.topology.backend.model.acl_table import entries as table_entries
 from src.apps.topology.backend.model.device_acl import project_device_acl
 from src.apps.topology.backend.model.path import trace
 from tests.unit.test_topology_path import without_policies
@@ -258,13 +260,17 @@ def test_pc1_pinging_pc4_is_refused_where_dist1_refused_it(scenario):
         "direction": "in",
         "acl": "PC-IN",
         "rule": 10,
-        "entry": {  # what the refusing entry matches, with its hit count
+        "entry": {  # what the refusing entry matches in the standard tree, with its hits
             "action": "deny",
-            "protocol": 1,
-            "src": {"address": "172.16.10.11", "wildcard": "0.0.0.0"},
-            "dst": {"address": "172.16.20.14", "wildcard": "0.0.0.0"},
-            "icmp": [8, None],
-            "matches": 3,
+            "matches": {
+                "ipv4": {
+                    "protocol": 1,
+                    "source-ipv4-network": "172.16.10.11/32",
+                    "destination-ipv4-network": "172.16.20.14/32",
+                },
+                "icmp": {"type": 8},
+            },
+            "matched-packets": 3,
         },
     }
     assert hits("dist1", "PC-IN", 10) == 3  # the three VPCS pings
@@ -314,11 +320,11 @@ def test_dns_to_the_internet_is_refused_on_every_path(scenario):
             "rule": 5,
             "entry": {
                 "action": "deny",
-                "protocol": 17,
-                "dst": {"address": "198.51.100.0", "wildcard": "0.0.0.255"},
-                "dst_ports": {"op": "eq", "ports": [53]},
-                "vrf": "default",
-                "matches": 2,
+                "matches": {
+                    "ipv4": {"protocol": 17, "destination-ipv4-network": "198.51.100.0/24"},
+                    "udp": {"destination-port": {"operator": "eq", "port": 53}},
+                },
+                "matched-packets": 2,
             },
         }
     assert hits("br1", "3990", 5) == 2  # the two VPCS probes
@@ -360,7 +366,8 @@ def test_a_bound_acl_whose_entries_were_not_read_stays_open(scenario):
     [path] = forward["paths"]
     assert forward["status"] == "partial"
     gaps = {gap["status"]: gap for gap in path["hops"][0]["gaps"]}
-    assert gaps["filter_undetermined"]["needs"] == ["acl_entries"]
+    # The tree cannot attach an ACL whose entries were not read.
+    assert gaps["filter_undetermined"]["needs"] == ["attached_acl_not_observed"]
     assert gaps["policy_not_computed"]["tables"] == ["acl_rules"]
     assert "acl_rules" in path["hops"][0]["not_observed"]
 
@@ -486,8 +493,7 @@ def test_what_rfc8519_cannot_express_is_left_out_with_a_gap(syntax, device_model
     validate(device_model, result["tree"])
     assert [(g["acl"], g["entry"], g["reasons"]) for g in result["gaps"]] == [
         ("10", 20, ["src_wildcard"]),  # 0.255.0.255 is not a prefix
-        ("T-ALL", 30, ["dst_ports"]),  # "eq www 443": one entry holds one port or range
-        ("T-ALL", 60, ["established"]),
+        ("T-ALL", 30, ["dst_ports"]),  # "eq www 443": an RFC 9899 port set needs a name
         ("T-ALL", 70, ["fragments"]),
         ("T-ALL", 120, ["condition:dscp ef"]),
         ("T-ALL", 130, ["object_group:OG-T"]),
@@ -503,12 +509,52 @@ def test_what_rfc8519_cannot_express_is_left_out_with_a_gap(syntax, device_model
     }
     assert aces["90"]["matches"]["tcp"] == {"source-port": {"operator": "gte", "port": 1024}}
     assert aces["20"]["matches"]["udp"]["source-port"] == {"lower-port": 1000, "upper-port": 2000}
-    # Exported entries keep the device's match order.
-    assert list(aces) == ["10", "20", "40", "50", "80", "90", "100", "110", "150", "160"]
+    # RFC 9899: established is the TCP flags ACK or RST.
+    assert aces["60"]["matches"]["tcp"] == {
+        "ietf-acl-enh:flags-bitmask": {
+            "operator": "any",
+            "explicit-tcp-flag": ["ietf-acl-enh:ack", "ietf-acl-enh:rst"],
+        }
+    }
+    # Exported entries keep the device's match order; a gap keeps its place.
+    assert list(aces) == ["10", "20", "40", "50", "60", "80", "90", "100", "110", "150", "160"]
+    assert [(g["entry"], g["position"], g.get("action")) for g in result["gaps"][1:3]] == [
+        (30, 2, "permit"),
+        (70, 6, "deny"),
+    ]
     result, acls = rfc8519(syntax, "br1")
     validate(device_model, result["tree"])
     [auto] = [acl for acl in acls["acl"] if acl["name"] == "3997"]
     assert [ace["name"] for ace in auto["aces"]["ace"]] == ["10", "5", "0"]
+
+
+def test_the_query_table_is_the_tree_with_its_gaps_in_place(syntax):
+    rows = acl_tables(syntax[ADDRESS["core1"]])
+    [t_all] = [row for row in rows if row["acl"] == "T-ALL"][:1]
+    names = [entry["name"] for entry in t_all["entries"]]
+    assert names[:8] == ["10", "20", "30", "40", "50", "60", "70", "80"]
+    by_name = {entry["name"]: entry for entry in t_all["entries"]}
+    assert by_name["30"] == {"name": "30", "action": "permit", "undetermined": ["dst_ports"]}
+    assert by_name["140"]["undetermined"] == ["time_range"]
+    assert "undetermined" not in by_name["60"]
+
+
+def test_what_the_tree_cannot_express_cannot_be_decided_past(syntax):
+    [t_all] = [row for row in acl_tables(syntax[ADDRESS["core1"]]) if row["acl"] == "T-ALL"][:1]
+    checked = table_entries(t_all)
+    # A reply matches established (now in the tree) before anything else decides.
+    reply = packet("198.51.100.1", "172.16.10.11", 6, 443, 50000)
+    # Entry 30, which the tree cannot hold, permits too: the result stands, and says so.
+    assert evaluate(checked, {**reply, "reply": True}, "deny") == {
+        "result": "permit",
+        "rule": 60,
+        "undecided_before": [30],
+    }
+    # A web flow meets entry 30 ("eq www 443"), which the tree cannot hold: undetermined.
+    web = packet("10.9.9.9", "192.0.2.5", 6, 40000, 80)
+    outcome = evaluate(checked, web, "deny")
+    assert outcome["result"] == "undetermined" and 30 in outcome["rules"]
+    assert "dst_ports" in outcome["needs"]
 
 
 def test_a_public_only_rule_is_not_attached_to_a_vpn_interface(scenario, device_model):

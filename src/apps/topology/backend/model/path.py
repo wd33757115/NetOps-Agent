@@ -63,9 +63,10 @@ subnets, there. Such a start is ``external_entry_assumed``.
 A traced packet is one flow: its addresses and, as far as the caller gives them, the
 protocol and ports (an ICMP flow is an echo request; the reverse direction is its reply,
 for TCP a segment with ACK set). Each hop checks the IPv4 ACL applied to the interface the
-packet enters by and the one it leaves by (model/acl.py), as the device's own entries
-say. Where the entries cannot decide (an open port, an object group, a condition not
-evaluated) the hop carries ``filter_undetermined`` and the walk goes on. An interface in a
+packet enters by and the one it leaves by (model/acl.py), as the ACL query table taken
+from the device's RFC 8519 / RFC 9899 tree has them (acl_table.py). Where the entries
+cannot decide (an open port, an entry the tree cannot express, an attachment it cannot
+hold) the hop carries ``filter_undetermined`` and the walk goes on. An interface in a
 security zone carries ``security_policy_not_evaluated``: between zones the device denies
 what no security policy permits, which is not evaluated here. Inside an MPLS or VXLAN
 tunnel the packet is encapsulated, so the core's ACLs (which see the outer header) are
@@ -90,6 +91,8 @@ from __future__ import annotations
 import ipaddress
 
 from .acl import ICMP, TCP, UDP, evaluate
+from .acl_table import acl_tables
+from .acl_table import entries as acl_entries
 from .device_pbr import project_device_pbr
 from .pbr import evaluate as pbr_evaluate
 from .pbr import query_table as pbr_table
@@ -143,6 +146,7 @@ class _Tracer:
         devices = prepare(devices)
         self.devices = devices
         self._pbr = {}  # device key -> policy-routing query table (None: content not read)
+        self._acl = {}  # device key -> ACL query table
         self.loc = _Locator(devices, base, observed)
         self.topo = self.loc.topo
         self.interface_trees = {
@@ -358,38 +362,31 @@ class _Tracer:
             hop.setdefault("gaps", []).append(
                 {"status": "security_policy_not_evaluated", "interface": ifname, "zones": zones}
             )
-        for binding in facts.get("acl_bindings") or []:
-            if (
-                binding["ifname"] != ifname
-                or binding["direction"] != direction
-                or binding.get("family") not in {None, "ipv4"}
-                or "acl" not in binding
-            ):
+        for row in self.acl_rows(key):
+            if row["interface-id"] != ifname or row["direction"] != direction:
                 continue
-            check = {"interface": ifname, "direction": direction, "acl": binding["acl"]}
-            entries = [row for row in facts.get("acl_rules") or [] if row["acl"] == binding["acl"]]
-            if binding.get("scope") or binding.get("status"):
-                # A common ACL, or a binding the device reports as not in effect.
-                outcome = {
-                    "result": "undetermined",
-                    "rules": [],
-                    "needs": [f"binding:{binding.get('scope') or binding.get('status')}"],
-                }
-            elif "acl_rules" not in facts or not entries:
+            check = {"interface": ifname, "direction": direction, "acl": row["acl"]}
+            if not row["complete"]:
+                # The attachment is not in the standard tree: a common ACL, a binding the
+                # device reports as not in effect, entries not read, an instance condition.
+                outcome = {"result": "undetermined", "rules": [], "needs": row["reasons"]}
+            elif not row["entries"]:
                 outcome = {"result": "undetermined", "rules": [], "needs": ["acl_entries"]}
             else:
                 outcome = evaluate(
-                    entries, {**packet, "vrf": hop["vrf"]}, binding.get("default_action")
+                    acl_entries(row), {**packet, "vrf": hop["vrf"]}, row["default-action"]
                 )
             hop.setdefault("filters", []).append({**check, **outcome})
             if outcome["result"] == "deny":
-                # What the refusing entry matches (and its hit count when collected), so a
-                # reader can tell which traffic it stops without asking the device again.
-                entry = next((row for row in entries if row["seq"] == outcome["rule"]), None)
+                # What the refusing entry matches in the standard tree (and its hit count
+                # when collected), so a reader can tell which traffic it stops.
+                entry = next(
+                    (e for e in row["entries"] if str(outcome["rule"]) == e["name"]), None
+                )
                 return {
                     **check,
                     "rule": outcome["rule"],
-                    **({"entry": _conditions(entry)} if entry else {}),
+                    **({"entry": {k: v for k, v in entry.items() if k != "name"}} if entry else {}),
                 }
             if outcome["result"] == "undetermined":
                 hop.setdefault("gaps", []).append(
@@ -401,6 +398,12 @@ class _Tracer:
                     }
                 )
         return None
+
+    def acl_rows(self, key):
+        """The device's ACL query table, from its RFC 8519 / RFC 9899 tree (acl_table)."""
+        if key not in self._acl:
+            self._acl[key] = acl_tables(self.devices[key])
+        return self._acl[key]
 
     def pbr_rows(self, key):
         """The device's policy-routing query table, from its standard tree (device_pbr)."""
@@ -1096,10 +1099,6 @@ def _flow(protocol, src_port, dst_port):
         if not isinstance(port, int) or not 1 <= port <= 65535:
             raise ValueError("端口应为 1-65535")
     return number, src_port, dst_port
-
-
-def _conditions(entry):
-    return {key: value for key, value in entry.items() if key not in {"acl", "seq", "family"}}
 
 
 EXTERNAL_NOTE = (

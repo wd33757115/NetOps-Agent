@@ -7,9 +7,21 @@
     "sha256": "4feb8d47cf34dac0d25e0f6a1157f45421d508f756b92ad0d7116245de3cf31f",
     "source": "https://www.iana.org/assignments/yang-parameters/iana-hardware@2018-03-13.yang"
   },
+  "iana-icmpv4-types@2025-12-22.yang": {
+    "sha256": "c8b28631ce52dbbea64dc3ac5cc41c852464b29bc0e67ab9924460d4bb57cc54",
+    "source": "https://raw.githubusercontent.com/YangModels/yang/3dc40afb4ab93b41709d94e974375afefed935e4/standard/iana/iana-icmpv4-types@2025-12-22.yang"
+  },
+  "iana-icmpv6-types@2025-12-22.yang": {
+    "sha256": "3716065cbe4d8910ccd2ded3027c9a8f3135752e713bb747f86cbf8786fe4de7",
+    "source": "https://raw.githubusercontent.com/YangModels/yang/3dc40afb4ab93b41709d94e974375afefed935e4/standard/iana/iana-icmpv6-types@2025-12-22.yang"
+  },
   "iana-if-type@2014-05-08.yang": {
     "sha256": "e3b33c79dc9090ceb732155dc554e9975d1220a411c184cbe635216d9720820e",
     "source": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ietf/RFC/iana-if-type@2014-05-08.yang"
+  },
+  "iana-ipv6-ext-types@2025-12-22.yang": {
+    "sha256": "de14e27dcef41353f1522f6b6c6929a18084d8ae5fb109f2929717eb18a2de71",
+    "source": "https://raw.githubusercontent.com/YangModels/yang/3dc40afb4ab93b41709d94e974375afefed935e4/standard/iana/iana-ipv6-ext-types@2025-12-22.yang"
   },
   "iana-routing-types@2017-12-04.yang": {
     "sha256": "560eef90e2a7f51ed1f521824eb42558e6bb65135d2a33d62cf80a5af79643f4",
@@ -35,6 +47,10 @@
     "source": "https://www.iana.org/assignments/yang-parameters/ietf-access-control-list@2019-03-04.yang",
     "sha256": "d32d1c4c8a4bef34d86295d78aa9aadb888a7a0c38b56048f71fea4b1962d2f1",
     "reference": "https://www.rfc-editor.org/rfc/rfc8519.html"
+  },
+  "ietf-acl-enh@2025-12-22.yang": {
+    "sha256": "0ce15f871cd5c5d666eee48265313ffff1f6fb8f4a5729ee0b5082cf1f32bcbb",
+    "source": "https://raw.githubusercontent.com/YangModels/yang/3dc40afb4ab93b41709d94e974375afefed935e4/standard/ietf/RFC/ietf-acl-enh@2025-12-22.yang"
   },
   "ietf-bfd-types@2022-09-22.yang": {
     "sha256": "65abd568987103be19342cdfb1611970f59577b97cf760455a553a6149c0fb88",

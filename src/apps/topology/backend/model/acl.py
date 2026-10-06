@@ -42,6 +42,10 @@ def _port(condition, value):
         return value < ports[0]
     if op == "gt":
         return value > ports[0]
+    if op == "lte":  # RFC 8519's operators, as the query table carries them
+        return value <= ports[0]
+    if op == "gte":
+        return value >= ports[0]
     return ports[0] <= value <= ports[1]
 
 

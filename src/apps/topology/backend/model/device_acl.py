@@ -1,10 +1,15 @@
-"""The collected IPv4 ACLs as an RFC 8519 tree (ietf-access-control-list).
+"""The collected IPv4 ACLs as an RFC 8519 tree, with the RFC 9899 extensions.
 
-An entry is exported only when RFC 8519 expresses it exactly: a contiguous wildcard is
-a prefix, "lt N"/"gt N" are "lte N-1"/"gte N+1". An entry RFC 8519 cannot express (several
-ports in one entry, established, fragments, a time range, a non-contiguous wildcard, a
-condition the reading does not know) is left out with a gap: dropping a condition would
-widen the entry. Exported entries keep the device's match order. The action for
+An entry is exported only when RFC 8519 and its extensions (RFC 9899, ietf-acl-enh, owner
+decision 2026-10-06) express it exactly: a contiguous wildcard is a prefix, "lt N"/"gt N"
+are "lte N-1"/"gte N+1", "established" is the TCP flags ACK or RST (RFC 9899
+flags-bitmask, operator "any"; the Cisco definition of established). An entry they
+cannot express (several ports in one entry: an RFC 9899 port set needs a name the device
+does not give; fragments: "non-initial fragment" is not one fragment-type condition; an
+object group whose members were not collected; a time range; a non-contiguous wildcard;
+a condition the reading does not know) is left out with a gap that keeps its place and
+action: dropping a condition would widen the entry, and a path computed from the tree
+cannot decide past it. Exported entries keep the device's match order. The action for
 packets no entry matches is not an RFC 8519 leaf and no entry is made up for it; it is
 application metadata, like the evidence. A rule limited to the public network (Comware
 without vpn-instance) is exact only where its ACL is applied to a public interface; an
@@ -18,6 +23,8 @@ import ipaddress
 from .device_state import project_device_state
 
 ACL = "ietf-access-control-list:"
+ENH = "ietf-acl-enh:"
+ESTABLISHED = {"operator": "any", "explicit-tcp-flag": [ENH + "ack", ENH + "rst"]}
 ACTIONS = {"permit": ACL + "accept", "deny": ACL + "drop"}
 PROTOCOL_CONTAINERS = {6: "tcp", 17: "udp"}
 
@@ -51,11 +58,7 @@ def _port(condition):
 def _ace(entry):
     """(RFC 8519 ace, None) or (None, [why it cannot be expressed])."""
     why = list(entry.get("unsupported") or [])
-    for flag, reason in (
-        ("established", "established"),
-        ("fragments", "fragments"),
-        ("time_range", "time_range"),
-    ):
+    for flag, reason in (("fragments", "fragments"), ("time_range", "time_range")):
         if entry.get(flag):
             why.append(reason)
     if entry.get("vrf") not in {None, "default"}:
@@ -82,6 +85,11 @@ def _ace(entry):
             why.append(key)
         else:
             matches.setdefault(container, {})[leaf] = port
+    if entry.get("established"):
+        if container != "tcp":
+            why.append("established")
+        else:
+            matches.setdefault("tcp", {})[ENH + "flags-bitmask"] = dict(ESTABLISHED)
     if "icmp" in entry:
         kind, code = entry["icmp"]
         matches["icmp"] = {"type": kind, **({"code": code} if code is not None else {})}
@@ -102,7 +110,7 @@ def project_device_acl(observation):
     if not isinstance(facts, dict):
         facts = {}
     metadata = {
-        "standard": "RFC 8519",
+        "standard": "RFC 8519, RFC 9899",
         "content": "operational",
         "completeness": "partial",
         "full_validation": "not_performed",
@@ -118,17 +126,26 @@ def project_device_acl(observation):
     if not isinstance(bindings, list):
         result["gaps"].append({"code": "acl_bindings_not_observed"})
         bindings = []
-    acls = {}
+    acls, positions = {}, {}
     for entry in rules:
         if entry.get("family", "ipv4") != "ipv4":
             continue
         acl = acls.setdefault(
             entry["acl"], {"name": entry["acl"], "type": ACL + "ipv4-acl-type"}
         )
+        # Its place among the ACL's entries in the device's match order.
+        position = positions[entry["acl"]] = positions.get(entry["acl"], -1) + 1
         ace, why = _ace(entry)
         if ace is None:
             result["gaps"].append(
-                {"code": "acl_entry_not_expressible", "acl": entry["acl"], "entry": entry["seq"], "reasons": why}
+                {
+                    "code": "acl_entry_not_expressible",
+                    "acl": entry["acl"],
+                    "entry": entry["seq"],
+                    "position": position,
+                    **({"action": entry["action"]} if entry.get("action") in ACTIONS else {}),
+                    "reasons": why,
+                }
             )
             continue
         acl.setdefault("aces", {"ace": []})["ace"].append(ace)

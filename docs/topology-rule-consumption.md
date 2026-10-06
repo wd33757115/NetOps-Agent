@@ -195,6 +195,11 @@ commands(check_item_ids) -> [{implementation_id, platforms, command, scoped_comm
   - 查询表（`model/pbr.py`）从标准树抽取：每个绑定接口一行，按 sequence-id 排好的规则，字段沿用标准节点名；不完整的标 `complete: false` 并带原因。
   - 路径：入向 ACL 之后、NAT 和查路由之前按查询表计算。命中有下一跳的节点：按该下一跳转发，下一跳的解析与路由一致，跳上 `route.protocol` 为 `policy-forwarding`；命中 deny 节点或没有命中：按路由表。跳上 `policy_route` 写明策略、节点、规则序号和描述（ACL 号与规则号）。判断不了时记 `pbr_undetermined`；下一跳解析不了时按路由表转发并记 `pbr_next_hop_unresolved`（H3C 文档：下一跳无效时按路由表转发）。设备本身发出的报文遇到本机策略时记 `local_policy_not_computed`。没采到策略内容的设备继续标 `policy_may_redirect`/`policy_not_computed`。
   - 未做：实机采集与打流核对（合并后在 BR1 上用 CLI 和 NETCONF 各采一次，再用路径工具核对验收用例）；NETCONF 代码按 H3C 的 PBR YANG 核对（GitHub 上没有 H3C 的模块，要从 BR1 用 get-schema 取，见 M5 README）；入方向 nat server 与策略路由的先后仍待实测；Comware 没有策略时 `display ip policy-based-route` 的输出未见样本，暂不声明有效空表（空输出不会被当成"没有策略"）；IPv6 策略。
+- **ACL 走标准树流水线（2026-10-06，topology 0.12.0）**：负责人决定接入 RFC 9899，无法处理的标为判断不了。
+  - 查证：RFC 8519（2019）之后，IETF 于 2025 年 12 月发布 RFC 9899（`ietf-acl-enh@2025-12-22`），补 TCP 标志、分片、地址/端口/协议集合等；时间段只有草案（draft-ietf-opsawg-ucl-acl），不是标准。华三（BR1 样本）与华为（Huawei/yang 的 `huawei-acl.yang`，NE 系列 VRP 8.22）的 ACL 是同一套构造：通配符、端口 eq/neq/lt/gt/range、established、分片、时间段、对象组（地址池）。
+  - 模块：`ietf-acl-enh` 及其导入的 `iana-icmpv4-types`、`iana-icmpv6-types`、`iana-ipv6-ext-types`（均 2025-12-22）从 YangModels/yang 取，记进 `resources/yang/sources.json`，加入设备模块库。
+  - 导出：established 写成 RFC 9899 的 TCP 标志（ACK 或 RST 任一置位，`operator any`；这是 Cisco 的定义，华三是否完全一致待实验网用命中计数核对）。仍表达不了、记缺口的：一条规则多个端口（RFC 9899 的端口集要名字，设备不给，不编造）、分片（"非首片"不是一个分片条件）、成员未采集的对象组、时间段、不连续通配符、模板不认识的条件、指定 VPN 实例的规则。缺口带上它在 ACL 里的位置和动作。
+  - 路径：读从树抽出的查询表（`model/acl_table.py`）。缺口规则占位为判断不了；拒绝时 `entry` 用标准节点名（`matches`、`matched-packets`）。与改动前相比，时间段、分片、不连续通配符、一条多端口的规则以及只匹配公网的规则绑在 VPN 接口上，从"能判定"变为"判断不了"。
 - **待做**：
   - 系统模板登记到规则治理的模板库（数据库），让页面可见、可评审；目前模板文件由资产清单按 sha256 钉住；
   - NX-OS 等家族在有实机样本后补实现，届时删掉对应的通用解析器；
