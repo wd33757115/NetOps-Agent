@@ -1,7 +1,7 @@
 manifest_version: 1
 id: netconf-api
 name: NETCONF 接口
-version: 0.4.0
+version: 0.7.0
 platform_api: '>=1.0,<2.0'
 icon: network
 dependencies:
@@ -14,7 +14,7 @@ frontend:
 database:
   mode: package
   migrations: migrations
-  head: netconf_api_0001
+  head: netconf_api_0002
   bootstrap: src.apps.netconf_api.backend.bootstrap:initialize
   bootstrap_version: 5
   tables: [app_netconf_definitions, app_netconf_definition_versions, app_netconf_capabilities, app_netconf_trials]

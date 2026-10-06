@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs
 from uuid import uuid4
+from xml.etree.ElementTree import Element, SubElement, tostring
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
@@ -50,6 +51,12 @@ class Publish(BaseModel):
 
 class Discard(BaseModel):
     revision: int = Field(ge=1)
+
+
+class BrowseRequest(BaseModel):
+    namespace: str = Field(min_length=1, max_length=300)
+    path: list[str] = Field(min_length=1, max_length=20)  # from the top element down
+    datastore: str = "state"  # state: <get>; running: <get-config> of running
 
 
 class TrialRequest(BaseModel):
@@ -131,6 +138,7 @@ def _summary(row, version):
         "vendor": body.get("vendor"),
         "platforms": body.get("platforms") or [],
         "description": body.get("description") or "",
+        "module": body.get("module"),
         "published_version": row.published_version,
         "has_draft": row.draft is not None,
         "revision": row.revision,
@@ -176,6 +184,16 @@ def read_definition(actor, definition_id):
         }
 
 
+def read_version(actor, definition_id, version):
+    """One published version with its body (the history keeps every version whole)."""
+    with sessions() as session:
+        _owned(session, definition_id)
+        row = session.get(DefinitionVersion, (definition_id, version))
+        if row is None:
+            raise HTTPException(404, "该版本不存在")
+        return {**_version_view(row), "body": row.body}
+
+
 def save_draft(actor, definition_id, payload: Draft):
     definition = _load(payload.body)
     if definition.id != definition_id:
@@ -206,23 +224,49 @@ def discard_draft(actor, definition_id, payload: Discard):
         return {"id": row.id, "revision": row.revision}
 
 
-def contract_fields(definition, platform, model=None):
-    """The check item's Values (``Selection.fields``) for one device family, or None
-    when rule governance publishes no implementation of it there."""
+def _fields(check_item, vendor, platform, model=None):
     from src.apps.rule_governance.runtime import CheckItemSelectionReader, SelectionError
 
-    device = {"vendor": definition.vendor, "platform": platform}
+    device = {"vendor": vendor, "platform": platform}
     if model:
         device["model"] = model
     try:
         chosen = (
             CheckItemSelectionReader(source=RULES_SOURCE)
-            .select([definition.check_item], device)
-            .get(definition.check_item)
+            .select([check_item], device)
+            .get(check_item)
         )
     except SelectionError:
         return None
     return chosen.fields if chosen else None
+
+
+def contract_fields(definition, platform, model=None):
+    """The check item's Values (``Selection.fields``) for one device family, or None
+    when rule governance publishes no implementation of it there."""
+    return _fields(definition.check_item, definition.vendor, platform, model)
+
+
+def read_contract(actor, check_item, vendor, platform):
+    """The Values a definition for this check item must write on one device family, as
+    publishing checks them: name, type, required, part of the entry's identity."""
+    fields = _fields(check_item, vendor, platform)
+    if fields is None:
+        raise HTTPException(404, f"规则治理没有为 {vendor} {platform} 发布检查项 {check_item}")
+    return {
+        "check_item": check_item,
+        "vendor": vendor,
+        "platform": platform,
+        "values": [
+            {
+                "name": name,
+                "value_type": spec.get("value_type"),
+                "required": bool(spec.get("required")),
+                "identity": bool(spec.get("identity")),
+            }
+            for name, spec in fields.items()
+        ],
+    }
 
 
 def publish(actor, definition_id, payload: Publish):
@@ -347,6 +391,75 @@ def _netconf(actor, device):
         yield session, guard
 
 
+def _inventory():
+    from src.platform.inventory.repository import DeviceRepository
+
+    return DeviceRepository().get_devices_by_filter(status="active")
+
+
+def _module_list(capabilities):
+    """[{name, revision, namespace}] the device announces (RFC 6020 module capabilities)."""
+    found = {}
+    for capability in capabilities:
+        namespace, _, query = capability.partition("?")
+        params = parse_qs(query)
+        for module in params.get("module", []):
+            found.setdefault(
+                module,
+                {
+                    "name": module,
+                    "revision": (params.get("revision") or [None])[0],
+                    "namespace": namespace,
+                },
+            )
+    return [found[name] for name in sorted(found)]
+
+
+def list_devices(actor):
+    """The active inventory devices with their last capability discovery, if any: the
+    modules announced, and for the device's vendor and platform which published
+    definitions it can serve (their module announced) and which not. No session is
+    opened; discovery is ``discover``."""
+    devices = _inventory()
+    with sessions() as session:
+        recorded = {row.device_id: row for row in session.scalars(select(Capability))}
+        definitions = published(session)
+        found = []
+        for device in devices:
+            vendor = str(device.get("vendor") or "").casefold()
+            platform = str(device.get("platform") or "")
+            row = recorded.get(device["device_id"])
+            capability = None
+            if row is not None:
+                capability = _capability_view(row, definitions)
+                modules = _module_list(row.capabilities or ())
+                announced = {module["name"] for module in modules}
+                capability["modules"] = modules
+                capability["unavailable"] = sorted(
+                    (
+                        {"id": definition.id, "module": definition.module}
+                        for definition in definitions.values()
+                        if definition.module
+                        and definition.vendor.casefold() == vendor
+                        and platform in definition.platforms
+                        and definition.module not in announced
+                    ),
+                    key=lambda item: item["id"],
+                )
+            found.append(
+                {
+                    "device_id": device["device_id"],
+                    "device_name": device.get("device_name"),
+                    "ip": device.get("ip"),
+                    "vendor": device.get("vendor"),
+                    "platform": device.get("platform"),
+                    "model": device.get("model"),
+                    "capability": capability,
+                }
+            )
+        return found
+
+
 def announced_modules(capabilities):
     """{module: namespace} the device announces (RFC 6020 module capabilities)."""
     found = {}
@@ -405,6 +518,58 @@ def discover(actor, device_id):
     return read_capabilities(actor, device_id)
 
 
+def browse_filter(namespace, path):
+    """The subtree filter selecting everything under one path: element names only, built
+    as XML here (the same checks as a definition's), so nothing else reaches the RPC."""
+    names = mapping._path(path, "path")
+    namespace = mapping._text(namespace, "namespace", mapping.NAMESPACE)
+    root = Element(names[0], xmlns=namespace)
+    node = root
+    for name in names[1:]:
+        node = SubElement(node, name)
+    return tostring(root, encoding="unicode")
+
+
+def browse(actor, device_id, payload: BrowseRequest):
+    """Read one subtree of a device as it is, to see what a definition would map. Read
+    only: the platform session sends nothing but a filtered <get> or <get-config>."""
+    from src.platform.device_access.contracts import DeviceAccessError
+
+    if payload.datastore not in mapping.DATASTORES:
+        raise HTTPException(422, f"数据源只能是 {'、'.join(sorted(mapping.DATASTORES))}")
+    try:
+        subtree = browse_filter(payload.namespace, payload.path)
+    except mapping.DefinitionError as exc:
+        raise HTTPException(422, f"路径不可用：{exc}") from None
+    device = _device(device_id)
+    started = now()
+    try:
+        with _netconf(actor, device) as (session, guard):
+            guard()
+            if payload.datastore == "running":
+                data = session.get_config(subtree, source="running")
+            else:
+                data = session.get(subtree)
+            capabilities = session.capabilities
+    except DeviceAccessError as exc:
+        return {
+            "status": "failed",
+            "failure_code": exc.failure_code,
+            "message": str(exc)[:500],
+            "filter": subtree,
+        }
+    _record_capabilities(actor, device_id, capabilities)
+    finished = now()
+    return {
+        "status": "succeeded",
+        "filter": subtree,
+        "datastore": payload.datastore,
+        "data": data,
+        "reply_bytes": len(data.encode("utf-8")),
+        "elapsed_ms": round((finished - started).total_seconds() * 1000),
+    }
+
+
 def read_capabilities(actor, device_id):
     with sessions() as session:
         row = session.get(Capability, device_id)
@@ -431,6 +596,7 @@ def _trial_view(row, *, rows=True):
             "read_count",
             "row_count",
             "problem_count",
+            "reply_bytes",
         )
     }
     view["started_at"] = row.started_at.isoformat() if row.started_at else None
@@ -486,6 +652,7 @@ def trial(actor, payload: TrialRequest):
         started_at=now(),
     )
     filters = []
+    received = 0  # bytes of the <data> replies, lookups included
     capabilities = None
     try:
         with _netconf(actor, device) as (session, guard):
@@ -493,9 +660,12 @@ def trial(actor, payload: TrialRequest):
             read = mapping.fetcher(session)
 
             def fetch(table, subtree):
+                nonlocal received
                 guard()
                 filters.append({"definition": table.id, "filter": subtree})
-                return read(table, subtree)
+                data = read(table, subtree)
+                received += len(data.encode("utf-8"))
+                return data
 
             mapped = mapping.collect(definitions, definition.id, fetch, fields=fields)
     except DeviceAccessError as exc:
@@ -528,6 +698,7 @@ def trial(actor, payload: TrialRequest):
     if capabilities is not None:
         _record_capabilities(actor, payload.device_id, capabilities)
     record.filters, record.finished_at = filters, now()
+    record.reply_bytes = received if filters else None
     record.rows, record.problems = record.rows or [], record.problems or []
     with sessions() as session:
         session.add(record)
