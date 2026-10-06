@@ -8,6 +8,7 @@ export interface DefinitionSummary {
   vendor: string | null
   platforms: string[]
   description: string
+  module: string | null
   published_version: number | null
   has_draft: boolean
   revision: number
@@ -23,6 +24,8 @@ export interface VersionView {
 }
 
 export type Body = Record<string, unknown>
+
+export interface ContractValue { name: string; value_type: string | null; required: boolean; identity: boolean }
 
 export interface DefinitionDetail extends DefinitionSummary {
   draft: Body | null
@@ -77,6 +80,7 @@ export interface TrialView {
   read_count: number | null
   row_count: number | null
   problem_count: number | null
+  reply_bytes: number | null
   started_at: string | null
   finished_at: string | null
   rows?: Record<string, string | number>[]
@@ -138,6 +142,11 @@ async function send<T>(method: 'get' | 'post' | 'put', url: string, body?: unkno
 
 export const listDefinitions = () => send<DefinitionSummary[]>('get', '/definitions')
 export const readDefinition = (id: string) => send<DefinitionDetail>('get', `/definitions/${encodeURIComponent(id)}`)
+export const readVersion = (id: string, version: number) =>
+  send<VersionView & { body: Body }>('get', `/definitions/${encodeURIComponent(id)}/versions/${version}`)
+export const readContract = (checkItem: string, vendor: string, platform: string) =>
+  send<{ check_item: string; vendor: string; platform: string; values: ContractValue[] }>('get',
+    `/check-items/${encodeURIComponent(checkItem)}/contract?vendor=${encodeURIComponent(vendor)}&platform=${encodeURIComponent(platform)}`)
 export const saveDraft = (id: string, body: Body, revision: number) =>
   send<{ id: string; revision: number }>('put', `/definitions/${encodeURIComponent(id)}/draft`, { body, revision })
 export const discardDraft = (id: string, revision: number) =>

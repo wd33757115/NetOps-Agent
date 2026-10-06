@@ -181,6 +181,8 @@ def test_a_trial_keeps_the_rows_problems_and_filters(device):
         "h3c-comware7.arp",
     ]
     assert device.session.asked == [item["filter"] for item in result["filters"]]
+    replies = (BR1 / "ifmgr-interfaces.xml").stat().st_size + (BR1 / "arp.xml").stat().st_size
+    assert result["reply_bytes"] == replies  # both tables read, the lookup included
     assert service.read_trial(ALICE, result["id"])["rows"] == result["rows"]
     assert status(lambda: service.read_trial(SimpleNamespace(user_id="bob"), result["id"])) == 404
     assert [t["id"] for t in service.list_trials(ALICE, "h3c-comware7.arp")] == [result["id"]]
@@ -299,6 +301,39 @@ def test_devices_are_listed_with_their_last_discovery(database, device, monkeypa
     capability = service.list_devices(ALICE)[0]["capability"]
     assert {"id": "h3c-comware7.arp", "module": "ARP"} in capability["unavailable"]
     assert "h3c-comware7.arp" not in capability["definitions"]
+
+
+def test_every_published_version_keeps_its_body(database):
+    first = service.read_definition(ALICE, "h3c-comware7.arp")
+    assert first["module"] == "ARP"
+    assert {row["id"]: row["module"] for row in service.list_definitions(ALICE)}[
+        "h3c-comware7.routes"
+    ] == "Route"
+    body = {**first["published"]["body"], "description": "第二版"}
+    saved = service.save_draft(ALICE, "h3c-comware7.arp", service.Draft(body=body, revision=1))
+    service.publish(ALICE, "h3c-comware7.arp", service.Publish(revision=saved["revision"]))
+    old = service.read_version(ALICE, "h3c-comware7.arp", 1)
+    new = service.read_version(ALICE, "h3c-comware7.arp", 2)
+    assert old["body"] == first["published"]["body"] and old["published_by"] == "system"
+    assert new["body"]["description"] == "第二版" and new["sha256"] == service.digest(body)
+    assert status(lambda: service.read_version(ALICE, "h3c-comware7.arp", 3)) == 404
+    assert status(lambda: service.read_version(ALICE, "no.such", 1)) == 404
+
+
+def test_the_contract_is_the_check_items_values_on_one_family(database):
+    contract = service.read_contract(ALICE, "topology.arp", "H3C", "comware")
+    values = {row["name"]: row for row in contract["values"]}
+    assert values["IP_ADDRESS"] == {
+        "name": "IP_ADDRESS",
+        "value_type": "ip_or_unassigned",
+        "required": True,
+        "identity": True,
+    }
+    assert values["MAC_ADDRESS"]["required"] and not values["VRF"]["required"]
+    # Security zones have no IOS implementation: no contract there.
+    assert status(
+        lambda: service.read_contract(ALICE, "topology.security_zones", "Cisco", "ios")
+    ) == 404
 
 
 def test_the_session_logs_in_with_the_inventory_credential_reference():

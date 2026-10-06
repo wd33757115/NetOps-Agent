@@ -18,6 +18,16 @@ def definition(definition_id: str, actor=Depends(user)):
     return service.read_definition(actor, definition_id)
 
 
+@router.get("/definitions/{definition_id}/versions/{version}")
+def definition_version(definition_id: str, version: int, actor=Depends(user)):
+    return service.read_version(actor, definition_id, version)
+
+
+@router.get("/check-items/{check_item}/contract")
+def contract(check_item: str, vendor: str, platform: str, actor=Depends(user)):
+    return service.read_contract(actor, check_item, vendor, platform)
+
+
 @router.put("/definitions/{definition_id}/draft")
 def save_draft(definition_id: str, payload: service.Draft, actor=Depends(user)):
     return service.save_draft(actor, definition_id, payload)

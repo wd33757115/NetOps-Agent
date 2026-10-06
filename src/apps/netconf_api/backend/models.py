@@ -64,6 +64,7 @@ class Trial(Base):
     read_count = Column(Integer)  # rows the device returned
     row_count = Column(Integer)  # rows output (``rows`` keeps the first TRIAL_ROWS)
     problem_count = Column(Integer)
+    reply_bytes = Column(Integer)  # bytes of the device's replies (lookups included)
     rows = Column(JSON, nullable=False, default=list)
     problems = Column(JSON, nullable=False, default=list)
     filters = Column(JSON, nullable=False, default=list)  # [{definition, filter}]

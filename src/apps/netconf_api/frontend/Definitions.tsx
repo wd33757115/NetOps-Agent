@@ -34,6 +34,7 @@ export default function Definitions({ rows, loading, error, onOpen, onCreate }: 
 }) {
   const [vendor, setVendor] = useState<string>()
   const [checkItem, setCheckItem] = useState<string>()
+  const [module, setModule] = useState<string>()
   const [search, setSearch] = useState('')
   const [creating, setCreating] = useState(false)
   const [newId, setNewId] = useState('')
@@ -41,9 +42,11 @@ export default function Definitions({ rows, loading, error, onOpen, onCreate }: 
   const [createError, setCreateError] = useState('')
   const vendors = useMemo(() => [...new Set(rows.map(row => row.vendor || '').filter(Boolean))].sort(), [rows])
   const items = useMemo(() => [...new Set(rows.map(row => row.check_item || '').filter(Boolean))].sort(), [rows])
+  const modules = useMemo(() => [...new Set(rows.map(row => row.module || '').filter(Boolean))].sort(), [rows])
   const shown = rows.filter(row =>
     (!vendor || row.vendor === vendor)
     && (!checkItem || row.check_item === checkItem)
+    && (!module || row.module === module)
     && (!search || `${row.id} ${row.description}`.toLowerCase().includes(search.toLowerCase())))
   async function create() {
     const id = newId.trim()
@@ -60,6 +63,7 @@ export default function Definitions({ rows, loading, error, onOpen, onCreate }: 
   return <>
     <div className="nc-filters">
       <Select allowClear placeholder="厂商" aria-label="按厂商筛选" value={vendor} onChange={setVendor} options={vendors.map(v => ({ value: v, label: v }))} style={{ width: 160 }} />
+      <Select allowClear showSearch placeholder="模块" aria-label="按模块筛选" value={module} onChange={setModule} options={modules.map(v => ({ value: v, label: v }))} style={{ width: 160 }} />
       <Select allowClear showSearch placeholder="检查项" aria-label="按检查项筛选" value={checkItem} onChange={setCheckItem} options={items.map(v => ({ value: v, label: v }))} style={{ width: 260 }} />
       <Input allowClear prefix={<SearchOutlined aria-hidden="true" />} placeholder="搜索定义 id 或说明" aria-label="搜索定义" value={search} onChange={event => setSearch(event.target.value)} style={{ width: 260 }} />
       <Button type="primary" icon={<PlusOutlined aria-hidden="true" />} onClick={() => setCreating(true)} style={{ marginLeft: 'auto' }}>新建定义</Button>
@@ -75,7 +79,7 @@ export default function Definitions({ rows, loading, error, onOpen, onCreate }: 
       columns={[
         { title: '定义', dataIndex: 'id', render: (id: string, row) => <div><button type="button" className="nc-link nc-mono" onClick={() => onOpen(id)}>{id}</button>{row.description && <div className="nc-muted">{row.description}</div>}</div> },
         { title: '检查项', dataIndex: 'check_item', render: (value: string | null) => value ? <span className="nc-mono">{value}</span> : <span className="nc-muted">仅供关联</span> },
-        { title: '设备', render: (_, row) => `${row.vendor || ''} ${row.platforms.join(', ')}` },
+        { title: '设备与模块', render: (_, row) => <>{`${row.vendor || ''} ${row.platforms.join(', ')}`}{row.module && <div className="nc-muted nc-mono">{row.module}</div>}</> },
         { title: '状态', render: (_, row) => statusTags(row) },
       ]}
     />

@@ -131,6 +131,7 @@ def _summary(row, version):
         "vendor": body.get("vendor"),
         "platforms": body.get("platforms") or [],
         "description": body.get("description") or "",
+        "module": body.get("module"),
         "published_version": row.published_version,
         "has_draft": row.draft is not None,
         "revision": row.revision,
@@ -176,6 +177,16 @@ def read_definition(actor, definition_id):
         }
 
 
+def read_version(actor, definition_id, version):
+    """One published version with its body (the history keeps every version whole)."""
+    with sessions() as session:
+        _owned(session, definition_id)
+        row = session.get(DefinitionVersion, (definition_id, version))
+        if row is None:
+            raise HTTPException(404, "该版本不存在")
+        return {**_version_view(row), "body": row.body}
+
+
 def save_draft(actor, definition_id, payload: Draft):
     definition = _load(payload.body)
     if definition.id != definition_id:
@@ -206,23 +217,49 @@ def discard_draft(actor, definition_id, payload: Discard):
         return {"id": row.id, "revision": row.revision}
 
 
-def contract_fields(definition, platform, model=None):
-    """The check item's Values (``Selection.fields``) for one device family, or None
-    when rule governance publishes no implementation of it there."""
+def _fields(check_item, vendor, platform, model=None):
     from src.apps.rule_governance.runtime import CheckItemSelectionReader, SelectionError
 
-    device = {"vendor": definition.vendor, "platform": platform}
+    device = {"vendor": vendor, "platform": platform}
     if model:
         device["model"] = model
     try:
         chosen = (
             CheckItemSelectionReader(source=RULES_SOURCE)
-            .select([definition.check_item], device)
-            .get(definition.check_item)
+            .select([check_item], device)
+            .get(check_item)
         )
     except SelectionError:
         return None
     return chosen.fields if chosen else None
+
+
+def contract_fields(definition, platform, model=None):
+    """The check item's Values (``Selection.fields``) for one device family, or None
+    when rule governance publishes no implementation of it there."""
+    return _fields(definition.check_item, definition.vendor, platform, model)
+
+
+def read_contract(actor, check_item, vendor, platform):
+    """The Values a definition for this check item must write on one device family, as
+    publishing checks them: name, type, required, part of the entry's identity."""
+    fields = _fields(check_item, vendor, platform)
+    if fields is None:
+        raise HTTPException(404, f"规则治理没有为 {vendor} {platform} 发布检查项 {check_item}")
+    return {
+        "check_item": check_item,
+        "vendor": vendor,
+        "platform": platform,
+        "values": [
+            {
+                "name": name,
+                "value_type": spec.get("value_type"),
+                "required": bool(spec.get("required")),
+                "identity": bool(spec.get("identity")),
+            }
+            for name, spec in fields.items()
+        ],
+    }
 
 
 def publish(actor, definition_id, payload: Publish):
@@ -500,6 +537,7 @@ def _trial_view(row, *, rows=True):
             "read_count",
             "row_count",
             "problem_count",
+            "reply_bytes",
         )
     }
     view["started_at"] = row.started_at.isoformat() if row.started_at else None
@@ -555,6 +593,7 @@ def trial(actor, payload: TrialRequest):
         started_at=now(),
     )
     filters = []
+    received = 0  # bytes of the <data> replies, lookups included
     capabilities = None
     try:
         with _netconf(actor, device) as (session, guard):
@@ -562,9 +601,12 @@ def trial(actor, payload: TrialRequest):
             read = mapping.fetcher(session)
 
             def fetch(table, subtree):
+                nonlocal received
                 guard()
                 filters.append({"definition": table.id, "filter": subtree})
-                return read(table, subtree)
+                data = read(table, subtree)
+                received += len(data.encode("utf-8"))
+                return data
 
             mapped = mapping.collect(definitions, definition.id, fetch, fields=fields)
     except DeviceAccessError as exc:
@@ -597,6 +639,7 @@ def trial(actor, payload: TrialRequest):
     if capabilities is not None:
         _record_capabilities(actor, payload.device_id, capabilities)
     record.filters, record.finished_at = filters, now()
+    record.reply_bytes = received if filters else None
     record.rows, record.problems = record.rows or [], record.problems or []
     with sessions() as session:
         session.add(record)

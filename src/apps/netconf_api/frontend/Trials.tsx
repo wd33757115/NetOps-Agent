@@ -7,6 +7,9 @@ import { failureText } from './Devices'
 const duration = (trial: TrialView) => trial.started_at && trial.finished_at
   ? `${Math.max(0, new Date(trial.finished_at).getTime() - new Date(trial.started_at).getTime())} ms` : '—'
 
+const size = (bytes: number | null) => bytes === null || bytes === undefined ? '—'
+  : bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`
+
 function TrialResult({ trial }: { trial: TrialView }) {
   const rows = trial.rows || []
   const problems = trial.problems || []
@@ -18,6 +21,7 @@ function TrialResult({ trial }: { trial: TrialView }) {
       <Statistic title="输出的值行" value={trial.row_count ?? '—'} />
       <Statistic title="问题" value={trial.problem_count ?? '—'} valueStyle={trial.problem_count ? { color: '#cf1322' } : undefined} />
       <Statistic title="耗时" value={duration(trial)} />
+      <Statistic title="回包大小" value={size(trial.reply_bytes)} />
       <Statistic title="定义版本" value={trial.version ? `v${trial.version}` : '草稿'} />
     </div>
     {trial.status === 'failed' && <Alert type="error" showIcon message={`试运行失败：${failureText(trial.failure_code)}`} description={trial.message || undefined} style={{ marginBottom: 16 }} />}

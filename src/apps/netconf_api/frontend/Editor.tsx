@@ -1,7 +1,7 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { Alert, Button, Descriptions, Empty, Input, Modal, Segmented, Select, Table, Tag } from 'antd'
 import { CloudUploadOutlined, DeleteOutlined, EditOutlined, ReloadOutlined } from '@ant-design/icons'
-import { discardDraft, publishDraft, saveDraft, type Body, type DefinitionDetail, type Refusal } from './api'
+import { discardDraft, publishDraft, readContract, readVersion, saveDraft, type Body, type ContractValue, type DefinitionDetail, type Refusal } from './api'
 import { statusTags } from './Definitions'
 
 type Rule = string | string[] | Record<string, unknown>
@@ -90,26 +90,104 @@ export function diffLines(before: string, after: string) {
 
 const json = (body: unknown) => JSON.stringify(body, null, 2)
 
+/** The Values a body writes: each part's values and its rest Value. */
+export function mappedValues(body: Body) {
+  const parts: Part[] = Array.isArray(body.parts) ? body.parts as Part[] : [body as Part]
+  const names = new Set<string>()
+  for (const part of parts) {
+    Object.keys(part.values || {}).forEach(name => names.add(name))
+    const rest = part.rest as { value?: string } | undefined
+    if (rest?.value) names.add(rest.value)
+  }
+  return names
+}
+
+/** The check item's Values on each platform of the body, and which the body leaves unmapped. */
+export function ContractPanel({ body, compact = false }: { body: Body; compact?: boolean }) {
+  const checkItem = typeof body.check_item === 'string' ? body.check_item : ''
+  const vendor = typeof body.vendor === 'string' ? body.vendor : ''
+  const platforms = Array.isArray(body.platforms) ? (body.platforms as unknown[]).map(String) : []
+  const key = `${checkItem}|${vendor}|${platforms.join(',')}`
+  const [contracts, setContracts] = useState<Record<string, ContractValue[] | string>>({})
+  useEffect(() => {
+    if (!checkItem || !vendor || !platforms.length) { setContracts({}); return }
+    let live = true
+    Promise.all(platforms.map(platform => readContract(checkItem, vendor, platform)
+      .then(found => [platform, found.values] as const)
+      .catch(err => [platform, (err as Refusal).message] as const)))
+      .then(found => { if (live) setContracts(Object.fromEntries(found)) })
+    return () => { live = false }
+  }, [key]) // eslint-disable-line react-hooks/exhaustive-deps
+  if (!checkItem) return compact ? null : <p className="nc-muted">这条定义只供关联，不对应检查项。</p>
+  const mapped = mappedValues(body)
+  return <div className="nc-contract" aria-label="检查项的值">
+    {Object.entries(contracts).map(([platform, values]) => {
+      if (typeof values === 'string') return <Alert key={platform} type="warning" showIcon message={`${platform}：${values}`} />
+      const missing = values.filter(value => value.required && !mapped.has(value.name)).map(value => value.name)
+      const outside = [...mapped].filter(name => !values.some(value => value.name === name))
+      if (compact) return (missing.length || outside.length)
+        ? <Alert key={platform} type="error" showIcon message={`${platform}：${missing.length ? `未映射的必填值 ${missing.join('、')}` : ''}${missing.length && outside.length ? '；' : ''}${outside.length ? `检查项之外的值 ${outside.join('、')}` : ''}`} />
+        : <Alert key={platform} type="success" showIcon message={`${platform}：覆盖了检查项的全部必填值`} />
+      return <section key={platform} className="nc-part">
+        <h3>检查项 <span className="nc-mono">{checkItem}</span> 在 {vendor} {platform} 上的值</h3>
+        {(missing.length > 0 || outside.length > 0) && <Alert type="error" showIcon style={{ marginBottom: 10 }}
+          message={[missing.length ? `未映射的必填值：${missing.join('、')}` : '', outside.length ? `检查项之外的值：${outside.join('、')}` : ''].filter(Boolean).join('；')} />}
+        <Table size="small" rowKey="name" pagination={false} dataSource={values} columns={[
+          { title: '值', dataIndex: 'name', render: (name: string) => <span className="nc-mono">{name}</span> },
+          { title: '类型', dataIndex: 'value_type', render: (type: string | null) => type || <span className="nc-muted">—</span> },
+          { title: '必填', dataIndex: 'required', render: (required: boolean, row) => <>{required ? '是' : '否'}{row.identity && <Tag style={{ marginLeft: 8 }}>标识</Tag>}</> },
+          { title: '定义', render: (_, row) => mapped.has(row.name) ? <Tag color="green">已映射</Tag> : row.required ? <Tag color="red">未映射</Tag> : <span className="nc-muted">未映射</span> },
+        ]} />
+      </section>
+    })}
+  </div>
+}
+
 /** Step 2: one definition's versions, its draft, and saving, discarding, publishing. */
 export default function Editor({ detail, onChanged }: { detail: DefinitionDetail; onChanged: () => Promise<void> }) {
+  const inUse = detail.published_version ? `v${detail.published_version}` : ''
+  const [bodies, setBodies] = useState<Record<string, Body>>(() => ({
+    ...(detail.draft ? { draft: detail.draft } : {}),
+    ...(detail.published ? { [`v${detail.published.version}`]: detail.published.body } : {}),
+  }))
   const choices = [
     ...(detail.draft ? [{ value: 'draft', label: '草稿' }] : []),
-    ...(detail.published ? [{ value: 'published', label: `已发布 v${detail.published.version}` }] : []),
+    ...detail.versions.map(v => ({ value: `v${v.version}`, label: `v${v.version}${v.version === detail.published_version ? '（使用中）' : ''}` })),
   ]
-  const [shown, setShown] = useState(choices[0]?.value || 'published')
+  const [shown, setShown] = useState(detail.draft ? 'draft' : inUse)
+  const [compareWith, setCompareWith] = useState<string>('')
   const [view, setView] = useState<string>('结构')
   const [editing, setEditing] = useState(false)
   const [source, setSource] = useState('')
   const [editError, setEditError] = useState<{ message: string; conflict: boolean }>()
+  const [loadError, setLoadError] = useState('')
   const [publishing, setPublishing] = useState(false)
   const [note, setNote] = useState('')
   const [publishError, setPublishError] = useState<Refusal>()
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
-  const body = (shown === 'draft' ? detail.draft : detail.published?.body) || null
 
-  function edit() {
-    setSource(json(detail.draft || detail.published?.body || {}))
+  // The draft and the version in use come with the detail; older versions on demand.
+  useEffect(() => {
+    setBodies(current => ({
+      ...current,
+      ...(detail.draft ? { draft: detail.draft } : {}),
+      ...(detail.published ? { [`v${detail.published.version}`]: detail.published.body } : {}),
+    }))
+    if (!detail.draft) setBodies(({ draft: _gone, ...rest }) => rest)
+  }, [detail])
+  useEffect(() => {
+    for (const key of [shown, compareWith]) {
+      if (!key || key === 'draft' || bodies[key]) continue
+      readVersion(detail.id, Number(key.slice(1)))
+        .then(found => setBodies(current => ({ ...current, [key]: found.body })))
+        .catch(err => setLoadError((err as Refusal).message))
+    }
+  }, [shown, compareWith, bodies, detail.id])
+  const body = bodies[shown] || null
+
+  function edit(from?: Body) {
+    setSource(json(from || detail.draft || detail.published?.body || {}))
     setEditError(undefined)
     setEditing(true)
   }
@@ -139,7 +217,7 @@ export default function Editor({ detail, onChanged }: { detail: DefinitionDetail
     setBusy(true)
     try {
       await discardDraft(detail.id, detail.revision)
-      setShown('published')
+      setShown(inUse)
       setNotice('草稿已丢弃')
       await onChanged()
     } catch (err) {
@@ -156,7 +234,7 @@ export default function Editor({ detail, onChanged }: { detail: DefinitionDetail
       const version = await publishDraft(detail.id, detail.revision, note)
       setPublishing(false)
       setNote('')
-      setShown('published')
+      setShown(`v${version.version}`)
       setNotice(`已发布 v${version.version}`)
       await onChanged()
     } catch (err) {
@@ -171,7 +249,14 @@ export default function Editor({ detail, onChanged }: { detail: DefinitionDetail
     await onChanged()
   }
 
-  const diff = detail.draft && detail.published ? diffLines(json(detail.published.body), json(detail.draft)) : null
+  let parsedSource: Body | null = null
+  try { parsedSource = editing ? JSON.parse(source) : null } catch { parsedSource = null }
+  // Compared with the chosen version; by default the draft with the version in use.
+  const against = compareWith && compareWith !== shown ? compareWith
+    : shown === 'draft' ? inUse : detail.draft ? 'draft' : ''
+  const other = against && bodies[against]
+  const diff = body && other ? diffLines(json(other), json(body)) : null
+  const label = (key: string) => choices.find(choice => choice.value === key)?.label || key
   return <div className="nc-editor">
     <div className="nc-detail-head">
       <div>
@@ -180,40 +265,46 @@ export default function Editor({ detail, onChanged }: { detail: DefinitionDetail
         {detail.description && <p className="nc-muted">{detail.description}</p>}
       </div>
       <div className="nc-actions">
-        <Button icon={<EditOutlined aria-hidden="true" />} onClick={edit}>{detail.draft ? '编辑草稿' : '新建草稿'}</Button>
+        <Button icon={<EditOutlined aria-hidden="true" />} onClick={() => edit()}>{detail.draft ? '编辑草稿' : '新建草稿'}</Button>
+        {shown !== 'draft' && body && <Button onClick={() => edit(body)}>以此版本为草稿</Button>}
         {detail.draft && detail.published_version && <Button icon={<DeleteOutlined aria-hidden="true" />} loading={busy} onClick={discard}>丢弃草稿</Button>}
         {detail.draft && <Button type="primary" icon={<CloudUploadOutlined aria-hidden="true" />} onClick={() => { setPublishError(undefined); setPublishing(true) }}>发布</Button>}
       </div>
     </div>
     {notice && <Alert type="success" showIcon closable message={notice} onClose={() => setNotice('')} style={{ marginBottom: 16 }} />}
+    {loadError && <Alert type="error" showIcon closable message={loadError} onClose={() => setLoadError('')} style={{ marginBottom: 16 }} />}
     {editError && !editing && <Alert type="error" showIcon message={editError.message} style={{ marginBottom: 16 }}
       action={editError.conflict ? <Button size="small" icon={<ReloadOutlined aria-hidden="true" />} onClick={refresh}>刷新</Button> : undefined} />}
     <div className="nc-filters">
       {choices.length > 0 && <Select aria-label="查看的版本" value={shown} onChange={setShown} options={choices} style={{ width: 160 }} />}
-      <Segmented value={view} onChange={value => setView(String(value))} options={['结构', '源码', '版本历史', '与发布版的差异']} />
+      <Segmented value={view} onChange={value => setView(String(value))} options={['结构', '源码', '版本历史', '差异']} />
+      {view === '差异' && <Select aria-label="比较的版本" placeholder="选择比较的版本" value={against || undefined} onChange={setCompareWith}
+        options={choices.filter(choice => choice.value !== shown)} style={{ width: 180 }} />}
     </div>
-    {view === '结构' && (body ? <BodyView body={body} /> : <Empty description="没有可查看的定义体" />)}
+    {view === '结构' && (body ? <div className="nc-body"><ContractPanel body={body} /><BodyView body={body} /></div> : <Empty description="没有可查看的定义体" />)}
     {view === '源码' && (body ? <pre className="nc-source" aria-label="定义源码">{json(body)}</pre> : <Empty description="没有可查看的定义体" />)}
-    {view === '版本历史' && <>
-      <Table size="small" rowKey="version" pagination={false} dataSource={detail.versions}
-        locale={{ emptyText: '尚未发布过' }}
-        columns={[
-          { title: '版本', dataIndex: 'version', render: (v: number) => <>v{v}{v === detail.published_version && <Tag color="blue" style={{ marginLeft: 8 }}>使用中</Tag>}</> },
-          { title: '发布人', dataIndex: 'published_by' },
-          { title: '时间', dataIndex: 'published_at', render: (at: string | null) => at ? new Date(at).toLocaleString('zh-CN') : '—' },
-          { title: '说明', dataIndex: 'note', render: (n: string) => n || <span className="nc-muted">—</span> },
-          { title: 'SHA-256', dataIndex: 'sha256', render: (sha: string) => <span className="nc-mono" title={sha}>{sha.slice(0, 12)}</span> },
-        ]} />
-      <p className="nc-muted" style={{ marginTop: 12 }}>接口只返回使用中版本的定义体，历史版本只能看到摘要。</p>
-    </>}
-    {view === '与发布版的差异' && (diff
-      ? <pre className="nc-source nc-diff" aria-label="差异">{diff.map((line, index) =>
-          <div key={index} className={line.kind === '+' ? 'nc-added' : line.kind === '-' ? 'nc-removed' : undefined}>{line.kind} {line.text}</div>)}</pre>
-      : <Empty description="需要同时有草稿和已发布版本才能比较" />)}
+    {view === '版本历史' && <Table size="small" rowKey="version" pagination={false} dataSource={detail.versions}
+      locale={{ emptyText: '尚未发布过' }}
+      onRow={row => ({ onClick: () => { setShown(`v${row.version}`); setView('结构') }, className: 'nc-clickable' })}
+      columns={[
+        { title: '版本', dataIndex: 'version', render: (v: number) => <>v{v}{v === detail.published_version && <Tag color="blue" style={{ marginLeft: 8 }}>使用中</Tag>}</> },
+        { title: '发布人', dataIndex: 'published_by' },
+        { title: '时间', dataIndex: 'published_at', render: (at: string | null) => at ? new Date(at).toLocaleString('zh-CN') : '—' },
+        { title: '说明', dataIndex: 'note', render: (n: string) => n || <span className="nc-muted">—</span> },
+        { title: 'SHA-256', dataIndex: 'sha256', render: (sha: string) => <span className="nc-mono" title={sha}>{sha.slice(0, 12)}</span> },
+      ]} />}
+    {view === '差异' && (diff
+      ? <>
+          <p className="nc-muted">{label(against)} → {label(shown)}（- 只在前者，+ 只在后者）</p>
+          <pre className="nc-source nc-diff" aria-label="版本差异">{diff.map((line, index) =>
+            <div key={index} className={line.kind === '+' ? 'nc-added' : line.kind === '-' ? 'nc-removed' : undefined}>{line.kind} {line.text}</div>)}</pre>
+        </>
+      : <Empty description={choices.length < 2 ? '只有一个版本，没有可比较的' : '选择要比较的版本'} />)}
 
     <Modal open={editing} width={880} title={`编辑草稿：${detail.id}`} okText="保存草稿" cancelText="取消" confirmLoading={busy} onOk={save} onCancel={() => setEditing(false)} destroyOnClose>
       <p className="nc-muted">定义体为 JSON，字段同种子文件（id、vendor、platforms、check_item、namespace、datastore、module，以及 path/keys/values 或 parts）。保存时由后端校验，错误原样显示。</p>
       <Input.TextArea aria-label="定义 JSON" value={source} onChange={event => setSource(event.target.value)} autoSize={{ minRows: 18, maxRows: 30 }} className="nc-mono" spellCheck={false} />
+      {parsedSource && <div style={{ marginTop: 12 }}><ContractPanel body={parsedSource} compact /></div>}
       {editError && <Alert type="error" showIcon message={editError.conflict ? '版本冲突' : '保存失败'} description={editError.message} style={{ marginTop: 12 }}
         action={editError.conflict ? <Button size="small" icon={<ReloadOutlined aria-hidden="true" />} onClick={refresh}>刷新</Button> : undefined} />}
     </Modal>

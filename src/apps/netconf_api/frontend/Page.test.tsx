@@ -16,8 +16,8 @@ const arpBody = {
   values: { IP_ADDRESS: 'Ipv4Address', TYPE: { leaf: 'Type', codes: { 1: 'Static', 2: 'Dynamic' } } },
 }
 const summaries = [
-  { id: 'h3c-comware7.arp', check_item: 'topology.arp', vendor: 'H3C', platforms: ['comware'], description: 'ARP 表', published_version: 2, has_draft: true, revision: 5 },
-  { id: 'h3c-comware7.interfaces', check_item: null, vendor: 'H3C', platforms: ['comware'], description: '接口表', published_version: 1, has_draft: false, revision: 1 },
+  { id: 'h3c-comware7.arp', check_item: 'topology.arp', vendor: 'H3C', platforms: ['comware'], description: 'ARP 表', module: 'ARP', published_version: 2, has_draft: true, revision: 5 },
+  { id: 'h3c-comware7.interfaces', check_item: null, vendor: 'H3C', platforms: ['comware'], description: '接口表', module: 'Ifmgr', published_version: 1, has_draft: false, revision: 1 },
 ]
 const detail = {
   ...summaries[0], draft: { ...arpBody, description: 'ARP 表（改）' }, draft_by: 'alice', draft_at: '2026-10-06T08:00:00+00:00',
@@ -27,6 +27,14 @@ const detail = {
     { version: 1, sha256: 'b'.repeat(64), check_item: 'topology.arp', published_by: 'system', published_at: '2026-10-04T08:00:00+00:00', note: 'seed' },
   ],
 }
+const contract = {
+  check_item: 'topology.arp', vendor: 'H3C', platform: 'comware', values: [
+    { name: 'IP_ADDRESS', value_type: 'ip_or_unassigned', required: true, identity: true },
+    { name: 'MAC_ADDRESS', value_type: 'text', required: true, identity: false },
+    { name: 'TYPE', value_type: 'text', required: false, identity: false },
+  ],
+}
+const firstBody = { ...arpBody, description: '第一版' }
 const devices = [
   { device_id: 'br1', device_name: 'BR1', ip: '10.10.1.11', vendor: 'H3C', platform: 'comware', model: 'VSR1000', capability: null },
 ]
@@ -37,7 +45,7 @@ const capability = {
 }
 const trial = {
   id: 't1', device_id: 'br1', definition_id: 'h3c-comware7.arp', version: 2, body_sha256: 'c'.repeat(64), status: 'succeeded',
-  failure_code: null, message: null, read_count: 3, row_count: 2, problem_count: 1,
+  failure_code: null, message: null, read_count: 3, row_count: 2, problem_count: 1, reply_bytes: 2048,
   started_at: '2026-10-06T08:00:00.000+00:00', finished_at: '2026-10-06T08:00:01.250+00:00',
   rows: [{ ref: 1, IP_ADDRESS: '10.0.13.2', TYPE: 'Dynamic' }, { ref: 2, IP_ADDRESS: '10.0.12.2', TYPE: 'Static' }],
   problems: [{ row: 3, key: 'Ipv4Address=10.0.14.2', value: 'TYPE', kind: 'unmapped_code', raw: '9', table: 'ARP/ArpTable/ArpEntry' }],
@@ -53,6 +61,8 @@ function routes(overrides: Record<string, () => Promise<unknown>> = {}) {
     if (path === '/definitions') return ok(summaries)
     if (path === '/definitions/h3c-comware7.arp') return ok(detail)
     if (path === '/devices') return ok(devices)
+    if (path.startsWith('/check-items/topology.arp/contract?')) return ok(contract)
+    if (path === '/definitions/h3c-comware7.arp/versions/1') return ok({ ...detail.versions[1], body: firstBody })
     if (path.startsWith('/trials?')) return ok([])
     return refused(404, '不存在')
   })
@@ -80,6 +90,14 @@ it('lists the definitions with their state and filters them', async () => {
   expect(screen.getByText('已发布 v2')).toBeInTheDocument()
   expect(screen.getByText('有草稿')).toBeInTheDocument()
   expect(screen.getByText('仅供关联')).toBeInTheDocument()
+  fireEvent.mouseDown(screen.getByRole('combobox', { name: '按模块筛选' }))
+  fireEvent.click(await screen.findByText('Ifmgr', { selector: '.ant-select-item-option-content' }))
+  expect(screen.queryByRole('button', { name: 'h3c-comware7.arp' })).not.toBeInTheDocument()
+  fireEvent.mouseDown(screen.getByRole('combobox', { name: '按模块筛选' }))
+  fireEvent.click(await screen.findByText('ARP', { selector: '.ant-select-item-option-content' }))
+  expect(screen.getByRole('button', { name: 'h3c-comware7.arp' })).toBeInTheDocument()
+  fireEvent.mouseDown(screen.getByRole('combobox', { name: '按模块筛选' }))
+  fireEvent.click(await screen.findByText('Ifmgr', { selector: '.ant-select-item-option-content' }))
   fireEvent.change(screen.getByLabelText('搜索定义'), { target: { value: '接口' } })
   expect(screen.queryByRole('button', { name: 'h3c-comware7.arp' })).not.toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'h3c-comware7.interfaces' })).toBeInTheDocument()
@@ -90,14 +108,45 @@ it('shows a definition and switches between draft and published version', async 
   expect(screen.getByText('top/ARP/ArpTable/ArpEntry')).toBeInTheDocument()
   expect(screen.getByText(/→ Dynamic/)).toBeInTheDocument() // code table
   fireEvent.mouseDown(screen.getByRole('combobox', { name: '查看的版本' }))
-  fireEvent.click(await screen.findByText('已发布 v2', { selector: '.ant-select-item-option-content' }))
+  fireEvent.click(await screen.findByText('v2（使用中）', { selector: '.ant-select-item-option-content' }))
   fireEvent.click(screen.getByText('源码'))
   expect(screen.getByLabelText('定义源码').textContent).not.toContain('ARP 表（改）')
   fireEvent.click(screen.getByText('版本历史'))
   expect(screen.getByText('第二版')).toBeInTheDocument()
   expect(screen.getByText('使用中')).toBeInTheDocument()
-  fireEvent.click(screen.getByText('与发布版的差异'))
-  expect(screen.getByLabelText('差异').textContent).toContain('+   "description": "ARP 表（改）"')
+  fireEvent.click(screen.getByText('差异', { selector: '.ant-segmented-item-label' }))
+  // Viewing the version in use, it is compared with the draft.
+  expect(screen.getByLabelText('版本差异').textContent).toContain('-   "description": "ARP 表（改）"')
+})
+
+it('shows the check item Values and those the definition leaves unmapped', async () => {
+  await openArp()
+  const panel = await screen.findByLabelText('检查项的值')
+  expect(await within(panel).findByText('未映射的必填值：MAC_ADDRESS')).toBeInTheDocument()
+  expect(within(panel).getByText('ip_or_unassigned')).toBeInTheDocument()
+  expect(api.get).toHaveBeenCalledWith(`${BASE}/check-items/topology.arp/contract?vendor=H3C&platform=comware`, expect.anything())
+  // In the editor the check follows the text being edited.
+  fireEvent.click(screen.getByRole('button', { name: /编辑草稿/ }))
+  const withMac = { ...detail.draft, values: { ...detail.draft.values, MAC_ADDRESS: 'MacAddress' } }
+  fireEvent.change(await screen.findByLabelText('定义 JSON'), { target: { value: JSON.stringify(withMac) } })
+  expect(await screen.findByText('comware：覆盖了检查项的全部必填值')).toBeInTheDocument()
+})
+
+it('loads an older version, compares any two and starts a draft from one', async () => {
+  await openArp()
+  fireEvent.mouseDown(screen.getByRole('combobox', { name: '查看的版本' }))
+  fireEvent.click(await screen.findByText('v1', { selector: '.ant-select-item-option-content' }))
+  fireEvent.click(screen.getByText('源码'))
+  await waitFor(() => expect(screen.getByLabelText('定义源码').textContent).toContain('第一版'))
+  expect(api.get).toHaveBeenCalledWith(`${BASE}/definitions/h3c-comware7.arp/versions/1`, expect.anything())
+  fireEvent.click(screen.getByText('差异', { selector: '.ant-segmented-item-label' }))
+  fireEvent.mouseDown(screen.getByRole('combobox', { name: '比较的版本' }))
+  await waitFor(() => expect(screen.getAllByText('v2（使用中）', { selector: '.ant-select-item-option-content' }).length).toBeGreaterThan(1))
+  // The last list opened is the comparison's.
+  fireEvent.click(screen.getAllByText('v2（使用中）', { selector: '.ant-select-item-option-content' }).at(-1)!)
+  expect(screen.getByLabelText('版本差异').textContent).toContain('+   "description": "第一版"')
+  fireEvent.click(screen.getByRole('button', { name: '以此版本为草稿' }))
+  expect(((await screen.findByLabelText('定义 JSON')) as HTMLTextAreaElement).value).toContain('第一版')
 })
 
 it('shows the validation error of a draft as the backend wrote it', async () => {
@@ -203,6 +252,7 @@ it('shows the rows and the problems of a trial', async () => {
   expect(within(result).getAllByText('IP_ADDRESS').length).toBeGreaterThan(0)
   expect(within(result).getByText('未映射的代码')).toBeInTheDocument()
   expect(within(result).getByText('1250 ms')).toBeInTheDocument()
+  expect(within(result).getByText('2.0 KB')).toBeInTheDocument()
   expect(within(result).getByText(/1 个问题/)).toBeInTheDocument()
 })
 
