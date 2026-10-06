@@ -1,0 +1,139 @@
+# H3C Comware 7 NETCONF → standard tables (backend/standard.py). Codes are those seen on
+# BR1/BR2 (VSR1000, 7.1.064 R1362P12; replies in tests/fixtures/netconf/h3c-comware7)
+# next to the CLI or the lab configuration (scripts/topology/campus_wan/configs); any
+# other code is reported with the device's text, not guessed.
+vendor: H3C
+platforms: [comware]
+namespace: http://www.h3c.com/netconf/data:1.0
+tables:
+  interface:  # ietf-interfaces (RFC 8343)
+    path: top/Ifmgr/Interfaces/Interface
+    fields:
+      name: Name
+      if-index: {leaf: IfIndex, convert: integer}
+      description: Description
+      enabled: {leaf: AdminStatus, codes: {"1": true}}
+      oper-status: {leaf: OperStatus, codes: {"1": up}}
+
+  ipv4-address:  # ietf-ip (RFC 8344) interface/ipv4/address
+    path: top/IPV4ADDRESS/Ipv4Addresses/Ipv4Address
+    fields:
+      interface: {leaf: IfIndex, convert: integer, lookup: {table: interface, match: if-index, take: name}}
+      ip: {leaf: Ipv4Address, convert: address}
+      prefix-length: {leaf: Ipv4Mask, convert: netmask}
+      # 1: every address BR1's configuration sets with "ip address"; 7: 10.10.1.10/32, the
+      # VRRP virtual address BR1 holds as master ("vrrp vrid 1 virtual-ip 10.10.1.10").
+      origin: {leaf: AddressOrigin, codes: {"1": static, "7": other}}
+
+  ipv4-neighbor:  # ietf-ip (RFC 8344) interface/ipv4/neighbor
+    path: top/ARP/ArpTable/ArpEntry
+    fields:
+      interface: {leaf: IfIndex, convert: integer, lookup: {table: interface, match: if-index, take: name}}
+      ip: {leaf: Ipv4Address, convert: address}
+      link-layer-address: {leaf: MacAddress, convert: mac}
+      origin: {leaf: ArpType, codes: {"0": dynamic}}  # CLI type D
+      # 0 is the public instance (CLI VPN "--"); a VPN instance's index is in L3vpn.
+      network-instance: {leaf: VrfIndex, codes: {"0": default}}
+
+  route:  # ietf-routing (RFC 8349) rib/routes/route, one row per next hop
+    path: [top/Route/Ipv4Routes/RouteEntry, top/Route/Ipv6Routes/RouteEntry]
+    fields:
+      network-instance: VRF  # empty: the public instance
+      destination-prefix:
+        - {format: "{Ipv4/Ipv4Address}/{Ipv4/Ipv4PrefixLength}", convert: prefix}
+        - {format: "{Ipv6Prefix/Ipv6Address}/{Ipv6Prefix/Ipv6PrefixLength}", convert: prefix}
+      # The CLI's protocol for each code; OSPF is "ospf 1" in the configuration (OSPFv2).
+      source-protocol:
+        leaf: [Protocol/ProtocolID, Protocol/SubProtocolID]
+        codes:
+          1/0: ietf-routing:direct
+          1/1: ietf-routing:direct
+          1/4: ietf-routing:direct
+          1/8: ietf-routing:direct  # a NAT global address (to NULL0)
+          1/9: ietf-routing:direct  # an interface address a NAT server maps
+          2/1: ietf-routing:static
+          4/1: ietf-ospf:ospfv2  # O_INTRA
+          4/2: ietf-ospf:ospfv2  # O_INTER
+          6/1: ietf-bgp:bgp  # IBGP
+          6/6: ietf-bgp:bgp  # EBGP
+      route-preference: {leaf: Preference, convert: integer}
+      next-hop-address: {leaf: Nexthop, convert: address}
+      outgoing-interface: IfName
+      # NULL0 discards (the CLI's aggregate and multicast routes); InLoopBack0 delivers to
+      # the device itself (its own addresses, next hop 127.0.0.1 or ::1).
+      special-next-hop:
+        leaf: IfName
+        when: {leaf: IfName, in: [NULL0, InLoopBack0]}
+        codes: {NULL0: blackhole, InLoopBack0: receive}
+      # RFC 9129 route data, for OSPF routes only.
+      ospf-route-type:
+        leaf: [Protocol/ProtocolID, Protocol/SubProtocolID]
+        when: {leaf: Protocol/ProtocolID, in: ["4"]}
+        codes: {4/1: intra-area, 4/2: inter-area}
+      ospf-metric: {leaf: Metric, convert: integer, when: {leaf: Protocol/ProtocolID, in: ["4"]}}
+      ospf-tag: {leaf: Tag, convert: integer, when: {leaf: Protocol/ProtocolID, in: ["4"]}}
+
+  ospf-instance:  # ietf-ospf (RFC 9129) control-plane-protocol
+    path: top/OSPF/Instances/Instance
+    fields:
+      name: Name
+      network-instance: VRF
+      router-id: {leaf: RouterId, convert: address}
+
+  ospf-area:
+    path: top/OSPF/Areas/Area
+    fields:
+      instance: Name
+      area-id: AreaId
+
+  ospf-interface:
+    path: top/OSPF/Interfaces/Interface
+    fields:
+      instance: IfEnable/Name
+      area-id: IfEnable/AreaId
+      name: IfName
+      cost: {leaf: Cost, convert: integer}
+      # 1: the Ethernet links, broadcast by default ("ospf 1 area" only) with a DR elected
+      # (CLI neighbours Full/DR).
+      interface-type: {leaf: NetworkType, codes: {"1": broadcast}}
+      priority: {leaf: DrPriority, convert: integer}
+      hello-interval: {leaf: HelloTimer, convert: integer}
+      dead-interval: {leaf: DeadTimer, convert: integer}
+      # 4: BR1 on each two-router link whose other end the CLI shows as DR; 6: LoopBack0.
+      state: {leaf: State, codes: {"4": bdr, "6": loopback}}
+
+  ospf-neighbor:
+    path: top/OSPF/Neighbours/Nbr
+    fields:
+      instance: Name
+      area-id: AreaId
+      interface: IfName
+      neighbor-router-id: {leaf: NbrRouterId, convert: address}
+      address: {leaf: NbrAddress, convert: address}
+      state: {leaf: State, codes: {"7": full}}  # CLI Full on all three, OSPF routes via them
+
+  lldp-neighbor:  # ieee802-dot1ab-lldp port/remote-systems-data
+    path: top/LLDP/NbBasicInfos/BasicInfo
+    fields:
+      interface: IfName
+      # Agent 1 is the CLI's "nearest-bridge" agent, whose address IEEE 802.1AB fixes.
+      dest-mac-address: {leaf: AgentID, codes: {"1": "01-80-C2-00-00-0E"}}
+      time-mark: {leaf: TimeMark, convert: integer}
+      remote-index: {leaf: NeighborIndex, convert: integer}
+      # The TLV subtype numbers (IEEE 802.1AB, the YANG enum values): BR1 shows 4 with a
+      # MAC and 5 with an interface name.
+      chassis-id-subtype:
+        leaf: ChassisID/SubType
+        codes: {"1": chassis-component, "2": interface-alias, "3": port-component, "4": mac-address, "5": network-address, "6": interface-name, "7": local}
+      chassis-id:
+        - {leaf: ChassisID/IDValue, convert: ieee-mac, when: {leaf: ChassisID/SubType, in: ["4"]}}
+        - {leaf: ChassisID/IDValue, when: {leaf: ChassisID/SubType, in: ["1", "2", "3", "6", "7"]}}
+      port-id-subtype:
+        leaf: PortID/SubType
+        codes: {"1": interface-alias, "2": port-component, "3": mac-address, "4": network-address, "5": interface-name, "6": agent-circuit-id, "7": local}
+      port-id:
+        - {leaf: PortID/IDValue, convert: ieee-mac, when: {leaf: PortID/SubType, in: ["3"]}}
+        - {leaf: PortID/IDValue, when: {leaf: PortID/SubType, in: ["1", "2", "5", "6", "7"]}}
+      port-desc: PortDesc
+      system-name: SystemName
+      system-description: SystemDesc
