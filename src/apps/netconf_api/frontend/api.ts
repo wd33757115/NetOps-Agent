@@ -153,7 +153,20 @@ export const discardDraft = (id: string, revision: number) =>
   send<{ id: string; revision: number }>('post', `/definitions/${encodeURIComponent(id)}/discard`, { revision })
 export const publishDraft = (id: string, revision: number, note: string) =>
   send<VersionView & { id: string; revision: number }>('post', `/definitions/${encodeURIComponent(id)}/publish`, { revision, note })
+export interface BrowseResult {
+  status: 'succeeded' | 'failed'
+  filter: string
+  datastore?: 'state' | 'running'
+  data?: string
+  reply_bytes: number
+  elapsed_ms: number
+  failure_code?: string
+  message?: string
+}
+
 export const listDevices = () => send<Device[]>('get', '/devices')
+export const browse = (deviceId: string, namespace: string, path: string[], datastore: 'state' | 'running') =>
+  send<BrowseResult>('post', `/devices/${encodeURIComponent(deviceId)}/browse`, { namespace, path, datastore })
 export const discover = (deviceId: string) =>
   send<CapabilityView>('post', `/devices/${encodeURIComponent(deviceId)}/capabilities`)
 export const runTrial = (deviceId: string, definitionId: string, draft: boolean) =>
@@ -179,6 +192,8 @@ export const FAILURE_TEXT: Record<string, string> = {
   reply_unreadable: '设备回包无法解析',
   definition_invalid: '定义不可用',
 }
+
+export const failureText = (code: string | null) => code ? `${FAILURE_TEXT[code] || '采集失败'}（${code}）` : ''
 
 export const PROBLEM_TEXT: Record<string, string> = {
   unmapped_code: '未映射的代码',

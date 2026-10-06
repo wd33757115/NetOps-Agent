@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { Alert, Button, Empty, Select, Statistic, Switch, Table, Tag } from 'antd'
 import { PlayCircleOutlined } from '@ant-design/icons'
-import { listDevices, listTrials, PROBLEM_TEXT, readTrial, runTrial, type DefinitionSummary, type Device, type Problem, type Refusal, type TrialView } from './api'
-import { failureText } from './Devices'
+import { listDevices, listTrials, PROBLEM_TEXT, readTrial, runTrial, type DefinitionSummary, type Device, type Problem, type Refusal, type TrialView, failureText } from './api'
 
 const duration = (trial: TrialView) => trial.started_at && trial.finished_at
   ? `${Math.max(0, new Date(trial.finished_at).getTime() - new Date(trial.started_at).getTime())} ms` : '—'

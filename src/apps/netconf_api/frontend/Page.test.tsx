@@ -226,6 +226,30 @@ it('runs capability discovery and shows modules and definitions', async () => {
   expect(screen.getByText('设备未通告模块 PBR')).toBeInTheDocument()
 })
 
+it('browses a subtree read only, from a definition, and narrows the path from the tree', async () => {
+  const data = '<data xmlns="urn:ietf:params:xml:ns:netconf:base:1.0"><top xmlns="http://www.h3c.com/netconf/data:1.0"><ARP><ArpTable><ArpEntry><Ipv4Address>10.0.13.2</Ipv4Address><Type>2</Type></ArpEntry></ArpTable></ARP></top></data>'
+  api.post.mockImplementation((url: string) => url.endsWith('/browse')
+    ? ok({ status: 'succeeded', filter: '<top/>', datastore: 'state', data, reply_bytes: 300, elapsed_ms: 42 })
+    : refused(404, '不存在'))
+  view()
+  fireEvent.click(await screen.findByRole('button', { name: /设备能力/ }))
+  fireEvent.click(await screen.findByText('BR1'))
+  fireEvent.mouseDown(screen.getByRole('combobox', { name: '从定义带入' }))
+  fireEvent.click(await screen.findByText('h3c-comware7.arp', { selector: '.ant-select-item-option-content' }))
+  await waitFor(() => expect((screen.getByLabelText('路径') as HTMLInputElement).value).toBe('top/ARP/ArpTable/ArpEntry'))
+  expect((screen.getByLabelText('命名空间') as HTMLInputElement).value).toBe('http://www.h3c.com/netconf/data:1.0')
+  fireEvent.click(screen.getByRole('button', { name: /读\s*取/ }))
+  const result = await screen.findByLabelText('浏览结果')
+  expect(api.post).toHaveBeenCalledWith(`${BASE}/devices/br1/browse`,
+    { namespace: 'http://www.h3c.com/netconf/data:1.0', path: ['top', 'ARP', 'ArpTable', 'ArpEntry'], datastore: 'state' }, expect.anything())
+  expect(within(result).getByText('10.0.13.2')).toBeInTheDocument()
+  expect(within(result).getByText('42 ms')).toBeInTheDocument()
+  // A node of the tree becomes the path, read again.
+  fireEvent.click(within(result).getAllByRole('button', { name: '设为路径' })[1])
+  await waitFor(() => expect(api.post).toHaveBeenLastCalledWith(`${BASE}/devices/br1/browse`,
+    { namespace: 'http://www.h3c.com/netconf/data:1.0', path: ['top', 'ARP'], datastore: 'state' }, expect.anything()))
+})
+
 it('shows the failure code of a discovery that failed', async () => {
   const failed = { ...capability, status: 'unavailable', failure_code: 'authentication_failed', definitions: [], modules: [], unavailable: [] }
   api.post.mockImplementation(() => ok(failed))

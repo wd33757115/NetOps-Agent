@@ -336,6 +336,43 @@ def test_the_contract_is_the_check_items_values_on_one_family(database):
     ) == 404
 
 
+def test_browsing_reads_one_subtree_as_it_is(device):
+    request = service.BrowseRequest(
+        namespace="http://www.h3c.com/netconf/data:1.0", path=["top", "ARP", "ArpTable"]
+    )
+    result = service.browse(ALICE, "br1", request)
+    assert result["status"] == "succeeded" and result["datastore"] == "state"
+    assert result["filter"] == (
+        '<top xmlns="http://www.h3c.com/netconf/data:1.0"><ARP><ArpTable /></ARP></top>'
+    )
+    assert device.session.asked == [result["filter"]]
+    assert "10.0.13.2" in result["data"]
+    assert result["reply_bytes"] == len(result["data"].encode("utf-8"))
+    # The hello of the session is kept as the device's capabilities.
+    assert service.read_capabilities(ALICE, "br1")["capability_count"] == 384
+
+
+@pytest.mark.parametrize(
+    "namespace,path,datastore",
+    [
+        ("http://www.h3c.com/netconf/data:1.0", ["top", "ARP><edit-config"], "state"),
+        ("http://www.h3c.com/netconf/data:1.0", ["top"], "candidate"),
+        ("not a namespace", ["top"], "state"),
+    ],
+)
+def test_browsing_builds_the_filter_itself(device, namespace, path, datastore):
+    request = service.BrowseRequest(namespace=namespace, path=path, datastore=datastore)
+    assert status(lambda: service.browse(ALICE, "br1", request)) == 422
+    assert device.session.asked == []
+
+
+def test_a_browse_the_device_refuses_says_why(device):
+    device.refuse = "authentication_failed"
+    request = service.BrowseRequest(namespace="http://www.h3c.com/netconf/data:1.0", path=["top"])
+    result = service.browse(ALICE, "br1", request)
+    assert (result["status"], result["failure_code"]) == ("failed", "authentication_failed")
+
+
 def test_the_session_logs_in_with_the_inventory_credential_reference():
     access = service._access(DEVICE)
     profile = access.profile_resolver("br1")

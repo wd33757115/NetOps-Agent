@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react'
 import { Alert, Button, Empty, Input, Table, Tag } from 'antd'
 import { RadarChartOutlined, SearchOutlined } from '@ant-design/icons'
-import { discover, FAILURE_TEXT, listDevices, type CapabilityView, type Device, type Refusal } from './api'
+import { discover, failureText, listDevices, type CapabilityView, type DefinitionSummary, type Device, type Refusal } from './api'
+import Browse from './Browse'
 
-export const failureText = (code: string | null) => code ? `${FAILURE_TEXT[code] || '采集失败'}（${code}）` : ''
 
 function capabilityTag(capability: CapabilityView | null) {
   if (!capability) return <Tag>未发现</Tag>
@@ -11,7 +11,7 @@ function capabilityTag(capability: CapabilityView | null) {
 }
 
 /** Step 3: what each inventory device announces in its NETCONF hello. */
-export default function Devices({ onDevices }: { onDevices?: (devices: Device[]) => void }) {
+export default function Devices({ definitions = [], onDevices }: { definitions?: DefinitionSummary[]; onDevices?: (devices: Device[]) => void }) {
   const [devices, setDevices] = useState<Device[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -101,6 +101,7 @@ export default function Devices({ onDevices }: { onDevices?: (devices: Device[])
             { title: '命名空间', dataIndex: 'namespace', render: (ns: string) => <span className="nc-mono nc-muted">{ns}</span> },
           ]} />
       </>}
+      <Browse key={current.device_id} deviceId={current.device_id} definitions={definitions} />
     </section>}
   </>
 }

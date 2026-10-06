@@ -63,6 +63,13 @@
 .nc-stats .ant-statistic-content { font-size: 20px; }
 .nc-problems .ant-table { border: 1px solid #f3c7c7; border-radius: 9px; }
 .nc-loading { display: grid; place-items: center; min-height: 200px; }
+.nc-browse { margin-top: 26px; padding-top: 20px; border-top: 1px solid #e0e6ef; }
+.nc-xml { max-height: 560px; overflow: auto; padding: 12px 14px; background: #f6f8fb; border: 1px solid #e0e6ef; border-radius: 9px; font-size: 12px; }
+.nc-xml-node { margin-left: 14px; }
+.nc-xml > .nc-xml-node { margin-left: 0; }
+.nc-xml-node > summary { cursor: pointer; line-height: 28px; }
+.nc-xml-leaf { margin-left: 28px; line-height: 22px; }
+.nc-xml-value { color: #17633a; }
 @media (max-width: 760px) {
   .nc-split { grid-template-columns: 1fr; }
   .nc-detail-head { flex-direction: column; }

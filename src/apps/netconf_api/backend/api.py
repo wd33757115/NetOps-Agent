@@ -53,6 +53,11 @@ def discover(device_id: str, actor=Depends(user)):
     return service.discover(actor, device_id)
 
 
+@router.post("/devices/{device_id}/browse")
+def browse(device_id: str, payload: service.BrowseRequest, actor=Depends(user)):
+    return service.browse(actor, device_id, payload)
+
+
 @router.get("/devices/{device_id}/capabilities")
 def capabilities(device_id: str, actor=Depends(user)):
     return service.read_capabilities(actor, device_id)

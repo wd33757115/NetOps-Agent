@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs
 from uuid import uuid4
+from xml.etree.ElementTree import Element, SubElement, tostring
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
@@ -50,6 +51,12 @@ class Publish(BaseModel):
 
 class Discard(BaseModel):
     revision: int = Field(ge=1)
+
+
+class BrowseRequest(BaseModel):
+    namespace: str = Field(min_length=1, max_length=300)
+    path: list[str] = Field(min_length=1, max_length=20)  # from the top element down
+    datastore: str = "state"  # state: <get>; running: <get-config> of running
 
 
 class TrialRequest(BaseModel):
@@ -509,6 +516,58 @@ def discover(actor, device_id):
     else:
         _record_capabilities(actor, device_id, capabilities)
     return read_capabilities(actor, device_id)
+
+
+def browse_filter(namespace, path):
+    """The subtree filter selecting everything under one path: element names only, built
+    as XML here (the same checks as a definition's), so nothing else reaches the RPC."""
+    names = mapping._path(path, "path")
+    namespace = mapping._text(namespace, "namespace", mapping.NAMESPACE)
+    root = Element(names[0], xmlns=namespace)
+    node = root
+    for name in names[1:]:
+        node = SubElement(node, name)
+    return tostring(root, encoding="unicode")
+
+
+def browse(actor, device_id, payload: BrowseRequest):
+    """Read one subtree of a device as it is, to see what a definition would map. Read
+    only: the platform session sends nothing but a filtered <get> or <get-config>."""
+    from src.platform.device_access.contracts import DeviceAccessError
+
+    if payload.datastore not in mapping.DATASTORES:
+        raise HTTPException(422, f"数据源只能是 {'、'.join(sorted(mapping.DATASTORES))}")
+    try:
+        subtree = browse_filter(payload.namespace, payload.path)
+    except mapping.DefinitionError as exc:
+        raise HTTPException(422, f"路径不可用：{exc}") from None
+    device = _device(device_id)
+    started = now()
+    try:
+        with _netconf(actor, device) as (session, guard):
+            guard()
+            if payload.datastore == "running":
+                data = session.get_config(subtree, source="running")
+            else:
+                data = session.get(subtree)
+            capabilities = session.capabilities
+    except DeviceAccessError as exc:
+        return {
+            "status": "failed",
+            "failure_code": exc.failure_code,
+            "message": str(exc)[:500],
+            "filter": subtree,
+        }
+    _record_capabilities(actor, device_id, capabilities)
+    finished = now()
+    return {
+        "status": "succeeded",
+        "filter": subtree,
+        "datastore": payload.datastore,
+        "data": data,
+        "reply_bytes": len(data.encode("utf-8")),
+        "elapsed_ms": round((finished - started).total_seconds() * 1000),
+    }
 
 
 def read_capabilities(actor, device_id):

@@ -18,7 +18,7 @@ const STEPS: { key: Step; title: string; hint: string; icon: React.ReactNode; he
   { key: 'editor', title: '编辑与发布', hint: '草稿、版本与差异', icon: <EditOutlined aria-hidden="true" />, heading: '编辑与发布',
     intro: '草稿保存时由后端校验；发布时检查是否覆盖了检查项的必填值。发布后的版本不可修改，拓扑采集只用已发布版本。' },
   { key: 'devices', title: '设备能力', hint: 'hello 通告的模块', icon: <DatabaseOutlined aria-hidden="true" />, heading: '设备能力',
-    intro: '经平台打开 NETCONF 会话读取设备的 hello，记录它通告的模块，并据此判断哪些定义能在这台设备上使用。' },
+    intro: '经平台打开 NETCONF 会话读取设备的 hello，记录它通告的模块，并据此判断哪些定义能在这台设备上使用；还可以只读地浏览设备的数据。' },
   { key: 'trials', title: '试运行', hint: '值行与问题', icon: <ExperimentOutlined aria-hidden="true" />, heading: '试运行',
     intro: '在一台设备上运行一条定义（已发布版本或草稿），查看它产出的值行和发现的问题。试运行不影响拓扑采集。' },
 ]
@@ -107,7 +107,7 @@ export default function NetconfApiPage() {
               : detailError ? <Alert type="error" showIcon message={detailError} />
               : !detail ? <div className="nc-loading"><Spin tip="加载中" /></div>
               : <Editor key={`${detail.id}`} detail={detail} onChanged={changed} />)}
-            {step === 'devices' && <Devices />}
+            {step === 'devices' && <Devices definitions={rows} />}
             {step === 'trials' && <Trials definitions={rows} initial={selected} />}
           </>}
         </main>
