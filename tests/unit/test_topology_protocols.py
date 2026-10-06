@@ -132,6 +132,11 @@ def test_ospf_instance_validates_with_the_frozen_rfc9129_modules():
     routing["control-plane-protocol"] = [
         i for i in routing["control-plane-protocol"] if i["type"].endswith("ospfv2")
     ]
+    # Likewise BGP routes (source-protocol ietf-bgp:bgp) in the RIB.
+    for rib in tree["ietf-routing:routing"].get("ribs", {}).get("rib", []):
+        rib["routes"]["route"] = [
+            r for r in rib["routes"]["route"] if r["source-protocol"] != "ietf-bgp:bgp"
+        ]
     # Test-only completion of the interface counters the CLI never gives.
     for interface in tree["ietf-interfaces:interfaces"]["interface"]:
         interface["statistics"] = {"discontinuity-time": "2000-01-01T00:00:00Z"}

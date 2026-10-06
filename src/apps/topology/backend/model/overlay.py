@@ -20,7 +20,8 @@ from __future__ import annotations
 
 import ipaddress
 
-BGP = {"B", "BGP", "bgp", "B*", "Bgp"}
+# CLI codes, and the identity in the RFC 8349 tree.
+BGP = {"B", "BGP", "bgp", "B*", "Bgp", "ietf-bgp:bgp"}
 
 
 def bindings(facts):

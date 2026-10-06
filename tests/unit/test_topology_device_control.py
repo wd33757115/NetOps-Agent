@@ -76,7 +76,9 @@ def observe(device):
 @pytest.mark.parametrize(
     "device", ["br1", "br2", "core1", "core2", "dist1", "dist2", "acc1", "acc2"]
 )
-def test_real_routes_keep_facts_and_report_missing_native_rib_keys(device):
+def test_real_routes_enter_a_rib_named_from_instance_and_family(device):
+    # The device prints no RIB name: one is derived from instance and address family
+    # (owner decision 2026-10-06) and metadata says so.
     observation = observe(device)
     before = copy.deepcopy(observation)
     projected = project_device_control(observation)
@@ -85,9 +87,22 @@ def test_real_routes_keep_facts_and_report_missing_native_rib_keys(device):
     assert len(projected["routing"]) == 1
     section = projected["routing"][0]
     assert section["vrf"] == ("default" if raw else None)
-    assert section["tree"] == {"ietf-routing:routing": {}}
+    if raw:
+        assert [rib["name"] for rib in ribs(section)] == ["ipv4"]
+        assert section["metadata"]["derived_rib_names"]["ipv4"]["network_instance"] == "default"
+        # Without interface facts in this observation, a route with an outgoing
+        # interface cannot reference it: such routes are gaps, kept by prefix.
+        held = {row["ietf-ipv4-unicast-routing:destination-prefix"] for row in routes(section)}
+        left = {
+            raw[gap["record_index"]]["prefix"]
+            for gap in section["gaps"]
+            if gap["code"] == "route_next_hop_not_projected"
+        }
+        assert held | left == {row["prefix"] for row in raw} and not held & left
+        assert "native_rib_name_not_observed" not in codes(section)
+    else:
+        assert section["tree"] == {"ietf-routing:routing": {}}
     assert section["metadata"]["records"] == raw
-    assert codes(section) == ({"native_rib_name_not_observed"} if raw else set())
     assert section["metadata"]["completeness"] == "partial"
     assert section["metadata"]["full_validation"] == "not_performed"
     assert section["metadata"]["observation_id"] == observation["id"]
@@ -135,9 +150,7 @@ def test_explicit_rib_with_conflicting_address_families_is_not_split_using_inven
     assert "native_rib_address_family_conflict" in codes(result)
 
 
-@pytest.mark.parametrize(
-    "protocol", ["B", "BGP", "D", "RIP", "O_FAKE", "ietf-routing:invented", [], None]
-)
+@pytest.mark.parametrize("protocol", ["D", "RIP", "O_FAKE", "ietf-routing:invented", [], None])
 def test_unfrozen_or_unknown_protocol_identity_is_preserved_as_a_gap(protocol):
     record = route(protocol=protocol)
     result = project_device_control({"routes": [record]})["routing"][0]
@@ -157,6 +170,9 @@ def test_unfrozen_or_unknown_protocol_identity_is_preserved_as_a_gap(protocol):
         ("O IA", "ietf-ospf:ospf"),
         ("O E2", "ietf-ospf:ospf"),
         ("O_INTRA", "ietf-ospf:ospf"),
+        # draft-ietf-idr-bgp-model (fixed draft, M4): validated with libyang only.
+        ("B", "ietf-bgp:bgp"),
+        ("BGP", "ietf-bgp:bgp"),
     ],
 )
 def test_supported_protocols_use_actual_frozen_native_identities(protocol, identity):
@@ -181,6 +197,20 @@ def test_invalid_preference_is_not_coerced(preference):
     assert "invalid_route_preference" in codes(section)
 
 
+UNPROVEN = [{"prefix": "192.0.2.0/24", "address": "10.0.0.2", "interface": "Ethernet0/1"}]
+
+
+def kept_without_interface(section):
+    """The route stays, with its next-hop address; metadata names the interface the tree
+    does not prove, and the interface tree is not built from it."""
+    assert routes(section)[0]["next-hop"] == {
+        "ietf-ipv4-unicast-routing:next-hop-address": "10.0.0.2"
+    }
+    assert section["metadata"]["next_hop_interfaces_unproven"] == UNPROVEN
+    assert "ietf-interfaces:interfaces" not in section["tree"]
+    assert "route_next_hop_not_projected" not in codes(section)
+
+
 def test_interface_refs_require_current_identity_and_explicit_same_vrf_ownership():
     record = route(hops=[{"ip": "10.0.0.2", "ifname": "Ethernet0/1", "vrf": "blue"}])
     facts = {
@@ -194,13 +224,33 @@ def test_interface_refs_require_current_identity_and_explicit_same_vrf_ownership
         {"name": "Ethernet0/1", "type": "iana-if-type:ethernetCsmacd", "oper-status": "up"}
     ]
     assert codes(result) == {"mandatory_statistics_not_observed", "admin_state_not_observed"}
-    for invalid in ("red", None):
-        changed = copy.deepcopy(facts)
-        changed["ip"][0]["vrf"] = invalid
-        rejected = project_device_control(changed)["routing"][0]
-        assert "outgoing-interface" not in routes(rejected)[0]["next-hop"]
-        assert "ietf-interfaces:interfaces" not in rejected["tree"]
-        assert "outgoing_interface_reference_not_proven" in codes(rejected)
+    # The interface proven in another instance: the tree keeps the next hop's address,
+    # metadata names the interface (a VPN route over the underlay).
+    changed = copy.deepcopy(facts)
+    changed["ip"][0]["vrf"] = "red"
+    outside = project_device_control(changed)["routing"][0]
+    assert routes(outside)[0]["next-hop"] == {
+        "ietf-ipv4-unicast-routing:next-hop-address": "10.0.0.2"
+    }
+    assert outside["metadata"]["next_hops_outside_instance"] == [
+        {
+            "prefix": "192.0.2.0/24",
+            "address": "10.0.0.2",
+            "interface": "Ethernet0/1",
+            "interface_instance": "red",
+        }
+    ]
+    assert "ietf-interfaces:interfaces" not in outside["tree"]
+    # Its instance not proven: the address stays in the tree, the interface in metadata.
+    changed["ip"][0]["vrf"] = None
+    kept_without_interface(project_device_control(changed)["routing"][0])
+    # Without an address there is nothing to keep: the route is a gap.
+    changed["routes"][0]["next_hops"][0]["ip"] = None
+    rejected = project_device_control(changed)["routing"][0]
+    assert routes(rejected) == []
+    assert {"outgoing_interface_reference_not_proven", "route_next_hop_not_projected"} <= codes(
+        rejected
+    )
 
 
 def test_duplicate_or_failed_interfaces_cannot_supply_native_references():
@@ -217,9 +267,7 @@ def test_duplicate_or_failed_interfaces_cannot_supply_native_references():
             "capabilities": {"routes": "complete", "ip": "complete", "interfaces": "failed"},
         },
     ):
-        result = project_device_control(observation)["routing"][0]
-        assert "outgoing-interface" not in routes(result)[0]["next-hop"]
-        assert "ietf-interfaces:interfaces" not in result["tree"]
+        kept_without_interface(project_device_control(observation)["routing"][0])
 
 
 def test_missing_or_conflicting_current_interface_scope_does_not_supply_native_ref():
@@ -229,19 +277,16 @@ def test_missing_or_conflicting_current_interface_scope_does_not_supply_native_r
         "interfaces": [{"ifname": "Ethernet0/1", "type": "ethernet", "oper_status": "up"}],
         "ip": [{"ifname": "Ethernet0/1", "vrf": "blue"}, {"ifname": "Ethernet0/1"}],
     }
-    result = project_device_control(facts)["routing"][0]
-    assert "outgoing-interface" not in routes(result)[0]["next-hop"]
-    assert "outgoing_interface_reference_not_proven" in codes(result)
+    kept_without_interface(project_device_control(facts)["routing"][0])
     facts["ip"][1]["vrf"] = "red"
-    result = project_device_control(facts)["routing"][0]
-    assert "outgoing-interface" not in routes(result)[0]["next-hop"]
+    kept_without_interface(project_device_control(facts)["routing"][0])
 
 
 def test_special_and_simple_next_hop_evidence_conflict_is_not_arbitrarily_selected():
     record = route()
     record["special_next_hop"] = "blackhole"
     section = project_device_control({"routes": [record]})["routing"][0]
-    assert "next-hop" not in routes(section)[0]
+    assert routes(section) == []  # RFC 8349 next-hop is the route's forwarding
     assert "conflicting_route_next_hop" in codes(section)
 
 
@@ -254,12 +299,24 @@ def test_recursive_next_hop_address_needs_no_invented_interface_or_index():
     assert not {"index", "active", "last-updated", "metric"} & set(routes(result)[0])
 
 
-def test_cross_vrf_next_hop_is_not_borrowed():
+def test_cross_vrf_next_hop_keeps_its_instance_in_metadata():
+    # RFC 8349 has no instance for a next hop: a leaked route keeps the address in the
+    # tree, and metadata says where it resolves.
     section = project_device_control({"routes": [route(hops=[{"ip": "10.0.0.2", "vrf": "red"}])]})[
         "routing"
     ][0]
-    assert "next-hop" not in routes(section)[0]
-    assert codes(section) == {"next_hop_scope_not_proven", "route_next_hop_not_projected"}
+    assert routes(section)[0]["next-hop"] == {
+        "ietf-ipv4-unicast-routing:next-hop-address": "10.0.0.2"
+    }
+    assert section["metadata"]["next_hops_outside_instance"] == [
+        {"prefix": "192.0.2.0/24", "address": "10.0.0.2", "network_instance": "red"}
+    ]
+    # Without an address there is nothing to resolve there: a gap.
+    blind = project_device_control({"routes": [route(hops=[{"ifname": "X1", "vrf": "red"}])]})[
+        "routing"
+    ][0]
+    assert routes(blind) == []
+    assert codes(blind) == {"next_hop_scope_not_proven", "route_next_hop_not_projected"}
 
 
 @pytest.mark.parametrize("address", ["2001:db8::1", "malformed", True, 25])
@@ -270,7 +327,7 @@ def test_invalid_or_cross_family_address_cannot_become_interface_only_next_hop(a
         "ip": [{"ifname": "Ethernet0/1", "vrf": "blue", "address": "10.0.0.1", "prefix_len": 24}],
     }
     section = project_device_control(facts)["routing"][0]
-    assert "next-hop" not in routes(section)[0]
+    assert routes(section) == []
     assert "ietf-interfaces:interfaces" not in section["tree"]
     assert codes(section) == {"invalid_next_hop_address", "route_next_hop_not_projected"}
 
@@ -289,11 +346,10 @@ def test_ecmp_bad_hop_is_omitted_without_becoming_a_different_interface_hop():
         "ip": [{"ifname": "Ethernet0/1", "vrf": "blue", "address": "10.0.0.1", "prefix_len": 24}],
     }
     section = project_device_control(facts)["routing"][0]
-    assert routes(section)[0]["next-hop"] == {
-        "next-hop-list": {"next-hop": [{"ietf-ipv4-unicast-routing:address": "10.0.0.2"}]}
-    }
+    # One ECMP hop left out would send traffic over the others only: no half route.
+    assert routes(section) == []
     assert "ietf-interfaces:interfaces" not in section["tree"]
-    assert codes(section) == {"invalid_next_hop_address", "next_hop_list_incomplete"}
+    assert codes(section) == {"invalid_next_hop_address", "route_next_hop_not_projected"}
 
 
 @pytest.mark.parametrize("status", ["failed", "unsupported", "unknown", None, [], True])
@@ -381,10 +437,7 @@ def test_transport_incomplete_reference_capability_cannot_close_current_route_in
             }
         }
     )["routing"][0]
-    assert routes(result)[0]["next-hop"] == {
-        "ietf-ipv4-unicast-routing:next-hop-address": "10.0.0.2"
-    }
-    assert "ietf-interfaces:interfaces" not in result["tree"]
+    kept_without_interface(result)  # its interface cannot be referenced
     assert {"code": "transport_collection_incomplete", "capability": cap} in result["gaps"]
     assert result["metadata"]["reference_facts"][cap] == facts[cap]
     assert result["metadata"]["fact_metadata"][cap] == metadata

@@ -165,7 +165,7 @@ IEEE 桥实例、component、FDB/FID、VID、端口为二层查找上下文；�
 
 依赖 M1。完成 interfaces/IP/hardware/system、NI/LNE/schema mount 的完整映射清单和导出；IVY 基础、软件、位置、topology mapping 按当前固定组合核验，随后加入被动资源、许可、能源的标准实例能力。
 
-现有模型模块 `device_state.py`、`device_ip.py`、`device_control.py` 在各自标准范围扩展；不得把 VRRP version、原生 RIB 名称、统计中断时间、LLDP 表键从本机序号或当前时间构造出来。未观测 mandatory 项保留缺口。
+现有模型模块 `device_state.py`、`device_ip.py`、`device_control.py` 在各自标准范围扩展；不得把 VRRP version、原生 RIB 名称、统计中断时间、LLDP 表键从本机序号或当前时间构造出来。未观测 mandatory 项保留缺口。（2026-10-06 负责人决定改变：设备不打印 RIB 名时，用“实例 + 地址族”推出，公网为 `ipv4`/`ipv6`，VPN 实例为 `<实例>:ipv4`，并在 metadata `derived_rib_names` 写明是推出的，做法同 ACL 端口集名和 PBR 的 sequence-id；见 M4 README。）
 
 验收：一设备多接口/地址、多 NI、同名接口跨设备、重复管理地址、虚拟/物理/堆叠区别；挂载内 leafref 不串设备；inventory mapping 的端口与组件真实对应。NE 缺项不能通过假序列号通过。当前实验缺物理/被动资源事实时以正式示例和脱敏素材离线验收该范围，明确无实机结论。
 
@@ -187,7 +187,8 @@ IEEE 桥实例、component、FDB/FID、VID、端口为二层查找上下文；�
 - 协议邻接：单独分析，不并入 L2/L3 图；Router ID 只在协议域内有效。
 - 方案列出的路径场景都有用例，新增跨 VRF 泄漏、非对称路径，以及基于真实 MGMT 路由表的同前缀隔离。
 - 实机只读验收：8 台设备、10 项核对全部通过。
-- 未完成：RIB 名称不可得，RIB 仍不导出；IPv6/ND、unnumbered、BFD、IS-IS、LSDB、TE 邻接以及 Comware 的按 VRF 路由都没有样本。
+- 2026-10-06（topology 0.13.0）：RIB 名按负责人决定由“实例 + 地址族”推出，设备路由表全部进 RFC 8349 树，路径改从树计算（见 M4 README）。
+- 未完成：IPv6/ND、unnumbered、BFD、IS-IS、LSDB、TE 邻接以及 Comware 的按 VRF 路由都没有样本。
 
 依赖 M2/M3。完成 RFC 8349 RIB 与当前 OSPF/VRRP/BFD 标准实例；按能力拓展 IS-IS、BGP（固定草案）、静态路由及研究目录中的其他协议。L3、LSDB、协议邻居、TE 邻接分别建模，不混入一张“物理图”。
 

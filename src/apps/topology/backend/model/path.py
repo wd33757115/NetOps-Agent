@@ -92,6 +92,8 @@ import ipaddress
 
 from .acl import ICMP, TCP, UDP, evaluate
 from .acl_table import acl_tables
+from .route_table import route_tables, uncovered
+from .route_table import routes as tree_routes
 from .acl_table import entries as acl_entries
 from .device_pbr import project_device_pbr
 from .pbr import evaluate as pbr_evaluate
@@ -143,7 +145,15 @@ def _unicast(value):
 
 class _Tracer:
     def __init__(self, devices, base, observed):
-        devices = prepare(devices)
+        # Routes come from each device's RFC 8349 tree (route_table), not the facts.
+        self._routes = {}
+        from_tree = {}
+        for key, facts in devices.items():
+            if isinstance(facts, dict) and isinstance(facts.get("routes"), list):
+                self._routes[key] = route_tables(facts)
+                facts = {**facts, "routes": tree_routes(self._routes[key])}
+            from_tree[key] = facts
+        devices = prepare(from_tree)
         self.devices = devices
         self._pbr = {}  # device key -> policy-routing query table (None: content not read)
         self._acl = {}  # device key -> ACL query table
@@ -196,6 +206,14 @@ class _Tracer:
             if best is None or rank < best[0]:
                 best = (rank, route)
         return best and best[1]
+
+    def not_in_tree(self, key, vrf, dst, route):
+        """Routes the device's tree could not hold that could win this lookup."""
+        table = self._routes.get(key)
+        if table is None:
+            return []
+        prefixlen = ipaddress.ip_network(route["prefix"]).prefixlen if route else None
+        return uncovered(table, vrf, dst, prefixlen)
 
     def connected(self, key, vrf, ip):
         """All local interfaces covering the address; overlap never picks the first row."""
@@ -642,14 +660,33 @@ class _Tracer:
             ):
                 hop.setdefault("gaps", []).append(gap)
             route = self.lookup(key, vrf, target)
+            hidden = self.not_in_tree(key, vrf, target, route)
+            if hidden and route is not None:  # without a route the end names them
+                hop.setdefault("gaps", []).append(
+                    {"status": "route_not_in_tree", "prefixes": hidden}
+                )
             if redirect is not None:
                 # Forwarded to the policy's next hop, bypassing the lookup; the next hop is
                 # resolved like a route's.
                 route = {"protocol": "policy-forwarding", "next_hops": [{"ip": redirect}]}
             if route is None:
-                end([*trail, hop], "no_route")
+                if hidden:
+                    # A route the device has but its tree could not hold covers dst.
+                    end([*trail, hop], "route_not_in_tree", prefixes=hidden)
+                else:
+                    end([*trail, hop], "no_route")
                 return
             matched = {k: route.get(k) for k in ("prefix", "protocol", "preference", "metric")}
+            special = route.get("special_next_hop")
+            if special == "blackhole":
+                hop["route"] = {**matched, "next_hop": None, "special_next_hop": special}
+                end([*trail, hop], "blackhole")
+                return
+            if special == "receive":
+                hop["route"] = {**matched, "next_hop": None, "special_next_hop": special}
+                if not deliver_local(key, vrf, [*trail, hop], dst):
+                    end([*trail, hop], "endpoint_unresolved", destination=dst)
+                return
             if not route.get("next_hops"):
                 hop["route"] = {**matched, "next_hop": None}
                 end([*trail, hop], "unresolved_next_hop", reason="route_next_hops_missing")

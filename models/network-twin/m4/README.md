@@ -21,7 +21,12 @@
 
 - OSPF 实例只有在该进程的全部可用接口都属于同一个 NI 时才导出，并且写进这个 NI 的路由树。实例引用的接口会复制到同一棵树里；引用不到的接口去掉，记 `ospf_interface_reference_not_proven`。
 - 未导出的内容：定时器、LSDB、统计、DR 选举视图（邻居角色）、`dead-timer` 倒计时快照、BGP `last-established`（需要用观测时刻推算）、按 afi-safi 的收到前缀数。字段映射见 [M1 fact-mapping](../m1/fact-mapping.json)：OSPF/BGP 共 28 个字段，其中 15 个已导出，5 个可映射但未导出，2 个没有原生节点，6 个作为作用域。
-- RIB 仍然不导出。RFC 8349 的 `ribs/rib[name]` 需要 RIB 名称，设备不提供（M1 的结论不变）。路由只作为证据参与路径推导。
+- RIB 导出（2026-10-06，topology 0.13.0）：RFC 8349 的 `ribs/rib[name]` 需要 RIB 名称，设备不提供。负责人决定由“实例 + 地址族”推出：公网 `ipv4`/`ipv6`，VPN 实例 `<实例>:ipv4`，并在每个实例分段的 metadata `derived_rib_names` 写明（`reason: the device prints no RIB name`）。做法同 ACL 端口集名、`<ACL>@<实例>` 和 PBR 的 sequence-id。设备打印了 RIB 名时用设备的。
+  - 路由协议用冻结模块的 identity：直连 `ietf-routing:direct`、静态 `ietf-routing:static`、OSPF `ietf-ospf:ospf`、BGP `ietf-bgp:bgp`（draft-ietf-idr-bgp-model，M1 锁定版本）等。不导出 OSPF metric：RFC 9129 只在 source-protocol 派生自具体 OSPF 版本时允许 metric，CLI 不给版本，不猜。
+  - 下一跳：Null 接口为 `special-next-hop blackhole`，InLoopBack 为 `receive`（下一跳在本实例时）。下一跳在别的实例（泄漏路由、VPN 经底层）：树里只写地址，metadata `next_hops_outside_instance` 写明实例和接口。设备打印的出接口在本实例的接口树里证明不了（接口没采到、重复行、归属不明）：树里写地址，metadata `next_hop_interfaces_unproven` 写明接口名，路径仍从这个接口出去，状态记未知。
+  - 整条导不出的路由（协议没有映射、没有下一跳、下一跳既无地址又证明不了接口等）：记缺口，查询表按前缀列在 `missing` 下。
+  - 查询表 `model/route_table.py` 只从树和缺口取；路径（`model/path.py`）不再读路由事实。查找时若有导不出的路由可能更长匹配，跳上记 `route_not_in_tree`；查不到路由而有这样的路由时，以 `route_not_in_tree` 结束（不当作没有路由）。
+  - 校验：BGP 路由的 source-protocol 来自 BGP 草案模块，yangson 加载不了该草案的闭包，单测里 yangson 校验去掉 BGP 路由；含 BGP 路由的树另用 libyang 校验。2026-10-06 在云端会话做了一次：libyang 2.1.30（Ubuntu `libyang2-tools`），模块为 App 设备库的冻结文件加 `ietf-bgp@2026-08-14` 的导入闭包（31 个文件）。闭包中 App 库没有的模块取自 YangModels `0e28ed8`（M1 锁定的提交）；其中 BGP 草案各模块的字节与 M1 锁文件里从草案正文抽取的版本不同（云端访问不了 ietf.org，未能按锁文件取原文），同名同 revision。仅测试用的补充：接口 `statistics/discontinuity-time` 填固定值；一个偏差模块去掉已废弃的 `routing-state`、`interfaces-state`（NMDA 服务器不实现；libyang 2.1 否则按其 min-elements 报错）。结果：campus-wan 6 台路由器的路由树（共 22 条 BGP 路由，含 BGP 协议实例）按完整数据存储（`-t data`）校验全部通过；反例（不存在的 identity、基 identity `routing-protocol`、悬空的出接口）均被拒绝。合并后在本地用 M1 镜像（libyang 5.8.6、锁定字节）复验。
 - 校验：BR1/DIST1 的路由树（OSPF + BGP + 引用的接口）在 libyang 5.8.6 的 get/data 模式下通过，strict 模式只缺未采集的接口节点（admin-status、if-index、统计）。OSPF 部分也能用 App 冻结的 RFC 9129 模块通过 yangson 校验；yangson 加载不了 BGP 草案，BGP 只用 libyang 校验。新增 3 个反例，分类都符合预期：OSPF 接口引用了树外的接口（semantic/reference），邻居状态写成 CLI 原文 `FULL/DR`（semantic/type），peer-type 写成 `ibgp`（semantic/type）。M1 正反例增至 48 个（两棵路由树各 3 种模式，加 3 个反例），全部符合预期；App 输出的标准路径从 102 增至 133。
 
 ## 协议邻接（单独分析，不并入 L2/L3 图）
@@ -65,5 +70,5 @@
 
 - 没有 IPv6/ND、unnumbered、BFD、IS-IS、静态路由配置实例的样本，这些不导出。
 - Comware 的按 VRF 路由没有样本（实验网 VSR 不使用 VPN 实例），按 VRF 路由采集只对 IOS 启用。
-- RIB 名称不可得，RIB 不导出；LSDB、TE 邻接没有采集。
+- RIB 名称由“实例 + 地址族”推出（见上）；LSDB、TE 邻接没有采集。
 - 实验室的路径核对只用平台自己的快照观测，不拿其他源地址的 ping 结果作证明。

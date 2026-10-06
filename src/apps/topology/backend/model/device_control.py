@@ -40,7 +40,15 @@ PROTOCOLS = {
     "O_ASE2": "ietf-ospf:ospf",
     "OSPF": "ietf-ospf:ospf",
     "ospf": "ietf-ospf:ospf",
+    # draft-ietf-idr-bgp-model: identity bgp, base routing-protocol.
+    "B": "ietf-bgp:bgp",
+    "BGP": "ietf-bgp:bgp",
+    "bgp": "ietf-bgp:bgp",
 }
+AF_NAMES = {4: "ipv4", 6: "ipv6"}
+# An outgoing interface that discards, or delivers to the device itself (RFC 8349
+# special-next-hop "blackhole" and "receive").
+SPECIAL_INTERFACES = (("null", "blackhole"), ("inloop", "receive"))
 PROTOCOLS.update({identity: identity for identity in set(PROTOCOLS.values())})
 CHASSIS_SUBTYPES = frozenset(
     {
@@ -122,6 +130,22 @@ def _capability(data, cap, result):
     return True
 
 
+def _owners(facts):
+    """{interface: instances} from its addresses (IP facts) and from the device's VRF
+    detail, which also names interfaces without an address (an L3 VNI's SVI)."""
+    scopes = defaultdict(set)
+    for record in facts.get("ip") or []:
+        if isinstance(record, dict) and _identifier(record.get("ifname")):
+            owner = record.get("vrf")
+            scopes[record["ifname"]].add(owner if _identifier(owner) else None)
+    for row in facts.get("vrf_detail") or []:
+        if isinstance(row, dict) and _identifier(row.get("vrf")):
+            for name in row.get("interfaces") or []:
+                if _identifier(name):
+                    scopes[name].add(row["vrf"])
+    return scopes
+
+
 def _scoped_interfaces(observation, data, facts, scope, result):
     """Only current interface identities with explicit IP-fact VRF ownership."""
     result["metadata"]["reference_facts"] = {
@@ -134,18 +158,15 @@ def _scoped_interfaces(observation, data, facts, scope, result):
     records = facts.get("ip")
     if not isinstance(records, list):
         return {}, []
-    scopes = defaultdict(set)
-    for record in records:
-        if isinstance(record, dict) and _identifier(record.get("ifname")):
-            owner = record.get("vrf")
-            scopes[record["ifname"]].add(owner if _identifier(owner) else None)
+    scopes = _owners(facts)
     state = project_device_state(observation)
     entries = state["tree"]["ietf-interfaces:interfaces"]["interface"]
     names = {name for name, owners in scopes.items() if owners == {scope}}
     return {row["name"]: row for row in entries if row["name"] in names}, state["gaps"]
 
 
-def _next_hop(record, version, scope, interfaces, result, index, used):
+def _next_hop(record, version, scope, interfaces, result, index, used, outside=None):
+    outside = outside or {}  # interfaces proven in exactly one other instance
     special = record.get("special_next_hop")
     if special is not None:
         if record.get("next_hops"):
@@ -159,13 +180,50 @@ def _next_hop(record, version, scope, interfaces, result, index, used):
     if not isinstance(raw, list) or not raw:
         _gap(result, "route_next_hop_not_observed", record_index=index)
         return None
-    hops = []
+    if len(raw) == 1 and isinstance(raw[0], dict) and raw[0].get("vrf") == scope:
+        name = str(raw[0].get("ifname") or "").lower()
+        for prefix, special in SPECIAL_INTERFACES:
+            if name.startswith(prefix):
+                return {"special-next-hop": special}
+    hops, failed = [], False
     for hop_index, hop in enumerate(raw):
         if not isinstance(hop, dict):
             _gap(result, "invalid_route_next_hop", record_index=index, next_hop_index=hop_index)
+            failed = True
             continue
-        if hop.get("vrf") != scope:
-            _gap(result, "next_hop_scope_not_proven", record_index=index, next_hop_index=hop_index)
+        other = hop.get("vrf")
+        if other != scope:
+            if not _identifier(other) or hop.get("ip") is None:
+                _gap(
+                    result,
+                    "next_hop_scope_not_proven",
+                    record_index=index,
+                    next_hop_index=hop_index,
+                )
+                failed = True
+                continue
+            # A next hop in another instance (a leaked route, a VPN route over the
+            # underlay): RFC 8349 has no instance for it, so the tree holds its address and
+            # metadata says where it resolves, as acl_views do for ACLs.
+            try:
+                parsed = ipaddress.ip_address(hop["ip"])
+            except ValueError:
+                parsed = None
+            if parsed is None or parsed.version != version:
+                _gap(
+                    result, "invalid_next_hop_address", record_index=index, next_hop_index=hop_index
+                )
+                failed = True
+                continue
+            hops.append({f"{AF[version]}:address": str(parsed)})
+            result["metadata"].setdefault("next_hops_outside_instance", []).append(
+                {
+                    "prefix": record.get("prefix"),
+                    "address": str(parsed),
+                    "network_instance": other,
+                    **({"interface": hop["ifname"]} if hop.get("ifname") else {}),
+                }
+            )
             continue
         entry = {}
         address = hop.get("ip")
@@ -184,6 +242,7 @@ def _next_hop(record, version, scope, interfaces, result, index, used):
                 )
                 # An explicit bad/cross-family address cannot become a different
                 # interface-only forwarding instruction.
+                failed = True
                 continue
             else:
                 entry[f"{AF[version]}:address"] = str(parsed)
@@ -192,6 +251,29 @@ def _next_hop(record, version, scope, interfaces, result, index, used):
             if isinstance(name, str) and name in interfaces:
                 entry["outgoing-interface"] = name
                 used.add(name)
+            elif _identifier(name) and entry and name in outside:
+                # The interface is in another instance (a VPN route over the underlay):
+                # this instance's tree cannot reference it; metadata names it.
+                result["metadata"].setdefault("next_hops_outside_instance", []).append(
+                    {
+                        "prefix": record.get("prefix"),
+                        "address": next(iter(entry.values())),
+                        "interface": name,
+                        "interface_instance": outside[name],
+                    }
+                )
+            elif _identifier(name) and entry:
+                # The device printed an interface the interface tree does not prove in
+                # this instance (no state observed, a duplicate row): the tree keeps the
+                # next-hop address, metadata the interface the device named, so the path
+                # still leaves through it with its state unknown.
+                result["metadata"].setdefault("next_hop_interfaces_unproven", []).append(
+                    {
+                        "prefix": record.get("prefix"),
+                        "address": next(iter(entry.values())),
+                        "interface": name,
+                    }
+                )
             else:
                 _gap(
                     result,
@@ -200,9 +282,12 @@ def _next_hop(record, version, scope, interfaces, result, index, used):
                     next_hop_index=hop_index,
                     interface=name if isinstance(name, str) else None,
                 )
+                failed = True
         if entry:
             hops.append(entry)
-    if not hops:
+    if failed or not hops:
+        # A route is exported whole or not at all: a next hop without its interface, or
+        # one left out, would send the path elsewhere than the device does.
         _gap(result, "route_next_hop_not_projected", record_index=index)
         return None
     if len(raw) == 1 and len(hops) == 1:
@@ -240,7 +325,6 @@ def _routing(observation, data, facts):
         result["metadata"]["records"] = [deepcopy(row) for _, row in scopes[scope]]
         needs_references = any(
             isinstance(record, dict)
-            and _identifier(record.get("rib_name"))
             and isinstance(record.get("next_hops"), list)
             and any(
                 isinstance(hop, dict) and hop.get("ifname") is not None
@@ -253,7 +337,14 @@ def _routing(observation, data, facts):
             if needs_references
             else ({}, [])
         )
-        ribs, versions, conflicts, used = {}, {}, set(), set()
+        owners = _owners(facts)
+        outside = {
+            name: next(iter(found))
+            for name, found in owners.items()
+            if len(found) == 1 and next(iter(found)) not in {scope, None}
+        }
+        result["metadata"]["record_indexes"] = [index for index, _ in scopes[scope]]
+        ribs, versions, conflicts, used, derived = {}, {}, set(), set(), set()
         for index, record in scopes[scope]:
             if not isinstance(record, dict):
                 _gap(result, "invalid_route_record", record_index=index)
@@ -262,9 +353,6 @@ def _routing(observation, data, facts):
                 _gap(result, "route_scope_not_observed", record_index=index)
                 continue
             name = record.get("rib_name")
-            if not _identifier(name):
-                _gap(result, "native_rib_name_not_observed", record_index=index)
-                continue
             try:
                 prefix = record.get("prefix")
                 network = (
@@ -278,6 +366,14 @@ def _routing(observation, data, facts):
                 _gap(result, "invalid_route_prefix", record_index=index)
                 continue
             version = network.version
+            if name is None:
+                # The device prints no RIB name: one per instance and address family,
+                # named from those (owner decision 2026-10-06), as metadata says.
+                name = AF_NAMES[version] if scope == "default" else f"{scope}:{AF_NAMES[version]}"
+                derived.add(name)
+            elif not _identifier(name):
+                _gap(result, "native_rib_name_not_observed", record_index=index)
+                continue
             if name in versions and versions[name] != version:
                 conflicts.add(name)
                 continue
@@ -298,13 +394,25 @@ def _routing(observation, data, facts):
                     entry["route-preference"] = preference
                 else:
                     _gap(result, "invalid_route_preference", record_index=index)
-            hop = _next_hop(record, version, scope, interfaces, result, index, used)
-            if hop is not None:
-                entry["next-hop"] = hop
+            # No OSPF metric: RFC 9129 adds it only for routes of an OSPF version
+            # (derived-from 'ospf'), and the version is not inferred from the CLI code.
+            hop = _next_hop(record, version, scope, interfaces, result, index, used, outside)
+            if hop is None:
+                continue  # RFC 8349 next-hop is the route's forwarding: no route without it
+            entry["next-hop"] = hop
             ribs.setdefault(name, []).append(entry)
         for name in sorted(conflicts):
             ribs.pop(name, None)
             _gap(result, "native_rib_address_family_conflict", rib_name=name)
+        if derived & set(ribs):
+            result["metadata"]["derived_rib_names"] = {
+                name: {
+                    "network_instance": scope,
+                    "address_family": AF_NAMES[versions[name]],
+                    "reason": "the device prints no RIB name",
+                }
+                for name in sorted(derived & set(ribs))
+            }
         if ribs:
             result["tree"]["ietf-routing:routing"]["ribs"] = {
                 "rib": [
@@ -523,6 +631,10 @@ def _protocols(observation, facts, routing):
         if used:
             existing = entry["tree"].setdefault("ietf-interfaces:interfaces", {"interface": []})
             names = {row["name"] for row in existing["interface"]}
+            for row in existing["interface"]:
+                # Already referenced by a route: LDP still needs its IPv4 (RFC 9070).
+                if row["name"] in addressed and "ietf-ip:ipv4" not in row:
+                    row["ietf-ip:ipv4"] = deepcopy(ipv4[row["name"]])
             copies = []
             for name in sorted(used - names):
                 row = deepcopy(rows[name])
@@ -539,3 +651,10 @@ def _protocols(observation, facts, routing):
             "RFC 9070",
             "RFC 8960",
         ]
+
+
+def project_routing(observation):
+    """The RFC 8349 routing sections of one observation, one per network instance."""
+    data = observation.get("data", observation) if isinstance(observation, dict) else {}
+    facts = data.get("facts", data) if isinstance(data, dict) else {}
+    return _routing(observation, data, facts if isinstance(facts, dict) else {})

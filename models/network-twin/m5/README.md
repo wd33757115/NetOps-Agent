@@ -185,7 +185,7 @@ H3C 的文档说明 Comware 7 的 YANG 文件内置在设备软件里，用 `net
 ## 未做与限制
 
 - **服务分组**：不从 VRF 猜客户服务，也不生成 L3SM/L2SM。hub-and-spoke 会按导出 RT 分成两个服务，导入关系列在 relations 中。
-- **RIB 与标签**：RIB（包括 MPLS RIB / LFIB）仍不导出，原因是 RIB 名称不可得。
+- **RIB 与标签**：IP 路由已用推出的 RIB 名导出（2026-10-06，见 M4 README），隧道（MPLS VPN、VXLAN L3VNI）仍由 `overlay.prepare` 在树来的路由上标注；MPLS RIB / LFIB 仍不导出（标签栈与 LSP 下一跳尚未映射）。
 - **未导出的字段**：BGP 前缀数；IOS EVI 的服务接口类型（受 RFC 9291 缺陷所限）；LDP 地址绑定和标签绑定。
 - **IPv6**：没有样本。
 - **其他厂商与规模**：NX-OS 等家族还没有 M5 的检查项实现；border leaf、多 fabric 互联没有样本。

@@ -85,7 +85,7 @@
 - L3SM/L2SM 与 SAP/AC 绑定：需要服务订单或部署事实，不从 VRF 猜。
 - ACL、NAT、QoS、IPsec 与流条件分析；服务保障（RFC 9418）、告警与 OAM。
 - 设备层的遗留项：
-  - RIB（含 MPLS RIB）仍不导出，原因是 RIB 名称不可得；
+  - IP RIB 自 2026-10-06（topology 0.13.0）起用“实例 + 地址族”推出的名字导出，路径从树计算；MPLS RIB 仍不导出；
   - BGP 前缀数不导出，原因是 CLI 没有说明计数在入口策略之前还是之后；
   - Comware 的 LDP 发现源，以及 NX-OS 的 M5 检查项实现，都没有样本。
 

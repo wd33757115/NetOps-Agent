@@ -77,7 +77,7 @@ TE 候选集一开始有 254 个错误（新草案引用 8776-update 才有的 g
 
 当前解析器采集的 77 个字段：已导出 21、可映射但未导出 31、键不可得 13、无原生节点 8、作用域 4。
 
-- 可映射未导出：接口 admin-status/description、VLAN 与成员、PVID、路由（App 不臆造 RIB 名称，所以不输出路由）、VRRP priority、IVY 厂商/型号等，是 M2/M3/M4 的直接工作量。
+- 可映射未导出：接口 admin-status/description、VLAN 与成员、PVID、路由（当时不臆造 RIB 名称，所以不输出路由；2026-10-06 起按负责人决定由“实例 + 地址族”推出 RIB 名并导出，见 M4 README）、VRRP priority、IVY 厂商/型号等，是 M2/M3/M4 的直接工作量。
 - 键不可得：FDB 需要 database-id 和桥端口号；LLDP 远端需要 time-mark/remote-index，端口需要 dest-mac-address；本地管理地址按 802.1AB 挂在发送端口下；序列号属于 component-id 未知的机框组件。
 - 无原生节点：CLI 简写接口名、ARP 老化时间、VLAN active/suspend、Cisco DTP 模式等，作为证据留在 YANG 树外。
 - 部分实例：已输出的接口缺 `statistics/discontinuity-time`，VRRP 实例缺 `version`；`admin-status`、`if-index` 受 `if-feature if-mib` 约束；LAG/微波节点受 when 约束。

@@ -345,6 +345,6 @@ def test_an_internet_address_is_placed_where_the_network_sends_to_it(lab):
     [exit_] = result["exits"]
     assert exit_["device"]["name"].startswith("BR1")
     assert (exit_["interface"], exit_["next_hop"]) == ("GigabitEthernet2/0", "100.64.1.1")
-    assert exit_["route"] == {"prefix": "198.51.100.0/24", "protocol": "BGP"}
+    assert exit_["route"] == {"prefix": "198.51.100.0/24", "protocol": "ietf-bgp:bgp"}
     # An address of the network itself is still located as before.
     assert locate_with_exits(lab, BASE, PC1)["status"] != "external"

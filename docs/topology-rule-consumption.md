@@ -201,6 +201,10 @@ commands(check_item_ids) -> [{implementation_id, platforms, command, scoped_comm
   - 导出：established 写成 RFC 9899 的 TCP 标志（ACK 或 RST 任一置位，`operator any`；这是 Cisco 的定义，华三是否完全一致待实验网用命中计数核对）。一条规则多个端口（如 `eq www 443`）写成 RFC 9899 端口集，集合名由设备的键推出：`<ACL名>:<规则号>:src|dst`（负责人决定，做法同 PBR 的 sequence-id）。仍表达不了、记缺口的：分片（"非首片"不是一个分片条件）、成员未采集的对象组、时间段、不连续通配符、模板不认识的条件。缺口带上它在 ACL 里的位置和动作。
   - VPN 实例：RFC 8519 和 RFC 9899 都没有实例条件，而华三不带 vpn-instance 的规则只匹配公网报文、带的只匹配该实例。因此 ACL 按它在每个实例里的实际作用导出（负责人决定）：公网接口用原名，VPN 接口用 `<ACL名>@<实例名>`，各自只含在该实例能命中的规则，并去掉实例条件；被略去的规则写在 metadata 的 `acl_views`。
   - 路径：读从树抽出的查询表（`model/acl_table.py`）。缺口规则占位为判断不了；拒绝时 `entry` 用标准节点名（`matches`、`matched-packets`）。与改动前相比，时间段、分片、不连续通配符从"能判定"变为"判断不了"。
+- **路由走标准树流水线（2026-10-06，topology 0.13.0）**：负责人决定允许推出 RIB 名：用“实例 + 地址族”（公网 `ipv4`、VPN 实例 `<实例>:ipv4`），并在 metadata `derived_rib_names` 写明是推出的，做法同端口集名和 `<ACL名>@<实例名>`。设备路由表的全部路由进 RFC 8349 树，路径直接从树计算。
+  - 导出：协议用冻结模块的 identity（BGP 为 `ietf-bgp:bgp`）；Null 出接口为 blackhole，InLoopBack 为 receive。下一跳在别的实例时树里写地址，实例写在 metadata `next_hops_outside_instance`；出接口在本实例证明不了时树里写地址，接口名写在 metadata `next_hop_interfaces_unproven`。整条表达不了的路由记缺口。OSPF metric 不导出（RFC 9129 要求具体 OSPF 版本，CLI 不给）。
+  - 路径：读查询表 `model/route_table.py`。跳上的 `route.protocol` 变为 identity（如 `ietf-ospf:ospf`、`ietf-routing:direct`），`metric` 为空；ECMP 与优先级比较不变。导不出的路由可能更长匹配时跳上记 `route_not_in_tree`，查不到路由时以 `route_not_in_tree` 结束（以前是按事实里的路由继续算，或 `unresolved_next_hop`）；InLoopBack 路由结束时不再带接口名。
+  - 未做：实机核对（合并后用同一快照比对换前换后的路径结论）；接口、IP、ARP 改走树（下一步）；MPLS RIB / LFIB。
 - **待做**：
   - 系统模板登记到规则治理的模板库（数据库），让页面可见、可评审；目前模板文件由资产清单按 sha256 钉住；
   - NX-OS 等家族在有实机样本后补实现，届时删掉对应的通用解析器；

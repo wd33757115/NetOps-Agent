@@ -22,7 +22,11 @@
 ## 3. ACL、NAT 以后怎么照着改
 
 - **ACL**（2026-10-06 已改，topology 0.12.0）：标准树是 RFC 8519 加 RFC 9899（`model/device_acl.py`），查询表 `model/acl_table.py` 只从树和缺口取（按接口和方向：按设备匹配顺序排好的 ace，字段用标准节点名，默认动作取自 metadata），路径改读查询表。树表达不了的规则在查询表里占住原来的位置，记为 `undetermined`（负责人决定：无法处理的标为判断不了），报文走到它时，后面的规则不能替它下结论；它前后的规则结论一致时仍能判定，并在 `undecided_before` 里写明。
+- **路由**（2026-10-06 已改，topology 0.13.0）：标准树是 RFC 8349 RIB（`model/device_control.py` 的 `project_routing`），RIB 名由“实例 + 地址族”推出并在 metadata `derived_rib_names` 写明（负责人决定）。查询表 `model/route_table.py` 每条路由一行（`destination-prefix`、`source-protocol`、`route-preference`、`next-hops`、`special-next-hop`），树放不下的部分从 metadata 还原（下一跳所在的别的实例、树证明不了的出接口），整条导不出的路由按前缀列在 `missing`。路径只读查询表；`missing` 里有可能更长匹配的路由时记 `route_not_in_tree`，查不到路由时以它结束。隧道标注（`overlay.prepare`）作用在树来的路由上。
+
 以后照着改的：
+
+- **接口、IP、ARP**：下一步，同样改为从 RFC 8343/8344 树取查询表。
 
 - **NAT**：第 2 步还没有。RFC 8512 的列表要求设备不打印的数字键（实例号、策略号、池号），按"不编造列表键"目前不导出（见 `docs/topology-rule-consumption.md` NAT 一节）。要先由负责人决定键的来源（例如按平台固定规则分配，并在 metadata 写明），再照 PBR 的方式做第 2、3 步。
 - **其他 CLI 采集**：同样先有标准树（M1—M5 已有的 RFC 8343/8344/8349/8529 等导出），再从树抽查询表，最后让路径改读查询表。可以一个领域一个领域地换，每换一个都用同一份样本对比换前换后的路径结论。

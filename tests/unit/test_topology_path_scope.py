@@ -253,11 +253,13 @@ def test_empty_next_hop_list_cannot_produce_vacuous_complete_path():
     devices["left"]["routes"][0]["next_hops"] = []
     result = trace(devices, BASE, "198.51.100.1", "198.51.100.2")
     assert result["forward"]["status"] == "partial"
+    # The route without a next hop cannot enter the device's tree: the lookup it would
+    # win is not decided as if it were absent.
     assert result["forward"]["paths"][0]["end"] == {
-        "status": "unresolved_next_hop",
-        "reason": "route_next_hops_missing",
+        "status": "route_not_in_tree",
+        "prefixes": ["198.51.100.2/32"],
     }
-    assert any(gap.get("reason") == "route_next_hops_missing" for gap in result["gaps"])
+    assert any(gap["status"] == "route_not_in_tree" for gap in result["gaps"])
 
 
 def leaked(*, back=True):

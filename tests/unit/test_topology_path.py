@@ -60,14 +60,14 @@ def test_lab_hosts_route_across_both_routers_and_back():
     first, last = path["hops"]
     assert first["route"] == {
         "prefix": "192.168.1.0/24",
-        "protocol": "O_INTRA",
+        "protocol": "ietf-ospf:ospf",
         "preference": 10,
-        "metric": 2,
+        "metric": None,  # RFC 9129 holds the metric only for a known OSPF version
         "next_hop": "2.2.2.2",
     }
     # The routed hop names the observed L2 link between the two GigabitEthernet2/0 ports.
     assert first["link_id"].startswith(BASE + "l2-link:")
-    assert last["route"]["protocol"] == "Direct"
+    assert last["route"]["protocol"] == "ietf-routing:direct"
     assert path["end"] == {"status": "delivered", "to": "subnet", "interface": "Vlan-interface200"}
     assert hops(reverse["paths"][0]) == [
         ("10.10.1.1", "Vlan-interface200", "GigabitEthernet2/0"),
@@ -425,10 +425,10 @@ def test_null_needs_no_egress_and_inloop_does_not_invent_a_local_destination():
     devices["10.0.0.1"]["routes"].append(route("172.16.11.0/24", ("0.0.0.0", "InLoopBack0")))
     forward = trace(devices, BASE, "172.16.1.10", "172.16.11.1")["forward"]
     assert forward["status"] == "partial"
+    # The tree holds the InLoopBack route as special-next-hop receive, without interface.
     assert forward["paths"][0]["end"] == {
         "status": "endpoint_unresolved",
         "destination": "172.16.11.1",
-        "interface": "InLoopBack0",
     }
 
 
