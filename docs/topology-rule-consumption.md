@@ -194,7 +194,7 @@ commands(check_item_ids) -> [{implementation_id, platforms, command, scoped_comm
   - 标准树（`model/device_pbr.py`）：最小 OpenConfig 宿主树，按钉住的完整依赖闭包（`models/network-twin/openconfig`）用 yangson 校验。节点的 ACL 展开为每条规则一个 OpenConfig rule，`sequence-id = 节点号 × 65536 + 序号`；含 deny 规则、时间段、模板不认识条件、不连续通配符、neq 端口、ICMP/established/fragments 的 ACL 不展开，该节点及其后的节点不导出并记缺口（丢掉一个节点会改变后面节点能收到哪些报文）。permit 且有下一跳 → `action/config/next-hop`；deny 节点和不设动作的 permit 节点 → `forwarding-action FORWARD`（按路由表转发、不再看后面的节点）。本机策略在 OpenConfig 里没有位置，记缺口并列在 metadata。
   - 查询表（`model/pbr.py`）从标准树抽取：每个绑定接口一行，按 sequence-id 排好的规则，字段沿用标准节点名；不完整的标 `complete: false` 并带原因。
   - 路径：入向 ACL 之后、NAT 和查路由之前按查询表计算。命中有下一跳的节点：按该下一跳转发，下一跳的解析与路由一致，跳上 `route.protocol` 为 `policy-forwarding`；命中 deny 节点或没有命中：按路由表。跳上 `policy_route` 写明策略、节点、规则序号和描述（ACL 号与规则号）。判断不了时记 `pbr_undetermined`；下一跳解析不了时按路由表转发并记 `pbr_next_hop_unresolved`（H3C 文档：下一跳无效时按路由表转发）。设备本身发出的报文遇到本机策略时记 `local_policy_not_computed`。没采到策略内容的设备继续标 `policy_may_redirect`/`policy_not_computed`。
-  - 未做：实机采集与打流核对（合并后在 BR1 上用 CLI 和 NETCONF 各采一次，再用路径工具核对验收用例）；入方向 nat server 与策略路由的先后仍待实测；Comware 没有策略时 `display ip policy-based-route` 的输出未见样本，暂不声明有效空表（空输出不会被当成"没有策略"）；IPv6 策略。
+  - 未做：实机采集与打流核对（合并后在 BR1 上用 CLI 和 NETCONF 各采一次，再用路径工具核对验收用例）；NETCONF 代码按 H3C 的 PBR YANG 核对（GitHub 上没有 H3C 的模块，要从 BR1 用 get-schema 取，见 M5 README）；入方向 nat server 与策略路由的先后仍待实测；Comware 没有策略时 `display ip policy-based-route` 的输出未见样本，暂不声明有效空表（空输出不会被当成"没有策略"）；IPv6 策略。
 - **待做**：
   - 系统模板登记到规则治理的模板库（数据库），让页面可见、可评审；目前模板文件由资产清单按 sha256 钉住；
   - NX-OS 等家族在有实机样本后补实现，届时删掉对应的通用解析器；

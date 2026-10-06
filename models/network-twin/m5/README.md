@@ -161,6 +161,13 @@ IETF 和 IEEE 都没有策略路由模型，负责人决定用 OpenConfig `openc
 - `library.json`：RFC 7895 模块库，由 `scripts/topology/build_openconfig_library.py` 生成；`--check` 先核对每个文件的 SHA-256，再核对模块库与文件一致。
 - 编译：pyang 2.7.1 无错误；yangson 1.6.3 能加载。yangson 只在"实现"的模块里解析 leafref，而 network-instance 树里有指向 routing-policy、defined-sets、qos、keychain 的 leafref，所以闭包里的 OpenConfig 模块全部标为实现；IETF 模块只有 `iana-if-type` 标为实现（接口类型要用它的身份），其余只导入。
 
+**厂商模块（H3C）**：按"缺 YANG 原始文件就去 GitHub 上对应的项目找"（负责人 2026-10-06），查过两处，都没有 H3C Comware 的 YANG：
+
+- YangModels/yang（提交 `3dc40afb4ab93b41709d94e974375afefed935e4`）：`vendor/` 下只有 alliedtelesis、arrcus、ciena、cisco、fujitsu、huawei、juniper、nokia、readylinks；
+- H3C 自己的 GitHub 组织：H3C/h3c_open.comware（`d728dd0`）、H3C/pycw7-ansible（`47de72c`）是 Ansible 集合，没有 `.yang` 或 `.xsd` 文件。
+
+H3C 的文档说明 Comware 7 的 YANG 文件内置在设备软件里，用 `netconf-state/schemas` 列出、`get-schema` 读取。BR1 的 hello 通告了 `ietf-netconf-monitoring`（2010-10-04），以及定义用到的模块：PBR 2022-08-18、ACL 2021-11-09、NAT 2023-01-03、Ifmgr 2021-11-25、ARP 2019-12-07、Route 2019-12-17。因此 `h3c-comware7.pbr-rules`/`pbr-nexthops` 里的代码目前只以 BR1 样本为据（与同一时刻的 CLI 对照）：节点 Mode 1=permit、2=deny；ApplyIPDF 2 对应"没有 apply ip-df"；下一跳表只读 Mode 0、VrfIndex 0、NexthopDirect false 这一种形式，其余报 `lookup_unexpected`。平台的 NETCONF 会话目前只发 `get`/`get-config`，不能发 `get-schema`；取到 PBR 等模块后，按 OpenConfig 的方式钉住，再核对这些代码。
+
 **宿主树**：policy-forwarding 只能挂在 `openconfig-network-instance` 下，接口绑定是指向 `/oc-if:interfaces/interface/name` 的 leafref。只生成最小宿主树：网络实例（名称、类型）、绑定的接口（名称和模块要求的类型）和 policy-forwarding。名称与 IETF 树一致（全局表在 OpenConfig 里叫 `DEFAULT`，类型 `DEFAULT_INSTANCE`；VRF 用 RFC 8529 的实例名，类型 `L3VRF`）。接口类型取自 RFC 8343 树，取不到时不造值，该绑定不导出并记缺口。
 
 **校验**：`tests/unit/test_topology_pbr.py` 用钉住的模块校验 BR1 样本导出的树；把绑定的接口名改成不存在的名字时，yangson 报 `instance-required`（leafref 生效）。

@@ -35,6 +35,7 @@
 以下是负责人长期以来的决定，任务中必须遵守。
 
 - **大道至简，IETF 优先。** 能用已有标准模型就不自造字段，也不增加项目自定义 YANG；没有 IETF/IEEE 标准时，用负责人认可的公开模型（例如 PBR 用 OpenConfig）。不要过度设计。
+- **YANG 原始文件从 GitHub 上对应的项目取**（负责人 2026-10-06）：缺哪个模块，就去发布它的项目找。IETF、IEEE 等标准模块和多数厂商的模块在 YangModels/yang（厂商在 `vendor/<厂商>`），OpenConfig 在 openconfig/public。固定一个提交，按 `models/network-twin/openconfig/sources.lock.json` 的格式记 URL 和 SHA-256，不改源码。GitHub 上找不到的，写明查过哪里，再从设备用 `get-schema`（RFC 6022）取，并记下设备型号和软件版本。H3C Comware 的模块就属于这种情况（2026-10-06 查过，见 `models/network-twin/m5/README.md`）。
 - **统一数据流水线**（[实施文档 §13](../network-digital-twin-implementation.md)）：原始响应（证据） → 解析或映射为标准数据树（RFC 7951 JSON，校验；不完整的标为 partial） → 从标准树抽取查询表 → 路径与影响分析读查询表。查询表的字段沿用标准节点的键和名称。
 - **厂商差异写成数据，不写进采集代码。** 设备族、命令、模板、映射都是数据；拓扑采集代码里不能出现厂商或族名（有守护测试检查）。
 - **解析归规则治理。** CLI 解析靠规则治理的检查项和 TextFSM 模板（模板在 `src/skills/shared/textfsm-templates`，按 sha256 钉住）；拓扑里不写手工解析器。NETCONF 映射由 netconf-api App 的定义完成，产出和检查项同名、按 CLI 原文写法的值行（见 [docs/netconf-api-handoff.md](../netconf-api-handoff.md)）。

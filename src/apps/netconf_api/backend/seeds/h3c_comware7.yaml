@@ -316,7 +316,9 @@ definitions:
     keys: [PolicyName, NodeID]
     where: {AddressType: "0"}  # IPv4
     # The form BR1 showed for "apply next-hop 10.0.13.2"; a next hop in a VPN instance,
-    # a directly connected one or another mode is not read as this one.
+    # a directly connected one or another mode is not read as this one. H3C's PBR YANG
+    # (PBR@2022-08-18) is not on GitHub; these codes are BR1's until it is read with
+    # get-schema (models/network-twin/m5/README.md).
     expect: {Mode: "0", VrfIndex: "0", NexthopDirect: "false"}
 
   - id: h3c-comware7.pbr-rules
