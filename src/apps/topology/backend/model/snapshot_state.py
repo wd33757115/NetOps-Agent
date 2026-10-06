@@ -10,12 +10,14 @@ from __future__ import annotations
 from copy import deepcopy
 
 from .builder import L2T, NT, ST
+from .device_acl import project_device_acl
 from .device_control import project_device_control
 from .device_ip import enrich_device_ip
 from .device_pbr import project_device_pbr
 from .device_state import project_device_state
 from .inventory import project_inventory
 from .retained_links import UNAVAILABLE_OPER_STATUSES, retain_l2_links
+from .standard_tables import builder_rows
 from .standard_trees import project as project_standard
 
 
@@ -91,18 +93,24 @@ def _device_trees(observation, data):
     """(device tree, control sections) of one observation.
 
     A device read as standard records over NETCONF (netconf-api's conversion layer)
-    exports the trees built from them; ACL keeps its own projection until it moves to
-    the conversion layer. Other devices export the CLI projections. Both carry PBR.
+    exports the trees built from them, ACL and PBR included (their builders read the
+    rows taken from the records). Other devices export the CLI projections.
     """
     standard = data.get("standard")
     records = standard.get("records") if isinstance(standard, dict) else None
     if isinstance(records, dict) and "interface" in records:
         identity = (data.get("platform") or {}).get("identity") or {}
-        built = project_standard(records, identity.get("os_family", ""))
+        platform = identity.get("os_family", "")
+        built = project_standard(records, platform)
+        facts = data.get("facts") if isinstance(data.get("facts"), dict) else {}
+        rows = {
+            "data": {"facts": {**facts, **builder_rows(records, platform)}},
+            **{k: observation[k] for k in ("id", "observed_at") if k in observation},
+        }
         control = {
             **built["control"],
-            "acl": project_device_control(observation)["acl"],
-            "pbr": project_device_pbr(observation),
+            "acl": project_device_acl(rows),
+            "pbr": project_device_pbr(rows),
             "source": {"netconf_mapping": standard.get("mapping")},
         }
         return built["device"], control

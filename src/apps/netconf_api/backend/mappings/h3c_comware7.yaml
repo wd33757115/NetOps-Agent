@@ -215,3 +215,128 @@ tables:
       fragment: {leaf: Fragment, codes: {"true": true, "false": false}}
       time-range: TimeRange
       network-instance: VRF
+
+  # --- ACL (RFC 8519/9899) and policy-based routing (OpenConfig), measured on BR1
+  # against "display acl all", "display packet-filter interface" and "display ip
+  # policy-based-route" (tests/fixtures/netconf/h3c-comware7/br1-policy; the VPN-instance
+  # condition on BR2, br2-acl-vrf). A leaf no field reads is reported as unread.
+  acl-group:
+    path: top/ACL/NamedGroups/Group
+    ignore: [GroupType, GroupCategory, Step, RuleNum, Name]
+    fields:
+      acl: GroupIndex
+      match-order: {leaf: MatchOrder, codes: {"1": config, "2": auto}}  # auto: depth first
+
+  acl-entry:  # basic and advanced IPv4 rules, named and numbered alike
+    path: [top/ACL/IPv4NamedBasicRules/Rule, top/ACL/IPv4NamedAdvanceRules/Rule]
+    ignore: [SrcAny, DstAny, Counting, Logging]
+    fields:
+      acl: GroupIndex
+      sequence: {leaf: RuleID, convert: integer}
+      match-index: {leaf: MatchIndex, convert: integer}  # the match order of an auto group
+      action: {leaf: Action, codes: {"1": deny, "2": permit}}
+      protocol: {leaf: ProtocolType, convert: integer, none: ["256"]}  # 256: any IP packet
+      source-address: {leaf: SrcIPv4/SrcIPv4Addr, convert: address}
+      source-wildcard: {leaf: SrcIPv4/SrcIPv4Wildcard, convert: address}
+      source-object-group: SrcObjectGroup
+      destination-address: {leaf: DstIPv4/DstIPv4Addr, convert: address}
+      destination-wildcard: {leaf: DstIPv4/DstIPv4Wildcard, convert: address}
+      destination-object-group: DstObjectGroup
+      # Port operators: 1 lt, 2 eq, 3 gt, 4 neq, 5 range (Value2 65536: no upper port).
+      source-port-operator: {leaf: SrcPort/SrcPortOp, codes: {"1": lt, "2": eq, "3": gt, "4": neq, "5": range}}
+      source-port: {leaf: SrcPort/SrcPortValue1, convert: integer}
+      source-upper-port: {leaf: SrcPort/SrcPortValue2, convert: integer, none: ["65536"]}
+      destination-port-operator: {leaf: DstPort/DstPortOp, codes: {"1": lt, "2": eq, "3": gt, "4": neq, "5": range}}
+      destination-port: {leaf: DstPort/DstPortValue1, convert: integer}
+      destination-upper-port: {leaf: DstPort/DstPortValue2, convert: integer, none: ["65536"]}
+      icmp-type: {leaf: ICMP/ICMPType, convert: integer}
+      icmp-code: {leaf: ICMP/ICMPCode, convert: integer}
+      established: {leaf: Established, codes: {"true": true, "false": false}}
+      fragment: {leaf: Fragment, codes: {"true": true, "false": false}}
+      time-range: TimeRange
+      time-range-active: {leaf: Status, codes: {"1": true, "2": false}}  # CLI Active/Inactive
+      network-instance: {leaf: VRF, default: default}  # no instance: public packets only
+      matched-packets: {leaf: Count, convert: integer, none: ["0"]}  # the CLI prints no 0
+
+  acl-attachment:  # packet filters on interfaces
+    path: top/ACL/PfilterApply/Pfilter
+    ignore: [HardCount, AppSequence]
+    where: {leaf: AppAclType, in: ["1"]}  # IPv4 ACLs (5: a direction's default action)
+    fields:
+      object-type: {leaf: AppObjType, codes: {"1": interface}}
+      interface: {leaf: AppObjIndex, convert: integer, lookup: {table: interface, match: if-index, take: name}}
+      if-index: {leaf: AppObjIndex, convert: integer}
+      direction: {leaf: AppDirection, codes: {"1": in, "2": out}}
+      acl: AppAclGroup
+
+  acl-default-attachment:  # a direction of an interface with the default action set
+    path: top/ACL/PfilterApply/Pfilter
+    ignore: [HardCount, AppSequence, AppAclGroup]
+    where: {leaf: AppAclType, in: ["5"]}
+    fields:
+      object-type: {leaf: AppObjType, codes: {"1": interface}}
+      interface: {leaf: AppObjIndex, convert: integer, lookup: {table: interface, match: if-index, take: name}}
+      direction: {leaf: AppDirection, codes: {"1": in, "2": out}}
+
+  acl-default-action:  # the device's action for packets no entry matches
+    path: top/ACL/PfilterDefAction
+    fields:
+      default-action: {leaf: DefaultAction, codes: {"1": permit}}
+
+  acl-run:  # whether an attached ACL is in effect
+    path: top/ACL/PfilterGroupRunInfo/GroupRunInfo
+    where: {leaf: AppAclType, in: ["1"]}
+    ignore: [AppObjType, AclGroupCountStatus, AclGroupPermitPkts, AclGroupPermitBytes, AclGroupDenyPkts, AclGroupDenyBytes]
+    fields:
+      if-index: {leaf: AppObjIndex, convert: integer}
+      direction: {leaf: AppDirection, codes: {"1": in, "2": out}}
+      acl: AppAclGroup
+      in-effect: {leaf: AclGroupStatus, codes: {"1": true}}
+
+  pbr-node:
+    path: top/PBR/PBRPolicyNode/PolicyNode
+    where: {leaf: AddressType, in: ["0"]}  # IPv4
+    fields:
+      policy: PolicyName
+      node: {leaf: NodeID, convert: integer}
+      mode: {leaf: Mode, codes: {"1": permit, "2": deny}}
+      acl: ACLNumber
+      # Clauses BR1's nodes do not have (the CLI shows none): any other value is a clause
+      # this mapping does not read, and the node is not evaluated as if it were absent.
+      apply-ip-df: {leaf: ApplyIPDF, codes: {"2": false}}
+      apply-remark-vpn: {leaf: ApplyRemarkVPN, codes: {"false": false}}
+      apply-continue: {leaf: ApplyContinue, codes: {"false": false}}
+      apply-load-share-next-hop: {leaf: ApplyLoadShareNexthop, codes: {"false": false}}
+      apply-load-share-default-next-hop: {leaf: ApplyLoadShareDefNexthop, codes: {"false": false}}
+      apply-load-share-interface: {leaf: ApplyLoadShareInterface, codes: {"false": false}}
+      apply-load-share-default-interface: {leaf: ApplyLoadShareDefInterface, codes: {"false": false}}
+      apply-load-share-srv6-policy: {leaf: ApplyLoadShareSRv6Policy, codes: {"false": false}}
+      apply-load-share-default-srv6-policy: {leaf: ApplyLoadShareDefSRv6Policy, codes: {"false": false}}
+    ignore: []
+
+  pbr-next-hop:
+    path: top/PBR/PBRApplyNexthop/ApplyNexthop
+    where: {leaf: AddressType, in: ["0"]}
+    ignore: [Priority]
+    fields:
+      policy: PolicyName
+      node: {leaf: NodeID, convert: integer}
+      address: {leaf: IpAddress, convert: address}
+      # The form BR1 showed for "apply next-hop 10.0.13.2": in the public instance, not
+      # directly connected. Another form is reported, and its node is not evaluated.
+      mode: {leaf: Mode, codes: {"0": next-hop}}
+      network-instance: {leaf: VrfIndex, codes: {"0": default}}
+      direct: {leaf: NexthopDirect, codes: {"false": false}}
+
+  pbr-interface:  # a policy applied to packets arriving on an interface
+    path: top/PBR/PBRIfPolicy/IfPolicy
+    where: {leaf: AddressType, in: ["0"]}
+    ignore: []
+    fields:
+      interface: {leaf: IfIndex, convert: integer, lookup: {table: interface, match: if-index, take: name}}
+      policy: PolicyName
+
+  pbr-local:  # the policy applied to packets the device itself sends
+    path: top/PBR/PBRLocalPolicy
+    fields:
+      policy: Ipv4PolicyName

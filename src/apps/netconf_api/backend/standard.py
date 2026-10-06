@@ -30,7 +30,9 @@ MAPPINGS = Path(__file__).resolve().parent / "mappings"
 
 NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*")
 FIELD = re.compile(r"[a-z][a-z0-9-]*")
-RULE_KEYS = frozenset({"leaf", "codes", "convert", "lookup", "format", "when"})
+RULE_KEYS = frozenset(
+    {"leaf", "codes", "convert", "lookup", "format", "when", "none", "default"}
+)
 
 
 class MappingError(ValueError):
@@ -105,6 +107,8 @@ class Rule:
     lookup: tuple[str, str, str] | None = None  # (table, match field, take field)
     format: str | None = None
     when: tuple[str, frozenset[str]] | None = None  # (leaf, its values for which it applies)
+    none: frozenset[str] = frozenset()  # device texts that mean "no value"
+    default: Any = None  # the value when the device gives none
 
 
 @dataclass(frozen=True)
@@ -115,6 +119,7 @@ class Table:
     # Leaves known to carry no condition. With it, a row's other leaves that no field reads
     # are listed in its ``unread`` field (a condition the mapping does not know).
     ignore: frozenset[str] | None = None
+    where: tuple[str, frozenset[str]] | None = None  # rows of this table (others are not)
 
 
 @dataclass(frozen=True)
@@ -172,6 +177,9 @@ def _rule(raw, where, earlier):
         if not isinstance(when, dict) or set(when) != {"leaf", "in"}:
             raise MappingError(f"{where}: a condition names leaf and in")
         when = (_leaf_path(when["leaf"], where), frozenset(str(v) for v in when["in"]))
+    none = raw.get("none", [])
+    if not isinstance(none, list):
+        raise MappingError(f"{where}: none lists device texts")
     return Rule(
         leaves=leaves,
         codes={str(k): v for k, v in codes.items()} if codes is not None else None,
@@ -179,6 +187,8 @@ def _rule(raw, where, earlier):
         lookup=lookup,
         format=fmt,
         when=when,
+        none=frozenset(str(v) for v in none),
+        default=raw.get("default"),
     )
 
 
@@ -190,10 +200,18 @@ def load(raw: Mapping[str, Any], id: str = "", sha256: str = "") -> StandardMapp
     for name, spec in raw["tables"].items():
         if not FIELD.fullmatch(name) or not isinstance(spec, dict):
             raise MappingError(f"{name}: not a table")
-        if not {"path", "fields"} <= set(spec) <= {"path", "fields", "ignore"} or not isinstance(
-            spec["fields"], dict
-        ):
-            raise MappingError(f"{name}: a table has path, fields and maybe ignore")
+        if not {"path", "fields"} <= set(spec) <= {
+            "path",
+            "fields",
+            "ignore",
+            "where",
+        } or not isinstance(spec["fields"], dict):
+            raise MappingError(f"{name}: a table has path, fields, maybe ignore and where")
+        where = spec.get("where")
+        if where is not None:
+            if not isinstance(where, dict) or set(where) != {"leaf", "in"}:
+                raise MappingError(f"{name}: where names leaf and in")
+            where = (_leaf_path(where["leaf"], name), frozenset(str(v) for v in where["in"]))
         paths = spec["path"] if isinstance(spec["path"], list) else [spec["path"]]
         paths = tuple(tuple(_leaf_path(path, name).split("/")) for path in paths)
         fields = {}
@@ -204,7 +222,7 @@ def load(raw: Mapping[str, Any], id: str = "", sha256: str = "") -> StandardMapp
         ignore = spec.get("ignore")
         if ignore is not None:
             ignore = frozenset(_leaf_path(leaf, name) for leaf in ignore)
-        tables.append(Table(name, paths, fields, ignore))
+        tables.append(Table(name, paths, fields, ignore, where))
         seen.add(name)
     platforms = raw.get("platforms") or []
     if not isinstance(platforms, list) or not all(isinstance(p, str) for p in platforms):
@@ -308,8 +326,8 @@ def _value(rule, element, ns, indexes):
     if rule.when is not None and _text(element, rule.when[0], ns) not in rule.when[1]:
         return None, None  # the field does not apply to this row
     texts = [_text(element, leaf, ns) for leaf in rule.leaves]
-    if all(not text for text in texts):
-        return None, None  # an absent or empty leaf is no value
+    if all(not text for text in texts) or "/".join(t or "" for t in texts) in rule.none:
+        return rule.default, None  # an absent or empty leaf, or one meaning none
     if rule.format is not None:
         if not all(texts):
             return None, ("incomplete", "/".join(text or "" for text in texts))
@@ -376,7 +394,10 @@ def convert(mapping: StandardMapping, replies: Iterable[str] | Mapping[str, list
                     index[key] = value if index.get(key, value) == value else None
                 indexes[rule.lookup] = index
         records = []
-        for number, element in enumerate(_rows(roots, table, ns)):
+        rows = _rows(roots, table, ns)
+        if table.where is not None:
+            rows = [row for row in rows if _text(row, table.where[0], ns) in table.where[1]]
+        for number, element in enumerate(rows):
             record = {}
             for leaf, rules in table.fields.items():
                 value, problem = None, None
@@ -385,6 +406,9 @@ def convert(mapping: StandardMapping, replies: Iterable[str] | Mapping[str, list
                     if value is not None or problem is not None:
                         break
                 if problem is not None:
+                    # The record says which fields the device gave but the mapping could
+                    # not read: a consumer never takes such a record as if they were absent.
+                    record.setdefault("problem_fields", []).append(leaf)
                     kind, text = problem
                     problems.append(
                         {
@@ -400,9 +424,12 @@ def convert(mapping: StandardMapping, replies: Iterable[str] | Mapping[str, list
             if table.ignore is not None:
                 read = {leaf for rules in table.fields.values() for r in rules for leaf in r.leaves}
                 read |= {r.when[0] for rules in table.fields.values() for r in rules if r.when}
-                unread = sorted(set(_leaves(element, ns)) - read - table.ignore)
+                if table.where is not None:
+                    read.add(table.where[0])
+                leaves = _leaves(element, ns)
+                unread = sorted(set(leaves) - read - table.ignore)
                 if unread:
-                    record["unread"] = unread
+                    record["unread"] = [f"{leaf}={leaves[leaf]}" for leaf in unread]
             records.append(record)
         found[table.name] = records
     return found, problems

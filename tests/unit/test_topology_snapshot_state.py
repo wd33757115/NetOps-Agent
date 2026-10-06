@@ -353,7 +353,8 @@ def test_a_device_read_as_standard_records_exports_their_trees():
         if p.name != "acl.xml"
     ]  # BR1 later configured with NAT, and the ACLs selecting its sources:
     texts += [
-        (folder / "br1-policy" / n).read_text(encoding="utf-8") for n in ("nat.xml", "acl.xml")
+        (folder / "br1-policy" / n).read_text(encoding="utf-8")
+        for n in ("nat.xml", "acl.xml", "pbr.xml")
     ]
     records, _ = standard.convert(mapping, texts)
     current = observations()
@@ -370,7 +371,14 @@ def test_a_device_read_as_standard_records_exports_their_trees():
     assert {rib["name"] for rib in ribs} == {"ipv4", "ipv6"}
     assert control["lldp"]["tree"]["ieee802-dot1ab-lldp:lldp"]["port"]
     assert control["nat"]["tree"]["ietf-nat:nat"]["instances"]["instance"][0]["policy"]
-    assert set(control) >= {"acl", "pbr"}
+    # ACL (RFC 8519/9899) and PBR (OpenConfig) from the same records.
+    acls = control["acl"]["tree"]["ietf-access-control-list:acls"]
+    assert {acl["name"] for acl in acls["acl"]} >= {"3990", "T-NAMED"}
+    points = acls["attachment-points"]["interface"]
+    assert [p["interface-id"] for p in points] == ["GigabitEthernet5/0"]
+    pbr = control["pbr"]["tree"]["openconfig-network-instance:network-instances"]
+    (instance,) = pbr["network-instance"]
+    assert instance["policy-forwarding"]["policies"]["policy"][0]["policy-id"] == "TEST-PBR"
     # The other devices keep their CLI projections, now with PBR.
     other = next(d for d in state["devices"] if d["address"] == ADDRESSES["B"])
     assert "pbr" in other["control"] and "source" not in other["control"]

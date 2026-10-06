@@ -58,6 +58,7 @@ def test_br1_tables_and_the_only_unlisted_code(br1):
         "ospf-neighbor": 3,
         "lldp-neighbor": 3,
         "lldp-management-address": 3,
+        "acl-default-action": 1,
     }
     # LoopBack0's OSPF network type 3 was seen next to nothing that names it.
     assert problems == [
@@ -267,7 +268,8 @@ def _br1_policy(mapping):
 
 def test_nat_tree_holds_what_display_nat_all_shows(mapping):
     records, problems = _br1_policy(mapping)
-    assert problems == [] and not any("unread" in r for t in records.values() for r in t)
+    nat = [t for name, t in records.items() if name.startswith("nat-")]
+    assert problems == [] and not any("unread" in r for t in nat for r in t)
     nat = project(records, "comware")["control"]["nat"]
     assert [g["code"] for g in nat["gaps"]] == ["mandatory_statistics_not_observed"]
     (instance,) = nat["tree"]["ietf-nat:nat"]["instances"]["instance"]

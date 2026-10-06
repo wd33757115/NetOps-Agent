@@ -435,3 +435,33 @@ def test_a_table_the_device_refuses_is_failed_and_the_rest_still_read(br1, stand
     br1.fail_on = "OSPF"  # a session lost midway: the standard read stops, the CLI serves
     result = br1.collect()
     assert result.standard["failed"].startswith("session:")
+
+
+def test_acl_and_pbr_from_the_standard_records_are_the_cli_facts(br1):
+    """BR1's ACL entries, packet filters and policy routes through the conversion layer
+    against the facts its CLI gives at the same moment (br1-policy)."""
+    from src.apps.netconf_api.backend import standard
+    from src.apps.topology.backend.model.standard_tables import policy_rows
+
+    seed = ROOT / "src/apps/netconf_api/backend/mappings/h3c_comware7.yaml"
+    mapping = standard.load(yaml.safe_load(seed.read_text(encoding="utf-8")))
+    texts = [p.read_text(encoding="utf-8") for p in sorted(POLICY.glob("*.xml"))]
+    texts.append((NETCONF / "ifmgr-interfaces.xml").read_text(encoding="utf-8"))
+    records, problems = standard.convert(mapping, texts)
+    assert problems == []
+    rows = policy_rows(records)
+    cli = topology_observation(br1.collect(netconf="off"))["facts"]
+
+    def same(key):
+        def text(row):
+            # An unknown condition is named by each reading in its own words.
+            row = dict(row)
+            if "unsupported" in row:
+                row["unsupported"] = [u.split(":")[0] for u in row["unsupported"]]
+            return json.dumps(row, sort_keys=True, default=str)
+
+        return sorted(map(text, cli[key])) == sorted(map(text, rows[key]))
+
+    assert all(same(key) for key in ("acl_rules", "acl_bindings", "pbr_rules", "pbr_bindings"))
+    dscp = next(r for r in rows["acl_rules"] if r["acl"] == "3990" and r["seq"] == 50)
+    assert dscp["unsupported"] == ["condition:DSCP=46"]  # the CLI: "dscp ef"
