@@ -347,6 +347,75 @@ def _netconf(actor, device):
         yield session, guard
 
 
+def _inventory():
+    from src.platform.inventory.repository import DeviceRepository
+
+    return DeviceRepository().get_devices_by_filter(status="active")
+
+
+def _module_list(capabilities):
+    """[{name, revision, namespace}] the device announces (RFC 6020 module capabilities)."""
+    found = {}
+    for capability in capabilities:
+        namespace, _, query = capability.partition("?")
+        params = parse_qs(query)
+        for module in params.get("module", []):
+            found.setdefault(
+                module,
+                {
+                    "name": module,
+                    "revision": (params.get("revision") or [None])[0],
+                    "namespace": namespace,
+                },
+            )
+    return [found[name] for name in sorted(found)]
+
+
+def list_devices(actor):
+    """The active inventory devices with their last capability discovery, if any: the
+    modules announced, and for the device's vendor and platform which published
+    definitions it can serve (their module announced) and which not. No session is
+    opened; discovery is ``discover``."""
+    devices = _inventory()
+    with sessions() as session:
+        recorded = {row.device_id: row for row in session.scalars(select(Capability))}
+        definitions = published(session)
+        found = []
+        for device in devices:
+            vendor = str(device.get("vendor") or "").casefold()
+            platform = str(device.get("platform") or "")
+            row = recorded.get(device["device_id"])
+            capability = None
+            if row is not None:
+                capability = _capability_view(row, definitions)
+                modules = _module_list(row.capabilities or ())
+                announced = {module["name"] for module in modules}
+                capability["modules"] = modules
+                capability["unavailable"] = sorted(
+                    (
+                        {"id": definition.id, "module": definition.module}
+                        for definition in definitions.values()
+                        if definition.module
+                        and definition.vendor.casefold() == vendor
+                        and platform in definition.platforms
+                        and definition.module not in announced
+                    ),
+                    key=lambda item: item["id"],
+                )
+            found.append(
+                {
+                    "device_id": device["device_id"],
+                    "device_name": device.get("device_name"),
+                    "ip": device.get("ip"),
+                    "vendor": device.get("vendor"),
+                    "platform": device.get("platform"),
+                    "model": device.get("model"),
+                    "capability": capability,
+                }
+            )
+        return found
+
+
 def announced_modules(capabilities):
     """{module: namespace} the device announces (RFC 6020 module capabilities)."""
     found = {}

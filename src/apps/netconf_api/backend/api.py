@@ -33,6 +33,11 @@ def publish(definition_id: str, payload: service.Publish, actor=Depends(user)):
     return service.publish(actor, definition_id, payload)
 
 
+@router.get("/devices")
+def devices(actor=Depends(user)):
+    return service.list_devices(actor)
+
+
 @router.post("/devices/{device_id}/capabilities")
 def discover(device_id: str, actor=Depends(user)):
     return service.discover(actor, device_id)

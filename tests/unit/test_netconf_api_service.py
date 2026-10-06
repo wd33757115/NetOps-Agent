@@ -267,6 +267,40 @@ def test_discover_records_the_hello(database, device):
         assert len(session.get(Capability, "br1").capabilities) == 384  # the last good hello
 
 
+def test_devices_are_listed_with_their_last_discovery(database, device, monkeypatch):
+    other = {**DEVICE, "device_id": "sw1", "device_name": "SW1", "ip": "10.10.1.21"}
+    monkeypatch.setattr(service, "_inventory", lambda: [DEVICE, other])
+    listed = service.list_devices(ALICE)
+    assert [(d["device_id"], d["capability"]) for d in listed] == [("br1", None), ("sw1", None)]
+    # Only what identifies the device: no login name or credential reference.
+    assert set(listed[0]) == {
+        "device_id",
+        "device_name",
+        "ip",
+        "vendor",
+        "platform",
+        "model",
+        "capability",
+    }
+    service.discover(ALICE, "br1")
+    [br1, sw1] = service.list_devices(ALICE)
+    assert sw1["capability"] is None
+    capability = br1["capability"]
+    assert capability["status"] == "available" and capability["module_count"] == 172
+    assert len(capability["modules"]) == 172
+    arp = next(m for m in capability["modules"] if m["name"] == "ARP")
+    assert arp["namespace"] and arp["revision"]
+    assert "h3c-comware7.arp" in capability["definitions"]
+    assert capability["unavailable"] == []
+    # A module the device no longer announces: its definitions are listed as unavailable.
+    with database() as session:
+        row = session.get(Capability, "br1")
+        row.capabilities = [c for c in row.capabilities if "module=ARP&" not in c + "&"]
+    capability = service.list_devices(ALICE)[0]["capability"]
+    assert {"id": "h3c-comware7.arp", "module": "ARP"} in capability["unavailable"]
+    assert "h3c-comware7.arp" not in capability["definitions"]
+
+
 def test_the_session_logs_in_with_the_inventory_credential_reference():
     access = service._access(DEVICE)
     profile = access.profile_resolver("br1")
