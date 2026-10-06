@@ -12,10 +12,11 @@ part of the definition and their rows are output in turn. From one definition co
 - from the <data> the device returns, rows of {Value: text} like a TextFSM template's,
   so topology's projections take NETCONF rows unchanged, and the problems found.
 
-Nothing is guessed: a code the definition does not list, a lookup that finds no row, a
-row that does not hold what the definition expects of it or a leaf that is not of its
-Value's type leaves the Value empty (or the row out) with a problem, and a row without a
-required Value is not output. A leaf the definition neither reads nor ignores is written
+Nothing is guessed: a code the definition does not list, a lookup that finds no row
+(unless the definition says the Value is optional there: a policy node without a next
+hop), a row that does not hold what the definition expects of it or a leaf that is not of
+its Value's type leaves the Value empty (or the row out) with a problem, and a row without
+a required Value is not output. A leaf the definition neither reads nor ignores is written
 into its ``rest`` Value (OTHER: a condition the reader does not know), never dropped.
 Names are checked when a definition is loaded and the filter is built as XML, so a
 definition cannot put anything else into the RPC (the platform checks the filter again).
@@ -57,6 +58,7 @@ FIELDS = frozenset(
 PART_FIELDS = frozenset({"path", "keys", "values", "where", "expect", "rest", "order"})
 RULE_FIELDS = frozenset({"leaf", "codes", "lookup", "format", "const", "when", "default", "none"})
 UNASSIGNED = frozenset({"unassigned", "--", "none", "n/a", "na"})
+UNEXPECTED = object()  # a lookup answered by a row its table does not expect
 
 
 class DefinitionError(ValueError):
@@ -100,11 +102,14 @@ class Condition:
 
 @dataclass(frozen=True)
 class Lookup:
-    """A Value read through another definition's table, which is read first."""
+    """A Value read through another definition's table, which is read first. Only the
+    table's entities count (its ``where``); a row that does not hold its ``expect`` is no
+    answer for its match (``lookup_unexpected``)."""
 
     definition: str
     match: tuple[str, ...]  # its leaves compared with this Value's; (): its only row
     take: str  # its leaf written as the Value
+    optional: bool = False  # a match the table does not list is no value, not a miss
 
 
 @dataclass(frozen=True)
@@ -203,8 +208,9 @@ class Definition:
 
 @dataclass(frozen=True)
 class Problem:
-    """``kind``: unmapped_code, lookup_miss, lookup_ambiguous, type_mismatch,
-    unexpected_value or required_missing (the last two: the row was not output)."""
+    """``kind``: unmapped_code, lookup_miss, lookup_ambiguous, lookup_unexpected,
+    type_mismatch, unexpected_value or required_missing (the last two: the row was not
+    output)."""
 
     row: int  # 1-based, across the definition's tables in reading order
     key: str  # the row's key leaves, "Ipv4Address=10.0.13.2"
@@ -224,10 +230,12 @@ class Mapped:
 
 @dataclass(frozen=True)
 class Table:
-    """A definition's rows as {leaf: text or None}, read for lookups."""
+    """A definition's rows as {leaf: text or None}, read for lookups: its entities only
+    (``where``); ``unexpected`` numbers the rows that do not hold its ``expect``."""
 
     definition: str
     rows: list[dict[str, str | None]]
+    unexpected: frozenset[int] = frozenset()
 
 
 # --- loading ---------------------------------------------------------------------------
@@ -325,14 +333,18 @@ def _rule(name, raw, where):
         if (
             not isinstance(spec, Mapping)
             or not {"definition", "take"} <= set(spec)
-            or (set(spec) - {"definition", "match", "take"})
+            or (set(spec) - {"definition", "match", "take", "optional"})
         ):
             raise DefinitionError(f"{where}.lookup needs definition, take and (or) match")
         match = _leaves(spec["match"], f"{where}.lookup.match") if "match" in spec else ()
+        optional = spec.get("optional", False)
+        if not isinstance(optional, bool) or (optional and not match):
+            raise DefinitionError(f"{where}.lookup.optional is true or false, with a match")
         lookup = Lookup(
             _text(spec["definition"], f"{where}.lookup.definition", DEFINITION_ID),
             match,
             _leaf(spec["take"], f"{where}.lookup.take"),
+            optional,
         )
     if "leaf" in raw:
         leaves = _leaves(raw["leaf"], f"{where}.leaf")
@@ -589,14 +601,19 @@ def _all_leaves(element, prefix=""):
 
 def read_table(definition: Definition, data: str, leaves: Iterable[str]) -> Table:
     ns = f"{{{definition.namespace}}}"
-    leaves = tuple(dict.fromkeys(leaves))
-    return Table(
-        definition.id,
-        [
-            {leaf: _read(element, leaf, ns) for leaf in leaves}
-            for element in _elements(definition, data)
-        ],
+    part = definition.parts[0]
+    leaves = tuple(dict.fromkeys((*leaves, *part.leaves())))
+    rows = [
+        {leaf: _read(element, leaf, ns) for leaf in leaves}
+        for element in _elements(definition, data)
+    ]
+    rows = [row for row in rows if all(c.holds(row.get(c.leaf)) for c in part.where)]
+    unexpected = frozenset(
+        number
+        for number, row in enumerate(rows)
+        if not all(c.holds(row.get(c.leaf)) for c in part.expect)
     )
+    return Table(definition.id, rows, unexpected)
 
 
 def _joined(row, leaves):
@@ -605,16 +622,22 @@ def _joined(row, leaves):
 
 
 def _index(table, lookup):
-    """{match: take}; a match the table lists with different takes maps to None. An
-    unkeyed lookup is the table's only row, keyed by ""."""
-    found = {}
+    """{match: take}; a match the table lists with different takes maps to None, one a
+    row it does not expect lists maps to UNEXPECTED. An unkeyed lookup is the table's only
+    row, keyed by ""."""
+    found, unexpected = {}, set()
     rows = table.rows
-    for row in rows:
+    for number, row in enumerate(rows):
         match = _joined(row, lookup.match) if lookup.match else ""
+        if number in table.unexpected:
+            if match is not None:
+                unexpected.add(match)
+            continue
         take = row.get(lookup.take)
         if match is None or take is None:
             continue  # a row without the take is no answer (a miss, not a conflict)
         found[match] = take if found.get(match, take) == take else None
+    found.update(dict.fromkeys(unexpected, UNEXPECTED))
     if not lookup.match and len(rows) > 1:
         found[""] = None  # several rows: no single answer
     return found
@@ -637,8 +660,10 @@ def _write(rule, element, ns, indexes):
     if rule.lookup is not None:
         index = indexes[rule.lookup]
         if text not in index:
-            return None, "lookup_miss", raw
+            return None, None if rule.lookup.optional else "lookup_miss", raw
         text = index[text]
+        if text is UNEXPECTED:
+            return None, "lookup_unexpected", raw
         if text is None:
             return None, "lookup_ambiguous", raw
     if rule.codes is not None:

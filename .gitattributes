@@ -43,3 +43,7 @@ models/network-twin/evidence/**/*.txt text eol=lf whitespace=-blank-at-eol
 # Frozen YANG resources are checked against SHA-256 digests of their LF bytes;
 # upstream modules keep their original trailing spaces.
 src/apps/topology/resources/yang/*.yang text eol=lf whitespace=-blank-at-eol
+
+# Pinned OpenConfig modules (models/network-twin/openconfig/sources.lock.json) are
+# checked against SHA-256 digests of their upstream LF bytes; their own whitespace stays.
+models/network-twin/openconfig/modules/*.yang text eol=lf whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab,-indent-with-non-tab,-tab-in-indent

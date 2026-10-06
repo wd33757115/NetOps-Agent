@@ -38,6 +38,8 @@ VPN_LEAF3 = Path(__file__).parents[1] / "fixtures/topology/vpn-fabric/leaf3"
 POLICIES_BR1 = Path(__file__).parents[1] / "fixtures/topology/campus-wan/policies/br1"
 ACL_BR1 = Path(__file__).parents[1] / "fixtures/topology/campus-wan/acl-syntax/br1"
 NAT_BR1 = Path(__file__).parents[1] / "fixtures/topology/campus-wan/nat/br1"
+# BR1's policy-route content, captured with its NETCONF replies (no campus sample has it).
+PBR_BR1 = Path(__file__).parents[1] / "fixtures/netconf/h3c-comware7/br1-policy"
 
 
 def identity(text=None):
@@ -209,6 +211,7 @@ def setup(monkeypatch):
                 POLICIES_BR1 / f"{cap}.txt",
                 ACL_BR1 / f"{cap}.txt",
                 NAT_BR1 / f"{cap}.txt",
+                PBR_BR1 / f"cli-{command(cap, spec).replace(' ', '-')}.txt",
             )
             if path.exists()
         ).read_text()

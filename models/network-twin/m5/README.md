@@ -150,6 +150,31 @@ M1 正反例从 48 个增至 72 个，全部符合预期（`scripts/topology/m1_
 - App 冻结模块集（`resources/yang/library.json`）已加入 RFC 8542 的两个模块和 l2-topology 的 VXLAN feature；叠加网络在 yangson 下通过（`test_overlay_export_validates_against_the_frozen_modules`）。
 - L3NM/L2NM 无法用 yangson 校验：它忽略 when 条件下的 mandatory 叶子，也编译不了 L3NM 的 leafref。这两个模型只用 libyang 校验（与 BGP 草案相同）。
 
+## 策略路由：OpenConfig policy-forwarding（2026-10-06）
+
+IETF 和 IEEE 都没有策略路由模型，负责人决定用 OpenConfig `openconfig-policy-forwarding`（[实施方案 §13](../../../docs/network-digital-twin-implementation.md)）。topology 0.11.0。
+
+**模型来源**（`models/network-twin/openconfig`）：
+
+- `sources.lock.json`：openconfig/public 提交 `8c3a6cf65ac8a21ad029d252352c6319745b06c2` 上 `openconfig-policy-forwarding` 的完整依赖闭包，99 个文件，每个记 URL 和 SHA-256。源码未改动，没有自造模块。
+- 闭包引用的 IETF 模块（`ietf-interfaces`、`ietf-inet-types`、`ietf-yang-types`、`iana-if-type`）用 topology App 已钉住的版本（`src/apps/topology/resources/yang`），不另取一份。
+- `library.json`：RFC 7895 模块库，由 `scripts/topology/build_openconfig_library.py` 生成；`--check` 先核对每个文件的 SHA-256，再核对模块库与文件一致。
+- 编译：pyang 2.7.1 无错误；yangson 1.6.3 能加载。yangson 只在"实现"的模块里解析 leafref，而 network-instance 树里有指向 routing-policy、defined-sets、qos、keychain 的 leafref，所以闭包里的 OpenConfig 模块全部标为实现；IETF 模块只有 `iana-if-type` 标为实现（接口类型要用它的身份），其余只导入。
+
+**宿主树**：policy-forwarding 只能挂在 `openconfig-network-instance` 下，接口绑定是指向 `/oc-if:interfaces/interface/name` 的 leafref。只生成最小宿主树：网络实例（名称、类型）、绑定的接口（名称和模块要求的类型）和 policy-forwarding。名称与 IETF 树一致（全局表在 OpenConfig 里叫 `DEFAULT`，类型 `DEFAULT_INSTANCE`；VRF 用 RFC 8529 的实例名，类型 `L3VRF`）。接口类型取自 RFC 8343 树，取不到时不造值，该绑定不导出并记缺口。
+
+**校验**：`tests/unit/test_topology_pbr.py` 用钉住的模块校验 BR1 样本导出的树；把绑定的接口名改成不存在的名字时，yangson 报 `instance-required`（leafref 生效）。
+
+**查证的建模问题**（来源：OpenConfig 模块 description、H3C 配置指导）：
+
+| 问题 | 结论 |
+|---|---|
+| 按 ACL 匹配 | OpenConfig 规则直接匹配报文字段。节点的 ACL 展开成每条规则一个 rule（`sequence-id = 节点号 × 65536 + 序号`），节点内按 ACL 顺序，节点间按节点号；规则之间是"第一个命中生效"。H3C 文档对 ACL 中 deny 规则和时间段的处理有两种说法（多数版本"PBR 忽略 ACL 的 permit/deny 和时间段"，另一些版本"deny 规则或 ACL 不存在时节点不匹配"），因此含 deny 规则或时间段的 ACL 不展开，标 partial。 |
+| deny 节点 | H3C：命中 deny 节点的报文按路由表转发，不再匹配后面的节点。OpenConfig：`forwarding-action FORWARD`（"Send the packet"），没有动作的规则在 OpenConfig 里是错误。permit 节点没有 apply 子句时同样处理。 |
+| 下一跳不可达 | H3C：下一跳无效时按路由表转发（另有 default-next-hop 时先用它，样本中没有）。路径计算按此回退，并记 `pbr_next_hop_unresolved` 缺口。 |
+| 本机策略 | OpenConfig policy-forwarding 只在网络实例的接口上应用，没有本机报文的位置。不导出，记 `local_policy_not_expressible` 缺口，策略名列在 metadata 的 `local_policies`。 |
+| 执行顺序 | OpenConfig 说明策略在 QoS/ACL 之后执行，没写规则间的顺序；按 sequence-id 升序（与 Comware 节点号一致）。路径上为入向 ACL → 策略路由 → NAT → 查路由（负责人决定）。 |
+
 ## 未做与限制
 
 - **服务分组**：不从 VRF 猜客户服务，也不生成 L3SM/L2SM。hub-and-spoke 会按导出 RT 分成两个服务，导入关系列在 relations 中。
@@ -158,6 +183,7 @@ M1 正反例从 48 个增至 72 个，全部符合预期（`scripts/topology/m1_
 - **IPv6**：没有样本。
 - **其他厂商与规模**：NX-OS 等家族还没有 M5 的检查项实现；border leaf、多 fabric 互联没有样本。
 - **SAP/AC、ACL/NAT/QoS、服务保障**（M5 的后续部分）未开始。
+- **策略路由**：只有 Comware 采集内容（CLI 与 NETCONF），IOS 只有绑定；IPv6 策略、apply 的其他动作（出接口、default-next-hop、优先级等）不导出。
 
 ## 实机验收（2026-10-04，只读发现）
 

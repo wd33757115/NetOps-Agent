@@ -62,6 +62,7 @@
 | `topology.ospf_interfaces` | OSPF 接口开销（简表，按行） | ★ADDRESS, TABLE, INTERFACE, PROCESS_ID, ROUTER_ID, LABEL, AREA, TYPE, STATE, COST, PRIORITY, DR, BDR, NEIGHBORS, BAD_ROW | ios: `show ip ospf interface brief`<br>comware: `display ospf interface` |
 | `topology.ospf_process` | OSPF 进程与接口映射（按行） | ★PROCESS_ID, ROUTER_ID, AREA, VRF_EVIDENCE, CONFIRMED_ROUTER_ID, ADDRESS, INTERFACE, COST, STATE | ios: `show ip ospf`<br>comware: `display ospf` |
 | `topology.pbr_bindings` | 策略路由的接口绑定 | ★INTERFACE, ★POLICY, TYPE | ios: `show ip policy`<br>comware: `display ip policy-based-route setup` |
+| `topology.pbr_rules` | 策略路由的节点（每个节点一行） | ★POLICY, ★NODE, MODE, MATCH_ACL, NEXT_HOP, OTHER | comware: `display ip policy-based-route` |
 | `topology.nat_bindings` | NAT 的接口绑定 | ★INTERFACE, ★KIND, RULE | ios: `show ip nat statistics`<br>comware: `display nat all` |
 | `topology.acl_rules` | IPv4 ACL 规则（按设备的匹配顺序） | ★ACL_NAME, ★LINE_NUM, ACL_TYPE, ADDRESS_FAMILY, MATCH_ORDER, ACTION, PROTOCOL, SRC_/DST_ HOST、ANY、NETWORK、WILDCARD、NETWORK_OBJECT_GROUP_NAME、PORT_MATCH、PORT、PORT_RANGE_START/END, ICMP_TYPE, ICMP_CODE, TCP_FLAG, FRAGMENTS, TIME, STATE, VRF, OTHER, MATCHES | ios: `show ip access-lists`<br>comware: `display acl all` |
 | `topology.acl_bindings` | ACL 的接口绑定 | ★INTERFACE, ★DIRECTION, ADDRESS_FAMILY, ACL_NAME, SCOPE, STATUS, DEFAULT_ACTION | ios: `show ip interface`<br>comware: `display packet-filter interface` |
@@ -186,6 +187,14 @@ commands(check_item_ids) -> [{implementation_id, platforms, command, scoped_comm
   - 部署后经平台发现与路径接口复验 11 项全部通过（四个场景的转换、回程还原、外部入口，Comware 规则与绑定共用一次 `display nat all`）；随后删除配置并重新发现，路径上已无转换。
   - 不按 RFC 8512 导出：它的实例、策略、地址池、映射条目都要求设备不打印的数字键（实例号、策略号、池号、条目序号；IOS 地址池只有名字），按"不编造设备没给出的列表键"不导出，NAT 只作为路径计算的内部证据。
   - 第二期策略路由：节点内容（`show route-map`、`display ip policy-based-route`）、下一跳可达性、动作优先级、deny 节点按路由表转发。第三期 NAT：规则内容、两个方向的改写、回程按去程的翻译推导。Comware 的出方向 NAT 与包过滤、入方向 nat server 与策略路由谁先，文档未写明，届时在实验网用流量和命中计数实测，写成家族数据。
+- **路径按流计算策略路由（第三期，2026-10-06，topology 0.11.0、规则治理 1.8.0、netconf-api 0.4.0）**：负责人决定策略路由用 OpenConfig `openconfig-policy-forwarding` 表达，并作为第一个完整走"原始响应 → 标准数据树 → 查询表 → 路径计算"的领域（设计说明见 [topology-standard-tree-pipeline.md](topology-standard-tree-pipeline.md)）。
+  - 新增 `topology.pbr_rules`：只做 Comware（`display ip policy-based-route`），每个节点一行：策略名、节点号、permit/deny、`if-match acl` 的 ACL、`apply next-hop` 的唯一下一跳。第二条 if-match/apply、带选项的下一跳（多个地址、vpn-instance、direct、track）和其他子句都进 OTHER，这样的节点不计算。不认识的行判失败。IOS 维持现状：只采绑定，只打 `policy_may_redirect`。
+  - 绑定：`Local` 类型（本机发出的报文）不再丢弃，记为 `{"policy", "local": true}`，不带接口。
+  - NETCONF：`h3c-comware7.pbr-rules` 读 `PBR/PBRPolicyNode`，下一跳经 `h3c-comware7.pbr-nexthops`（`PBRApplyNexthop`）查得；同一份 BR1 样本上与 CLI 的值行一致。为此 `mapping.py` 的查表增加两点：`optional: true`（查不到即无值，用于 deny 节点、不设下一跳的节点），以及被查表自己的 `where`/`expect` 生效（不满足 `expect` 的行记 `lookup_unexpected`，例如 VPN 实例里的下一跳、direct 下一跳）。
+  - 标准树（`model/device_pbr.py`）：最小 OpenConfig 宿主树，按钉住的完整依赖闭包（`models/network-twin/openconfig`）用 yangson 校验。节点的 ACL 展开为每条规则一个 OpenConfig rule，`sequence-id = 节点号 × 65536 + 序号`；含 deny 规则、时间段、模板不认识条件、不连续通配符、neq 端口、ICMP/established/fragments 的 ACL 不展开，该节点及其后的节点不导出并记缺口（丢掉一个节点会改变后面节点能收到哪些报文）。permit 且有下一跳 → `action/config/next-hop`；deny 节点和不设动作的 permit 节点 → `forwarding-action FORWARD`（按路由表转发、不再看后面的节点）。本机策略在 OpenConfig 里没有位置，记缺口并列在 metadata。
+  - 查询表（`model/pbr.py`）从标准树抽取：每个绑定接口一行，按 sequence-id 排好的规则，字段沿用标准节点名；不完整的标 `complete: false` 并带原因。
+  - 路径：入向 ACL 之后、NAT 和查路由之前按查询表计算。命中有下一跳的节点：按该下一跳转发，下一跳的解析与路由一致，跳上 `route.protocol` 为 `policy-forwarding`；命中 deny 节点或没有命中：按路由表。跳上 `policy_route` 写明策略、节点、规则序号和描述（ACL 号与规则号）。判断不了时记 `pbr_undetermined`；下一跳解析不了时按路由表转发并记 `pbr_next_hop_unresolved`（H3C 文档：下一跳无效时按路由表转发）。设备本身发出的报文遇到本机策略时记 `local_policy_not_computed`。没采到策略内容的设备继续标 `policy_may_redirect`/`policy_not_computed`。
+  - 未做：实机采集与打流核对（合并后在 BR1 上用 CLI 和 NETCONF 各采一次，再用路径工具核对验收用例）；入方向 nat server 与策略路由的先后仍待实测；Comware 没有策略时 `display ip policy-based-route` 的输出未见样本，暂不声明有效空表（空输出不会被当成"没有策略"）；IPv6 策略。
 - **待做**：
   - 系统模板登记到规则治理的模板库（数据库），让页面可见、可评审；目前模板文件由资产清单按 sha256 钉住；
   - NX-OS 等家族在有实机样本后补实现，届时删掉对应的通用解析器；

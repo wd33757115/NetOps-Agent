@@ -26,6 +26,7 @@ CASES = {
     "nat_rules": ("h3c-comware7.nat-rules", "cli-display-nat-all.txt"),
     "nat_bindings": ("h3c-comware7.nat-bindings", "cli-display-nat-all.txt"),
     "pbr_bindings": ("h3c-comware7.pbr-bindings", "cli-display-ip-policy-based-route-setup.txt"),
+    "pbr_rules": ("h3c-comware7.pbr-rules", "cli-display-ip-policy-based-route.txt"),
 }
 
 
@@ -239,6 +240,92 @@ def test_an_unkeyed_lookup_needs_exactly_one_row(definitions):
     )
     _, mapped = read(definitions, "acl_bindings", replies(ACL=reply))
     assert {p.kind for p in mapped.problems} == {"lookup_ambiguous"}
+
+
+def test_policy_nodes_are_the_cli_rows(definitions):
+    chosen, mapped = read(definitions, "pbr_rules")
+    cli = rules.reader().parse(
+        chosen, (POLICY / "cli-display-ip-policy-based-route.txt").read_text("utf-8")
+    )
+    names = ("POLICY", "NODE", "MODE", "MATCH_ACL", "NEXT_HOP")
+    # The CLI leaves out an empty Value, NETCONF writes it as "".
+    assert [{n: row[n] for n in names} for row in mapped.rows] == [
+        {n: row.get(n) or "" for n in names} for row in cli.rows
+    ]
+    assert [row["NODE"] for row in mapped.rows] == ["10", "20"]
+    assert [row["NEXT_HOP"] for row in mapped.rows] == ["10.0.13.2", ""]
+    assert not any(row.get("OTHER") for row in (*mapped.rows, *cli.rows))
+
+
+def pbr_reply(old, new):
+    return replies(PBR=(POLICY / "pbr.xml").read_text("utf-8").replace(old, new, 1))
+
+
+NEXT_HOP = "<IpAddress>10.0.13.2</IpAddress>"
+
+
+def test_a_node_with_two_next_hops_is_not_read_as_one(definitions):
+    second = (
+        "<ApplyNexthop><AddressType>0</AddressType><PolicyName>TEST-PBR</PolicyName>"
+        "<NodeID>10</NodeID><Mode>0</Mode><VrfIndex>0</VrfIndex>"
+        "<IpAddress>10.0.23.2</IpAddress><Priority>2</Priority>"
+        "<NexthopDirect>false</NexthopDirect></ApplyNexthop></PBRApplyNexthop>"
+    )
+    chosen, mapped = read(definitions, "pbr_rules", pbr_reply("</PBRApplyNexthop>", second))
+    [problem] = mapped.problems
+    assert (problem.value, problem.kind) == ("NEXT_HOP", "lookup_ambiguous")
+    assert facts(chosen, mapped, "pbr_rules").status == "partial"
+
+
+@pytest.mark.parametrize(
+    "old,new",
+    [
+        ("<NexthopDirect>false</NexthopDirect>", "<NexthopDirect>true</NexthopDirect>"),
+        ("<VrfIndex>0</VrfIndex>", "<VrfIndex>3</VrfIndex>"),
+    ],
+)
+def test_a_next_hop_of_another_form_is_reported(definitions, old, new):
+    chosen, mapped = read(definitions, "pbr_rules", pbr_reply(old, new))
+    [problem] = mapped.problems
+    assert (problem.value, problem.kind, problem.raw) == (
+        "NEXT_HOP",
+        "lookup_unexpected",
+        "TEST-PBR/10",
+    )
+    assert facts(chosen, mapped, "pbr_rules").status == "partial"
+
+
+def test_an_ipv6_next_hop_is_not_an_ipv4_nodes(definitions):
+    reply = pbr_reply(
+        "<ApplyNexthop><AddressType>0</AddressType>", "<ApplyNexthop><AddressType>1</AddressType>"
+    )
+    _, mapped = read(definitions, "pbr_rules", reply)
+    assert mapped.problems == []  # no IPv4 next hop: the node sets none
+    assert [row["NEXT_HOP"] for row in mapped.rows] == ["", ""]
+
+
+def test_a_node_clause_no_definition_reads_keeps_the_node_out(definitions):
+    reply = pbr_reply("<NodeID>20</NodeID>", "<NodeID>20</NodeID><ApplyPrecedence>5</ApplyPrecedence>")
+    chosen, mapped = read(definitions, "pbr_rules", reply)
+    assert mapped.rows[1]["OTHER"] == "ApplyPrecedence=5"
+    record = facts(chosen, mapped, "pbr_rules").records[1]
+    assert record["unsupported"] == ["clause:ApplyPrecedence=5"]
+
+
+def test_a_lookup_marked_optional_needs_a_match():
+    raw = {
+        **BASE,
+        "parts": [
+            {
+                **PART,
+                "values": {
+                    "ACL_NAME": {"lookup": {"definition": "y", "take": "B", "optional": True}}
+                },
+            }
+        ],
+    }
+    with pytest.raises(mapping.DefinitionError):
+        mapping.load(raw)
 
 
 BASE = {

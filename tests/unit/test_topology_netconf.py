@@ -47,8 +47,9 @@ POLICY_CLI = {
     "display packet-filter interface": "cli-display-packet-filter-interface.txt",
     "display nat all": "cli-display-nat-all.txt",
     "display ip policy-based-route setup": "cli-display-ip-policy-based-route-setup.txt",
+    "display ip policy-based-route": "cli-display-ip-policy-based-route.txt",
 }
-POLICY_CAPS = ("acl_rules", "acl_bindings", "nat_rules", "nat_bindings", "pbr_bindings")
+POLICY_CAPS = ("acl_rules", "acl_bindings", "nat_rules", "nat_bindings", "pbr_bindings", "pbr_rules")
 NO_VRFS = "L3VPN is not configured."
 
 

@@ -575,6 +575,20 @@ check_items:
       STATUS: [text, false, 规则状态原文（如 Active）]
       OTHER: [text, false, 模板不认识的规则内容；有它的规则不计算]
 
+  topology.pbr_rules:
+    # 2026-10-06: the content of an IPv4 policy route, which a path evaluates at the hops
+    # its bindings name (topology.pbr_bindings). One row per node.
+    name: 拓扑发现：策略路由的节点
+    entity_type: pbr_rule
+    keys: [POLICY, NODE]
+    values:
+      POLICY: [text, true, 策略名]
+      NODE: [integer, true, 节点号（按从小到大的顺序匹配）]
+      MODE: [text, true, 节点模式（permit、deny）]
+      MATCH_ACL: [text, false, 节点匹配的 ACL（if-match acl）]
+      NEXT_HOP: [ip_or_unassigned, false, 节点设置的唯一下一跳（apply next-hop）]
+      OTHER: [text, false, 模板不认识的条件或动作原文；有它的节点不计算]
+
 implementations:
   - check_item: topology.arp
     platform: ios
@@ -948,6 +962,11 @@ implementations:
     sha256: 3006a6fd3e0f8d1feac61c9f9bfb181b44ce548f960a5d6586a9fb9434b1fe87
     valid_empty: ['\A\s*PBR4 is not configured\.\s*\Z']
     required: ['^Policy name\s+Type\s+Interface\s*$']
+  - check_item: topology.pbr_rules
+    platform: comware
+    command: display ip policy-based-route
+    template: H3C/Comware7/display_ip_policy-based-route__topology-1.0.0.textfsm
+    sha256: fbbba0c55b56ceacaa3515d6a113f3f07c5db00698201ce8594e5787c4408fbf
   - check_item: topology.nat_bindings
     platform: ios
     command: show ip nat statistics

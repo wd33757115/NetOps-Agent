@@ -304,3 +304,45 @@ definitions:
           POLICY: "."
           TYPE: {const: Local}
           INTERFACE: {const: N/A}
+
+  - id: h3c-comware7.pbr-nexthops
+    description: 策略路由节点的下一跳，供 h3c-comware7.pbr-rules 读取
+    vendor: H3C
+    platforms: [comware]
+    namespace: http://www.h3c.com/netconf/data:1.0
+    datastore: state
+    module: PBR
+    path: top/PBR/PBRApplyNexthop/ApplyNexthop
+    keys: [PolicyName, NodeID]
+    where: {AddressType: "0"}  # IPv4
+    # The form BR1 showed for "apply next-hop 10.0.13.2"; a next hop in a VPN instance,
+    # a directly connected one or another mode is not read as this one.
+    expect: {Mode: "0", VrfIndex: "0", NexthopDirect: "false"}
+
+  - id: h3c-comware7.pbr-rules
+    description: IPv4 策略路由的节点（模式、匹配的 ACL、唯一下一跳）
+    vendor: H3C
+    platforms: [comware]
+    check_item: topology.pbr_rules
+    namespace: http://www.h3c.com/netconf/data:1.0
+    datastore: state
+    module: PBR
+    path: top/PBR/PBRPolicyNode/PolicyNode
+    keys: [PolicyName, NodeID]
+    where: {AddressType: "0"}  # IPv4
+    # ApplyIPDF 2 on BR1's nodes, whose CLI shows no "apply ip-df": no such clause.
+    expect: {ApplyIPDF: "2"}
+    values:
+      POLICY: PolicyName
+      NODE: NodeID
+      MODE: {leaf: Mode, codes: {"1": permit, "2": deny}}
+      MATCH_ACL: ACLNumber
+      NEXT_HOP:
+        leaf: [PolicyName, NodeID]
+        lookup:
+          definition: h3c-comware7.pbr-nexthops
+          match: [PolicyName, NodeID]
+          take: IpAddress
+          optional: true  # a deny node, or a permit node that sets no next hop
+    # Any other clause of the node (another match, another action) is kept, never dropped.
+    rest: {value: OTHER}

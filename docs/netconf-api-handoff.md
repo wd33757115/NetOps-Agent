@@ -140,7 +140,7 @@ CLI 的 42 个目的、47 条路由全部对上，管理距离（`Preference`）
 `Mapped` 包含四项：
 - `rows`：每行是"值名 → 字符串"，定义里的每个值都有，没有值时为 `""`，和 TextFSM 一样；
 - `refs`：每行对应设备的第几行；
-- `problems`：`Problem(row, key, value, kind, raw)` 的列表，`kind` 是 `unmapped_code`、`lookup_miss`、`lookup_ambiguous`、`type_mismatch` 或 `required_missing`；
+- `problems`：`Problem(row, key, value, kind, raw)` 的列表，`kind` 是 `unmapped_code`、`lookup_miss`、`lookup_ambiguous`、`lookup_unexpected`、`type_mismatch`、`unexpected_value` 或 `required_missing`；
 - `read`：设备返回的行数。
 
 定义的写法见种子文件。每个值的取法：
@@ -160,6 +160,10 @@ CLI 的 42 个目的、47 条路由全部对上，管理距离（`Preference`）
 - `rest`：定义没读、也没在 `ignore` 里声明的叶子，写进一个值（OTHER），拓扑把这条规则标为"无法计算"，防止不认识的条件被悄悄忽略。带 `rest` 的表会按整行读取。
 - `order`：组内按某个叶子排序（auto 顺序的 ACL 按 MatchIndex）。
 - 叶子 `.`：取行元素自身的文本（每行只有一个叶子的表）。
+
+2026-10-06 为策略路由的节点（`h3c-comware7.pbr-rules`）增加了查表的两点，同样只是数据：
+- `lookup.optional: true`：被查表里没有这一行时，这个值为空且不记问题（deny 节点、不设下一跳的节点本来就没有下一跳）。只能和 `match` 一起用。
+- 被查表自己的 `where` 和 `expect` 生效：不是实体的行不参与查表；不满足 `expect` 的行不作为答案，查到它时记 `lookup_unexpected`（例如 VPN 实例里的下一跳、direct 下一跳，不当作普通下一跳读）。
 
 ### 5.3 原始需求
 

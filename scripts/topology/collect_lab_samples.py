@@ -58,6 +58,7 @@ COMMANDS = [
     ("bgp", "display bgp peer ipv4"),
     # interface bindings of policy routing and NAT (path hops they may redirect)
     ("pbr_bindings", "display ip policy-based-route setup"),
+    ("pbr_rules", "display ip policy-based-route"),
     ("nat_bindings", "display nat all"),
     ("acl_rules", "display acl all"),
     ("acl_bindings", "display packet-filter interface"),

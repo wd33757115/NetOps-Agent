@@ -69,6 +69,7 @@ MODE_CAPABILITIES = {
         # What may move a packet off the route-table path (a policy, an address rewrite)
         # or stop it (an ACL, a security zone).
         "pbr_bindings",
+        "pbr_rules",
         "nat_bindings",
         "acl_rules",
         "acl_bindings",

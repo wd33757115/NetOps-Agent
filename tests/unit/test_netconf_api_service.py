@@ -100,6 +100,8 @@ def test_seeds_are_published_once_and_a_user_version_is_kept(database):
         "h3c-comware7.packet-filter-default",
         "h3c-comware7.packet-filter-run",
         "h3c-comware7.pbr-bindings",
+        "h3c-comware7.pbr-nexthops",
+        "h3c-comware7.pbr-rules",
         "h3c-comware7.routes",
     }
     assert {row["published_version"] for row in listed.values()} == {1}
@@ -198,6 +200,8 @@ def test_a_trial_keeps_the_rows_problems_and_filters(device):
         "h3c-comware7.packet-filter-default",
         "h3c-comware7.packet-filter-run",
         "h3c-comware7.pbr-bindings",
+        "h3c-comware7.pbr-nexthops",
+        "h3c-comware7.pbr-rules",
         "h3c-comware7.routes",
     ]
 

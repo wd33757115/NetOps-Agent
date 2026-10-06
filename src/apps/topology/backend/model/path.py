@@ -31,7 +31,8 @@ route or to NAT. The path is still the route-table path, but such a hop carries 
 read that policy on the device; its content is not evaluated here:
 
 - ``policy_may_redirect``: a policy route is applied to packets arriving on the hop's
-  ingress interface;
+  ingress interface of a device whose policy content was not read (where it was, the
+  policy is applied, below);
 - ``nat_may_translate``: NAT is bound to the hop's ingress or egress interface of a device
   whose NAT rules were not read (where they were, NAT is applied, below).
 
@@ -43,6 +44,16 @@ address a pool gives is ``nat_address_unknown``. The reply is sent from the tran
 destination to the translated source and each translation is undone where it was made
 (the device's session), so where the forward direction translated, the reverse one is
 derived from it rather than traced on its own.
+
+A policy route is applied after the inbound ACL and before NAT and the lookup, from the
+query table taken from the device's OpenConfig policy-forwarding tree (device_pbr.py,
+pbr.py): the first node that matches decides. A permit node with a next hop sends the
+packet to it, resolved like a route's next hop (the hop's route has protocol
+``policy-forwarding``); a deny node, or no node, leaves it to the routing table. The hop's
+``policy_route`` names the policy, node and rule. A policy that cannot decide is
+``pbr_undetermined``; a next hop the device cannot resolve falls back to the routing table
+(Comware) with ``pbr_next_hop_unresolved``; a local policy (packets the device sends
+itself) has no place in the tree: ``local_policy_not_computed``.
 
 A source outside the collected network (no collected device or subnet has it) comes in
 where the devices would send to it through a next hop no collected device owns, the way
@@ -79,6 +90,9 @@ from __future__ import annotations
 import ipaddress
 
 from .acl import ICMP, TCP, UDP, evaluate
+from .device_pbr import project_device_pbr
+from .pbr import evaluate as pbr_evaluate
+from .pbr import query_table as pbr_table
 from .nat import destination as nat_destination
 from .nat import source as nat_source
 from .builder import NT, ST
@@ -128,6 +142,7 @@ class _Tracer:
     def __init__(self, devices, base, observed):
         devices = prepare(devices)
         self.devices = devices
+        self._pbr = {}  # device key -> policy-routing query table (None: content not read)
         self.loc = _Locator(devices, base, observed)
         self.topo = self.loc.topo
         self.interface_trees = {
@@ -307,7 +322,7 @@ class _Tracer:
         if not ifname:
             return []
         gaps = []
-        if direction == "in":
+        if direction == "in" and "pbr_rules" not in facts:
             gaps += [
                 {"status": "policy_may_redirect", "interface": ifname, "policy": row["policy"]}
                 for row in facts.get("pbr_bindings") or []
@@ -386,6 +401,46 @@ class _Tracer:
                     }
                 )
         return None
+
+    def pbr_rows(self, key):
+        """The device's policy-routing query table, from its standard tree (device_pbr)."""
+        if key not in self._pbr:
+            facts = self.devices[key]
+            self._pbr[key] = (
+                pbr_table(project_device_pbr({"facts": facts})) if "pbr_rules" in facts else None
+            )
+        return self._pbr[key]
+
+    def policy_route(self, key, vrf, in_if, packet, hop):
+        """The policy applied to packets arriving on in_if: the next hop it sends this one
+        to, or None for the routing table. The hop says which policy and node decided; a
+        next hop the device cannot resolve leaves it to the routing table (Comware), a gap."""
+        rows = self.pbr_rows(key)
+        if rows is None or not in_if:
+            return None
+        row = next((r for r in rows if r["interface-id"] == in_if), None)
+        if row is None:
+            return None
+        outcome = pbr_evaluate(row, packet)
+        where = {"interface": in_if, "policy": row["policy-id"]}
+        if outcome["result"] == "undetermined":
+            hop.setdefault("gaps", []).append({"status": "pbr_undetermined", **where, **outcome})
+            return None
+        hop["policy_route"] = {**where, **{k: v for k, v in outcome.items() if k != "undecided_before"}}
+        if outcome["result"] != "next-hop":
+            return None
+        next_hop = outcome["next-hop"]
+        if not self.resolve(key, vrf, next_hop):
+            hop.setdefault("gaps", []).append(
+                {
+                    "status": "pbr_next_hop_unresolved",
+                    **where,
+                    "node": outcome["node"],
+                    "next_hop": next_hop,
+                }
+            )
+            return None
+        return next_hop
 
     def translate(self, key, in_if, out_if, packet, hop, sessions):
         """NAT of a packet arriving (no out_if) or leaving by out_if: the session of the
@@ -532,17 +587,28 @@ class _Tracer:
                     hop.setdefault("gaps", []).append(
                         {"status": "policy_not_computed", "tables": uncomputed}
                     )
+            redirect = None
             if tunnel is not None:
                 hop["encapsulated"] = True  # arrived inside a tunnel: the outer header
             elif denied := self.filters(key, in_if, "in", packet, hop):
                 end([*trail, hop], "denied_in", **denied)
                 return
             elif in_if is not None:
+                # Policy routing after the inbound ACL, before NAT and the lookup.
+                redirect = self.policy_route(key, vrf, in_if, packet, hop)
                 # Destination NAT, or the way back of the flow's source NAT, before the lookup.
                 packet = self.translate(key, in_if, None, packet, hop, sessions)
             dst = packet["dst"]
             # What it originates is neither filtered nor translated on its way out.
             originated = not trail and in_if is None
+            if originated and "pbr_rules" in self.devices[key]:
+                # A local policy applies to what the device sends itself; OpenConfig has no
+                # place for it (device_pbr), so it is not computed.
+                hop.setdefault("gaps", []).extend(
+                    {"status": "local_policy_not_computed", "policy": row["policy"]}
+                    for row in self.devices[key].get("pbr_bindings") or []
+                    if row.get("local")
+                )
             if ingress := self.policy_gaps(key, in_if, "in"):
                 hop.setdefault("gaps", []).extend(ingress)
             if tunnel is not None and self.topo.ip_candidates(
@@ -573,6 +639,10 @@ class _Tracer:
             ):
                 hop.setdefault("gaps", []).append(gap)
             route = self.lookup(key, vrf, target)
+            if redirect is not None:
+                # Forwarded to the policy's next hop, bypassing the lookup; the next hop is
+                # resolved like a route's.
+                route = {"protocol": "policy-forwarding", "next_hops": [{"ip": redirect}]}
             if route is None:
                 end([*trail, hop], "no_route")
                 return

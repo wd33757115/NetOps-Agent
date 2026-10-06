@@ -151,7 +151,7 @@ def test_output_after_the_policies_were_removed_is_an_empty_table(device, family
 )
 def test_a_policy_for_locally_generated_packets_binds_no_interface(family, text):
     result = parse(IDENTITY[family], "pbr_bindings", text)
-    assert (result.status, result.records) == ("complete", [])
+    assert (result.status, result.records) == ("complete", [{"policy": "PBR-L", "local": True}])
 
 
 def test_bindings_the_templates_do_not_know_are_never_passed_over():

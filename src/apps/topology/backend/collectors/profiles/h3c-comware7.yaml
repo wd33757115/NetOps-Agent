@@ -41,6 +41,7 @@ capabilities:
   tunnel_interfaces: {parser: rules}
   evpn_mac: {parser: rules}
   pbr_bindings: {parser: rules}
+  pbr_rules: {parser: rules}
   nat_bindings: {parser: rules}
   acl_rules: {parser: rules}
   acl_bindings: {parser: rules}

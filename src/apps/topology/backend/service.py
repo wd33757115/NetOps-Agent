@@ -61,7 +61,15 @@ MODEL_PROFILE = "rfc8345+simap-yang-03:l2-l3:scoped-v2"
 ACTIVE = ("queued", "running", "waiting_for_input")
 # Tables a path checks a packet against: only a complete one says what is not there.
 POLICY_FACTS = frozenset(
-    {"pbr_bindings", "nat_bindings", "nat_rules", "acl_rules", "acl_bindings", "security_zones"}
+    {
+        "pbr_bindings",
+        "pbr_rules",
+        "nat_bindings",
+        "nat_rules",
+        "acl_rules",
+        "acl_bindings",
+        "security_zones",
+    }
 )
 TOPOLOGY_FACTS = (
     "version",
@@ -94,6 +102,7 @@ TOPOLOGY_FACTS = (
     "tunnel_interfaces",
     "evpn_mac",
     "pbr_bindings",
+    "pbr_rules",
     "nat_bindings",
     "acl_rules",
     "acl_bindings",

@@ -70,6 +70,7 @@ CHECK_ITEMS = {
     "ospf_interfaces": "topology.ospf_interfaces",
     "ospf_process": "topology.ospf_process",
     "pbr_bindings": "topology.pbr_bindings",
+    "pbr_rules": "topology.pbr_rules",
     "nat_bindings": "topology.nat_bindings",
     "acl_rules": "topology.acl_rules",
     "acl_bindings": "topology.acl_bindings",
@@ -1034,15 +1035,34 @@ def _vrf(row, family, lines, warnings):
 
 
 def _pbr_binding(row, family, lines, warnings):
-    """A policy applied to packets arriving on an interface; a policy for locally generated
-    packets (type Local, interface "local" or "N/A") routes no transit traffic."""
+    """A policy applied to packets arriving on an interface, or (type Local, interface
+    "local" or "N/A") to the packets the device itself sends: no interface, local."""
     port = row["INTERFACE"]
-    if str(row.get("TYPE") or "forward").lower() != "forward" or port.lower() in {
-        "local",
-        "n/a",
-    }:
+    if str(row.get("TYPE") or "forward").lower() == "local" or port.lower() in {"local", "n/a"}:
+        return {"policy": row["POLICY"], "local": True}
+    if str(row.get("TYPE") or "forward").lower() != "forward":
         return []
     return {"ifname": interface(port, family).name, "policy": row["POLICY"]}
+
+
+def _pbr_rule(row, family, lines, warnings):
+    """One node of a policy route: permit or deny, the ACL it matches, the next hop it
+    sets. A clause the reading does not know is "unsupported": such a node is not
+    evaluated as if the clause were absent."""
+    record = {"policy": row["POLICY"], "node": int(row["NODE"])}
+    mode = str(row.get("MODE") or "").lower()
+    if mode not in {"permit", "deny"}:
+        raise ValueError("pbr_mode")
+    record["mode"] = mode
+    if acl := row.get("MATCH_ACL"):
+        record["acl"] = acl
+    if next_hop := row.get("NEXT_HOP"):
+        record["next_hop"] = ip_address(next_hop)
+    if other := row.get("OTHER"):
+        record["unsupported"] = [
+            "clause:" + (" | ".join(other) if isinstance(other, list) else other)
+        ]
+    return record
 
 
 def _nat_binding(row, family, lines, warnings):
@@ -1295,6 +1315,7 @@ ROWS = {
     "security_zones": _security_zone,
     "nat_rules": _nat_rule,
     "pbr_bindings": _pbr_binding,
+    "pbr_rules": _pbr_rule,
     "nat_bindings": _nat_binding,
     "arp": _arp,
     "routes": _route,
@@ -1364,6 +1385,7 @@ HEADERS = {
 UNIQUE = {
     "vrfs": ("name",),
     "acl_rules": ("acl", "seq"),
+    "pbr_rules": ("policy", "node"),
     "security_zones": ("zone", "ifname"),
     "ldp_peers": ("peer_lsr_id", "label_space"),
     "tunnel_interfaces": ("ifname",),

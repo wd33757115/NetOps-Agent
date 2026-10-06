@@ -1,0 +1,48 @@
+Value Filldown,Required POLICY (\S+)
+Value Required NODE (\d+)
+Value MODE (permit|deny)
+Value MATCH_ACL (\S+)
+Value NEXT_HOP (\d+\.\d+\.\d+\.\d+)
+Value List OTHER (\S.*?)
+
+# "display ip policy-based-route": each node of each IPv4 policy, one row: the policy,
+# node number, permit or deny, the ACL it matches ("if-match acl") and the one next hop
+# it sets ("apply next-hop" with a single address). A second if-match or apply line, a
+# next hop with options (several addresses, vpn-instance, direct, track) and any other
+# clause are kept in OTHER, so such a node is never read as complete.
+Start
+  ^Policy\s+name:\s+${POLICY}\s*$$
+  ^\s+node\s+\d+\s+(permit|deny):\s*$$ -> Continue.Record
+  ^\s+node\s+${NODE}\s+${MODE}:\s*$$ -> Node
+  ^\s*$$
+  ^.* -> Error "unrecognized display ip policy-based-route line"
+
+Node
+  ^Policy\s+name:.* -> Continue.Record
+  ^Policy\s+name:\s+${POLICY}\s*$$ -> Start
+  ^\s+node\s+\d+\s+(permit|deny):\s*$$ -> Continue.Record
+  ^\s+node\s+${NODE}\s+${MODE}:\s*$$
+  ^\s+if-match\s+acl\s+${MATCH_ACL}\s*$$ -> Matched
+  ^\s+apply\s+next-hop\s+${NEXT_HOP}\s*$$ -> Applied
+  ^\s+${OTHER}\s*$$
+  ^\s*$$
+  ^.* -> Error "unrecognized display ip policy-based-route line"
+
+Matched
+  ^Policy\s+name:.* -> Continue.Record
+  ^Policy\s+name:\s+${POLICY}\s*$$ -> Start
+  ^\s+node\s+\d+\s+(permit|deny):\s*$$ -> Continue.Record
+  ^\s+node\s+${NODE}\s+${MODE}:\s*$$ -> Node
+  ^\s+apply\s+next-hop\s+${NEXT_HOP}\s*$$ -> Applied
+  ^\s+${OTHER}\s*$$
+  ^\s*$$
+  ^.* -> Error "unrecognized display ip policy-based-route line"
+
+Applied
+  ^Policy\s+name:.* -> Continue.Record
+  ^Policy\s+name:\s+${POLICY}\s*$$ -> Start
+  ^\s+node\s+\d+\s+(permit|deny):\s*$$ -> Continue.Record
+  ^\s+node\s+${NODE}\s+${MODE}:\s*$$ -> Node
+  ^\s+${OTHER}\s*$$
+  ^\s*$$
+  ^.* -> Error "unrecognized display ip policy-based-route line"
