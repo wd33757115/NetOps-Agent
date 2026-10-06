@@ -7,6 +7,7 @@
 - **PBR 用 OpenConfig 的 `openconfig-policy-forwarding`。** IETF 和 IEEE 都没有 PBR 标准模型，所以用这个公开模型。要固定版本、纳入来源锁和校验；不增加项目自定义 YANG。ACL 用 RFC 8519，NAT 用 RFC 8512。（[实施文档 §13](../network-digital-twin-implementation.md) 第 3 条）
 - **走统一流水线**：原始响应 → 标准数据树（RFC 7951 JSON，校验；不完整的标为 partial） → 从标准树抽取查询表 → 路径分析读查询表。（§13 第 1 条，负责人 2026-10-06 确认）PBR 是第一个完整走这条路的领域，要把这几步做成以后 ACL、NAT 和 CLI 采集也能照着改的样子，但**本任务不改造 ACL 和 NAT**。
 - **路径上的处理顺序**：入接口 → 入方向 ACL → **PBR** → NAT → 路由 → 出方向 ACL → ARP/ND → 二层转发。
+- **宿主树用最小 OpenConfig 树**（负责人 2026-10-06 确认）：`openconfig-policy-forwarding` 只能挂在 `openconfig-network-instance` 的网络实例下，接口绑定的 `interface-ref` 是指向 `/oc-if:interfaces/interface/name` 的 leafref。因此只生成承载 PBR 所需的最小 OpenConfig 树：网络实例（名称、类型）、接口（名称及模块要求的必填项）和 policy-forwarding。名称必须与 IETF 树（RFC 8529 网络实例、RFC 8343 接口）一致；接口、地址、路由等权威数据仍以 IETF 树为准，不在 OpenConfig 树里重复填写。校验用钉住的完整依赖闭包（`openconfig-network-instance` 会引入 BGP、MPLS 等模块，只需编译，不需要填实例），让 leafref 检查接口名是否对得上。必填项无法从证据得到时标 partial 并写明原因，不造值。
 - **只对 H3C 设备做测试**：本任务只覆盖 H3C Comware 7，CLI 和 NETCONF 都要做。Cisco IOS 维持现状，只采集绑定、只打"可能改变走向"的标记，不采集 route-map 的内容。
 
 ## 2. 现状
