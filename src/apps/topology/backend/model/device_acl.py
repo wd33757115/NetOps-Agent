@@ -3,9 +3,10 @@
 An entry is exported only when RFC 8519 and its extensions (RFC 9899, ietf-acl-enh, owner
 decision 2026-10-06) express it exactly: a contiguous wildcard is a prefix, "lt N"/"gt N"
 are "lte N-1"/"gte N+1", "established" is the TCP flags ACK or RST (RFC 9899
-flags-bitmask, operator "any"; the Cisco definition of established). An entry they
-cannot express (several ports in one entry: an RFC 9899 port set needs a name the device
-does not give; fragments: "non-initial fragment" is not one fragment-type condition; an
+flags-bitmask, operator "any"; the Cisco definition of established). Several ports
+in one entry ("eq www 443") are an RFC 9899 port set named "<ACL>:<rule>:src|dst" from
+the device's own keys (owner decision 2026-10-06, as PBR's sequence-id). An entry they
+cannot express (fragments: "non-initial fragment" is not one fragment-type condition; an
 object group whose members were not collected; a time range; a non-contiguous wildcard;
 a condition the reading does not know) is left out with a gap that keeps its place and
 action: dropping a condition would widen the entry, and a path computed from the tree
@@ -56,8 +57,10 @@ def _port(condition):
 
 
 def _ace(entry):
-    """(RFC 8519 ace, None) or (None, [why it cannot be expressed])."""
+    """(RFC 8519 ace, None, its RFC 9899 port sets) or (None, [why it cannot be
+    expressed], [])."""
     why = list(entry.get("unsupported") or [])
+    port_sets = []
     for flag, reason in (("fragments", "fragments"), ("time_range", "time_range")):
         if entry.get(flag):
             why.append(reason)
@@ -80,7 +83,26 @@ def _ace(entry):
     for key, leaf in (("src_ports", "source-port"), ("dst_ports", "destination-port")):
         if key not in entry:
             continue
-        port = _port(entry[key]) if container else None
+        condition = entry[key]
+        if container and condition["op"] == "eq" and len(condition["ports"]) > 1:
+            if any(port is None for port in condition["ports"]):
+                why.append(key)
+                continue
+            # Several ports: an RFC 9899 port set, named from the device's own keys.
+            side = "source" if key == "src_ports" else "destination"
+            name = f"{entry['acl']}:{entry['seq']}:{'src' if side == 'source' else 'dst'}"
+            port_sets.append(
+                {
+                    "name": name,
+                    "port": [
+                        {"id": str(n), "port-range-or-operator": {"operator": "eq", "port": port}}
+                        for n, port in enumerate(condition["ports"], 1)
+                    ],
+                }
+            )
+            matches.setdefault(container, {})[f"{ENH}{side}-{container}-port-set"] = name
+            continue
+        port = _port(condition) if container else None
         if port is None:
             why.append(key)
         else:
@@ -94,13 +116,13 @@ def _ace(entry):
         kind, code = entry["icmp"]
         matches["icmp"] = {"type": kind, **({"code": code} if code is not None else {})}
     if why:
-        return None, sorted(set(why))
+        return None, sorted(set(why)), []
     ace = {"name": str(entry["seq"]), "actions": {"forwarding": ACTIONS[entry["action"]]}}
     if matches:
         ace["matches"] = matches
     if "matches" in entry:
         ace["statistics"] = {"matched-packets": str(entry["matches"])}
-    return ace, None
+    return ace, None, port_sets
 
 
 def project_device_acl(observation):
@@ -126,7 +148,7 @@ def project_device_acl(observation):
     if not isinstance(bindings, list):
         result["gaps"].append({"code": "acl_bindings_not_observed"})
         bindings = []
-    acls, positions = {}, {}
+    acls, positions, port_sets = {}, {}, []
     for entry in rules:
         if entry.get("family", "ipv4") != "ipv4":
             continue
@@ -135,7 +157,8 @@ def project_device_acl(observation):
         )
         # Its place among the ACL's entries in the device's match order.
         position = positions[entry["acl"]] = positions.get(entry["acl"], -1) + 1
-        ace, why = _ace(entry)
+        ace, why, sets = _ace(entry)
+        port_sets += sets
         if ace is None:
             result["gaps"].append(
                 {
@@ -189,6 +212,8 @@ def project_device_acl(observation):
         metadata["default_actions"] = defaults
     if acls:
         tree = {"acl": list(acls.values())}
+        if port_sets:
+            tree[ENH + "defined-sets"] = {"port-sets": {"port-set": port_sets}}
         if points:
             tree["attachment-points"] = {"interface": [points[name] for name in sorted(points)]}
         result["tree"][ACL + "acls"] = tree

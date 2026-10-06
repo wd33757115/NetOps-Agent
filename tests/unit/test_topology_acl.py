@@ -493,7 +493,6 @@ def test_what_rfc8519_cannot_express_is_left_out_with_a_gap(syntax, device_model
     validate(device_model, result["tree"])
     assert [(g["acl"], g["entry"], g["reasons"]) for g in result["gaps"]] == [
         ("10", 20, ["src_wildcard"]),  # 0.255.0.255 is not a prefix
-        ("T-ALL", 30, ["dst_ports"]),  # "eq www 443": an RFC 9899 port set needs a name
         ("T-ALL", 70, ["fragments"]),
         ("T-ALL", 120, ["condition:dscp ef"]),
         ("T-ALL", 130, ["object_group:OG-T"]),
@@ -516,10 +515,23 @@ def test_what_rfc8519_cannot_express_is_left_out_with_a_gap(syntax, device_model
             "explicit-tcp-flag": ["ietf-acl-enh:ack", "ietf-acl-enh:rst"],
         }
     }
+    # "eq www 443": an RFC 9899 port set, named from the device's keys.
+    assert aces["30"]["matches"]["tcp"] == {
+        "ietf-acl-enh:destination-tcp-port-set": "T-ALL:30:dst"
+    }
+    [port_set] = acls["ietf-acl-enh:defined-sets"]["port-sets"]["port-set"]
+    assert port_set == {
+        "name": "T-ALL:30:dst",
+        "port": [
+            {"id": "1", "port-range-or-operator": {"operator": "eq", "port": 80}},
+            {"id": "2", "port-range-or-operator": {"operator": "eq", "port": 443}},
+        ],
+    }
     # Exported entries keep the device's match order; a gap keeps its place.
-    assert list(aces) == ["10", "20", "40", "50", "60", "80", "90", "100", "110", "150", "160"]
-    assert [(g["entry"], g["position"], g.get("action")) for g in result["gaps"][1:3]] == [
-        (30, 2, "permit"),
+    assert list(aces) == [
+        "10", "20", "30", "40", "50", "60", "80", "90", "100", "110", "150", "160"
+    ]
+    assert [(g["entry"], g["position"], g.get("action")) for g in result["gaps"][1:2]] == [
         (70, 6, "deny"),
     ]
     result, acls = rfc8519(syntax, "br1")
@@ -534,7 +546,13 @@ def test_the_query_table_is_the_tree_with_its_gaps_in_place(syntax):
     names = [entry["name"] for entry in t_all["entries"]]
     assert names[:8] == ["10", "20", "30", "40", "50", "60", "70", "80"]
     by_name = {entry["name"]: entry for entry in t_all["entries"]}
-    assert by_name["30"] == {"name": "30", "action": "permit", "undetermined": ["dst_ports"]}
+    # The port set is resolved into its ports; the entry that cannot be expressed holds
+    # its place.
+    assert by_name["30"]["matches"]["tcp"]["ietf-acl-enh:destination-tcp-port-set"] == [
+        {"operator": "eq", "port": 80},
+        {"operator": "eq", "port": 443},
+    ]
+    assert by_name["70"] == {"name": "70", "action": "deny", "undetermined": ["fragments"]}
     assert by_name["140"]["undetermined"] == ["time_range"]
     assert "undetermined" not in by_name["60"]
 
@@ -542,19 +560,17 @@ def test_the_query_table_is_the_tree_with_its_gaps_in_place(syntax):
 def test_what_the_tree_cannot_express_cannot_be_decided_past(syntax):
     [t_all] = [row for row in acl_tables(syntax[ADDRESS["core1"]]) if row["acl"] == "T-ALL"][:1]
     checked = table_entries(t_all)
-    # A reply matches established (now in the tree) before anything else decides.
+    # A reply matches established (RFC 9899 TCP flags) before anything else decides.
     reply = packet("198.51.100.1", "172.16.10.11", 6, 443, 50000)
-    # Entry 30, which the tree cannot hold, permits too: the result stands, and says so.
-    assert evaluate(checked, {**reply, "reply": True}, "deny") == {
-        "result": "permit",
-        "rule": 60,
-        "undecided_before": [30],
-    }
-    # A web flow meets entry 30 ("eq www 443"), which the tree cannot hold: undetermined.
+    assert evaluate(checked, {**reply, "reply": True}, "deny") == {"result": "permit", "rule": 60}
+    # "eq www 443" is a port set now: a web flow is decided by it.
     web = packet("10.9.9.9", "192.0.2.5", 6, 40000, 80)
-    outcome = evaluate(checked, web, "deny")
-    assert outcome["result"] == "undetermined" and 30 in outcome["rules"]
-    assert "dst_ports" in outcome["needs"]
+    assert evaluate(checked, web, "deny") == {"result": "permit", "rule": 30}
+    # From 192.0.2.0/24 a flow reaches entry 70 (fragments), which the tree cannot hold.
+    from_test_net = packet("192.0.2.7", "10.8.8.8", 6, 1000, 2000)
+    outcome = evaluate(checked, from_test_net, "deny")
+    assert outcome["result"] == "undetermined" and 70 in outcome["rules"]
+    assert "fragments" in outcome["needs"]
 
 
 def test_a_public_only_rule_is_not_attached_to_a_vpn_interface(scenario, device_model):

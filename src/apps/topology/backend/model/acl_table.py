@@ -27,8 +27,15 @@ NOT_ATTACHED = {
 }
 
 
-def _entry(ace):
-    found = {"name": ace["name"], "matches": ace.get("matches", {})}
+def _entry(ace, sets):
+    """An exported entry; a port set it references is resolved into its ports."""
+    matches = ace.get("matches", {})
+    for container in ("tcp", "udp"):
+        for side in ("source", "destination"):
+            leaf = f"{ENH}{side}-{container}-port-set"
+            if leaf in matches.get(container, {}):
+                matches = {**matches, container: {**matches[container], leaf: sets.get(matches[container][leaf], [])}}
+    found = {"name": ace["name"], "matches": matches}
     forwarding = ace.get("actions", {}).get("forwarding")
     if forwarding in FORWARDING:
         found["action"] = FORWARDING[forwarding]
@@ -49,13 +56,17 @@ def query_table(projection):
                 **({"action": gap["action"]} if "action" in gap else {}),
                 "undetermined": gap["reasons"],
             }
+    sets = {
+        row["name"]: [port["port-range-or-operator"] for port in row["port"]]
+        for row in acls.get(ENH + "defined-sets", {}).get("port-sets", {}).get("port-set", [])
+    }
     ordered = {}
     for acl in acls.get("acl", []):
         aces = iter(acl.get("aces", {}).get("ace", []))
         places = held.get(acl["name"], {})
         total = len(acl.get("aces", {}).get("ace", [])) + len(places)
         ordered[acl["name"]] = [
-            places[n] if n in places else _entry(next(aces)) for n in range(total)
+            places[n] if n in places else _entry(next(aces), sets) for n in range(total)
         ]
     defaults = {
         (row["interface"], row["direction"], row["acl"]): row["default_action"]
@@ -111,7 +122,7 @@ def _seq(name):
 
 def entries(row):
     """A row's entries as the conditions model/acl.py evaluates (src/dst address and
-    wildcard, protocol, ports, ICMP, established)."""
+    wildcard, protocol, ports (a port set as its ports), ICMP, established)."""
     found = []
     for entry in row["entries"]:
         record = {"seq": _seq(entry["name"])}
@@ -129,14 +140,21 @@ def entries(row):
             if leaf in ipv4:
                 record[key] = _address(ipv4[leaf])
         for container in ("tcp", "udp"):
-            for leaf, key in (("source-port", "src_ports"), ("destination-port", "dst_ports")):
-                if leaf in matches.get(container, {}):
-                    record[key] = _port(matches[container][leaf])
+            for side, key in (("source", "src_ports"), ("destination", "dst_ports")):
+                fields = matches.get(container, {})
+                if f"{side}-port" in fields:
+                    record[key] = _port(fields[f"{side}-port"])
+                members = fields.get(f"{ENH}{side}-{container}-port-set")
+                if members is not None:
+                    if members and all(m.get("operator") == "eq" for m in members):
+                        record[key] = {"op": "eq", "ports": [m["port"] for m in members]}
+                    else:
+                        record.setdefault("unsupported", []).append(f"{key}_set")
         flags = matches.get("tcp", {}).get(ENH + "flags-bitmask")
         if flags == ESTABLISHED:
             record["established"] = True
         elif flags is not None:
-            record["unsupported"] = ["tcp_flags"]
+            record.setdefault("unsupported", []).append("tcp_flags")
         if "icmp" in matches:
             record["icmp"] = [matches["icmp"]["type"], matches["icmp"].get("code")]
         if "matched-packets" in entry:
