@@ -16,6 +16,8 @@ interface TopologyNode { id: string; name: string; address?: string; addresses?:
 interface Link { id: string; source: string; target: string; source_tp: string; target_tp: string; freshness: string; observed_at?: string; evidence_id?: string; link_type?: string; direction?: string; label?: string; ends?: string[]; subnets?: string[]; evidence?: string[]; state?: string; available?: boolean | null }
 interface Graph { nodes: TopologyNode[]; links: Link[]; model_profile: string }
 interface Target { id: string; address: string; depth: number; status: string; reason?: string; version: number; evidence_id?: string }
+// The discovery form's choice for a new network; never sent to the server.
+const NEW_NETWORK = '__new__'
 interface Run { id: string; network_id: string; status: string; port?: number; snapshot_id?: string; graph: Graph; targets: Target[]; created_at: string }
 interface History { id: string; status: string; created_at: string; snapshot_id?: string }
 const labels: Record<string, string> = { queued: '排队中', running: '发现中', waiting_for_input: '等待人工处理', completed: '已完成', partial: '部分完成', cancelled: '已取消', succeeded: '采集成功', skipped: '人工跳过', observed: '本次观测', advertised: '邻居通告', not_observed: '本次未观测', absent_in_observation: '本次邻接表中未出现', candidate: '候选身份', address_scoped: '地址范围内身份', collected: '已采集', host: '未识别端点', endpoint: '未识别端点', segment: '共享网段', p2p: '点到点', mp2mp: '多点共享', bi: '双向', uni: '单向' }
@@ -151,10 +153,11 @@ export default function Page() {
   }
   const [form] = Form.useForm()
   const chosenNetwork = Form.useWatch('network_id', form)
-  // An existing network keeps its name.
+  // An existing network keeps its name; "create a new network" is an explicit choice, not a
+  // hidden clear icon, and starts from the default name rather than the last network's.
   const applyNetwork = (id?: string) => {
     const chosen = networks.find(n => n.id === id)
-    if (chosen) form.setFieldsValue({ network_id: chosen.id, name: chosen.name })
+    form.setFieldsValue(chosen ? { network_id: chosen.id, name: chosen.name } : { network_id: NEW_NETWORK, name: '网络拓扑' })
   }
   const [retryForm] = Form.useForm()
   const [defaultForm] = Form.useForm()
@@ -268,16 +271,16 @@ export default function Page() {
     </main>
     <Drawer title="新建拓扑发现" open={create} onClose={() => { form.resetFields(); setCreate(false) }} destroyOnClose width={520}>
       <Form form={form} layout="vertical" initialValues={{ name: '网络拓扑', port: 22, profile_id: 'auto', max_depth: 3, max_targets: 30 }} onFinish={async values => {
-        const { username, password, ...rest } = values
+        const { username, password, network_id, ...rest } = values
         if (!!username !== !!password) { message.error('本次用户名和密码需要同时填写，或都留空使用默认'); return }
         if (!username && !defaultLogin?.configured) { message.error('请填写本次用户名和密码，或先设置默认登录'); return }
         setBusy(true)
-        try { const { data } = await api.post<Run>('/apps/topology/runs', { ...rest, ...(username ? { credentials: { username, password } } : {}), request_id: crypto.randomUUID(), seeds: values.seeds.split(/[\s,]+/).filter(Boolean), allowed_cidrs: values.allowed_cidrs.split(/[\s,]+/).filter(Boolean) }); await accept(data); setCreate(false); form.resetFields() }
+        try { const { data } = await api.post<Run>('/apps/topology/runs', { ...rest, ...(network_id && network_id !== NEW_NETWORK ? { network_id } : {}), ...(username ? { credentials: { username, password } } : {}), request_id: crypto.randomUUID(), seeds: values.seeds.split(/[\s,]+/).filter(Boolean), allowed_cidrs: values.allowed_cidrs.split(/[\s,]+/).filter(Boolean) }); await accept(data); setCreate(false); form.resetFields() }
         catch (error) { message.error(errorMessage(error)) }
         finally { form.setFieldValue('password', ''); setBusy(false) }
       }}>
-        <Form.Item name="network_id" label="网络范围"><Select allowClear placeholder="创建新网络" onChange={value => applyNetwork(value)} options={networks.map(n => ({ value: n.id, label: n.name }))} /></Form.Item>
-        <Form.Item name="name" label="网络名称" rules={[{ required: true }]}><Input disabled={!!chosenNetwork} /></Form.Item>
+        <Form.Item name="network_id" label="网络范围" extra="选择已有网络会在该网络下重新发现；选择“创建新网络”会新建一个网络"><Select onChange={value => applyNetwork(value)} options={[{ value: NEW_NETWORK, label: '＋ 创建新网络' }, ...networks.map(n => ({ value: n.id, label: n.name }))]} /></Form.Item>
+        <Form.Item name="name" label="网络名称" rules={[{ required: true }]}><Input disabled={!!chosenNetwork && chosenNetwork !== NEW_NETWORK} /></Form.Item>
         <Form.Item name="seeds" label="种子设备地址" rules={[{ required: true }]} extra="多个 IP 以空格或换行分隔"><Input.TextArea rows={2} placeholder="10.10.1.1" /></Form.Item>
         <Form.Item name="allowed_cidrs" label="本任务允许的管理网段" rules={[{ required: true }]} extra="只发现此网段内的邻居"><Input placeholder="10.10.1.0/24" /></Form.Item>
         <Form.Item name="profile_id" label="种子设备平台（可选）" extra="默认自动识别。手工选择只适用于种子；每个新邻居都独立识别，不继承种子平台。"><Select options={profiles} /></Form.Item>

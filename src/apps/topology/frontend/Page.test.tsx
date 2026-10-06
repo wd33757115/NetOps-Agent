@@ -54,6 +54,26 @@ it('has no management domain or neighbour option and uses the default login when
   expect(body).toMatchObject({ seeds: ['10.0.0.1'], allowed_cidrs: ['10.0.0.0/24'], max_depth: 3, max_targets: 30 })
 })
 
+it('offers creating a new network next to the existing ones', async () => {
+  state.networks = [{ id: 'n1', name: 'vpn-fabric 实验网' }]
+  render(<MemoryRouter><Page /></MemoryRouter>)
+  fireEvent.click(await screen.findByRole('button', { name: '新建发现任务' }))
+  // The viewed network is preselected and its name locked.
+  await waitFor(() => expect(screen.getByLabelText('网络名称')).toHaveValue('vpn-fabric 实验网'))
+  expect(screen.getByLabelText('网络名称')).toBeDisabled()
+  fireEvent.mouseDown(screen.getByLabelText('网络范围'))
+  fireEvent.click(await screen.findByText('＋ 创建新网络'))
+  await waitFor(() => expect(screen.getByLabelText('网络名称')).toBeEnabled())
+  fireEvent.change(screen.getByLabelText('网络名称'), { target: { value: '园区二期' } })
+  fireEvent.change(screen.getByLabelText('种子设备地址'), { target: { value: '10.0.0.1' } })
+  fireEvent.change(screen.getByLabelText('本任务允许的管理网段'), { target: { value: '10.0.0.0/24' } })
+  fireEvent.click(screen.getByRole('button', { name: '开始发现' }))
+  await waitFor(() => expect(api.post).toHaveBeenCalledWith('/apps/topology/runs', expect.anything()))
+  const body = api.post.mock.calls[0][1]
+  expect(body).not.toHaveProperty('network_id')
+  expect(body.name).toBe('园区二期')
+})
+
 it('sends a temporary login for this run only', async () => {
   await startDiscovery({ username: 'ops', password: 'run-test-secret' })
   await waitFor(() => expect(api.post).toHaveBeenCalled())
