@@ -327,6 +327,11 @@ def _facts(data):
     facts["platform"] = identity.get("os_family") or discovery_families().get(
         platform.get("profile_id"), ""
     )
+    if isinstance(data.get("standard"), dict) and isinstance(
+        data["standard"].get("records"), dict
+    ):
+        # The device's NETCONF tables as standard records: its trees are built from them.
+        facts["standard"] = data["standard"]
     return facts
 
 
@@ -1073,6 +1078,8 @@ def topology_observation(result):
             for cap, parsed in result.parsed.items()
             if cap in TOPOLOGY_FACTS
         },
+        # NETCONF tables as standard records, for the standard trees (netconf-api).
+        **({"standard": result.standard} if getattr(result, "standard", None) else {}),
         "failure_code": None
         if complete
         else (

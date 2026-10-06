@@ -48,6 +48,45 @@ def reader():
     return cached[0]
 
 
+def standard_reader():
+    from src.apps.netconf_api.runtime import StandardReader
+
+    cached = _cache.get("standard")
+    if cached is None or time.monotonic() - cached[1] > REFRESH_SECONDS:
+        cached = _cache["standard"] = (StandardReader(), time.monotonic())
+    return cached[0]
+
+
+def standard_selection(identity, model=None):
+    """The netconf-api mapping that reads this device's tables as standard records."""
+    try:
+        return standard_reader().select(rules.device(identity, model))
+    except Exception as exc:  # mappings unavailable: the device keeps its CLI trees
+        logger.warning("netconf standard mappings unavailable: %s", exc)
+        return None
+
+
+def read_standard(session, guard, selection, on_result=None):
+    """The device's tables as standard records (netconf-api's conversion layer), each
+    reply kept as evidence; topology builds the standard trees from them."""
+    data = standard_reader().read(selection, session, guard=guard)
+    _evidence(
+        "standard",
+        [
+            {"definition": f"{selection.ref}:{r['table']}", "reply": r["reply"]}
+            for r in data["replies"]
+        ],
+        on_result,
+    )
+    return {
+        "mapping": selection.ref,
+        "records": data["records"],
+        "problem_count": len(data["problems"]),
+        "problems": data["problems"][:MAX_PROBLEMS],
+        "failed": data["failed"],
+    }
+
+
 def selections(identity, capabilities, model=None):
     """{capability: NetconfSelection} a published definition serves on this device.
 

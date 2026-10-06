@@ -344,12 +344,15 @@ def _collect_netconf(
     remaining,
     should_continue,
     on_result,
+    standard=None,
 ):
     """Read the NETCONF-served tables in one session on the node's login.
 
     Preferred: a table read whole and clean replaces the CLI's; the others are returned
     as {capability: metadata} for the CLI to collect. Compared: the CLI's facts stay, and
     each carries how NETCONF's differ. Every capability keeps its NETCONF metadata.
+    ``standard``: the device's tables are also read as standard records in the same
+    session (``result.standard``), from which topology builds the standard trees.
     """
     from src.platform.device_access.netconf import NETCONF_PORT
 
@@ -366,7 +369,7 @@ def _collect_netconf(
         else:
             pending[cap] = selection
     read = {}
-    if pending:
+    if pending or standard is not None:
         profile = replace(original_profile, port=NETCONF_PORT, connection_attempts=1)
         service = DeviceAccessService(
             target_resolver=access.target_resolver,
@@ -396,9 +399,13 @@ def _collect_netconf(
                         for rest in order[index:]:
                             read[rest] = _session_lost(pending[rest], exc)
                         break
+                if standard is not None and len(read) == len(pending):
+                    result.standard = nc.read_standard(session, checked, standard, on_result)
         except DeviceAccessError as exc:
             for cap, selection in pending.items():
                 read.setdefault(cap, _session_lost(selection, exc))
+            if standard is not None and result.standard is None:
+                result.standard = {"mapping": standard.ref, "failed": f"session:{exc.failure_code}"}
     for cap, (parsed, meta) in read.items():
         if mode == "compare":
             cli = result.parsed.get(cap)
@@ -424,6 +431,7 @@ class CollectionResult:
     parsed: dict = field(default_factory=dict)
     missing: dict = field(default_factory=dict)
     driver_warning: str | None = None
+    standard: dict | None = None  # the NETCONF tables as standard records (netconf-api)
 
 
 def command_allowlist(profiles=None):
@@ -595,6 +603,7 @@ def collect_node(
         if netconf != "off"
         else {}
     )
+    standard = nc.standard_selection(identity, model) if netconf != "off" else None
     # Preferred: a table NETCONF serves waits for it, and runs on the CLI only if it fails.
     later = set(via_netconf) if netconf == "prefer" else set()
     # Capabilities published with the same command (IOS interface addresses and ACL
@@ -670,7 +679,7 @@ def collect_node(
         on_result,
     )
     kept = {}
-    if via_netconf and netconf == "prefer":
+    if (via_netconf or standard) and netconf == "prefer":
         fallback = _collect_netconf(
             result,
             via_netconf,
@@ -684,6 +693,7 @@ def collect_node(
             remaining,
             should_continue,
             on_result,
+            standard,
         )
         caps = [cap for cap in fallback if command_of.get(cap)]
         if caps:
@@ -760,7 +770,7 @@ def collect_node(
             should_continue,
             on_result,
         )
-    if via_netconf and netconf == "compare":
+    if (via_netconf or standard) and netconf == "compare":
         # Compared with the CLI's final tables, per-VRF scopes merged.
         _collect_netconf(
             result,
@@ -775,6 +785,7 @@ def collect_node(
             remaining,
             should_continue,
             on_result,
+            standard,
         )
     for cap, meta in kept.items():
         # A per-VRF merge rebuilds a table; how NETCONF served it stays with it.

@@ -14,13 +14,19 @@ lookup that finds no record leaves the field out and is reported with the device
 
 from __future__ import annotations
 
+import hashlib
 import ipaddress
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
+from xml.etree.ElementTree import Element, SubElement, tostring
 
+import yaml
 from defusedxml import ElementTree
+
+MAPPINGS = Path(__file__).resolve().parent / "mappings"
 
 NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*")
 FIELD = re.compile(r"[a-z][a-z0-9-]*")
@@ -104,6 +110,9 @@ class StandardMapping:
     vendor: str
     namespace: str
     tables: tuple[Table, ...] = field(default_factory=tuple)
+    platforms: tuple[str, ...] = ()
+    id: str = ""
+    sha256: str = ""
 
 
 def _leaf_path(text, where):
@@ -161,7 +170,7 @@ def _rule(raw, where, earlier):
     )
 
 
-def load(raw: Mapping[str, Any]) -> StandardMapping:
+def load(raw: Mapping[str, Any], id: str = "", sha256: str = "") -> StandardMapping:
     """A mapping from its data; an unusable one raises MappingError when loaded."""
     if not isinstance(raw, dict) or not isinstance(raw.get("tables"), dict):
         raise MappingError("a mapping has vendor, namespace and tables")
@@ -185,7 +194,62 @@ def load(raw: Mapping[str, Any]) -> StandardMapping:
             ignore = frozenset(_leaf_path(leaf, name) for leaf in ignore)
         tables.append(Table(name, paths, fields, ignore))
         seen.add(name)
-    return StandardMapping(str(raw.get("vendor", "")), str(raw["namespace"]), tuple(tables))
+    platforms = raw.get("platforms") or []
+    if not isinstance(platforms, list) or not all(isinstance(p, str) for p in platforms):
+        raise MappingError("platforms must be a list of names")
+    return StandardMapping(
+        str(raw.get("vendor", "")),
+        str(raw["namespace"]),
+        tuple(tables),
+        tuple(platforms),
+        id,
+        sha256,
+    )
+
+
+def shipped() -> dict[str, StandardMapping]:
+    """{id: mapping} of the mappings shipped with the app (``mappings/<id>.yaml``)."""
+    found = {}
+    for path in sorted(MAPPINGS.glob("*.yaml")):
+        text = path.read_bytes()
+        found[path.stem] = load(
+            yaml.safe_load(text.decode("utf-8")), path.stem, hashlib.sha256(text).hexdigest()
+        )
+    return found
+
+
+def subtree_filter(mapping: StandardMapping, table: Table) -> str:
+    """The subtree filter selecting a table's whole rows (each of its paths)."""
+    heads = {path[0] for path in table.paths}
+    if len(heads) != 1:
+        raise MappingError(f"{table.name}: its paths are under different top elements")
+    root = Element(next(iter(heads)), xmlns=mapping.namespace)
+    for path in table.paths:
+        node = root
+        for name in path[1:]:
+            child = next((c for c in node if c.tag == name), None)
+            node = child if child is not None else SubElement(node, name)
+    return tostring(root, encoding="unicode")
+
+
+def read(mapping: StandardMapping, fetch: Callable[[str], str], refused=()):
+    """Read every table of a mapping with ``fetch(subtree filter)`` and convert them.
+
+    {"records", "problems", "replies": [{table, filter, reply}], "failed": {table: why}}.
+    An exception in ``refused`` (the device refuses one table's RPC) leaves that table
+    out as failed; any other exception (the session is gone) goes to the caller.
+    """
+    replies, failed = [], {}
+    for table in mapping.tables:
+        subtree = subtree_filter(mapping, table)
+        try:
+            reply = fetch(subtree)
+        except tuple(refused) as exc:
+            failed[table.name] = str(exc)[:300]
+            continue
+        replies.append({"table": table.name, "filter": subtree, "reply": reply})
+    records, problems = convert(mapping, {item["table"]: [item["reply"]] for item in replies})
+    return {"records": records, "problems": problems, "replies": replies, "failed": failed}
 
 
 def _find(roots, path, ns):
@@ -261,21 +325,32 @@ def _value(rule, element, ns, indexes):
     return text, None
 
 
-def convert(mapping: StandardMapping, replies: Iterable[str]):
-    """({table: [record]}, [problem]) from the device's replies (rpc-reply or <data>).
-
-    Every table of the mapping is read from all replies; a table whose rows are in none
-    of them is absent from the result (not collected), not an empty table.
-    """
+def _parse(texts):
     roots = []
-    for reply in replies:
+    for text in texts:
         try:
-            roots.append(ElementTree.fromstring(reply))
+            roots.append(ElementTree.fromstring(text))
         except Exception:
             raise MappingError("a device reply is not XML") from None
+    return roots
+
+
+def convert(mapping: StandardMapping, replies: Iterable[str] | Mapping[str, list[str]]):
+    """({table: [record]}, [problem]) from the device's replies (rpc-reply or <data>).
+
+    ``replies`` is {table: its replies} (each table read from its own reply only), or a
+    list every table is read from. A table whose rows are in none of its replies is
+    absent from the result (not collected), not an empty table.
+    """
+    if isinstance(replies, Mapping):
+        roots_of = {name: _parse(texts) for name, texts in replies.items()}
+    else:
+        shared = _parse(replies)
+        roots_of = {table.name: shared for table in mapping.tables}
     ns = f"{{{mapping.namespace}}}"
     found, problems, indexes = {}, [], {}
     for table in mapping.tables:
+        roots = roots_of.get(table.name, [])
         if not _collected(roots, table, ns):
             continue
         for rule in (rule for rules in table.fields.values() for rule in rules):

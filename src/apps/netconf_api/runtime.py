@@ -13,7 +13,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from .backend import mapping
+from .backend import mapping, standard
 
 CONTRACT_VERSION = 1
 DefinitionError = mapping.DefinitionError
@@ -26,6 +26,8 @@ __all__ = [
     "MappingError",
     "NetconfRead",
     "NetconfSelection",
+    "StandardReader",
+    "StandardSelection",
     "announced",
 ]
 
@@ -149,3 +151,61 @@ class DefinitionReader:
             mapped.read,
             replies,
         )
+
+
+@dataclass(frozen=True)
+class StandardSelection:
+    """The mapping that reads a device family's tables as standard records."""
+
+    mapping: standard.StandardMapping
+
+    @property
+    def ref(self):
+        return f"{self.mapping.id}@{self.mapping.sha256[:12]}"
+
+
+class StandardReader:
+    """Select a device family's standard mapping and read it over a consumer's session.
+
+    The records are named after the standard leaves (``backend/standard.py``); the
+    consumer places them in the standard trees.
+    """
+
+    def __init__(
+        self, loader: Callable[[], Mapping[str, standard.StandardMapping]] | None = None
+    ) -> None:
+        """``loader``: {id: mapping}; the mappings shipped with the app by default."""
+        self._loader = loader or standard.shipped
+        self._mappings = None
+
+    def select(self, device: Mapping[str, Any]) -> StandardSelection | None:
+        """The one mapping for a device {"vendor", "platform"}, or None."""
+        if self._mappings is None:
+            self._mappings = self._loader()
+        vendor = str(device.get("vendor") or "").casefold()
+        found = [
+            item
+            for item in self._mappings.values()
+            if item.vendor.casefold() == vendor and device.get("platform") in item.platforms
+        ]
+        return StandardSelection(found[0]) if len(found) == 1 else None
+
+    def read(self, selection: StandardSelection, session, *, guard=None) -> dict[str, Any]:
+        """{"records", "problems", "replies", "failed"}; a table the device refuses
+        (an RPC error) is failed, a lost session raises the platform's error."""
+        from src.platform.device_access.contracts import DeviceAccessError
+
+        class RefusedError(Exception):
+            pass
+
+        def fetch(subtree):
+            if guard is not None:
+                guard()
+            try:
+                return session.get(subtree)
+            except DeviceAccessError as exc:
+                if exc.failure_code == "netconf_rpc_error":
+                    raise RefusedError(str(exc)) from exc
+                raise
+
+        return standard.read(selection.mapping, fetch, refused=(RefusedError,))

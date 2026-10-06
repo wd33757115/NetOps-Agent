@@ -18,6 +18,7 @@ from __future__ import annotations
 import ipaddress
 
 from .device_control import project_routing
+from .standard_trees import routing_sections
 
 AF = ("ietf-ipv4-unicast-routing", "ietf-ipv6-unicast-routing")
 
@@ -128,5 +129,17 @@ def uncovered(table, vrf, dst, prefixlen):
     return found
 
 
+def standard_records(facts):
+    """The device's NETCONF tables as standard records, when it was read that way."""
+    standard = facts.get("standard") if isinstance(facts, dict) else None
+    records = standard.get("records") if isinstance(standard, dict) else None
+    return records if isinstance(records, dict) else None
+
+
 def route_tables(facts):
+    """The route query table from the device's RFC 8349 trees: built from its NETCONF
+    tables when it was read that way, else from its CLI facts."""
+    records = standard_records(facts)
+    if records is not None and "route" in records:
+        return query_table(routing_sections(records, facts.get("platform", "")))
     return query_table(project_routing({"facts": facts}))

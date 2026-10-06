@@ -92,19 +92,20 @@ import ipaddress
 
 from .acl import ICMP, TCP, UDP, evaluate
 from .acl_table import acl_tables
-from .route_table import route_tables, uncovered
-from .route_table import routes as tree_routes
 from .acl_table import entries as acl_entries
-from .device_pbr import project_device_pbr
-from .pbr import evaluate as pbr_evaluate
-from .pbr import query_table as pbr_table
-from .nat import destination as nat_destination
-from .nat import source as nat_source
 from .builder import NT, ST
+from .device_pbr import project_device_pbr
 from .device_state import project_interfaces, read_interface_state
 from .locate import _Locator, answer, locate
+from .nat import destination as nat_destination
+from .nat import source as nat_source
 from .overlay import egress_instances, prepare
+from .pbr import evaluate as pbr_evaluate
+from .pbr import query_table as pbr_table
 from .retained_links import UNAVAILABLE_OPER_STATUSES
+from .route_table import route_tables, standard_records, uncovered
+from .route_table import routes as tree_routes
+from .standard_trees import device_tree
 
 MAX_PATHS = 8
 MAX_HOPS = 32
@@ -149,7 +150,10 @@ class _Tracer:
         self._routes = {}
         from_tree = {}
         for key, facts in devices.items():
-            if isinstance(facts, dict) and isinstance(facts.get("routes"), list):
+            records = standard_records(facts)
+            if isinstance(facts, dict) and (
+                isinstance(facts.get("routes"), list) or (records and "route" in records)
+            ):
                 self._routes[key] = route_tables(facts)
                 facts = {**facts, "routes": tree_routes(self._routes[key])}
             from_tree[key] = facts
@@ -160,7 +164,12 @@ class _Tracer:
         self.loc = _Locator(devices, base, observed)
         self.topo = self.loc.topo
         self.interface_trees = {
-            key: project_interfaces(facts.get("interfaces")) for key, facts in devices.items()
+            key: (
+                device_tree(standard_records(facts), facts.get("platform", ""))
+                if standard_records(facts) and "interface" in standard_records(facts)
+                else project_interfaces(facts.get("interfaces"))
+            )
+            for key, facts in devices.items()
         }
         self.observed = observed
 
@@ -171,13 +180,7 @@ class _Tracer:
         entry = read_interface_state(self.interface_trees[key], ifname)
         status = entry.get("oper-status", "unknown") if entry else "unknown"
         state = {"interface": ifname, "interface_role": role, "oper_status": status}
-        rows = self.devices[key].get("interfaces")
-        matches = (
-            [row for row in rows if isinstance(row, dict) and row.get("ifname") == ifname]
-            if isinstance(rows, list)
-            else []
-        )
-        if len(matches) == 1 and matches[0].get("admin_status") == "down":
+        if entry and entry.get("enabled") is False:  # RFC 8343: shut down
             state["admin_status"] = "down"
         for name in ("evidence_id", "observed_at"):
             if name in self.observed.get(key, {}):

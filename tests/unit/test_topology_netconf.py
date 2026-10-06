@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from src.apps.netconf_api.backend import mapping
-from src.apps.netconf_api.runtime import DefinitionReader
+from src.apps.netconf_api.runtime import DefinitionReader, StandardReader
 from src.apps.topology.backend import issues
 from src.apps.topology.backend.collectors import collect as runtime
 from src.apps.topology.backend.collectors import netconf as nc
@@ -49,7 +49,14 @@ POLICY_CLI = {
     "display ip policy-based-route setup": "cli-display-ip-policy-based-route-setup.txt",
     "display ip policy-based-route": "cli-display-ip-policy-based-route.txt",
 }
-POLICY_CAPS = ("acl_rules", "acl_bindings", "nat_rules", "nat_bindings", "pbr_bindings", "pbr_rules")
+POLICY_CAPS = (
+    "acl_rules",
+    "acl_bindings",
+    "nat_rules",
+    "nat_bindings",
+    "pbr_bindings",
+    "pbr_rules",
+)
 NO_VRFS = "L3VPN is not configured."
 
 
@@ -72,7 +79,21 @@ def definitions(monkeypatch):
     loaded = mapping.load_all(bodies)
     reader = DefinitionReader(loader=lambda: {key: (d, 1, "f" * 64) for key, d in loaded.items()})
     monkeypatch.setitem(nc._cache, "reader", (reader, float("inf")))
+    # The standard tables are read only where a test asks for them (standard_tables).
+    monkeypatch.setitem(nc._cache, "standard", (StandardReader(loader=dict), float("inf")))
     return loaded
+
+
+@pytest.fixture
+def standard_tables(monkeypatch):
+    """The shipped H3C mapping, and BR1's replies for the tables it adds."""
+    monkeypatch.setitem(nc._cache, "standard", (StandardReader(), float("inf")))
+    for module, name in (
+        ("IPV4ADDRESS", "ipv4address.xml"),
+        ("OSPF", "ospf.xml"),
+        ("LLDP", "lldp.xml"),
+    ):
+        monkeypatch.setitem(REPLIES, module, NETCONF / name)
 
 
 @pytest.fixture
@@ -85,6 +106,7 @@ def br1():
         hello=tuple((NETCONF / "hello-capabilities.txt").read_text("utf-8").split()),
         refuse=None,  # a failure code for the NETCONF login
         fail_on=None,  # a module whose read breaks the session
+        refused=None,  # a module whose read the device refuses (an RPC error)
         asked=[],
         sessions=0,
     )
@@ -116,6 +138,8 @@ def br1():
             module = subtree.split("><", 1)[1].split(">", 1)[0].lstrip("<")
             if module == state.fail_on:
                 raise DeviceAccessError("timeout", "NETCONF reply was not received before timeout")
+            if module == state.refused:
+                raise DeviceAccessError("netconf_rpc_error", "unknown element")
             state.asked.append(subtree)
             return state.replies.get(module) or REPLIES[module].read_text("utf-8")
 
@@ -368,3 +392,39 @@ def test_a_failed_node_is_an_issue_and_unsupported_commands_are_not(database):
     keep(database, data, reason="parse_incomplete")
     kinds = {(i["capability"], i["kind"]) for i in open_issues(database)}
     assert kinds == {("node", "parse_incomplete"), ("evpn_mac", "failed")}
+
+
+def test_standard_tables_are_read_in_the_same_session_and_reach_the_route_table(
+    br1, standard_tables
+):
+    """NETCONF → standard records (netconf-api) → RFC 8349 tree → route query table."""
+    from src.apps.topology.backend.model.route_table import route_tables
+    from src.apps.topology.backend.service import _facts
+
+    result = br1.collect()
+    assert br1.sessions == 1  # one session for the definitions and the standard tables
+    read = result.standard
+    assert read["mapping"].startswith("h3c_comware7@") and read["failed"] == {}
+    counts = {name: len(rows) for name, rows in read["records"].items()}
+    expected = {"interface": 9, "ipv4-address": 7, "route": 50, "ospf-neighbor": 3}
+    assert expected.items() <= counts.items() and counts["lldp-neighbor"] == 3
+    data = topology_observation(result)
+    facts = _facts(data)
+    table = route_tables(facts)
+    rows = {(r["rib"], r["destination-prefix"]): r for r in table["routes"]}
+    # OSPFv2, known from NETCONF (the CLI gives only "O_INTRA").
+    assert rows[("ipv4", "10.255.0.3/32")]["source-protocol"] == "ietf-ospf:ospfv2"
+    assert ("ipv6", "::1/128") in rows
+    assert any(e.command_id.startswith("netconf-standard-") for e in br1.evidence)
+
+
+def test_a_table_the_device_refuses_is_failed_and_the_rest_still_read(br1, standard_tables):
+    br1.refused = "LLDP"
+    result = br1.collect()
+    assert set(result.standard["failed"]) == {"lldp-neighbor"}
+    assert "lldp-neighbor" not in result.standard["records"]  # not collected, not empty
+    assert len(result.standard["records"]["route"]) == 50
+
+    br1.fail_on = "OSPF"  # a session lost midway: the standard read stops, the CLI serves
+    result = br1.collect()
+    assert result.standard["failed"].startswith("session:")
