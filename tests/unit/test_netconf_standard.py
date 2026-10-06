@@ -255,3 +255,75 @@ def test_the_route_query_table_reads_netconf_sections(br1):
     assert default["source-protocol"] == "ietf-bgp:bgp" and default["route-preference"] == 255
     assert default["next-hops"] == [{"ip": "100.64.1.1", "ifname": "GigabitEthernet2/0"}]
     assert table["missing"] == {}
+
+
+def _br1_policy(mapping):
+    texts = replies("br1-policy") + [
+        (FIXTURES / "br1/ifmgr-interfaces.xml").read_text(encoding="utf-8")
+    ]
+    return standard.convert(mapping, texts)
+
+
+def test_nat_tree_holds_what_display_nat_all_shows(mapping):
+    records, problems = _br1_policy(mapping)
+    assert problems == [] and not any("unread" in r for t in records.values() for r in t)
+    nat = project(records, "comware")["control"]["nat"]
+    assert [g["code"] for g in nat["gaps"]] == ["mandatory_statistics_not_observed"]
+    (instance,) = nat["tree"]["ietf-nat:nat"]["instances"]["instance"]
+    policies = {p["id"]: p for p in instance["policy"]}
+    # "ACL: 2991  Address group ID: 9  NO-PAT: Y" with group 9 = 203.0.113.100-103.
+    assert policies[2991] == {
+        "id": 2991,
+        "external-ip-address-pool": [{"pool-id": 9, "external-ip-pool": "203.0.113.100/30"}],
+        "subscriber-match": [{"match-id": 5, "subnet": "192.0.2.0/25"}],
+        "external-realm": {"external-interface": "GigabitEthernet2/0"},
+    }
+    # "ACL: 2992  Address group ID: ---": the interface's own address (Easy IP).
+    assert "external-ip-address-pool" not in policies[2992]
+    assert nat["metadata"]["translated_to_interface_address"] == [2992]
+    assert nat["metadata"]["policy_types"] == {"2991": "basic-nat44", "2992": "napt44"}
+    entries = {e["index"]: e for e in instance["mapping-table"]["mapping-entry"]}
+    assert entries[1] == {
+        "index": 1,
+        "type": "static",
+        "internal-src-address": "192.0.2.20/32",
+        "external-src-address": "203.0.113.20/32",
+    }
+    servers = {
+        (
+            e["transport-protocol"],
+            e["external-dst-address"],
+            e["external-dst-port"]["start-port-number"],
+        ): (
+            e["internal-dst-address"],
+            e["internal-dst-port"]["start-port-number"],
+        )
+        for e in entries.values()
+        if "transport-protocol" in e
+    }
+    assert servers == {
+        (6, "100.64.1.2/32", 8080): ("192.0.2.80/32", 80),
+        (17, "203.0.113.53/32", 53): ("192.0.2.53/32", 53),
+    }
+    tree = copy.deepcopy(nat["tree"])
+    instance = tree["ietf-nat:nat"]["instances"]["instance"][0]
+    instance["statistics"] = {"discontinuity-time": "2000-01-01T00:00:00Z"}  # test-only
+    _validate(tree)
+
+
+def test_an_acl_with_an_exception_is_not_a_nat_subnet(mapping):
+    """RFC 8512 selects subnets; a deny rule in the ACL cannot be expressed."""
+    records, _ = _br1_policy(mapping)
+    records = copy.deepcopy(records)
+    deny = {
+        "acl": "2991",
+        "rule": 1,
+        "action": "deny",
+        "source-address": "192.0.2.1",
+        "source-wildcard": "0.0.0.0",
+    }
+    records["acl-basic-rule"].append(deny)
+    nat = project(records, "comware")["control"]["nat"]
+    policies = nat["tree"]["ietf-nat:nat"]["instances"]["instance"][0]["policy"]
+    assert [p["id"] for p in policies] == [2992]  # 2991 left out whole
+    assert {"code": "acl_deny_rule", "record_index": 1, "acl": "2991"} in nat["gaps"]

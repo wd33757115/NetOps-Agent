@@ -94,6 +94,9 @@ class Table:
     name: str
     paths: tuple[tuple[str, ...], ...]  # where its rows are; several tables can feed one
     fields: Mapping[str, tuple[Rule, ...]]  # alternatives: the first with a value counts
+    # Leaves known to carry no condition. With it, a row's other leaves that no field reads
+    # are listed in its ``unread`` field (a condition the mapping does not know).
+    ignore: frozenset[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -166,8 +169,10 @@ def load(raw: Mapping[str, Any]) -> StandardMapping:
     for name, spec in raw["tables"].items():
         if not FIELD.fullmatch(name) or not isinstance(spec, dict):
             raise MappingError(f"{name}: not a table")
-        if set(spec) != {"path", "fields"} or not isinstance(spec["fields"], dict):
-            raise MappingError(f"{name}: a table has path and fields")
+        if not {"path", "fields"} <= set(spec) <= {"path", "fields", "ignore"} or not isinstance(
+            spec["fields"], dict
+        ):
+            raise MappingError(f"{name}: a table has path, fields and maybe ignore")
         paths = spec["path"] if isinstance(spec["path"], list) else [spec["path"]]
         paths = tuple(tuple(_leaf_path(path, name).split("/")) for path in paths)
         fields = {}
@@ -175,7 +180,10 @@ def load(raw: Mapping[str, Any]) -> StandardMapping:
             if not FIELD.fullmatch(leaf):
                 raise MappingError(f"{name}.{leaf}: not a standard leaf name")
             fields[leaf] = _rules(rule, f"{name}.{leaf}", seen)
-        tables.append(Table(name, paths, fields))
+        ignore = spec.get("ignore")
+        if ignore is not None:
+            ignore = frozenset(_leaf_path(leaf, name) for leaf in ignore)
+        tables.append(Table(name, paths, fields, ignore))
         seen.add(name)
     return StandardMapping(str(raw.get("vendor", "")), str(raw["namespace"]), tuple(tables))
 
@@ -205,6 +213,18 @@ def _text(element, leaf, ns):
     if node is None:
         return None
     return (node.text or "").strip()
+
+
+def _leaves(element, ns, prefix=""):
+    """{leaf path: text} of the non-empty leaves under a row element."""
+    found = {}
+    for child in element:
+        name = prefix + child.tag.removeprefix(ns)
+        if len(child):
+            found.update(_leaves(child, ns, name + "/"))
+        elif (child.text or "").strip():
+            found[name] = child.text.strip()
+    return found
 
 
 def _value(rule, element, ns, indexes):
@@ -290,6 +310,12 @@ def convert(mapping: StandardMapping, replies: Iterable[str]):
                     )
                 elif value is not None:
                     record[leaf] = value
+            if table.ignore is not None:
+                read = {leaf for rules in table.fields.values() for r in rules for leaf in r.leaves}
+                read |= {r.when[0] for rules in table.fields.values() for r in rules if r.when}
+                unread = sorted(set(_leaves(element, ns)) - read - table.ignore)
+                if unread:
+                    record["unread"] = unread
             records.append(record)
         found[table.name] = records
     return found, problems

@@ -363,6 +363,178 @@ def lldp_section(records, platform):
     return result
 
 
+def _one_prefix(start, end):
+    """The single prefix holding exactly start..end, or None."""
+    try:
+        found = list(
+            ipaddress.summarize_address_range(
+                ipaddress.ip_address(start), ipaddress.ip_address(end or start)
+            )
+        )
+    except (TypeError, ValueError):
+        return None
+    return str(found[0]) if len(found) == 1 else None
+
+
+def _subnets(rules):
+    """([(rule, subnet)], None) when an ACL only permits source prefixes, else (None, why)."""
+    found = []
+    for rule in sorted(rules, key=lambda r: r.get("rule", 0)):
+        if rule.get("unread") or rule.get("fragment") or rule.get("time-range"):
+            return None, "acl_condition_not_a_subnet"
+        if rule.get("network-instance"):
+            return None, "acl_instance_condition"
+        if rule.get("action") != "permit":
+            return None, "acl_deny_rule"  # RFC 8512 matches subnets, it has no exceptions
+        if rule.get("any-source"):
+            subnet = "0.0.0.0/0"
+        else:
+            try:
+                subnet = str(
+                    ipaddress.ip_network(f"{rule['source-address']}/{rule['source-wildcard']}")
+                )
+            except (KeyError, ValueError):
+                return None, "acl_wildcard_not_a_prefix"
+        found.append((rule["rule"], subnet))
+    return (found, None) if found else (None, "acl_rules_not_observed")
+
+
+def nat_section(records, platform):
+    """RFC 8512 NAT: outbound policies (pool or interface address, the subnets their ACL
+    selects), and static mappings and internal servers as static mapping entries.
+
+    Keys the device prints are the keys: a pool is its address group, a policy its ACL,
+    a subscriber match the ACL rule. The device prints no NAT instance or mapping
+    number: the instance is 1 and the mappings are numbered in the device's order, as
+    metadata says. What RFC 8512 cannot hold (the interface's own address as the
+    translation, an ACL with exceptions, ranges that are not one prefix) is a gap and
+    that policy or mapping is left out whole.
+    """
+    device = device_tree(records, platform)
+    interfaces = {row["name"]: row for row in device["tree"][IF]["interface"]}
+    result = _section("RFC 8512", {})
+    gaps, metadata = result["gaps"], result["metadata"]
+    tables = ("nat-pool", "nat-outbound", "nat-server", "nat-static")
+    if not any(table in records for table in tables):
+        return result
+    pools = {r["pool-id"]: r for r in records.get("nat-pool", []) if "pool-id" in r}
+    rules = defaultdict(list)
+    for rule in records.get("acl-basic-rule", []):
+        if "acl" in rule:
+            rules[rule["acl"]].append(rule)
+    policies, used, kinds, by_interface = [], set(), {}, []
+    for index, row in enumerate(records.get("nat-outbound", [])):
+        acl, name = row.get("acl"), row.get("external-interface")
+        if not (acl or "").isdigit() or name not in interfaces:
+            _gap(gaps, "nat_policy_keys_not_observed", record_index=index)
+            continue
+        if any(p["id"] == int(acl) for p in policies):
+            _gap(gaps, "nat_policy_acl_used_twice", record_index=index, acl=acl)
+            continue
+        if row.get("unread") or row.get("reversible") or row.get("port-preserved"):
+            _gap(gaps, "nat_policy_option_not_expressible", record_index=index, acl=acl)
+            continue
+        if acl not in rules:
+            _gap(gaps, "nat_selection_not_observed", record_index=index, acl=acl)
+            continue
+        matches, why = _subnets(rules[acl])
+        if matches is None:
+            _gap(gaps, why, record_index=index, acl=acl)
+            continue
+        policy = {"id": int(acl)}
+        if "pool-id" in row:
+            pool = pools.get(row["pool-id"])
+            prefix = pool and _one_prefix(pool.get("start-address"), pool.get("end-address"))
+            if not prefix:
+                _gap(gaps, "nat_pool_not_one_prefix", record_index=index, pool_id=row["pool-id"])
+                continue
+            policy["external-ip-address-pool"] = [
+                {"pool-id": row["pool-id"], "external-ip-pool": prefix}
+            ]
+        else:
+            # Easy IP: the interface's own address; RFC 8512 has no leaf for it.
+            by_interface.append(int(acl))
+        policy["subscriber-match"] = [{"match-id": n, "subnet": subnet} for n, subnet in matches]
+        policy["external-realm"] = {"external-interface": name}
+        kinds[int(acl)] = "basic-nat44" if row.get("no-pat") else "napt44"
+        used.add(name)
+        policies.append(policy)
+    entries = []
+    for kind, table in (("static", "nat-static"), ("server", "nat-server")):
+        for index, row in enumerate(records.get(table, [])):
+            if row.get("unread") or row.get("reversible") or row.get("disabled"):
+                _gap(gaps, f"nat_{kind}_option_not_expressible", record_index=index)
+                continue
+            if row.get("acl") or any(
+                row.get(k)
+                for k in (
+                    "network-instance",
+                    "internal-network-instance",
+                    "external-network-instance",
+                )
+            ):
+                _gap(gaps, f"nat_{kind}_condition_not_expressible", record_index=index)
+                continue
+            entry = {"index": len(entries) + 1, "type": "static"}
+            if kind == "static":
+                inside = _one_prefix(row.get("internal-src-start"), row.get("internal-src-end"))
+                if not inside or "external-src-address" not in row:
+                    _gap(gaps, "nat_static_range_not_one_prefix", record_index=index)
+                    continue
+                entry.update(
+                    {
+                        "internal-src-address": inside,
+                        "external-src-address": row["external-src-address"],
+                    }
+                )
+            else:
+                if row.get("external-dst-end-address") or row.get("external-dst-end-port"):
+                    _gap(gaps, "nat_server_range_not_expressible", record_index=index)
+                    continue
+                if not all(
+                    k in row
+                    for k in (
+                        "transport-protocol",
+                        "external-dst-address",
+                        "internal-dst-address",
+                    )
+                ):
+                    _gap(gaps, "nat_server_keys_not_observed", record_index=index)
+                    continue
+                entry.update(
+                    {
+                        "transport-protocol": row["transport-protocol"],
+                        "internal-dst-address": f"{row['internal-dst-address']}/32",
+                        "external-dst-address": f"{row['external-dst-address']}/32",
+                    }
+                )
+                for side in ("internal", "external"):
+                    if f"{side}-dst-port" in row:
+                        entry[f"{side}-dst-port"] = {"start-port-number": row[f"{side}-dst-port"]}
+            metadata.setdefault("mapping_entries", {})[entry["index"]] = {
+                "kind": kind,
+                **({"interface": row["interface"]} if row.get("interface") else {}),
+            }
+            entries.append(entry)
+    instance = {"id": 1}
+    if policies:
+        instance["policy"] = policies
+    if entries:
+        instance["mapping-table"] = {"mapping-entry": entries}
+    result["tree"]["ietf-nat:nat"] = {"instances": {"instance": [instance]}}
+    _gap(gaps, "mandatory_statistics_not_observed", field="statistics/discontinuity-time")
+    metadata["derived_keys"] = {
+        "instance": {"id": 1, "reason": "the device has one NAT and prints no instance number"},
+        "mapping-entry": "numbered in the device's order (static mappings, then servers)",
+    }
+    metadata["policy_types"] = {str(k): v for k, v in sorted(kinds.items())}
+    if by_interface:
+        metadata["translated_to_interface_address"] = sorted(by_interface)
+    if used:
+        result["tree"][IF] = {"interface": [deepcopy(interfaces[n]) for n in sorted(used)]}
+    return result
+
+
 def project(records, platform):
     """The device tree and the control sections from one device's standard records."""
     return {
@@ -370,5 +542,6 @@ def project(records, platform):
         "control": {
             "routing": routing_sections(records, platform),
             "lldp": lldp_section(records, platform),
+            "nat": nat_section(records, platform),
         },
     }

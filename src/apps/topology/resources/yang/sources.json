@@ -105,6 +105,11 @@
     "sha256": "4758cc09bb33a051828a8ac90c3ef4358a1a4f67dc7507eeca9d9b326f6c5eff",
     "source": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ietf/RFC/ietf-l3-unicast-topology@2018-02-26.yang"
   },
+  "ietf-nat@2019-01-10.yang": {
+    "sha256": "8d8103659f9b98d205487821d41cfcb87eef7317ad788ffdf41934268df9b2de",
+    "source": "https://raw.githubusercontent.com/YangModels/yang/3dc40afb4ab93b41709d94e974375afefed935e4/standard/ietf/RFC/ietf-nat@2019-01-10.yang",
+    "reference": "https://www.rfc-editor.org/rfc/rfc8512.html"
+  },
   "ietf-netconf-acm@2018-02-14.yang": {
     "sha256": "e03f91317f9538a89296e99df3ff0c4003cdfea70bf517407643b3ec13c1ed25",
     "source": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ietf/RFC/ietf-netconf-acm@2018-02-14.yang"

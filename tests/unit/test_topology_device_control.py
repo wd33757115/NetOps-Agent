@@ -684,9 +684,10 @@ def test_device_library_has_complete_sources_and_no_trimming_or_unobserved_featu
     sources = json.loads((YANG / "sources.json").read_text("utf-8"))
     library = json.loads((YANG / "device-library.json").read_text("utf-8"))
     modules = library["ietf-yang-library:modules-state"]["module"]
-    assert len(modules) == 28  # 24, and RFC 9899 with the IANA modules it imports
+    assert len(modules) == 29  # 24, RFC 9899 with the IANA modules it imports, RFC 8512
     expected = {
         "ietf-acl-enh",
+        "ietf-nat",
         "iana-icmpv4-types",
         "iana-icmpv6-types",
         "iana-ipv6-ext-types",
@@ -708,7 +709,8 @@ def test_device_library_has_complete_sources_and_no_trimming_or_unobserved_featu
     }
     assert expected <= {entry["name"] for entry in modules}
     # Only features the collected devices show: IPv4 ACL entries matching IPv4, TCP,
-    # UDP and ICMP fields, applied to interfaces, with per-entry hit counters.
+    # UDP and ICMP fields, applied to interfaces, with per-entry hit counters; NAT with
+    # and without port translation, and internal servers (BR1).
     features = {entry["name"]: entry["feature"] for entry in modules if entry.get("feature")}
     assert features == {
         "ietf-access-control-list": [
@@ -719,7 +721,8 @@ def test_device_library_has_complete_sources_and_no_trimming_or_unobserved_featu
             "ipv4",
             "interface-attachment",
             "acl-aggregate-stats",
-        ]
+        ],
+        "ietf-nat": ["basic-nat44", "napt44", "dst-nat"],
     }
     entries = [(entry["name"], entry["revision"]) for entry in modules]
     entries.extend(

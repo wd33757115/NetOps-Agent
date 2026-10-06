@@ -137,3 +137,68 @@ tables:
       port-desc: PortDesc
       system-name: SystemName
       system-description: SystemDesc
+
+  # --- NAT (ietf-nat, RFC 8512), measured on BR1 against "display nat all"
+  # (tests/fixtures/netconf/h3c-comware7/br1-policy).
+  nat-pool:  # an address group: policy/external-ip-address-pool
+    path: top/NAT/AddrGroupMembers/GroupMember
+    ignore: []
+    fields:
+      pool-id: {leaf: GroupNumber, convert: integer}
+      start-address: {leaf: StartIpv4Address, convert: address}
+      end-address: {leaf: EndIpv4Address, convert: address}
+
+  nat-outbound:  # outbound dynamic NAT: the sources an ACL selects, leaving an interface
+    path: top/NAT/OutboundDynamicRules/Interface
+    ignore: [MatchingCount, WhetherPersistConfig]
+    fields:
+      external-interface: {leaf: IfIndex, convert: integer, lookup: {table: interface, match: if-index, take: name}}
+      acl: ACLNumber
+      pool-id: {leaf: AddrGroupNumber, convert: integer}  # none: the interface's address
+      no-pat: {leaf: NoPAT, codes: {"true": true, "false": false}}  # CLI NO-PAT Y/N
+      reversible: {leaf: Reversible, codes: {"true": true, "false": false}}
+      port-preserved: {leaf: PortPreserved, codes: {"true": true, "false": false}}
+
+  nat-server:  # an internal server: a static destination mapping on an interface
+    path: top/NAT/ServerOnInterfaces/Interface
+    ignore: [MatchingCount, WhetherPersistConfig]
+    fields:
+      interface: {leaf: IfIndex, convert: integer, lookup: {table: interface, match: if-index, take: name}}
+      transport-protocol: {leaf: ProtocolType, convert: integer}  # 6(TCP), 17(UDP) in the CLI
+      external-dst-address: {leaf: GlobalInfo/GlobalStartIpv4Address, convert: address}
+      external-dst-end-address: {leaf: GlobalInfo/GlobalEndIpv4Address, convert: address}
+      external-dst-port: {leaf: GlobalInfo/GlobalStartPortNumber, convert: integer}
+      external-dst-end-port: {leaf: GlobalInfo/GlobalEndPortNumber, convert: integer}
+      external-interface: {leaf: GlobalInfo/GlobalIfIndex, convert: integer, lookup: {table: interface, match: if-index, take: name}}
+      network-instance: GlobalInfo/GlobalVRF
+      internal-dst-address: {leaf: LocalInfo/LocalStartIpv4Address, convert: address}
+      internal-dst-port: {leaf: LocalInfo/LocalStartPortNumber, convert: integer}
+      acl: ACLNumber
+      reversible: {leaf: Reversible, codes: {"true": true, "false": false}}
+
+  nat-static:  # an outbound one-to-one static mapping
+    path: top/NAT/OutboundStaticMappings/Mapping
+    ignore: [MatchingCount, Counting, Description]
+    fields:
+      internal-network-instance: LocalInfo/LocalVRF
+      internal-src-start: {leaf: LocalInfo/StartIpv4Address, convert: address}
+      internal-src-end: {leaf: LocalInfo/EndIpv4Address, convert: address}
+      external-network-instance: GlobalInfo/GlobalVRF
+      external-src-address: {format: "{GlobalInfo/Ipv4Address}/{GlobalInfo/Ipv4PrefixLength}", convert: prefix}
+      acl: ACLNumber
+      reversible: {leaf: Reversible, codes: {"true": true, "false": false}}
+      disabled: {leaf: Disable, codes: {"true": true, "false": false}}
+
+  acl-basic-rule:  # basic IPv4 ACL rules, which select the sources of an outbound NAT
+    path: top/ACL/IPv4NamedBasicRules/Rule
+    ignore: [SrcAny, Counting, Logging, Count, Status]
+    fields:
+      acl: GroupIndex
+      rule: {leaf: RuleID, convert: integer}
+      action: {leaf: Action, codes: {"1": deny, "2": permit}}
+      source-address: {leaf: SrcIPv4/SrcIPv4Addr, convert: address}
+      source-wildcard: {leaf: SrcIPv4/SrcIPv4Wildcard, convert: address}
+      any-source: {leaf: SrcAny, codes: {"true": true, "false": false}}
+      fragment: {leaf: Fragment, codes: {"true": true, "false": false}}
+      time-range: TimeRange
+      network-instance: VRF

@@ -132,6 +132,17 @@
         "conformance-type": "import"
       },
       {
+        "name": "ietf-nat",
+        "revision": "2019-01-10",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-nat",
+        "feature": [
+          "basic-nat44",
+          "napt44",
+          "dst-nat"
+        ],
+        "conformance-type": "implement"
+      },
+      {
         "name": "ietf-netconf-acm",
         "revision": "2018-02-14",
         "namespace": "urn:ietf:params:xml:ns:yang:ietf-netconf-acm",
