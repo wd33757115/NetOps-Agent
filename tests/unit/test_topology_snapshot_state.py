@@ -335,3 +335,42 @@ def test_retained_standard_tree_has_closed_references_under_frozen_full_content_
     result, state = enrich_snapshot_state(current, {}, [], [], prior())
     assert len(links(result)) == 1 and state["links"][BASE + "AB"]["historical"] is True
     validator.from_raw(result).validate(ctype=content)
+
+
+def test_a_device_read_as_standard_records_exports_their_trees():
+    """NETCONF → standard records → the trees in the snapshot (BR1's replies)."""
+    import yaml
+
+    from src.apps.netconf_api.backend import standard
+
+    root = Path(__file__).resolve().parents[2]
+    seed = root / "src/apps/netconf_api/backend/mappings/h3c_comware7.yaml"
+    mapping = standard.load(yaml.safe_load(seed.read_text(encoding="utf-8")))
+    folder = root / "tests/fixtures/netconf/h3c-comware7"
+    texts = [
+        p.read_text(encoding="utf-8")
+        for p in sorted((folder / "br1").glob("*.xml"))
+        if p.name != "acl.xml"
+    ]  # BR1 later configured with NAT, and the ACLs selecting its sources:
+    texts += [
+        (folder / "br1-policy" / n).read_text(encoding="utf-8") for n in ("nat.xml", "acl.xml")
+    ]
+    records, _ = standard.convert(mapping, texts)
+    current = observations()
+    current[0]["data"]["standard"] = {"mapping": "h3c_comware7@test", "records": records}
+    current[0]["data"]["platform"] = {"identity": {"os_family": "comware"}}
+    _, state = enrich_snapshot_state(tree([("A", "B")]), collected(), current, [])
+    device = next(d for d in state["devices"] if d["address"] == ADDRESSES["A"])
+    names = {row["name"] for row in device["tree"]["ietf-interfaces:interfaces"]["interface"]}
+    assert "GigabitEthernet3/0" in names and PORT not in names  # from NETCONF, not facts
+    control = device["control"]
+    assert control["source"] == {"netconf_mapping": "h3c_comware7@test"}
+    (routing,) = control["routing"]
+    ribs = routing["tree"]["ietf-routing:routing"]["ribs"]["rib"]
+    assert {rib["name"] for rib in ribs} == {"ipv4", "ipv6"}
+    assert control["lldp"]["tree"]["ieee802-dot1ab-lldp:lldp"]["port"]
+    assert control["nat"]["tree"]["ietf-nat:nat"]["instances"]["instance"][0]["policy"]
+    assert set(control) >= {"acl", "pbr"}
+    # The other devices keep their CLI projections, now with PBR.
+    other = next(d for d in state["devices"] if d["address"] == ADDRESSES["B"])
+    assert "pbr" in other["control"] and "source" not in other["control"]

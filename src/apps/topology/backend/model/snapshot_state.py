@@ -12,9 +12,11 @@ from copy import deepcopy
 from .builder import L2T, NT, ST
 from .device_control import project_device_control
 from .device_ip import enrich_device_ip
+from .device_pbr import project_device_pbr
 from .device_state import project_device_state
 from .inventory import project_inventory
 from .retained_links import UNAVAILABLE_OPER_STATUSES, retain_l2_links
+from .standard_trees import project as project_standard
 
 
 def _l2(tree):
@@ -83,6 +85,31 @@ def _lldp_ports(data):
             if isinstance(row, dict) and isinstance(row.get("local_if"), str) and row["local_if"]
         }
     )
+
+
+def _device_trees(observation, data):
+    """(device tree, control sections) of one observation.
+
+    A device read as standard records over NETCONF (netconf-api's conversion layer)
+    exports the trees built from them; ACL keeps its own projection until it moves to
+    the conversion layer. Other devices export the CLI projections. Both carry PBR.
+    """
+    standard = data.get("standard")
+    records = standard.get("records") if isinstance(standard, dict) else None
+    if isinstance(records, dict) and "interface" in records:
+        identity = (data.get("platform") or {}).get("identity") or {}
+        built = project_standard(records, identity.get("os_family", ""))
+        control = {
+            **built["control"],
+            "acl": project_device_control(observation)["acl"],
+            "pbr": project_device_pbr(observation),
+            "source": {"netconf_mapping": standard.get("mapping")},
+        }
+        return built["device"], control
+    projected = enrich_device_ip(project_device_state(observation), observation)
+    control = project_device_control(observation)
+    control["pbr"] = project_device_pbr(observation or {})
+    return projected, control
 
 
 def _collection(data, target):
@@ -172,9 +199,9 @@ def enrich_snapshot_state(tree, collected, observations, targets, prior=None):
     known, devices = {}, []
     for address in sorted(set(by_address) | set(target_map) | set(identities)):
         observation = by_address.get(address)
-        projected = enrich_device_ip(project_device_state(observation), observation)
         data = observation.get("data", {}) if observation else {}
         data = data if isinstance(data, dict) else {}
+        projected, control = _device_trees(observation, data)
         target = target_map.get(address, {})
         node_id = identities.get(address)
         status = _collection(data, target)
@@ -183,7 +210,7 @@ def enrich_snapshot_state(tree, collected, observations, targets, prior=None):
             "node_id": node_id,
             "collection_status": status,
             **deepcopy(projected),
-            "control": project_device_control(observation),
+            "control": control,
             "inventory": project_inventory(observation or {}, node_id),
         }
         if node_id in current_labels:
