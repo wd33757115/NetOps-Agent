@@ -198,8 +198,9 @@ commands(check_item_ids) -> [{implementation_id, platforms, command, scoped_comm
 - **ACL 走标准树流水线（2026-10-06，topology 0.12.0）**：负责人决定接入 RFC 9899，无法处理的标为判断不了。
   - 查证：RFC 8519（2019）之后，IETF 于 2025 年 12 月发布 RFC 9899（`ietf-acl-enh@2025-12-22`），补 TCP 标志、分片、地址/端口/协议集合等；时间段只有草案（draft-ietf-opsawg-ucl-acl），不是标准。华三（BR1 样本）与华为（Huawei/yang 的 `huawei-acl.yang`，NE 系列 VRP 8.22）的 ACL 是同一套构造：通配符、端口 eq/neq/lt/gt/range、established、分片、时间段、对象组（地址池）。
   - 模块：`ietf-acl-enh` 及其导入的 `iana-icmpv4-types`、`iana-icmpv6-types`、`iana-ipv6-ext-types`（均 2025-12-22）从 YangModels/yang 取，记进 `resources/yang/sources.json`，加入设备模块库。
-  - 导出：established 写成 RFC 9899 的 TCP 标志（ACK 或 RST 任一置位，`operator any`；这是 Cisco 的定义，华三是否完全一致待实验网用命中计数核对）。一条规则多个端口（如 `eq www 443`）写成 RFC 9899 端口集，集合名由设备的键推出：`<ACL名>:<规则号>:src|dst`（负责人决定，做法同 PBR 的 sequence-id）。仍表达不了、记缺口的：分片（"非首片"不是一个分片条件）、成员未采集的对象组、时间段、不连续通配符、模板不认识的条件、指定 VPN 实例的规则。缺口带上它在 ACL 里的位置和动作。
-  - 路径：读从树抽出的查询表（`model/acl_table.py`）。缺口规则占位为判断不了；拒绝时 `entry` 用标准节点名（`matches`、`matched-packets`）。与改动前相比，时间段、分片、不连续通配符以及只匹配公网的规则绑在 VPN 接口上，从"能判定"变为"判断不了"。
+  - 导出：established 写成 RFC 9899 的 TCP 标志（ACK 或 RST 任一置位，`operator any`；这是 Cisco 的定义，华三是否完全一致待实验网用命中计数核对）。一条规则多个端口（如 `eq www 443`）写成 RFC 9899 端口集，集合名由设备的键推出：`<ACL名>:<规则号>:src|dst`（负责人决定，做法同 PBR 的 sequence-id）。仍表达不了、记缺口的：分片（"非首片"不是一个分片条件）、成员未采集的对象组、时间段、不连续通配符、模板不认识的条件。缺口带上它在 ACL 里的位置和动作。
+  - VPN 实例：RFC 8519 和 RFC 9899 都没有实例条件，而华三不带 vpn-instance 的规则只匹配公网报文、带的只匹配该实例。因此 ACL 按它在每个实例里的实际作用导出（负责人决定）：公网接口用原名，VPN 接口用 `<ACL名>@<实例名>`，各自只含在该实例能命中的规则，并去掉实例条件；被略去的规则写在 metadata 的 `acl_views`。
+  - 路径：读从树抽出的查询表（`model/acl_table.py`）。缺口规则占位为判断不了；拒绝时 `entry` 用标准节点名（`matches`、`matched-packets`）。与改动前相比，时间段、分片、不连续通配符从"能判定"变为"判断不了"。
 - **待做**：
   - 系统模板登记到规则治理的模板库（数据库），让页面可见、可评审；目前模板文件由资产清单按 sha256 钉住；
   - NX-OS 等家族在有实机样本后补实现，届时删掉对应的通用解析器；

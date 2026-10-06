@@ -12,9 +12,13 @@ a condition the reading does not know) is left out with a gap that keeps its pla
 action: dropping a condition would widen the entry, and a path computed from the tree
 cannot decide past it. Exported entries keep the device's match order. The action for
 packets no entry matches is not an RFC 8519 leaf and no entry is made up for it; it is
-application metadata, like the evidence. A rule limited to the public network (Comware
-without vpn-instance) is exact only where its ACL is applied to a public interface; an
-attachment to an interface in a VPN instance is left out with a gap.
+application metadata, like the evidence. Neither RFC 8519 nor RFC 9899 has a network
+instance condition, while a Comware entry without vpn-instance matches only public packets
+and one with vpn-instance only that instance's. So an ACL is exported as it acts in each
+instance it is applied in (owner decision 2026-10-06): under its own name for public
+interfaces, as "<ACL>@<instance>" for interfaces in a VPN instance, each with the entries
+that can match there and without the instance condition; the entries left out are named
+in metadata ``acl_views``.
 """
 
 from __future__ import annotations
@@ -148,30 +152,49 @@ def project_device_acl(observation):
     if not isinstance(bindings, list):
         result["gaps"].append({"code": "acl_bindings_not_observed"})
         bindings = []
-    acls, positions, port_sets = {}, {}, []
+    entries = {}
     for entry in rules:
-        if entry.get("family", "ipv4") != "ipv4":
-            continue
-        acl = acls.setdefault(
-            entry["acl"], {"name": entry["acl"], "type": ACL + "ipv4-acl-type"}
-        )
-        # Its place among the ACL's entries in the device's match order.
-        position = positions[entry["acl"]] = positions.get(entry["acl"], -1) + 1
-        ace, why, sets = _ace(entry)
-        port_sets += sets
-        if ace is None:
-            result["gaps"].append(
-                {
-                    "code": "acl_entry_not_expressible",
-                    "acl": entry["acl"],
-                    "entry": entry["seq"],
-                    "position": position,
-                    **({"action": entry["action"]} if entry.get("action") in ACTIONS else {}),
-                    "reasons": why,
-                }
+        if entry.get("family", "ipv4") == "ipv4":
+            entries.setdefault(entry["acl"], []).append(entry)
+    acls, port_sets, views = {}, [], []
+
+    def view(name, scope):
+        """The ACL as it acts on packets of one network instance: its entries with no
+        instance condition or with this instance's, in the device's order; an entry of
+        another instance never matches there and is left out."""
+        key = name if scope == "default" else f"{name}@{scope}"
+        if key in acls:
+            return key
+        acl = acls[key] = {"name": key, "type": ACL + "ipv4-acl-type"}
+        omitted, position = [], -1
+        for entry in entries[name]:
+            if entry.get("vrf") not in {None, scope}:
+                omitted.append(entry["seq"])
+                continue
+            position += 1
+            ace, why, sets = _ace({k: v for k, v in entry.items() if k != "vrf"} | {"acl": key})
+            port_sets.extend(sets)
+            if ace is None:
+                result["gaps"].append(
+                    {
+                        "code": "acl_entry_not_expressible",
+                        "acl": key,
+                        "entry": entry["seq"],
+                        "position": position,
+                        **({"action": entry["action"]} if entry.get("action") in ACTIONS else {}),
+                        "reasons": why,
+                    }
+                )
+                continue
+            acl.setdefault("aces", {"ace": []})["ace"].append(ace)
+        if key != name or omitted:
+            views.append(
+                {"acl": key, "of": name, "network_instance": scope, "omitted_entries": omitted}
             )
-            continue
-        acl.setdefault("aces", {"ace": []})["ace"].append(ace)
+        return key
+
+    for name in entries:
+        view(name, "default")
     rows = (
         project_device_state(observation)["tree"]
         .get("ietf-interfaces:interfaces", {})
@@ -179,35 +202,41 @@ def project_device_acl(observation):
     )
     names = {row["name"] for row in rows}
     instance = {row["ifname"]: row.get("vrf", "default") for row in facts.get("ip") or []}
-    public_only = {entry["acl"] for entry in rules if entry.get("vrf") == "default"}
     points, defaults, used = {}, [], set()
     for binding in bindings:
         if binding.get("family") not in {None, "ipv4"} or "acl" not in binding:
             continue
         where = {"interface": binding["ifname"], "direction": binding["direction"], "acl": binding["acl"]}
-        if binding.get("default_action"):
-            defaults.append({**where, "default_action": binding["default_action"]})
         if binding.get("scope") or binding.get("status"):
+            if binding.get("default_action"):
+                defaults.append({**where, "default_action": binding["default_action"]})
             result["gaps"].append(
                 {"code": "acl_attachment_not_expressible", **where,
                  "reason": binding.get("scope") or binding.get("status")}
             )
             continue
-        if binding["acl"] not in acls:
+        if binding["acl"] not in entries:
+            if binding.get("default_action"):
+                defaults.append({**where, "default_action": binding["default_action"]})
             result["gaps"].append({"code": "attached_acl_not_observed", **where})
             continue
         if binding["ifname"] not in names:
+            if binding.get("default_action"):
+                defaults.append({**where, "default_action": binding["default_action"]})
             result["gaps"].append({"code": "acl_interface_reference_not_proven", **where})
             continue
-        if binding["acl"] in public_only and instance.get(binding["ifname"], "default") != "default":
-            result["gaps"].append({"code": "acl_instance_condition_not_expressible", **where})
-            continue
+        # The interface's instance decides which entries can match there.
+        attached = view(binding["acl"], instance.get(binding["ifname"], "default"))
+        if binding.get("default_action"):
+            defaults.append({**where, "acl": attached, "default_action": binding["default_action"]})
         side = "ingress" if binding["direction"] == "in" else "egress"
         point = points.setdefault(binding["ifname"], {"interface-id": binding["ifname"]})
         point.setdefault(side, {"acl-sets": {"acl-set": []}})["acl-sets"]["acl-set"].append(
-            {"name": binding["acl"]}
+            {"name": attached}
         )
         used.add(binding["ifname"])
+    if views:
+        metadata["acl_views"] = views
     if defaults:
         metadata["default_actions"] = defaults
     if acls:

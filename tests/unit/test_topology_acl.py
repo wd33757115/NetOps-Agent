@@ -20,7 +20,7 @@ from src.apps.rule_governance.backend.check_items import system_items
 from src.apps.rule_governance.runtime import CheckItemSelectionReader, SelectionError
 from src.apps.topology.backend.collectors.parse import parse
 from src.apps.topology.backend.model.acl import entry_matches, evaluate
-from src.apps.topology.backend.model.acl_table import acl_tables
+from src.apps.topology.backend.model.acl_table import acl_tables, query_table
 from src.apps.topology.backend.model.acl_table import entries as table_entries
 from src.apps.topology.backend.model.device_acl import project_device_acl
 from src.apps.topology.backend.model.path import trace
@@ -573,20 +573,29 @@ def test_what_the_tree_cannot_express_cannot_be_decided_past(syntax):
     assert "fragments" in outcome["needs"]
 
 
-def test_a_public_only_rule_is_not_attached_to_a_vpn_interface(scenario, device_model):
-    facts = dict(scenario[ADDRESS["br1"]])
+def test_an_acl_is_exported_as_it_acts_in_each_instance(scenario, device_model):
+    # Neither RFC 8519 nor RFC 9899 has an instance condition: on GE2/0 moved into RED,
+    # 3990 acts with its RED entries only, exported as "3990@RED".
+    facts = deepcopy(scenario[ADDRESS["br1"]])
     facts["ip"] = [
         {**row, "vrf": "RED"} if row["ifname"] == "GigabitEthernet2/0" else row
         for row in facts["ip"]
     ]
+    for entry in facts["acl_rules"]:
+        if (entry["acl"], entry["seq"]) == ("3990", 5):
+            entry["vrf"] = "RED"  # "vpn-instance RED" on the DNS entry
     result = project_device_acl({"facts": facts})
     validate(device_model, result["tree"])
-    assert "attachment-points" not in result["tree"]["ietf-access-control-list:acls"]
-    assert result["gaps"] == [
-        {
-            "code": "acl_instance_condition_not_expressible",
-            "interface": "GigabitEthernet2/0",
-            "direction": "out",
-            "acl": "3990",
-        }
-    ]
+    acls = {acl["name"]: acl for acl in result["tree"]["ietf-access-control-list:acls"]["acl"]}
+    assert [ace["name"] for ace in acls["3990@RED"]["aces"]["ace"]] == ["5"]
+    assert "5" not in [ace["name"] for ace in acls["3990"].get("aces", {}).get("ace", [])]
+    [point] = result["tree"]["ietf-access-control-list:acls"]["attachment-points"]["interface"]
+    assert point["egress"]["acl-sets"]["acl-set"] == [{"name": "3990@RED"}]
+    views = {view["acl"]: view for view in result["metadata"]["acl_views"]}
+    assert views["3990@RED"]["of"] == "3990" and views["3990@RED"]["network_instance"] == "RED"
+    assert 5 in views["3990"]["omitted_entries"]  # a RED entry never matches public packets
+    assert not any(g["code"] == "acl_instance_condition_not_expressible" for g in result["gaps"])
+    # On the path: DNS in RED meets the RED entry and is refused.
+    [row] = [r for r in query_table(result) if r["acl"] == "3990@RED"]
+    dns = {**packet(PC1, INTERNET, 17, 50000, 53), "vrf": "RED"}
+    assert evaluate(table_entries(row), dns, row["default-action"])["result"] == "deny"
