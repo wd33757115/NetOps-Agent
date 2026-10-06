@@ -57,6 +57,7 @@ def test_br1_tables_and_the_only_unlisted_code(br1):
         "ospf-interface": 4,
         "ospf-neighbor": 3,
         "lldp-neighbor": 3,
+        "lldp-management-address": 3,
     }
     # LoopBack0's OSPF network type 3 was seen next to nothing that names it.
     assert problems == [
@@ -327,3 +328,32 @@ def test_an_acl_with_an_exception_is_not_a_nat_subnet(mapping):
     policies = nat["tree"]["ietf-nat:nat"]["instances"]["instance"][0]["policy"]
     assert [p["id"] for p in policies] == [2992]  # 2991 left out whole
     assert {"code": "acl_deny_rule", "record_index": 1, "acl": "2991"} in nat["gaps"]
+
+
+def test_builder_rows_from_the_trees_equal_the_cli_facts(br1):
+    """BR1's interfaces, addresses, ARP and LLDP for the SIMAP builder, from the trees,
+    against the facts its CLI gave (campus-wan capture)."""
+    import json
+
+    from test_topology_protocols import observation
+
+    from src.apps.topology.backend.model.standard_tables import builder_rows
+
+    cli = observation("br1")["facts"]
+    rows = builder_rows(br1[0], "comware")
+
+    def same(key, drop=()):
+        def text(row):
+            return json.dumps({k: v for k, v in row.items() if k not in drop}, sort_keys=True)
+
+        return sorted(map(text, cli[key])), sorted(map(text, rows[key]))
+
+    assert same("ip")[0] == same("ip")[1]
+    assert same("arp", drop={"age_s"})[0] == same("arp", drop={"age_s"})[1]  # NETCONF: no age
+    # The 258-character description is not in the IEEE tree (255 octets at most).
+    left, right = same("lldp", drop={"remote_system_description"})
+    assert left == right and len(right) == 3
+    # NULL0 and REG0 have no IANA type and stay out of the tree; the device's own
+    # descriptions of its loopbacks are kept.
+    names = {row["ifname"] for row in cli["interfaces"]} - {"NULL0", "REG0"}
+    assert {row["ifname"] for row in rows["interfaces"]} == names

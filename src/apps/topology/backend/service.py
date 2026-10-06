@@ -33,6 +33,7 @@ from .collectors.identify import TopologyDiscoveryPlan as DiscoveryPlan
 from .collectors.tiers.common import valid_mac
 from .logins import DOMAIN
 from .model.builder import build_topology_layers, device_node_ids
+from .model.standard_tables import builder_rows
 from .model.l2_forwarding import analyse as analyse_l2_forwarding
 from .model.path import locate_with_exits as locate_in
 from .model.path import trace as trace_in
@@ -330,8 +331,10 @@ def _facts(data):
     if isinstance(data.get("standard"), dict) and isinstance(
         data["standard"].get("records"), dict
     ):
-        # The device's NETCONF tables as standard records: its trees are built from them.
+        # The device's NETCONF tables as standard records: its trees are built from them,
+        # and the builder's interface, address, neighbour and LLDP rows from those trees.
         facts["standard"] = data["standard"]
+        facts.update(builder_rows(data["standard"]["records"], facts["platform"]))
     return facts
 
 

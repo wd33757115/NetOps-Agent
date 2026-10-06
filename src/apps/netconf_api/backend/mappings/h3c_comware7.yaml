@@ -138,6 +138,19 @@ tables:
       system-name: SystemName
       system-description: SystemDesc
 
+  lldp-management-address:  # ieee802-dot1ab-lldp remote-systems-data/management-address
+    path: top/LLDP/NbManageAddresses/ManageAddress
+    fields:
+      interface: IfName
+      dest-mac-address: {leaf: AgentID, codes: {"1": "01-80-C2-00-00-0E"}}
+      time-mark: {leaf: TimeMark, convert: integer}
+      remote-index: {leaf: NeighborIndex, convert: integer}
+      # The CLI: "Management address type: IPv4", "interface type: IfIndex".
+      address-subtype: {leaf: SubType, codes: {"1": "ietf-routing:ipv4"}}
+      address: {leaf: Address, convert: base64-hex}
+      if-subtype: {leaf: InterfaceType, codes: {"2": port-ref}}
+      if-id: {leaf: InterfaceID, convert: integer}
+
   # --- NAT (ietf-nat, RFC 8512), measured on BR1 against "display nat all"
   # (tests/fixtures/netconf/h3c-comware7/br1-policy).
   nat-pool:  # an address group: policy/external-ip-address-pool

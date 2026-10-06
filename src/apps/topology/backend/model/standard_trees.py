@@ -351,6 +351,22 @@ def lldp_section(records, platform):
                 )
                 continue
             entry[key] = row[key]
+        key = (row["interface"], row["dest-mac-address"], row["time-mark"], row["remote-index"])
+        addresses = [
+            {k: a[k] for k in ("address-subtype", "address", "if-subtype", "if-id") if k in a}
+            for a in records.get("lldp-management-address", [])
+            if (
+                a.get("interface"),
+                a.get("dest-mac-address"),
+                a.get("time-mark"),
+                a.get("remote-index"),
+            )
+            == key
+            and "address-subtype" in a
+            and "address" in a
+        ]
+        if addresses:
+            entry["management-address"] = addresses
         ports[(row["interface"], row["dest-mac-address"])].append(entry)
     if ports:
         result["tree"][LLDP]["port"] = [

@@ -68,6 +68,17 @@ def _address(text):
         return None
 
 
+def _base64_hex(text):
+    """Octets sent base64-encoded, as the upper-case hex IEEE 802.1AB writes them."""
+    import base64
+    import binascii
+
+    try:
+        return base64.b64decode(text, validate=True).hex().upper() or None
+    except (binascii.Error, ValueError):
+        return None
+
+
 def _prefix(text):
     try:
         return str(ipaddress.ip_network(text, strict=False))
@@ -82,6 +93,7 @@ CONVERTERS = {
     "ieee-mac": _ieee_mac,
     "address": _address,
     "prefix": _prefix,
+    "base64-hex": _base64_hex,
 }
 
 

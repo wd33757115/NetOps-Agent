@@ -411,6 +411,13 @@ def test_standard_tables_are_read_in_the_same_session_and_reach_the_route_table(
     data = topology_observation(result)
     facts = _facts(data)
     table = route_tables(facts)
+    # The builder's rows come from the same trees: LLDP with its management addresses.
+    assert {(row["local_if"], tuple(row["remote_mgmt_addresses"])) for row in facts["lldp"]} == {
+        ("GigabitEthernet3/0", ("10.0.13.2",)),
+        ("GigabitEthernet4/0", ("10.0.14.2",)),
+        ("GigabitEthernet5/0", ("10.0.12.2",)),
+    }
+    assert len(facts["ip"]) == 6 and "age_s" not in facts["arp"][0]
     rows = {(r["rib"], r["destination-prefix"]): r for r in table["routes"]}
     # OSPFv2, known from NETCONF (the CLI gives only "O_INTRA").
     assert rows[("ipv4", "10.255.0.3/32")]["source-protocol"] == "ietf-ospf:ospfv2"
@@ -421,7 +428,7 @@ def test_standard_tables_are_read_in_the_same_session_and_reach_the_route_table(
 def test_a_table_the_device_refuses_is_failed_and_the_rest_still_read(br1, standard_tables):
     br1.refused = "LLDP"
     result = br1.collect()
-    assert set(result.standard["failed"]) == {"lldp-neighbor"}
+    assert set(result.standard["failed"]) == {"lldp-neighbor", "lldp-management-address"}
     assert "lldp-neighbor" not in result.standard["records"]  # not collected, not empty
     assert len(result.standard["records"]["route"]) == 50
 
