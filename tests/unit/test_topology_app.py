@@ -8,6 +8,7 @@ import pytest
 from cryptography.fernet import Fernet
 from fastapi import HTTPException
 from sqlalchemy import create_engine, event, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from src.apps.topology.backend import logins, service
@@ -875,12 +876,48 @@ def test_locate_answers_from_a_snapshot_with_evidence(world):
     assert foreign.value.status_code == 404
 
 
-def test_locate_searches_the_current_snapshot_of_every_network(world):
+def test_locate_searches_the_current_snapshot_of_the_active_network(world):
     lab_run(world)
     found = service.locate_current("user", "0050.7966.6805")
     assert [f["status"] for f in found] == ["confirmed"]
     assert service.locate_current("user", "10.200.0.1") == []
-    assert service.locate_current("stranger", "0050.7966.6805") == []
+    with pytest.raises(HTTPException) as none:
+        service.locate_current("stranger", "0050.7966.6805")
+    assert (none.value.status_code, none.value.detail) == (409, service.NO_ACTIVE)
+
+
+def test_one_active_topology_per_owner_is_all_the_assistant_reads(world):
+    lab = lab_run(world)["network_id"]
+    # The owner's first network became active by itself; a later one does not.
+    imported = service.import_captures("user", offline())["network_id"]
+    assert {n["id"]: n["active"] for n in service.networks("user")} == {
+        lab: True,
+        imported: False,
+    }
+    assert service.locate_current("user", "0050.7966.6805")[0]["network_id"] == lab
+    # Switching moves the one active mark; the lab network is then out of the answers.
+    views = service.activate("user", imported)
+    assert {n["id"]: n["active"] for n in views} == {lab: False, imported: True}
+    assert service.locate_current("user", "0050.7966.6805") == []
+    assert service.services_current("user") == []
+    service.activate("user", lab)
+    assert service.locate_current("user", "0050.7966.6805")[0]["network_id"] == lab
+    with pytest.raises(HTTPException) as foreign:
+        service.activate("stranger", lab)
+    assert foreign.value.status_code == 404
+    # The database keeps it to one, whatever the code path.
+    with pytest.raises(IntegrityError), world.sessions() as session:
+        session.get(Network, imported).active = True
+        session.flush()
+
+
+def test_an_active_network_without_a_snapshot_says_so(world):
+    row = service.submit("user", discovery(max_depth=0))
+    assert service.networks("user")[0]["active"] is True
+    with pytest.raises(HTTPException) as empty:
+        service.trace_current("user", "192.168.1.2", "1.1.1.2")
+    assert empty.value.status_code == 409 and "还没有可查询的快照" in empty.value.detail
+    assert row["network_id"] == service.networks("user")[0]["id"]
 
 
 def test_trace_answers_both_directions_from_a_snapshot(world):
@@ -926,7 +963,9 @@ def test_trace_searches_current_snapshots_that_know_either_end(world):
     ]
     assert "候选路径" in found["meaning"] and "不能单凭差异断定" in found["meaning"]
     assert service.trace_current("user", "10.200.0.1", "10.200.0.2") == []
-    assert service.trace_current("stranger", "192.168.1.2", "1.1.1.2") == []
+    with pytest.raises(HTTPException) as none:
+        service.trace_current("stranger", "192.168.1.2", "1.1.1.2")
+    assert none.value.status_code == 409
 
 
 def test_services_are_read_from_a_snapshot_and_owner_scoped(world):
@@ -939,9 +978,11 @@ def test_services_are_read_from_a_snapshot_and_owner_scoped(world):
     with pytest.raises(HTTPException) as foreign:
         service.services("stranger", result["snapshot_id"])
     assert foreign.value.status_code == 404
-    # Across networks, only those whose current snapshot shows a VPN are answered.
+    # The active network's current snapshot is answered only when it shows a VPN.
     assert service.services_current("user") == []
-    assert service.services_current("stranger") == []
+    with pytest.raises(HTTPException) as none:
+        service.services_current("stranger")
+    assert none.value.status_code == 409
 
 
 def test_offline_snapshots_without_facts_find_nothing(world):

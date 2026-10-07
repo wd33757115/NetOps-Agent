@@ -278,9 +278,20 @@ def test_migration_preserves_old_network_run_and_snapshot(tmp_path):
                 id="old-snapshot", network_id="old-net", run_id="old-run", graph={"nodes": ["old"]}
             )
         )
+        connection.execute(Network.__table__.update().values(current_snapshot="old-snapshot"))
+        connection.execute(
+            Network.__table__.insert().values(
+                id="empty-net", owner_id="alice", name="empty", domain="lab"
+            )
+        )
         command.upgrade(config, manifest.data["database"]["head"])
         command.upgrade(config, manifest.data["database"]["head"])
         assert connection.scalar(select(Snapshot.graph)) == {"nodes": ["old"]}
+        # The owner's network with a snapshot stays answerable as the active topology.
+        assert dict(connection.execute(select(Network.id, Network.active)).all()) == {
+            "old-net": True,
+            "empty-net": False,
+        }
         assert set(inspect(connection).get_table_names()) == {
             "alembic_app_topology",
             *manifest.data["database"]["tables"],

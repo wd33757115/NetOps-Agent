@@ -42,6 +42,11 @@ def networks(user: CurrentUser = Depends(actor)):
     return service.networks(user.user_id)
 
 
+@router.post("/networks/{network_id}/activate")
+def activate(network_id: str, user: CurrentUser = Depends(actor)):
+    return service.activate(user.user_id, network_id)
+
+
 @router.get("/networks/{network_id}/runs")
 def runs(network_id: str, user: CurrentUser = Depends(actor)):
     return service.runs(user.user_id, network_id)

@@ -74,6 +74,21 @@ it('offers creating a new network next to the existing ones', async () => {
   expect(body.name).toBe('园区二期')
 })
 
+it('shows the active topology first and switches the one the AI queries', async () => {
+  state.networks = [{ id: 'n1', name: '园区一期', active: false }, { id: 'n2', name: 'vpn-fabric 实验网', active: true }]
+  const switched = [{ id: 'n1', name: '园区一期', active: true }, { id: 'n2', name: 'vpn-fabric 实验网', active: false }]
+  api.post.mockImplementation((url: string) => Promise.resolve({ data: url.endsWith('/activate') ? switched : run(state.reason) }))
+  render(<MemoryRouter><Page /></MemoryRouter>)
+  expect(await screen.findByText('活跃拓扑 · AI 查询此网络')).toBeInTheDocument()
+  await waitFor(() => expect(api.get).toHaveBeenCalledWith('/apps/topology/networks/n2/runs'))
+  fireEvent.mouseDown(screen.getByRole('combobox', { name: '网络' }))
+  fireEvent.click(await screen.findByText('园区一期'))
+  fireEvent.click(await screen.findByRole('button', { name: '设为活跃拓扑' }))
+  await waitFor(() => expect(api.post).toHaveBeenCalledWith('/apps/topology/networks/n1/activate'))
+  expect(await screen.findByText('活跃拓扑 · AI 查询此网络')).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: '设为活跃拓扑' })).not.toBeInTheDocument()
+})
+
 it('sends a temporary login for this run only', async () => {
   await startDiscovery({ username: 'ops', password: 'run-test-secret' })
   await waitFor(() => expect(api.post).toHaveBeenCalled())

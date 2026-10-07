@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from fastapi import HTTPException
 from sqlalchemy import delete, func, select, update
+from sqlalchemy.exc import IntegrityError
 
 from src.apps.device_access.backend.host_keys import HostKeyStore
 from src.platform.clock import beijing
@@ -178,6 +179,7 @@ def _new_run(session, owner, body, settings, mode):
         network = Network(id=uuid4().hex, owner_id=owner, name=body.name, domain=DOMAIN)
         session.add(network)
         session.flush()
+        _activate_if_none(session, owner, network)
     run = Run(
         id=uuid4().hex,
         network_id=network.id,
@@ -487,6 +489,7 @@ def networks(owner):
                 "name": n.name,
                 "active_run": n.active_run,
                 "current_snapshot": n.current_snapshot,
+                "active": n.active,
             }
             for n in session.scalars(
                 select(Network)
@@ -613,28 +616,60 @@ def locate(owner, snapshot_id, query):
         return _locate(session, snap, query)
 
 
-def locate_current(owner, query):
-    """The same question over the current snapshot of every network of the owner."""
+NO_ACTIVE = "当前没有活跃拓扑：请在网络拓扑 App 中把要查询的网络设为活跃拓扑"
+
+
+def _activate_if_none(session, owner, network):
+    """An owner's first network becomes the active topology; a later one does not."""
+    if session.scalar(select(Network.id).where(Network.owner_id == owner, Network.active)):
+        return
+    try:
+        with session.begin_nested():
+            network.active = True
+            session.flush()
+    except IntegrityError:
+        network.active = False  # another network became active meanwhile
+
+
+def activate(owner, network_id):
+    """Make one network the owner's active topology, the one the assistant reads."""
     with sessions() as session:
-        found = []
-        for network in session.scalars(
-            select(Network)
-            .where(Network.owner_id == owner, Network.current_snapshot.is_not(None))
-            .order_by(Network.created_at.desc())
-            .limit(200)
-        ):
-            snap = session.get(Snapshot, network.current_snapshot)
-            if snap and "simap" in snap.graph:
-                try:
-                    result = _locate(session, snap, query)
-                except Exception:
-                    # One network's data must not take every other network's answer down.
-                    logger.exception("locate failed", extra={"network_id": network.id})
-                    found.append(_unanswered(network, snap))
-                    continue
-                if result["status"] != "not_found":
-                    found.append(result)
-        return found
+        owned_networks = session.scalars(
+            select(Network).where(Network.owner_id == owner).with_for_update()
+        ).all()
+        chosen = next((n for n in owned_networks if n.id == network_id), None)
+        if chosen is None:
+            raise HTTPException(404, "网络不存在")
+        for network in owned_networks:
+            network.active = False
+        session.flush()  # clear the old one first: the index allows one active per owner
+        chosen.active = True
+        session.flush()
+    return networks(owner)
+
+
+def _active(session, owner):
+    """The owner's active topology and its current snapshot: all the assistant reads."""
+    network = session.scalar(select(Network).where(Network.owner_id == owner, Network.active))
+    if network is None:
+        raise HTTPException(409, NO_ACTIVE)
+    snap = session.get(Snapshot, network.current_snapshot) if network.current_snapshot else None
+    if snap is None or "simap" not in snap.graph:
+        raise HTTPException(409, f"活跃拓扑“{network.name}”还没有可查询的快照：请先完成一次发现")
+    return network, snap
+
+
+def locate_current(owner, query):
+    """The same question over the current snapshot of the owner's active topology."""
+    with sessions() as session:
+        network, snap = _active(session, owner)
+        try:
+            result = _locate(session, snap, query)
+        except Exception:
+            # A failed analysis is reported as unanswered, never as "not found".
+            logger.exception("locate failed", extra={"network_id": network.id})
+            return [_unanswered(network, snap)]
+        return [] if result["status"] == "not_found" else [result]
 
 
 def _unanswered(network, snap):
@@ -700,37 +735,28 @@ def trace(owner, snapshot_id, src, dst, src_vrf=None, dst_vrf=None, flow=None):
 
 
 def trace_current(owner, src, dst, src_vrf=None, dst_vrf=None, flow=None):
-    """The same question over the current snapshot of every network that knows either end."""
+    """The same question over the current snapshot of the owner's active topology."""
     with sessions() as session:
-        found = []
-        for network in session.scalars(
-            select(Network)
-            .where(Network.owner_id == owner, Network.current_snapshot.is_not(None))
-            .order_by(Network.created_at.desc())
-            .limit(200)
-        ):
-            snap = session.get(Snapshot, network.current_snapshot)
-            if snap and "simap" in snap.graph:
-                try:
-                    result = _analyse(
-                        session,
-                        snap,
-                        trace_in,
-                        src,
-                        dst,
-                        src_vrf=src_vrf,
-                        dst_vrf=dst_vrf,
-                        **(flow or {}),
-                    )
-                except HTTPException:
-                    raise  # the question itself is invalid (an address, a port)
-                except Exception:
-                    logger.exception("trace failed", extra={"network_id": network.id})
-                    found.append(_unanswered(network, snap))
-                    continue
-                if {result["forward"]["status"], result["reverse"]["status"]} != {"no_gateway"}:
-                    found.append(_as_history(result))
-        return found
+        network, snap = _active(session, owner)
+        try:
+            result = _analyse(
+                session,
+                snap,
+                trace_in,
+                src,
+                dst,
+                src_vrf=src_vrf,
+                dst_vrf=dst_vrf,
+                **(flow or {}),
+            )
+        except HTTPException:
+            raise  # the question itself is invalid (an address, a port)
+        except Exception:
+            logger.exception("trace failed", extra={"network_id": network.id})
+            return [_unanswered(network, snap)]
+        if {result["forward"]["status"], result["reverse"]["status"]} == {"no_gateway"}:
+            return []  # neither end is known to this network
+        return [_as_history(result)]
 
 
 def _services(devices, base, observed):
@@ -748,21 +774,11 @@ def services(owner, snapshot_id):
 
 
 def services_current(owner):
-    """The same projection over the current snapshot of every network that shows a VPN."""
+    """The same projection over the current snapshot of the owner's active topology."""
     with sessions() as session:
-        found = []
-        for network in session.scalars(
-            select(Network)
-            .where(Network.owner_id == owner, Network.current_snapshot.is_not(None))
-            .order_by(Network.created_at.desc())
-            .limit(200)
-        ):
-            snap = session.get(Snapshot, network.current_snapshot)
-            if snap and "simap" in snap.graph:
-                result = _analyse(session, snap, _services)
-                if result["l3nm"]["tree"] or result["l2nm"]["tree"]:
-                    found.append(result)
-        return found
+        _, snap = _active(session, owner)
+        result = _analyse(session, snap, _services)
+        return [result] if result["l3nm"]["tree"] or result["l2nm"]["tree"] else []
 
 
 def compare(owner, before_id, after_id):

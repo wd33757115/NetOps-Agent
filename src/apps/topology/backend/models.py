@@ -4,14 +4,17 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     Column,
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import declarative_base
 
@@ -31,6 +34,18 @@ class Network(Base):
     current_snapshot = Column(String(32))
     active_run = Column(String(32))
     created_at = Column(DateTime(timezone=True), nullable=False, default=now)
+    # The owner's active topology: the one network the assistant's topology tools read.
+    # At most one per owner (owner decision 2026-10-06).
+    active = Column(Boolean, nullable=False, server_default=text("false"))
+    __table_args__ = (
+        Index(
+            "uq_topology_active_network",
+            "owner_id",
+            unique=True,
+            postgresql_where=text("active"),
+            sqlite_where=text("active"),
+        ),
+    )
 
 
 class DefaultLogin(Base):

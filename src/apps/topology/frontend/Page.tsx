@@ -11,7 +11,8 @@ import DeviceTerminal, { acceptHostKey, readHostKey, type HostKey } from '@netop
 import Located, { highlightIds, type LocateResult } from './Located'
 import './topology.css'
 
-interface Network { id: string; name: string; active_run?: string; current_snapshot?: string }
+// `active`: the owner's one active topology, the only network the AI diagnosis queries.
+interface Network { id: string; name: string; active_run?: string; current_snapshot?: string; active?: boolean }
 interface TopologyNode { id: string; name: string; address?: string; addresses?: string[]; identity_status: string; freshness: string; observed_at?: string; evidence_id?: string; members?: number; subnets?: string[]; tps: { id: string; name: string }[] }
 interface Link { id: string; source: string; target: string; source_tp: string; target_tp: string; freshness: string; observed_at?: string; evidence_id?: string; link_type?: string; direction?: string; label?: string; ends?: string[]; subnets?: string[]; evidence?: string[]; state?: string; available?: boolean | null }
 interface Graph { nodes: TopologyNode[]; links: Link[]; model_profile: string }
@@ -162,7 +163,14 @@ export default function Page() {
   const [retryForm] = Form.useForm()
   const [defaultForm] = Form.useForm()
   const refreshDefault = () => api.get<{ username: string | null; configured: boolean }>('/apps/topology/default-login').then(({ data }) => setDefaultLogin(data))
-  const refreshNetworks = () => api.get<Network[]>('/apps/topology/networks').then(({ data }) => { setNetworks(data); setNetworkId(current => current || data[0]?.id) })
+  const viewed = networks.find(n => n.id === networkId)
+  const activate = async (network: Network) => {
+    try {
+      const { data } = await api.post<Network[]>(`/apps/topology/networks/${network.id}/activate`)
+      setNetworks(data); message.success(`已将“${network.name}”设为活跃拓扑，AI 诊断将查询此网络`)
+    } catch (error) { message.error(errorMessage(error)) }
+  }
+  const refreshNetworks = () => api.get<Network[]>('/apps/topology/networks').then(({ data }) => { setNetworks(data); setNetworkId(current => current || data.find(n => n.active)?.id || data[0]?.id) })
   useEffect(() => { void refreshNetworks().catch(error => setError(errorMessage(error))); void refreshDefault().catch(() => undefined) }, [])
   useEffect(() => {
     setRun(undefined); setSelected(undefined); setRunId(undefined); setLocated(undefined)
@@ -241,7 +249,10 @@ export default function Page() {
       </div>
       {error && <Alert className="tp-alert" type="error" message={error} action={<Button size="small" onClick={() => { setError(''); void refreshNetworks().catch(error => setError(errorMessage(error))) }}>刷新</Button>} />}
       <div className="tp-tools">
-        <Select aria-label="网络" placeholder="选择网络" value={networkId} onChange={setNetworkId} options={networks.map(n => ({ value: n.id, label: n.name }))} style={{ minWidth: 200 }} />
+        <Select aria-label="网络" placeholder="选择网络" value={networkId} onChange={setNetworkId} options={networks.map(n => ({ value: n.id, label: n.active ? `${n.name}（活跃）` : n.name }))} style={{ minWidth: 200 }} />
+        {viewed && (viewed.active
+          ? <Tag color="blue" title="AI 诊断只查询活跃拓扑的当前快照">活跃拓扑 · AI 查询此网络</Tag>
+          : <Button title="AI 诊断只查询活跃拓扑；同一时间只有一个" onClick={() => void activate(viewed)}>设为活跃拓扑</Button>)}
         <Select aria-label="观测任务" placeholder="观测任务" value={runId} onChange={pickRun} options={history.map(h => ({ value: h.id, label: `${new Date(h.created_at).toLocaleString()} · ${labels[h.status] || h.status}` }))} style={{ minWidth: 270 }} />
         {run && <Tag color={active ? 'processing' : run.status === 'completed' ? 'success' : 'default'}>{labels[run.status]}</Tag>}
         <Input.Search className="tp-locate" aria-label="定位 IP 或 MAC" placeholder={run?.snapshot_id ? '定位 IP 或 MAC' : '任务完成后可定位'} enterButton="定位" loading={locating} disabled={!run?.snapshot_id} onSearch={value => void locate(value)} allowClear />
