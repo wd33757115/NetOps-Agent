@@ -69,6 +69,10 @@ def freeze_rule_semantics(contract: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(f'unknown canonical observation types: {identifier}')
         definition = validate_local_definition(raw, identifier)
         if 'semantic_definition' in row:
+            if len(definition['assessment_roles']) != 1:
+                raise ValueError(f'{identifier}: 每个字段只能选择一个评估用途')
+            if definition['assessment_roles'] == ['current_state'] and definition['semantic_type'] in {'counter', 'threshold'}:
+                raise ValueError(f'{identifier}: 只有状态和数值测量可以用于健康判断')
             row['semantic_definition'] = definition
             row['semantic_type'] = definition['semantic_type']
             row['assessment_roles'] = definition['assessment_roles']
@@ -80,6 +84,10 @@ def freeze_rule_semantics(contract: dict[str, Any]) -> dict[str, Any]:
             row['unit'] = definition['canonical_unit']
         definitions.append(definition)
     validate_local_references(contract.get('observations', []))
+    from .local_semantics import compile_health_policy
+    for row in rows:
+        if 'semantic_definition' in row:
+            compile_health_policy(row)
     digest = hashlib.sha256(json.dumps(definitions, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
     return {
         **contract,

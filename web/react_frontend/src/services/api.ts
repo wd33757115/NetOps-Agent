@@ -2040,6 +2040,7 @@ export interface ParserCheckItem {
   coverage_policy: Record<string, unknown>
   status: string
   digest: string
+  patrol_status?: CheckItemPatrolStatus | null
   implementation_count: number
   implementations: Array<{
     implementation_id: string
@@ -2285,6 +2286,196 @@ export interface CanonicalRuleContext {
   }
   digest: string
   check_item?: Record<string, unknown>
+}
+
+/** What an unsaved check-item draft will judge, one entry per standard field. */
+export interface CheckItemRulePreview {
+  valid: boolean
+  errors: string[]
+  assessment_mode: 'health' | 'change' | 'evidence' | null
+  assessment_mode_label?: string
+  fields: Array<{
+    canonical_field: string
+    observation_type: string
+    outcome: 'health' | 'change' | 'reference' | 'evidence'
+    lines: string[]
+    warnings: string[]
+  }>
+}
+
+/** What the published version of a check item judges today, in the same sentences as the preview. */
+export interface CheckItemRulesInForce {
+  check_item_id: string
+  version: number
+  check_item_version_id: string
+  leftover_count: number
+  fields: Array<{
+    canonical_field: string
+    observation_type: string
+    lines: string[]
+    stale_count: number
+    stale_versions: number[]
+  }>
+}
+
+/** Where a check item stands in the patrol: the first unmet step names the state. */
+export interface CheckItemPatrolStatus {
+  state: 'ready' | 'display_only' | 'rules_missing' | 'adapters_pending' | 'no_adapter' | 'topology'
+  judged_fields: number
+  rules_wanted: number
+  rules_active: number
+  rules_awaiting_approval: boolean
+  adapters: number
+  adapters_ready: number
+  pending_change: { id: string; status: 'draft' | 'pending_approval' } | null
+  blockers: string[]
+}
+
+type RelationChange = 'same' | 'added' | 'removed' | 'changed'
+
+/** Events on record under one event type that a rule of the check item produces or produced. */
+export interface CheckItemEventTally {
+  event_type: string
+  event_class: 'fault' | 'recovery' | 'change' | string
+  severity: string
+  field?: string
+  open?: number
+  total?: number
+  count?: number
+}
+
+/** A check item as field -> judgment -> outcomes; `change` is set when two versions are compared. */
+export interface CheckItemRelations {
+  mode: 'current' | 'diff'
+  patrolled?: boolean
+  rows: Array<{
+    field: { name: string; description: string; observation_type: string; change?: RelationChange }
+    rule: {
+      kind: 'health' | 'change' | 'state'
+      title: string
+      detail: string
+      lines: string[]
+      state?: 'active' | 'missing'
+      change?: RelationChange
+      before?: { title: string; detail: string }
+    }
+    outcomes: Array<{
+      key: string
+      kind: 'event' | 'abnormal' | 'trend' | 'counted'
+      text: string
+      event_type?: string
+      event_class?: 'fault' | 'recovery' | 'change' | string
+      severity?: string
+      judges_current?: boolean
+      resolves?: string[]
+      state?: 'active' | 'missing'
+      open?: number
+      total?: number
+      change?: RelationChange
+      before_text?: string
+    }>
+  }>
+  reference: string[] | { fields: string[]; added: string[]; removed: string[] }
+  evidence: string[] | { fields: string[]; added: string[]; removed: string[] }
+  retired?: CheckItemEventTally[]
+  errors: string[]
+}
+
+export interface CheckItemEventList {
+  event_type: string
+  total: number
+  items: Array<{
+    id: string
+    device_id: string
+    entity_key: string
+    status: string
+    severity: string
+    last_seen_at: string | null
+    occurrence_count: number
+    old?: unknown
+    new?: unknown
+    closed_note?: string | null
+  }>
+}
+
+/** A trial of deleting one check item: the delete is tried on the server and rolled back. */
+export interface CheckItemDeletePreview {
+  check_item_id: string
+  deletable: boolean
+  blockers: string[]
+  name?: string
+  version?: number
+  version_count?: number
+  cancelled_change_count?: number
+  rules?: Array<{ kind: 'change_policy' | 'event_rule'; name: string }>
+  runtime_bundle_version_ids?: string[]
+  adapters_withdrawn?: Array<{ implementation_id: string; name: string }>
+  adapters_kept?: Array<{ implementation_id: string; name: string; also_serves: string[] }>
+  events_closed?: CheckItemEventTally[]
+}
+
+/** A trial of publishing one check item change: the switch is tried on the server and rolled back. */
+export interface CheckItemReleasePreview {
+  applicable: boolean
+  check_item_id?: string
+  from_version?: number | null
+  to_version?: number
+  releasable: boolean
+  blockers: string[]
+  fields: Array<{
+    canonical_field: string
+    change: 'unchanged' | 'changed' | 'added' | 'removed'
+    before: string[]
+    after: string[]
+  }>
+  graph?: CheckItemRelations
+  release: {
+    events_closed?: CheckItemEventTally[]
+    rules_activated: number
+    rules_retired_without_successor: number
+    adapters_repinned: number
+    runtime_bundle_version_ids: string[]
+    adapters: Array<{
+      implementation_id: string
+      name: string
+      repinned: boolean
+      in_force?: boolean
+      dropped_fields?: string[]
+    }>
+  } | null
+}
+
+export interface CheckItemOverview {
+  check_item_id: string
+  name: string
+  version: number
+  check_item_version_id: string
+  result_mode: string
+  status: CheckItemPatrolStatus
+  fields: Array<{
+    canonical_field: string
+    description: string
+    use: 'health' | 'change' | 'reference' | 'evidence'
+    use_label: string
+    lines: string[]
+    rules_missing: boolean
+    stale_count: number
+    provided_by: number | null
+  }>
+  structured_adapters: number
+  adapters: Array<{
+    implementation_id: string
+    implementation_version_id: string
+    name: string
+    scope: string
+    command: string
+    state: 'ready' | 'previous_version' | 'pending' | 'not_required'
+    running_check_item_version: number | null
+    fields_provided: number | null
+    missing_fields: string[] | null
+  }>
+  leftover_count: number
+  graph?: CheckItemRelations
 }
 
 export interface CanonicalRuleCandidates {

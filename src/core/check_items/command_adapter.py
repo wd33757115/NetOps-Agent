@@ -590,7 +590,11 @@ def execute_adapter(
         errors: list[str] = list(join_errors)
         field_specs = _field_specs(check_item)
         fields = _output_fields(output, version=normalized["schema_version"])
+        aggregate_dimensions = _aggregate_dimensions(check_item)
         for index, source in enumerate(source_rows):
+            blank = [name for name in aggregate_dimensions if str(source.get(name) or "").strip() == ""]
+            if blank:
+                source = {**source, **dict.fromkeys(blank, AGGREGATE_DIMENSION)}
             try:
                 mapped = {
                     target: (
@@ -825,6 +829,31 @@ def _join_record_sets(
             enriched.append(merged)
         rows = enriched
     return rows, errors
+
+
+AGGREGATE_DIMENSION = "aggregate"
+
+
+def _aggregate_dimensions(check_item: Mapping[str, Any]) -> tuple[str, ...]:
+    """Identity dimensions that subdivide one object, such as an optical channel.
+
+    Under the same-name contract no projection can rename or default a Value, so
+    a record that prints no token for such a dimension (an unchannelized optic)
+    describes the object as a whole. It is recorded as "aggregate" rather than
+    rejected, which used to drop every record of a single-lane transceiver.
+    """
+
+    contract = check_item.get("canonical_contract") or {}
+    if contract.get("value_contract") != "same-name/v1":
+        return ()
+    subdivisions = {
+        str(name)
+        for row in contract.get("observations") or []
+        for name in row.get("dimensions") or []
+    }
+    return tuple(
+        name for name in contract.get("identity_dimensions") or [] if name in subdivisions
+    )
 
 
 def _output_fields(output: Mapping[str, Any], *, version: str) -> Mapping[str, Any]:

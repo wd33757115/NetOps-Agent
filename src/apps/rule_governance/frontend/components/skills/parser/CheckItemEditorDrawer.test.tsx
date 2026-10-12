@@ -3,7 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { ParserCheckItem } from '@netops/services/api'
+import { parserApi, type ParserCheckItem } from '@netops/services/api'
 import CheckItemEditorDrawer from './CheckItemEditorDrawer'
 
 const checkItem: ParserCheckItem = {
@@ -160,5 +160,113 @@ describe('CheckItemEditorDrawer', () => {
       },
     })
     expect(payload.applicability).toEqual(checkItem.applicability)
+  })
+
+  const numeric = (canonical_field: string, id: string, semantic_type: string, extra = {}) => ({
+    canonical_field, observation_type: id, semantic_type, value_type: 'number', unit: 'percent', change_tracking: false, ...extra,
+  })
+  const frozen = (id: string, semantic_type: string, assessment_roles: string[]) => ({
+    id, description: id, semantic_type, value_types: ['number'], canonical_unit: 'percent', dimensions: [],
+    allowed_values: [], state_groups: {}, assessment_roles,
+  })
+  const cpu: ParserCheckItem = { ...checkItem, check_item_id: 'system.cpu_usage', canonical_contract: {
+    entity_type: 'cpu_scope', identity_dimensions: ['slot'], value_contract: 'same-name/v1',
+    observations: [
+      numeric('cpu_usage_percent', 'device.cpu.utilization', 'gauge', {
+        // Stored as "evidence", yet the runtime judges it from the health policy.
+        assessment_roles: ['evidence'], fixed_dimensions: { window: '5m' },
+        threshold_references: { high: { field_name: 'cpu_high_warning_percent' }, critical_high: { field_name: 'cpu_high_alarm_percent' } },
+        health_policy: { revision: 'old', window: '5m', baseline_mode: 'trend_only',
+          trend: { kind: 'utilization_increase', threshold_ratio: 0.1, min_increase_points: 10 },
+          device_thresholds: { high: ['cpu_high_warning_percent', 'cpu_high_alarm_percent'] } },
+      }),
+      numeric('cpu_high_warning_percent', 'device.cpu.high_warning', 'threshold', { assessment_roles: ['reference'] }),
+      numeric('cpu_high_alarm_percent', 'device.cpu.high_alarm', 'threshold', { assessment_roles: ['reference'] }),
+    ],
+    rule_semantics_snapshot: { digest: 'frozen', observations: [
+      frozen('device.cpu.utilization', 'gauge', ['current_state', 'change']),
+      frozen('device.cpu.high_warning', 'threshold', ['reference']),
+      frozen('device.cpu.high_alarm', 'threshold', ['reference']),
+    ] },
+  } }
+
+  it('opens a health-policy Value as a health check and hands the server only its trend', async () => {
+    const onSubmit = vi.fn()
+    const user = userEvent.setup()
+    render(<CheckItemEditorDrawer open mobile={false} checkItem={cpu} onClose={vi.fn()} onSubmit={onSubmit} />)
+    expect(screen.getByLabelText('评估模式')).toHaveValue('健康与风险')
+    expect(screen.queryByText('启用全部字段变化事件')).not.toBeInTheDocument()
+    await user.click(screen.getAllByText('编辑语义与规则用途')[0])
+    expect(screen.getByText('上限阈值字段')).toBeInTheDocument()
+    expect(screen.getByLabelText('相对上次上升超过（%）')).toHaveValue('10')
+    await user.clear(screen.getByLabelText('相对上次上升超过（%）'))
+    await user.type(screen.getByLabelText('相对上次上升超过（%）'), '20')
+    await user.click(screen.getByRole('button', { name: /保存草稿并预览影响/ }))
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledOnce())
+    const payload = onSubmit.mock.calls[0][0]
+    const usage = payload.canonical_contract.observations[0]
+    expect(payload.assessment_mode).toBe('health')
+    expect(payload.canonical_contract.change_events).toBe(false)
+    expect(usage.semantic_definition.assessment_roles).toEqual(['current_state'])
+    expect(usage.threshold_references).toEqual({
+      high: { field_name: 'cpu_high_warning_percent' }, critical_high: { field_name: 'cpu_high_alarm_percent' },
+    })
+    expect(usage.health_policy).toEqual({ trend: { kind: 'utilization_increase', threshold_ratio: 0.2, min_increase_points: 10 } })
+    expect(payload.canonical_contract.observations[1].semantic_definition.assessment_roles).toEqual(['reference'])
+  })
+
+  it('keeps one use per Value and shows what the draft will do', async () => {
+    const onSubmit = vi.fn()
+    const preview = vi.spyOn(parserApi, 'previewCheckItemRules').mockResolvedValue({
+      valid: true, errors: [], assessment_mode: 'change', fields: [{
+        canonical_field: 'fan_status', observation_type: 'environment.fan.state', outcome: 'change',
+        lines: ['从 ok 变为 broken 时产生故障事件（重要）。'], warnings: [],
+      }],
+    })
+    const definition = { id: 'environment.fan.state', description: '风扇状态', semantic_type: 'state',
+      value_types: ['text'], dimensions: [], assessment_roles: ['evidence'], allowed_values: ['ok', 'broken'],
+      state_groups: { healthy: ['ok'], unhealthy: ['broken'] } }
+    render(<CheckItemEditorDrawer open mobile={false} onClose={vi.fn()} onSubmit={onSubmit}
+      checkItem={{ ...checkItem, canonical_contract: { ...checkItem.canonical_contract,
+        observations: [{ ...(checkItem.canonical_contract.observations as any[])[0], assessment_roles: ['change', 'evidence'] }],
+        rule_semantics_snapshot: { digest: 'frozen', observations: [definition] } } }} />)
+    expect(await screen.findByText('从 ok 变为 broken 时产生故障事件（重要）。')).toBeInTheDocument()
+    expect(preview.mock.calls[0][0].canonical_contract).toMatchObject({ change_events: false })
+    await userEvent.click(screen.getByRole('button', { name: /保存草稿并预览影响/ }))
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledOnce())
+    const payload = onSubmit.mock.calls[0][0]
+    expect(payload.assessment_mode).toBe('change')
+    expect(payload.canonical_contract.observations[0]).toMatchObject({
+      change_tracking: true, semantic_definition: { assessment_roles: ['change'], state_groups: { unhealthy: ['broken'] } },
+    })
+    preview.mockRestore()
+  })
+
+  it('sets the rules in force beside the draft only where they differ', async () => {
+    const draft = (field: string, outcome: string, lines: string[]) => ({
+      canonical_field: field, observation_type: field, outcome, lines, warnings: [] })
+    const preview = vi.spyOn(parserApi, 'previewCheckItemRules').mockResolvedValue({
+      valid: true, errors: [], assessment_mode: 'health', fields: [
+        draft('cpu_usage_percent', 'health', ['高于设备输出的 cpu_high_warning_percent 时判定异常。']),
+        draft('cpu_high_warning_percent', 'reference', ['作为 cpu_usage_percent 的阈值。']),
+        draft('cpu_high_alarm_percent', 'reference', ['作为 cpu_usage_percent 的阈值。']),
+      ] } as any)
+    const active = (field: string, lines: string[], stale = 0) => ({
+      canonical_field: field, observation_type: field, lines, stale_count: stale, stale_versions: stale ? [13] : [] })
+    const inForce = vi.spyOn(parserApi, 'checkItemRulesInForce').mockResolvedValue({
+      check_item_id: 'system.cpu_usage', version: 14, check_item_version_id: 'v14', leftover_count: 2, fields: [
+        active('cpu_usage_percent', ['不低于设备输出的 cpu_high_warning_percent 时产生 CpuUtilizationHigh（警告）。'], 1),
+        active('cpu_high_warning_percent', []),
+        active('cpu_high_alarm_percent', []),
+      ] })
+    render(<CheckItemEditorDrawer open mobile={false} checkItem={cpu} onClose={vi.fn()} onSubmit={vi.fn()} />)
+    expect(await screen.findByText('不低于设备输出的 cpu_high_warning_percent 时产生 CpuUtilizationHigh（警告）。')).toBeInTheDocument()
+    expect(inForce).toHaveBeenCalledWith('system.cpu_usage')
+    expect(screen.getAllByText('现在生效（保存并发布后将被上面的内容取代）：')).toHaveLength(1)
+    expect(screen.getAllByText('与现在生效的规则一致。')).toHaveLength(2)
+    expect(screen.getByText('另有 1 条绑定在旧版本 v13 上的规则仍为生效状态。')).toBeInTheDocument()
+    expect(screen.getByText('另有 2 条规则绑定在旧版本已不存在的字段上，仍为生效状态')).toBeInTheDocument()
+    preview.mockRestore()
+    inForce.mockRestore()
   })
 })

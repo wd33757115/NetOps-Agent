@@ -90,6 +90,49 @@ def _event_not_older(event: Any, row: NetworkEventRecord) -> bool:
     )
 
 
+ACTIVE_EVENT_STATUSES = ("open", "acknowledged", "recovering")
+
+
+def close_events_in_session(
+    db: Any,
+    *,
+    event_types: Iterable[str],
+    reason: str,
+    note: str,
+    actor: str,
+    now: datetime,
+) -> dict[str, int]:
+    """Close the events still open under ``event_types``, whose rules no longer run.
+
+    Nothing recovered, so no occurrence is recorded and nothing is published;
+    each aggregate carries why it was closed and by whom. Joins the caller's
+    transaction. Returns how many were closed per event type.
+    """
+
+    wanted = sorted({str(item) for item in event_types if item})
+    closed: dict[str, int] = {}
+    if not wanted:
+        return closed
+    rows = (
+        db.query(NetworkEventRecord)
+        .filter(NetworkEventRecord.event_type.in_(wanted))
+        .filter(NetworkEventRecord.status.in_(ACTIVE_EVENT_STATUSES))
+        .with_for_update()
+        .all()
+    )
+    for row in rows:
+        payload = dict(row.payload_json or {})
+        payload["resolved_at"] = now.isoformat()
+        payload["closed_reason"] = reason
+        payload["closed_note"] = note
+        payload["closed_by"] = actor
+        row.payload_json = payload
+        row.status = "resolved"
+        closed[str(row.event_type)] = closed.get(str(row.event_type), 0) + 1
+    db.flush()
+    return closed
+
+
 class ChangeEventRepository:
     def save_changes(
         self,

@@ -83,3 +83,58 @@ def validate_local_references(rows: list) -> None:
         supported = {'state': {'state_transition', 'enum_transition', 'exact'}, 'enum': {'state_transition', 'enum_transition', 'exact'}, 'boolean': {'state_transition', 'enum_transition', 'exact'}, 'text': {'exact', 'hash_diff'}, 'gauge': {'numeric_delta', 'threshold_and_deadband', 'threshold_low_and_deadband', 'dimension_dispatch'}, 'threshold': {'numeric_delta', 'threshold_and_deadband', 'threshold_low_and_deadband'}, 'counter': {'counter_delta'}}
         if not isinstance(modes, list) or set(modes) - supported[row['semantic_type']]:
             raise ValueError(f"{row['canonical_field']}: 比较方式与语义类型不匹配")
+
+
+def derive_assessment_mode(contract: dict) -> str:
+    """The check item judges health if any Value does, else change, else nothing."""
+    roles = {role for row in contract.get('observations') or [] for role in row.get('assessment_roles') or []}
+    return 'health' if 'current_state' in roles else 'change' if 'change' in roles else 'evidence'
+
+
+_TREND_KINDS = {
+    'utilization_increase': ('percent', '利用率上升', '百分比（percent）'),
+    'linear_power_drop': ('dbm', '光功率下降', 'dBm'),
+}
+
+
+def compile_health_policy(row: dict) -> None:
+    """A numeric health Value is judged by the limits the device itself reports.
+
+    The form owns the threshold fields and the optional trend; everything the
+    runtime reads (``health_policy``) is derived here and never hand-written.
+    """
+    field = row.get('canonical_field')
+    kind, roles = row.get('semantic_type'), row.get('assessment_roles') or []
+    submitted = row.pop('health_policy', None)
+    if 'current_state' not in roles or kind != 'gauge':
+        return
+    references = row.get('threshold_references') or {}
+    limits = {}
+    for side, keys in (('high', ('high', 'critical_high')), ('low', ('low', 'critical_low'))):
+        fields = [references[key]['field_name'] for key in keys if key in references]
+        if fields:
+            limits[side] = list(dict.fromkeys(fields))
+    if not limits:
+        raise ValueError(f'{field}: 数值健康判断必须选择设备输出的阈值字段')
+    policy = {'baseline_mode': 'device_limits', 'device_thresholds': limits}
+    window = (row.get('fixed_dimensions') or {}).get('window')
+    if window == '5m':
+        policy['window'] = window
+    trend = submitted.get('trend') if isinstance(submitted, dict) else None
+    identity_fields = []
+    if trend:
+        if not isinstance(trend, dict) or trend.get('kind') not in _TREND_KINDS:
+            raise ValueError(f'{field}: 趋势提醒类型无效')
+        unit, label, unit_label = _TREND_KINDS[trend['kind']]
+        if (row.get('unit') or '').lower() != unit:
+            raise ValueError(f'{field}: 趋势提醒“{label}”只适用于单位为 {unit_label} 的字段')
+        identity_fields = list(trend.get('identity_fields') or [])
+        policy.update(baseline_mode='trend_only', trend=trend)
+    from .numeric_health import validate_health_policy
+    errors = validate_health_policy(policy)
+    if errors:
+        raise ValueError(f'{field}: ' + '; '.join(errors))
+    row['health_policy'] = policy
+    # The runtime reads limits and module identity from the same record.
+    needed = [name for fields in limits.values() for name in fields] + identity_fields
+    row['context_fields'] = list(dict.fromkeys([*(row.get('context_fields') or []), *needed]))

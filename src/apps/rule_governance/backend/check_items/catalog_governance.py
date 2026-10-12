@@ -6,7 +6,7 @@ import hashlib
 import json
 import uuid
 from collections.abc import Callable, Mapping
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
@@ -25,6 +25,16 @@ from src.apps.rule_governance.backend.check_items.catalog import (
     primary_collection_commands,
     validate_check_item_definition,
 )
+from src.apps.rule_governance.backend.check_items.release import (
+    CheckItemReleaseBlocked,
+    prepare_rules,
+    release_in_session,
+)
+from src.apps.rule_governance.backend.check_items.retirement import (
+    close_orphaned_events,
+    orphaned_events,
+    retire_check_item,
+)
 from src.apps.rule_governance.backend.check_items.rollout import (
     RolloutCampaignService,
 )
@@ -39,6 +49,7 @@ from src.apps.rule_governance.backend.check_items.system_items import (
 )
 from src.common.governance import actor_matches_any
 from src.core.check_items.canonical import freeze_rule_semantics
+from src.core.check_items.local_semantics import derive_assessment_mode
 from src.core.check_items.command_adapter import (
     is_direct_projection_adapter,
     validate_adapter_spec,
@@ -58,6 +69,14 @@ from src.infrastructure.db.models import (
 )
 from src.infrastructure.db.postgres import get_db_session
 from src.platform.inventory.repository import DeviceRepository
+
+
+@contextmanager
+def _joined(db: Any):
+    """A session scope that stays inside the caller's transaction."""
+
+    yield db
+    db.flush()
 
 
 def _ensure_deletable(**asset: str) -> None:
@@ -177,8 +196,15 @@ class CheckItemCatalogGovernanceService:
         session_scope: Callable[[], AbstractContextManager[Any]] = get_db_session,
         *,
         inventory_loader: Callable[[], list[dict[str, Any]]] | None = None,
+        release_derived_assets: bool | None = None,
     ) -> None:
         self._session_scope = session_scope
+        # Rules and runtime bundles live in the default database. A catalog opened
+        # on another store has none to switch and keeps the guard against
+        # replacing a version that is in use.
+        self._release = (
+            session_scope is get_db_session if release_derived_assets is None else bool(release_derived_assets)
+        )
         self._catalog = CheckItemCatalogRepository(session_scope=session_scope)
         self._inventory_loader = inventory_loader or (
             lambda: DeviceRepository().get_devices_by_filter(status="active")
@@ -243,6 +269,10 @@ class CheckItemCatalogGovernanceService:
                 }
             )
             raw["canonical_contract"] = freeze_rule_semantics(dict(raw.get("canonical_contract") or {}))
+            rows = raw["canonical_contract"].get("observations") or []
+            if raw.get("result_mode") == "structured" and rows and all("semantic_definition" in row for row in rows):
+                # Each Value states its own use; the check item follows from them.
+                raw["assessment_mode"] = derive_assessment_mode(raw["canonical_contract"])
             candidate = build_check_item_definition(raw, defaults=defaults)
             validate_check_item_definition(candidate)
             # A system base check item keeps the Values topology discovery reads.
@@ -658,104 +688,77 @@ class CheckItemCatalogGovernanceService:
                     "idempotent_replay": True,
                 }
 
-            root = db.get(CheckItemRecord, check_item_id)
+            root = (
+                db.query(CheckItemRecord)
+                .filter(CheckItemRecord.id == check_item_id)
+                .with_for_update()
+                .first()
+            )
             if root is None:
                 raise ValueError("check item not found")
-            versions = (
-                db.query(CheckItemVersionRecord)
-                .filter(CheckItemVersionRecord.check_item_id == check_item_id)
-                .with_for_update()
-                .all()
-            )
-            version_ids = [str(item.id) for item in versions]
-            active_runtime = (
-                db.query(CheckItemRuntimeBundleVersionRecord)
-                .filter(
-                    CheckItemRuntimeBundleVersionRecord.status == "active",
-                    CheckItemRuntimeBundleVersionRecord.check_item_version_id.in_(
-                        version_ids or [""]
-                    ),
-                )
-                .all()
-            )
-            if active_runtime:
-                raise CatalogGovernanceConflictError(
-                    "check item is referenced by active RuntimeBundle versions: "
-                    f"{sorted(str(item.id) for item in active_runtime)}"
-                )
-
-            linked_active_implementations = (
-                db.query(CollectionImplementationVersionRecord)
-                .join(
-                    CheckItemImplementationLinkRecord,
-                    CheckItemImplementationLinkRecord.implementation_version_id
-                    == CollectionImplementationVersionRecord.id,
-                )
-                .filter(
-                    CheckItemImplementationLinkRecord.check_item_version_id.in_(
-                        version_ids or [""]
-                    ),
-                    CollectionImplementationVersionRecord.status == "active",
-                )
-                .all()
-            )
-            if linked_active_implementations:
-                raise CatalogGovernanceConflictError(
-                    "check item still has active collection implementations: "
-                    + ", ".join(
-                        sorted(
-                            str(item.implementation_id)
-                            for item in linked_active_implementations
-                        )
-                    )
-                )
-
-            pending_changes = (
-                db.query(CheckItemCatalogChangeRecord)
-                .filter(
-                    CheckItemCatalogChangeRecord.asset_kind == "check_item",
-                    CheckItemCatalogChangeRecord.asset_id == check_item_id,
-                    CheckItemCatalogChangeRecord.status.in_(
-                        ["draft", "pending_approval"]
-                    ),
-                )
-                .with_for_update()
-                .all()
-            )
-            for change in pending_changes:
-                change.status = "cancelled"
-                change.decided_by = actor
-                change.decision_reason = reason
-                change.decided_at = now
-                change.updated_at = now
-            for version in versions:
-                if str(version.status) in {"draft", "active"}:
-                    version.status = "deprecated"
-                    version.deprecated_at = now
-            root.status = "deprecated"
-            root.updated_at = now
-            detail = {
-                "check_item_id": check_item_id,
-                "version_ids": version_ids,
-                "cancelled_change_count": len(pending_changes),
-                "reason": reason,
-            }
+            # Rules, runtime bundles and the adapters that only serve it go with it.
+            retired = retire_check_item(db, root, actor=actor, reason=reason, now=now)
             self._audit(
                 db,
                 action="check_item_deleted",
                 actor=actor,
                 resource_id=check_item_id,
                 idempotency_key=audit_key,
-                detail=detail,
+                detail={**retired, "reason": reason},
             )
             db.flush()
             return {
                 "success": True,
-                "check_item_id": check_item_id,
                 "status": "deprecated",
-                "cancelled_change_count": len(pending_changes),
                 "idempotent_replay": False,
+                **retired,
             }
+
+    def preview_delete(self, check_item_id: str, *, actor: str) -> dict[str, Any]:
+        """Say what deleting a check item would take with it, by doing it and rolling back."""
+
+        check_item_id = _require_text(check_item_id, label="check item id")
+        try:
+            _ensure_deletable(check_item_id=check_item_id)
+        except CatalogGovernanceConflictError as exc:
+            return {"check_item_id": check_item_id, "deletable": False, "blockers": [str(exc)]}
+        with self._session_scope() as db:
+            try:
+                root = db.get(CheckItemRecord, check_item_id)
+                if root is None or str(root.status) != "active":
+                    raise ValueError("check item not found")
+                retired = retire_check_item(db, root, actor=actor, reason="删除前试算", now=_utcnow())
+            finally:
+                db.rollback()
+        return {"deletable": True, "blockers": [], **retired}
+
+    def retired_rule_events(self, check_item_id: str) -> list[dict[str, Any]]:
+        """Open events of a check item whose rule no longer runs."""
+
+        with self._session_scope() as db:
+            return orphaned_events(db, _require_text(check_item_id, label="check item id"))
+
+    def close_retired_rule_events(self, check_item_id: str, *, actor: str) -> dict[str, Any]:
+        """Close the events a retired rule of this check item left open."""
+
+        check_item_id = _require_text(check_item_id, label="check item id")
+        actor = _require_text(actor, label="actor")
+        with self._session_scope() as db:
+            if db.get(CheckItemRecord, check_item_id) is None:
+                raise ValueError("check item not found")
+            closed = close_orphaned_events(
+                db, check_item_id, reason="rule_retired", note="规则已停用", actor=actor, now=_utcnow()
+            )
+            if closed:
+                self._audit(
+                    db,
+                    action="check_item_retired_rule_events_closed",
+                    actor=actor,
+                    resource_id=check_item_id,
+                    idempotency_key=None,
+                    detail={"events_closed": closed},
+                )
+            return {"check_item_id": check_item_id, "events_closed": closed}
 
     def delete_implementation(
         self,
@@ -971,6 +974,7 @@ class CheckItemCatalogGovernanceService:
         proposed = self._proposed_catalog(current, candidate)
         if isinstance(candidate, CheckItemDefinition):
             return self._preview_check_item_impact(
+                release_switches_bundles=self._release,
                 change_id=str(change_id),
                 candidate=candidate,
                 baseline_version_id=baseline_version_id or None,
@@ -1144,6 +1148,7 @@ class CheckItemCatalogGovernanceService:
     @staticmethod
     def _preview_check_item_impact(
         *,
+        release_switches_bundles: bool,
         change_id: str,
         candidate: CheckItemDefinition,
         baseline_version_id: str | None,
@@ -1190,7 +1195,7 @@ class CheckItemCatalogGovernanceService:
         )
         blockers: list[dict[str, Any]] = []
         warnings: list[dict[str, Any]] = []
-        if active_bundle_version_ids:
+        if active_bundle_version_ids and not release_switches_bundles:
             blockers.append(
                 {
                     "code": "active_runtime_bundle_requires_check_item_retirement",
@@ -1215,7 +1220,7 @@ class CheckItemCatalogGovernanceService:
                     "next_action": "add_check_item_to_patrol_profile",
                 }
             )
-        elif changed_fields:
+        elif changed_fields and not release_switches_bundles:
             warnings.append(
                 {
                     "code": "check_item_runtime_assets_require_reassembly",
@@ -1540,6 +1545,14 @@ class CheckItemCatalogGovernanceService:
         reason = str(reason or "").strip()
         idempotency_key = _require_text(idempotency_key, label="idempotency key", minimum=8)
         impact = self.preview_impact(change_id)
+        release_bundle_id = None
+        releasing = self._release and decision == "approved" and impact.get("asset_kind") == "check_item"
+        if releasing and not impact["blockers"]:
+            # Rule drafts are compiled before the switch; they change nothing until approved with it.
+            try:
+                release_bundle_id = prepare_rules(str(impact["candidate_version_id"]), actor=actor)
+            except CheckItemReleaseBlocked as exc:
+                raise CatalogGovernanceConflictError(str(exc)) from exc
         now = _utcnow()
         with self._session_scope() as db:
             change = (
@@ -1722,6 +1735,25 @@ class CheckItemCatalogGovernanceService:
                 root.description = str(candidate_snapshot.description)
                 if is_check_item:
                     root.category = str(candidate_snapshot.category)
+                if releasing:
+                    # One approval: rules, adapters and runtime bundles switch with the version or not at all.
+                    try:
+                        release = release_in_session(
+                            db,
+                            session_scope=lambda: _joined(db),
+                            change_id=str(change.id),
+                            root=root,
+                            version=version,
+                            previous=active,
+                            bundle_id=release_bundle_id,
+                            actor=actor,
+                            reason=reason,
+                            now=now,
+                        )
+                    except CheckItemReleaseBlocked as exc:
+                        raise CatalogGovernanceConflictError(f"检查项无法发布：{exc}") from exc
+                    change.cutover_bundle_version_ids_json = release["runtime_bundle_version_ids"]
+                    change.cutover_evidence_json = release
             else:
                 version.status = "deprecated"
                 version.deprecated_at = now
@@ -1752,6 +1784,133 @@ class CheckItemCatalogGovernanceService:
             )
             db.flush()
             return self._serialize_change(db, change)
+
+    def preview_release(self, change_id: str, *, actor: str) -> dict[str, Any]:
+        """Say what approving a check item change would switch, by doing it and rolling back.
+
+        The rule drafts compiled for the trial are kept; the switch itself is not.
+        """
+
+        from src.apps.rule_governance.backend.check_items.relations import (
+            compile_relations,
+            count_relations,
+            diff_relations,
+        )
+        from src.apps.rule_governance.backend.check_items.rule_preview import (
+            describe_compiled_rules,
+            rules_in_force,
+        )
+
+        with self._session_scope() as db:
+            change = db.get(CheckItemCatalogChangeRecord, str(change_id))
+            if change is None:
+                raise ValueError("catalog change request not found")
+            if (
+                not self._release
+                or str(change.asset_kind) != "check_item"
+                or str(change.status) not in {"draft", "pending_approval"}
+            ):
+                return {"applicable": False, "releasable": False, "blockers": [], "fields": [], "release": None}
+            version = db.get(CheckItemVersionRecord, str(change.version_id))
+            candidate = self._candidate(db, change)
+            check_item_id, version_id = str(change.asset_id), str(change.version_id)
+            baseline = db.get(CheckItemVersionRecord, str(change.baseline_version_id or ""))
+            result = {
+                "applicable": True,
+                "check_item_id": check_item_id,
+                "from_version": int(baseline.version) if baseline is not None else None,
+                "to_version": int(version.version),
+            }
+            result["graph"] = count_relations(
+                db,
+                diff_relations(
+                    compile_relations(
+                        check_item_id=check_item_id,
+                        result_mode=str(baseline.result_mode),
+                        assessment_mode=str(baseline.assessment_mode),
+                        canonical_contract=dict(baseline.canonical_contract_json or {}),
+                    )
+                    if baseline is not None
+                    else None,
+                    compile_relations(
+                        check_item_id=check_item_id,
+                        result_mode=candidate.result_mode,
+                        assessment_mode=candidate.assessment_mode,
+                        canonical_contract=candidate.canonical_contract,
+                    ),
+                ),
+            )
+        after = describe_compiled_rules(
+            check_item_id=check_item_id,
+            result_mode=candidate.result_mode,
+            assessment_mode=candidate.assessment_mode,
+            canonical_contract=candidate.canonical_contract,
+        )
+        before = {}
+        if result["from_version"] is not None:
+            try:
+                before = {field["canonical_field"]: field["lines"] for field in rules_in_force(check_item_id)["fields"]}
+            except KeyError:
+                before = {}
+        fields = []
+        for name, lines in after["fields"].items():
+            now_lines = before.pop(name, None)
+            kind = "added" if now_lines is None and result["from_version"] is not None else (
+                "unchanged" if (now_lines or []) == lines else "changed"
+            )
+            fields.append({"canonical_field": name, "change": kind, "before": now_lines or [], "after": lines})
+        fields.extend(
+            {"canonical_field": name, "change": "removed", "before": lines, "after": []}
+            for name, lines in before.items()
+        )
+        result["fields"] = fields
+        blockers = list(after["errors"])
+        release = None
+        if not blockers:
+            try:
+                bundle_id = prepare_rules(version_id, actor=actor)
+                with self._session_scope() as db:
+                    try:
+                        change = db.get(CheckItemCatalogChangeRecord, str(change_id))
+                        version = db.get(CheckItemVersionRecord, version_id)
+                        root = db.get(CheckItemRecord, check_item_id)
+                        active = (
+                            db.query(CheckItemVersionRecord)
+                            .filter(
+                                CheckItemVersionRecord.check_item_id == check_item_id,
+                                CheckItemVersionRecord.status == "active",
+                            )
+                            .first()
+                        )
+                        now = _utcnow()
+                        if active is not None:
+                            active.status = "deprecated"
+                            active.deprecated_at = now
+                            db.flush()
+                        version.status = "active"
+                        version.activated_at = now
+                        root.status = "active"
+                        root.current_version = int(version.version)
+                        release = release_in_session(
+                            db,
+                            session_scope=lambda: _joined(db),
+                            change_id=str(change.id),
+                            root=root,
+                            version=version,
+                            previous=active,
+                            bundle_id=bundle_id,
+                            actor=actor,
+                            reason="发布前试算",
+                            now=now,
+                        )
+                    finally:
+                        db.rollback()
+            except CheckItemReleaseBlocked as exc:
+                blockers.extend(exc.blockers)
+        result["blockers"] = blockers
+        result["releasable"] = not blockers
+        result["release"] = release
+        return result
 
     def _candidate(
         self,

@@ -198,6 +198,9 @@ describe('CheckItemCatalogWorkspace', () => {
       offset: 0,
     })
     vi.spyOn(parserApi, 'adapterProjectionCutoverReadiness').mockResolvedValue(cutoverReadiness)
+    vi.spyOn(parserApi, 'previewCheckItemRelease').mockResolvedValue({
+      applicable: false, releasable: false, blockers: [], fields: [], release: null,
+    })
     vi.spyOn(ruleAssetSourceApi, 'checkItemProductionGroups').mockResolvedValue({
       items: [],
       page: 1,
@@ -287,8 +290,8 @@ describe('CheckItemCatalogWorkspace', () => {
     expect(screen.getByLabelText('稳定检查项 ID')).toBeEnabled()
     expect(screen.getByText('按标准字段自动生成')).toBeInTheDocument()
     expect(screen.getByText('标准输出')).toBeInTheDocument()
-    expect(screen.getByText('规则生成依据')).toBeInTheDocument()
-    expect(screen.getByText('变化策略和事件规则只读取这里的标准语义')).toBeInTheDocument()
+    expect(screen.getByText('巡检时会做什么')).toBeInTheDocument()
+    expect(screen.getByLabelText('评估模式')).toHaveValue('审计证据')
 
     fireEvent.change(screen.getByLabelText('稳定检查项 ID'), {
       target: { value: 'routing.test_neighbor' },
@@ -384,6 +387,39 @@ describe('CheckItemCatalogWorkspace', () => {
     expect(screen.getByRole('button', { name: '关联检查项' })).toBeVisible()
     expect(screen.getByRole('button', { name: '删除命令' })).toBeVisible()
     expect(screen.queryByRole('button', { name: '删除检查项 __pending_classification__' })).not.toBeInTheDocument()
+  })
+
+  it('shows every check item of a page beside the pinned unclassified row', async () => {
+    const pageAt = (offset: number) => Array.from({ length: 20 }, (_, index) => ({
+      ...checkItem,
+      check_item_id: `item.${offset + index + 1}`,
+      check_item_version_id: `version-${offset + index + 1}`,
+      name: `检查项 ${offset + index + 1}`,
+      display_name: `检查项 ${offset + index + 1}`,
+    }))
+    vi.spyOn(parserApi, 'checkItems').mockImplementation(async (params = {}) => ({
+      items: pageAt(Number(params.offset || 0)),
+      total: 60,
+      limit: 20,
+      offset: Number(params.offset || 0),
+    }))
+    vi.spyOn(ruleAssetSourceApi, 'checkItemProductionGroups').mockResolvedValue({
+      items: [{ id: 'check-item:__unclassified__:asset-1', classification_required: true, implementations: [] }],
+      page: 1,
+      page_size: 100,
+      total: 1,
+      page_count: 1,
+    } as never)
+
+    renderWorkspace()
+
+    expect(await screen.findByText('待归类检查项')).toBeVisible()
+    expect(await screen.findByText('检查项 1')).toBeVisible()
+    expect(screen.getByText('检查项 20')).toBeVisible()
+    await userEvent.click(screen.getByTitle('2'))
+    expect(await screen.findByText('检查项 21')).toBeVisible()
+    expect(screen.getByText('检查项 40')).toBeVisible()
+    expect(screen.getByText('待归类检查项')).toBeVisible()
   })
 
   it('scopes a sample-import deep link to that import’s pending commands', async () => {

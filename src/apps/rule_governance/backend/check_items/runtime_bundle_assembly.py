@@ -253,13 +253,20 @@ def derive_asset_requirement_profile(
     evaluates_state = assessment_mode == "health"
     evaluates_change = assessment_mode in {"health", "change"}
 
+    # A form-owned numeric health Value carries its compiled health_policy and is
+    # judged from it directly; it needs no current-state EventRule asset.
+    intrinsic_health = {
+        str(row["observation_type"]).strip()
+        for row in rows
+        if "semantic_definition" in row and row.get("health_policy")
+    }
     current_required = (
-        types_with_role(required_types, "current_state")
+        types_with_role(required_types, "current_state") - intrinsic_health
         if structured and evaluates_state
         else set()
     )
     current_conditional = (
-        types_with_role(optional_types, "current_state")
+        types_with_role(optional_types, "current_state") - intrinsic_health
         if structured and evaluates_state
         else set()
     )
@@ -885,6 +892,75 @@ class RuntimeBundleAssemblyPlanner:
 
     def __init__(self, db: Any) -> None:
         self.db = db
+        # One planner serves one read. A list plans hundreds of pairs that ask for
+        # the same active assets; each distinct lookup runs once per planner.
+        self._memo: dict[Any, Any] = {}
+
+    def _once(self, key: Any, load: Any) -> Any:
+        if key not in self._memo:
+            self._memo[key] = load()
+        return self._memo[key]
+
+    def prime(self, pairs: Iterable[tuple[str, str]]) -> None:
+        """Load in a few queries what build() would ask for once per pair."""
+
+        db = self.db
+        pairs = {(str(check), str(implementation)) for check, implementation in pairs}
+        check_ids = sorted({check for check, _ in pairs})
+        implementation_ids = sorted({implementation for _, implementation in pairs})
+        if not pairs:
+            return
+        check_versions = db.query(CheckItemVersionRecord).filter(CheckItemVersionRecord.id.in_(check_ids)).all()
+        implementation_versions = (
+            db.query(CollectionImplementationVersionRecord)
+            .filter(CollectionImplementationVersionRecord.id.in_(implementation_ids))
+            .all()
+        )
+        for row in check_versions:
+            self._memo[("check_version", str(row.id))] = row
+        for row in implementation_versions:
+            self._memo[("implementation_version", str(row.id))] = row
+        for row in db.query(CheckItemRecord).filter(
+            CheckItemRecord.id.in_(sorted({row.check_item_id for row in check_versions}))
+        ):
+            self._memo[("check_item", row.id)] = row
+        for row in db.query(CollectionImplementationRecord).filter(
+            CollectionImplementationRecord.id.in_(sorted({row.implementation_id for row in implementation_versions}))
+        ):
+            self._memo[("implementation", row.id)] = row
+        links, active, drafts = {}, {}, {}
+        for row in db.query(CheckItemImplementationLinkRecord).filter(
+            CheckItemImplementationLinkRecord.check_item_version_id.in_(check_ids)
+        ):
+            links.setdefault((str(row.check_item_version_id), str(row.implementation_version_id)), row)
+        for bundle, version in (
+            db.query(CheckItemRuntimeBundleRecord, CheckItemRuntimeBundleVersionRecord)
+            .join(
+                CheckItemRuntimeBundleVersionRecord,
+                CheckItemRuntimeBundleVersionRecord.bundle_id == CheckItemRuntimeBundleRecord.id,
+            )
+            .filter(
+                CheckItemRuntimeBundleVersionRecord.check_item_version_id.in_(check_ids),
+                CheckItemRuntimeBundleVersionRecord.status == "active",
+            )
+        ):
+            active.setdefault((str(version.check_item_version_id), str(version.implementation_version_id)), (bundle, version))
+        for version in (
+            db.query(CheckItemRuntimeBundleVersionRecord)
+            .filter(
+                CheckItemRuntimeBundleVersionRecord.check_item_version_id.in_(check_ids),
+                CheckItemRuntimeBundleVersionRecord.status == "draft",
+            )
+            .order_by(
+                CheckItemRuntimeBundleVersionRecord.version.desc(),
+                CheckItemRuntimeBundleVersionRecord.id,
+            )
+        ):
+            drafts.setdefault((str(version.check_item_version_id), str(version.implementation_version_id)), []).append(version)
+        for pair in pairs:
+            self._memo[("link", pair)] = links.get(pair)
+            self._memo[("active_bundle", pair)] = active.get(pair)
+            self._memo[("draft_bundles", pair)] = drafts.get(pair, [])
 
     def build(
         self,
@@ -901,10 +977,13 @@ class RuntimeBundleAssemblyPlanner:
         blockers: list[dict[str, Any]] = []
         warnings: list[dict[str, Any]] = []
 
-        check_version = db.get(CheckItemVersionRecord, check_item_version_id)
-        implementation_version = db.get(
-            CollectionImplementationVersionRecord,
-            implementation_version_id,
+        check_version = self._once(
+            ("check_version", str(check_item_version_id)),
+            lambda: db.get(CheckItemVersionRecord, check_item_version_id),
+        )
+        implementation_version = self._once(
+            ("implementation_version", str(implementation_version_id)),
+            lambda: db.get(CollectionImplementationVersionRecord, implementation_version_id),
         )
         if check_version is None:
             blockers.append(
@@ -931,20 +1010,25 @@ class RuntimeBundleAssemblyPlanner:
             )
 
         canonical_catalog = rule_semantics_catalog(dict(check_version.canonical_contract_json or {}))
-        check_item = db.get(CheckItemRecord, check_version.check_item_id)
-        implementation = db.get(
-            CollectionImplementationRecord,
-            implementation_version.implementation_id,
+        pair = (str(check_version.id), str(implementation_version.id))
+        check_item = self._once(
+            ("check_item", check_version.check_item_id),
+            lambda: db.get(CheckItemRecord, check_version.check_item_id),
         )
-        link = (
-            db.query(CheckItemImplementationLinkRecord)
+        implementation = self._once(
+            ("implementation", implementation_version.implementation_id),
+            lambda: db.get(CollectionImplementationRecord, implementation_version.implementation_id),
+        )
+        link = self._once(
+            ("link", pair),
+            lambda: db.query(CheckItemImplementationLinkRecord)
             .filter(
                 CheckItemImplementationLinkRecord.check_item_version_id
                 == check_version.id,
                 CheckItemImplementationLinkRecord.implementation_version_id
                 == implementation_version.id,
             )
-            .first()
+            .first(),
         )
         if check_item is None or implementation is None:
             blockers.append(
@@ -1129,17 +1213,26 @@ class RuntimeBundleAssemblyPlanner:
             str(item) for item in event_rule_version_ids if str(item).strip()
         }
 
+        # Candidate previews name their own drafts; plain plans all read the same active set.
+        preview_key = (
+            tuple(sorted(requested_parser_ids)),
+            tuple(sorted(requested_policy_ids)),
+            tuple(sorted(requested_rule_ids)),
+        ) if _preview_candidates else ()
         parser_rows = (
-            db.query(ParserTemplate)
-            .filter(or_(ParserTemplate.status == "active", and_(
-                _preview_candidates, ParserTemplate.id.in_(requested_parser_ids), ParserTemplate.status == "pending_approval")))
-            .order_by(
-                ParserTemplate.canonical_command,
-                ParserTemplate.vendor,
-                ParserTemplate.profile,
-                ParserTemplate.id,
+            self._once(
+                ("parser_templates", preview_key),
+                lambda: db.query(ParserTemplate)
+                .filter(or_(ParserTemplate.status == "active", and_(
+                    _preview_candidates, ParserTemplate.id.in_(requested_parser_ids), ParserTemplate.status == "pending_approval")))
+                .order_by(
+                    ParserTemplate.canonical_command,
+                    ParserTemplate.vendor,
+                    ParserTemplate.profile,
+                    ParserTemplate.id,
+                )
+                .all(),
             )
-            .all()
             if result_mode == "structured"
             else []
         )
@@ -1447,7 +1540,9 @@ class RuntimeBundleAssemblyPlanner:
                     ),
                 )
             )
-        policy_rows_all = (
+        policy_rows_all = self._once(
+            ("change_policies", tuple(sorted(change_required)), preview_key),
+            lambda: (
             db.query(ChangePolicyVersionRecord)
             .filter(
                 or_(ChangePolicyVersionRecord.status == "active", and_(
@@ -1463,6 +1558,7 @@ class RuntimeBundleAssemblyPlanner:
                 ChangePolicyVersionRecord.id,
             )
             .all()
+            ),
         )
         scoped_policy_types = {
             str(item.observation_type)
@@ -1699,6 +1795,9 @@ class RuntimeBundleAssemblyPlanner:
                 )
             )
         rule_rows_all = (
+            self._once(
+                ("event_rules", preview_key),
+                lambda: (
             db.query(EventRuleVersionRecord, EventRuleRecord)
             .join(EventRuleRecord, EventRuleRecord.id == EventRuleVersionRecord.rule_id)
             .filter(or_(EventRuleVersionRecord.status == "active", and_(
@@ -1710,6 +1809,8 @@ class RuntimeBundleAssemblyPlanner:
                 EventRuleVersionRecord.id,
             )
             .all()
+                ),
+            )
             if allowed_rule_observation_types or requested_rule_ids
             else []
         )
@@ -2129,14 +2230,15 @@ class RuntimeBundleAssemblyPlanner:
                 )
             )
 
-        identity_version = (
-            db.query(EntityIdentityPolicyVersionRecord)
+        identity_version = self._once(
+            "identity_policy",
+            lambda: db.query(EntityIdentityPolicyVersionRecord)
             .filter(EntityIdentityPolicyVersionRecord.status == "active")
             .order_by(
                 EntityIdentityPolicyVersionRecord.version.desc(),
                 EntityIdentityPolicyVersionRecord.id,
             )
-            .first()
+            .first(),
         )
         if identity_version is None:
             blockers.append(
@@ -2146,8 +2248,9 @@ class RuntimeBundleAssemblyPlanner:
                 )
             )
 
-        active_bundle = (
-            db.query(
+        active_bundle = self._once(
+            ("active_bundle", pair),
+            lambda: db.query(
                 CheckItemRuntimeBundleRecord,
                 CheckItemRuntimeBundleVersionRecord,
             )
@@ -2163,10 +2266,11 @@ class RuntimeBundleAssemblyPlanner:
                 == implementation_version.id,
                 CheckItemRuntimeBundleVersionRecord.status == "active",
             )
-            .first()
+            .first(),
         )
-        draft_rows = (
-            db.query(CheckItemRuntimeBundleVersionRecord)
+        draft_rows = self._once(
+            ("draft_bundles", pair),
+            lambda: db.query(CheckItemRuntimeBundleVersionRecord)
             .filter(
                 CheckItemRuntimeBundleVersionRecord.check_item_version_id
                 == check_version.id,
@@ -2178,7 +2282,7 @@ class RuntimeBundleAssemblyPlanner:
                 CheckItemRuntimeBundleVersionRecord.version.desc(),
                 CheckItemRuntimeBundleVersionRecord.id,
             )
-            .all()
+            .all(),
         )
 
         executable_count = sum(

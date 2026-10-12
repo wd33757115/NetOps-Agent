@@ -75,9 +75,11 @@ def numeric_contract():
 
 
 def test_numeric_threshold_is_compiled_from_local_reference():
-    result = candidates(freeze_rule_semantics(numeric_contract()))
+    frozen = freeze_rule_semantics(numeric_contract())
+    assert frozen['observations'][0]['health_policy']['device_thresholds'] == {'high': ['LIMIT']}
+    result = candidates(frozen)
     assert result['success'], result['blockers']
-    assert any(rule['condition'].get('reference_field') == 'LIMIT' for rule in result['event_rules'])
+    assert not result['event_rules']
 
 
 @pytest.mark.parametrize('target,unit', [('MISSING', 'watts'), ('WATTS', 'watts'), ('LIMIT', 'volts')])
@@ -97,8 +99,11 @@ def test_local_change_opt_in_generates_event_without_bulk_switch(legacy):
     value['observations'][0]['semantic_definition']['assessment_roles'] = ['change']
     result = candidates(freeze_rule_semantics(value))
     assert result['success'], result['blockers']
-    assert result['event_rules'][0]['condition']['kind'] == 'field_change'
-    assert result['event_rules'][0]['severity'] == 'info'
+    rules = {rule['trigger_role']: rule for rule in result['event_rules']}
+    # The Value names its normal and abnormal states, so the direction is reported too.
+    assert set(rules) == {'down', 'up', 'change'}
+    assert rules['change']['condition']['kind'] == 'field_change'
+    assert rules['change']['severity'] == 'info'
 
 
 def test_numeric_health_cannot_fall_back_to_implicit_thresholds():

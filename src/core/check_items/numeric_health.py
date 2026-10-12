@@ -41,6 +41,10 @@ def validate_health_policy(policy: Any) -> list[str]:
             errors.append("health_policy.trend.require_identity must be boolean")
         if not isinstance(fields, list) or any(not isinstance(f, str) or not f for f in fields):
             errors.append("health_policy.trend.identity_fields must contain field names")
+    elif mode == "device_limits":
+        # Device limits alone decide health; no baseline is consulted.
+        if policy.get("trend"):
+            errors.append("health_policy.trend requires baseline_mode trend_only")
     elif mode == "absolute_relative":
         ratio = number(policy.get("max_relative_deviation"))
         if ratio is None or not 0 <= ratio <= 1:
@@ -64,7 +68,9 @@ def validate_health_policy(policy: Any) -> list[str]:
 
 def evaluate_numeric_health(observation: dict, policy: dict) -> dict:
     """Evaluate the frozen policy version; never replace missing measurement facts."""
-    if policy.get("baseline_mode") == "trend_only" and not validate_health_policy(policy):
+    if policy.get("baseline_mode") in {"trend_only", "device_limits"} and not validate_health_policy(
+        policy
+    ):
         return _evaluate_threshold_health(observation, policy)
     context = dict(observation.get("context") or {})
     value = number(observation.get("value"))
@@ -167,6 +173,31 @@ def _evaluate_threshold_health(observation: dict, policy: dict) -> dict:
     context = dict(observation.get("context") or {})
     value, baseline = number(observation.get("value")), number(context.get("baseline_value"))
     limits, missing, violations = _device_limits(value, context, policy)
+    if policy["baseline_mode"] == "device_limits":
+        if value is None:
+            missing.append("current_value_missing")
+        if (
+            policy.get("window")
+            and (observation.get("dimensions") or {}).get("window") != policy["window"]
+        ):
+            missing.append("measurement_window_missing")
+        if {"measurement_window_missing", "device_threshold_conflict"} & set(missing):
+            violations = []
+        return {
+            "status": "abnormal" if violations else "unknown" if missing else "healthy",
+            "complete": not missing,
+            "missing": missing,
+            "violations": violations,
+            "value": value,
+            "baseline_value": baseline,
+            "relative_deviation": None,
+            "max_relative_deviation": None,
+            "baseline_mode": "device_limits",
+            "trend": None,
+            "thresholds": limits,
+            "baseline_observation_id": context.get("baseline_observation_id"),
+            "baseline_snapshot_id": context.get("baseline_snapshot_id"),
+        }
     trend_policy = {
         **policy["trend"],
         "threshold_ratio": number(policy["trend"]["threshold_ratio"]),

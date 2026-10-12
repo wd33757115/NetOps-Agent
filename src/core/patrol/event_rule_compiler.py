@@ -14,6 +14,10 @@ class RuleRole:
     condition: dict[str, Any]
     default_severity: str
     resolves_roles: tuple[str, ...] = ()
+    # A direction rule outranks the plain change rule so one change yields one event.
+    priority: int = 100
+    exclusive: bool = False
+    evaluation_scope: str | None = None
 
 
 _ROLE_ALIASES = {
@@ -130,6 +134,7 @@ def expected_rule_roles(
     *,
     contract: dict[str, Any],
     change_policy: dict[str, Any],
+    event_constraints: dict[str, Any] | None = None,
 ) -> tuple[list[RuleRole], list[str]]:
     """Return runtime roles implied only by Contract and ChangePolicy."""
 
@@ -159,11 +164,36 @@ def expected_rule_roles(
         "observation_types": [observation_type],
     }
     dimension_selector = dict(change_policy.get("dimension_selector") or {})
+    compare_mode = str(change_policy.get("compare_mode") or "").strip()
     if any(dict(contract.get("state_semantics", {}).get(field) or {}).get("event_on_change") for field in fields):
-        return [RuleRole("change", "change", {"kind": "field_change", **base, "allow_initial": False}, "info")], []
+        change = RuleRole("change", "change", {"kind": "field_change", **base, "allow_initial": False}, "info")
+        healthy_values, unhealthy_values = _state_values(contract, observation_type)
+        declared = dict(event_constraints or {}).get("role_event_types") or {}
+        if (
+            compare_mode not in {"state_transition", "enum_transition"}
+            or not {"down", "up"} <= set(declared)
+            or not healthy_values
+            or not unhealthy_values
+        ):
+            return [change], []
+        # Only a move between the declared groups is a fault or its recovery; an
+        # object that was already abnormal (an unused port) raises nothing.
+        move = {"kind": "transition", **base, "allow_initial_target": False}
+        return [
+            RuleRole(
+                "down", "fault",
+                {**move, "from_group": "up", "to_group": "down", "from_values": healthy_values, "to_values": unhealthy_values},
+                "major", priority=200, exclusive=True, evaluation_scope="change",
+            ),
+            RuleRole(
+                "up", "recovery",
+                {**move, "from_group": "down", "to_group": "up", "from_values": unhealthy_values, "to_values": healthy_values},
+                "info", ("down",), priority=200, exclusive=True, evaluation_scope="change",
+            ),
+            change,
+        ], []
     if dimension_selector:
         base["dimensions"] = dimension_selector
-    compare_mode = str(change_policy.get("compare_mode") or "").strip()
     thresholds = {
         str(key): value
         for key, value in dict(change_policy.get("thresholds") or {}).items()
@@ -560,7 +590,10 @@ def _requires_current_state_only(
     policy = dict(requirements or {})
     if policy.get("requires_current_state_rule") is not True:
         return False
-    if policy.get("requires_event_rule") is True:
+    events = dict(policy.get("required_event_types_by_observation") or {})
+    # Each Value has one use: sibling Values that report changes do not turn a
+    # health-only Value into a change rule.
+    if policy.get("requires_event_rule") is True and (not events or observation_type in events):
         return False
     scoped_types = {
         str(item).strip()
@@ -687,6 +720,7 @@ def compile_event_rule_intents(
     roles, errors = expected_rule_roles(
         contract=contract,
         change_policy=change_policy,
+        event_constraints=event_constraints,
     )
     if errors or not roles:
         return {
@@ -763,12 +797,14 @@ def compile_event_rule_intents(
                 or f"Generated {observation_type} {role.name} event candidate."
             ),
             "condition": dict(role.condition),
-            "priority": int(source.get("priority") or 100),
-            "exclusive": bool(source.get("exclusive", False)),
+            "priority": int(source.get("priority") or role.priority),
+            "exclusive": bool(source.get("exclusive", role.exclusive)),
             "event_class": role.event_class,
             "evaluation_scope": (
                 "current_state"
                 if current_state_only
+                else role.evaluation_scope
+                if role.evaluation_scope
                 else "change"
                 if role.event_class in {"recovery", "change"}
                 else str(source.get("evaluation_scope") or "both")

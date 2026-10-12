@@ -563,6 +563,17 @@ class CheckItemDraftRequest(BaseModel):
     reason: str = Field(default="", max_length=2000)
 
 
+class CheckItemRulePreviewRequest(BaseModel):
+    id: str = Field(default="", max_length=128)
+    result_mode: Literal[
+        "structured",
+        "normalized_diff",
+        "hash_only",
+        "evidence_only",
+    ]
+    canonical_contract: dict[str, Any]
+
+
 class CheckItemDeleteRequest(BaseModel):
     reason: str = Field(default="", max_length=2000)
 
@@ -4172,6 +4183,88 @@ def create_check_item_draft(
         _raise_catalog_governance_error(exc)
 
 
+@router.post("/catalog/check-items/rule-preview")
+def preview_check_item_draft_rules(payload: CheckItemRulePreviewRequest):
+    """Explain what an unsaved check-item draft will judge; stores nothing."""
+
+    from src.apps.rule_governance.backend.check_items.rule_preview import (
+        preview_check_item_rules,
+    )
+
+    return preview_check_item_rules(
+        check_item_id=payload.id,
+        result_mode=payload.result_mode,
+        canonical_contract=payload.canonical_contract,
+    )
+
+
+@router.get("/catalog/check-items/{check_item_id}/active-rules")
+def get_check_item_rules_in_force(check_item_id: str):
+    """The rules the patrol applies today to the published version of a check item."""
+
+    from src.apps.rule_governance.backend.check_items.rule_preview import rules_in_force
+
+    try:
+        return rules_in_force(check_item_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/catalog/check-items/{check_item_id}/overview")
+def get_check_item_overview(check_item_id: str):
+    """One check item with the rules it produces and the adapters that run it."""
+
+    from src.apps.rule_governance.backend.check_items.patrol_overview import check_item_overview
+
+    try:
+        return check_item_overview(check_item_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/catalog/check-items/{check_item_id}/events")
+def list_check_item_events(check_item_id: str, event_type: str, limit: int = 10):
+    """The latest stored events of one event type a rule of this check item produces."""
+
+    from src.apps.rule_governance.backend.check_items.relations import recent_events
+    from src.infrastructure.db.postgres import get_db_session
+
+    try:
+        with get_db_session() as db:
+            return recent_events(db, check_item_id, event_type, limit=limit)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post(
+    "/catalog/check-items/{check_item_id}/retired-events/close",
+    dependencies=[Depends(app_user)],
+)
+def close_check_item_retired_events(request: Request, check_item_id: str):
+    """Close the events left open by rules of this check item that no longer run."""
+
+    try:
+        return CheckItemCatalogGovernanceService().close_retired_rule_events(
+            check_item_id,
+            actor=_authenticated_actor(request),
+        )
+    except ValueError as exc:
+        _raise_catalog_governance_error(exc)
+
+
+@router.post("/catalog/check-items/{check_item_id}/delete-preview")
+def preview_check_item_delete(request: Request, check_item_id: str):
+    """What deleting a check item would take with it. The delete is tried and rolled back."""
+
+    try:
+        return CheckItemCatalogGovernanceService().preview_delete(
+            check_item_id,
+            actor=_authenticated_actor(request),
+        )
+    except ValueError as exc:
+        _raise_catalog_governance_error(exc)
+
+
 @router.delete(
     "/catalog/check-items/{check_item_id}",
     dependencies=[Depends(app_user)],
@@ -4236,6 +4329,19 @@ def delete_collection_implementation(
 def preview_check_item_catalog_change(change_id: str):
     try:
         return CheckItemCatalogGovernanceService().preview_impact(change_id)
+    except ValueError as exc:
+        _raise_catalog_governance_error(exc)
+
+
+@router.post("/catalog/changes/{change_id}/release-preview")
+def preview_check_item_release(request: Request, change_id: str):
+    """What publishing a check item change would switch. The switch is tried and rolled back."""
+
+    try:
+        return CheckItemCatalogGovernanceService().preview_release(
+            change_id,
+            actor=_authenticated_actor(request),
+        )
     except ValueError as exc:
         _raise_catalog_governance_error(exc)
 
@@ -4416,8 +4522,14 @@ def list_check_items(
             )
         page_size = max(1, min(int(limit), 200))
         page_offset = max(0, int(offset))
+        page = items[page_offset : page_offset + page_size]
+        from src.apps.rule_governance.backend.check_items.patrol_overview import patrol_status
+
+        statuses = patrol_status(row["check_item_id"] for row in page)
+        for row in page:
+            row["patrol_status"] = statuses.get(row["check_item_id"])
         return {
-            "items": items[page_offset : page_offset + page_size],
+            "items": page,
             "total": len(items),
             "limit": page_size,
             "offset": page_offset,

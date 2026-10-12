@@ -16,6 +16,8 @@ from src.core.check_items import (
 from src.infrastructure.db.models import (
     AuditLogRecord,
     Base,
+    ChangePolicyRecord,
+    ChangePolicyVersionRecord,
     CheckItemCatalogChangeRecord,
     CheckItemImplementationLinkRecord,
     CheckItemRecord,
@@ -24,6 +26,9 @@ from src.infrastructure.db.models import (
     CheckItemVersionRecord,
     CollectionImplementationRecord,
     CollectionImplementationVersionRecord,
+    EventRuleRecord,
+    EventRuleVersionRecord,
+    NetworkEventRecord,
     ParserTemplate,
 )
 
@@ -56,6 +61,12 @@ def _environment(tmp_path, *, devices=None):
             CheckItemRuntimeBundleRecord.__table__,
             CheckItemRuntimeBundleVersionRecord.__table__,
             ParserTemplate.__table__,
+            # Deleting a check item retires its rules and closes their events.
+            ChangePolicyRecord.__table__,
+            ChangePolicyVersionRecord.__table__,
+            EventRuleRecord.__table__,
+            EventRuleVersionRecord.__table__,
+            NetworkEventRecord.__table__,
         ],
     )
     session_factory = sessionmaker(bind=engine)

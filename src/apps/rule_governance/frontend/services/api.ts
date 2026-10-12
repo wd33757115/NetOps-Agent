@@ -15,12 +15,19 @@ import type {
   CanonicalRuleContext,
   CheckItemCatalogChange,
   CheckItemCatalogCheckItemDeleteResult,
+  CheckItemDeletePreview,
+  CheckItemEventList,
+  CheckItemEventTally,
   CheckItemCatalogCheckItemDraftInput,
   CheckItemCatalogImpact,
   CheckItemCatalogImplementationDeleteResult,
   CheckItemCatalogImplementationDraftInput,
   CheckItemCatalogPublicationOptions,
   CheckItemProductionGroupPage,
+  CheckItemRulePreview,
+  CheckItemOverview,
+  CheckItemReleasePreview,
+  CheckItemRulesInForce,
   CheckItemRuntimeBundleHealthPage,
   CheckItemRuntimeBundleHealthStatus,
   CheckItemRuntimeBundleVersion,
@@ -583,6 +590,39 @@ export const parserApi = {
       `/parser/catalog/check-item-versions/${checkItemVersionId}/rule-candidates/drafts/`,
     )
   ).data,
+  previewCheckItemRules: async (data: {
+    id: string
+    result_mode: CheckItemCatalogCheckItemDraftInput['result_mode']
+    canonical_contract: Record<string, unknown>
+  }): Promise<CheckItemRulePreview> => (
+    await api.post<CheckItemRulePreview>('/parser/catalog/check-items/rule-preview/', data)
+  ).data,
+  checkItemOverview: async (checkItemId: string): Promise<CheckItemOverview> => (
+    await api.get<CheckItemOverview>(
+      `/parser/catalog/check-items/${encodeURIComponent(checkItemId)}/overview/`,
+    )
+  ).data,
+  checkItemEvents: async (checkItemId: string, eventType: string): Promise<CheckItemEventList> => (
+    await api.get<CheckItemEventList>(
+      `/parser/catalog/check-items/${encodeURIComponent(checkItemId)}/events/`,
+      { params: { event_type: eventType, limit: 10 } },
+    )
+  ).data,
+  closeRetiredRuleEvents: async (checkItemId: string): Promise<{ events_closed: CheckItemEventTally[] }> => (
+    await api.post<{ events_closed: CheckItemEventTally[] }>(
+      `/parser/catalog/check-items/${encodeURIComponent(checkItemId)}/retired-events/close/`,
+    )
+  ).data,
+  previewCheckItemDelete: async (checkItemId: string): Promise<CheckItemDeletePreview> => (
+    await api.post<CheckItemDeletePreview>(
+      `/parser/catalog/check-items/${encodeURIComponent(checkItemId)}/delete-preview/`,
+    )
+  ).data,
+  checkItemRulesInForce: async (checkItemId: string): Promise<CheckItemRulesInForce> => (
+    await api.get<CheckItemRulesInForce>(
+      `/parser/catalog/check-items/${encodeURIComponent(checkItemId)}/active-rules/`,
+    )
+  ).data,
   createCheckItemDraft: async (
     data: CheckItemCatalogCheckItemDraftInput,
     idempotencyKey: string,
@@ -693,6 +733,9 @@ export const parserApi = {
     await api.get<CheckItemCatalogPublicationOptions>(
       `/parser/catalog/changes/${changeId}/publication-options/`,
     )
+  ).data,
+  previewCheckItemRelease: async (changeId: string): Promise<CheckItemReleasePreview> => (
+    await api.post<CheckItemReleasePreview>(`/parser/catalog/changes/${changeId}/release-preview/`)
   ).data,
   submitCatalogChange: async (
     changeId: string,

@@ -1999,6 +1999,10 @@ class RuleAssetCommandUnitService:
                 for unit, source_job in rows
             ]
             assembly_planner = RuntimeBundleAssemblyPlanner(db)
+            assembly_planner.prime(
+                (link["check_item_version_id"], link["implementation_version_id"])
+                for link in link_rows
+            )
             assembly_plans: dict[tuple[str, str], dict[str, Any]] = {}
             for link in link_rows:
                 plan_key = (

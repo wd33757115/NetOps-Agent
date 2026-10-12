@@ -54,7 +54,11 @@ import {
   type ParserCheckItem,
 } from '@netops/services/api'
 import { queryErrorLabel, shortDigest } from './parserUi'
+import CheckItemDeleteDialog from './CheckItemDeleteDialog'
 import CheckItemEditorDrawer from './CheckItemEditorDrawer'
+import CheckItemOverviewDrawer, { CheckItemPatrolStatusLabel } from './CheckItemOverviewDrawer'
+import CheckItemPicker, { type CheckItemPickerHandle } from './CheckItemPicker'
+import CheckItemReleasePreview from './CheckItemReleasePreview'
 
 type CatalogView = 'catalog' | 'changes' | 'cutover'
 
@@ -412,7 +416,6 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
   const [editingCheckItem, setEditingCheckItem] = useState<ParserCheckItem>()
   const [checkItemIdempotencyKey, setCheckItemIdempotencyKey] = useState('')
   const [deletingCheckItem, setDeletingCheckItem] = useState<ParserCheckItem>()
-  const [checkItemDeleteReason, setCheckItemDeleteReason] = useState('')
   const [projectionFeedback, setProjectionFeedback] = useState<Record<number, {
     success: boolean
     errors: string[]
@@ -432,6 +435,8 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
   const [draftSourceContext, setDraftSourceContext] = useState<CommandAdapterDraftContext>()
   const [associationTarget, setAssociationTarget] = useState<CheckItemProductionGroup>()
   const [associationCheckItemId, setAssociationCheckItemId] = useState<string>()
+  const [overviewCheckItem, setOverviewCheckItem] = useState<ParserCheckItem>()
+  const associationPickerRef = useRef<CheckItemPickerHandle>(null)
   const configureAdapter = Form.useWatch('configure_adapter', form)
   const parserRequirement = Form.useWatch('parser_requirement', form)
   const handledFocusChangeId = useRef('')
@@ -498,6 +503,12 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
     () => parserApi.previewCatalogChange(selectedChangeId || ''),
     { enabled: Boolean(selectedChangeId && detailOpen) },
   )
+  // The trial compiles rule drafts on the server, so it runs once per opened change, not on every refocus.
+  const releasePreviewQuery = useQuery(
+    ['check-item-release-preview', selectedChangeId],
+    () => parserApi.previewCheckItemRelease(selectedChangeId || ''),
+    { enabled: Boolean(selectedChangeId && detailOpen), refetchOnWindowFocus: false, retry: false },
+  )
   const publicationOptionsQuery = useQuery(
     ['check-item-catalog-publication-options', selectedChangeId],
     () => parserApi.catalogPublicationOptions(selectedChangeId || ''),
@@ -512,10 +523,12 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
   const refreshAll = async () => {
     await Promise.all([
       queryClient.invalidateQueries('check-item-catalog'),
+      queryClient.invalidateQueries('check-item-overview'),
       queryClient.invalidateQueries('check-item-catalog-options'),
       queryClient.invalidateQueries('check-item-catalog-changes'),
       queryClient.invalidateQueries('check-item-catalog-change'),
       queryClient.invalidateQueries('check-item-catalog-impact'),
+      queryClient.invalidateQueries('check-item-release-preview'),
       queryClient.invalidateQueries('check-item-catalog-publication-options'),
       queryClient.invalidateQueries('check-item-catalog-unclassified-sample-commands'),
       queryClient.invalidateQueries('adapter-projection-cutover-readiness'),
@@ -573,6 +586,25 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
       onError: (error) => message.error(queryErrorLabel(error)),
     },
   )
+  // A check item is approved once: submitting and approving are one action for whoever may do both.
+  const publishMutation = useMutation(
+    async ({ changeId, impactDigest }: { changeId: string; impactDigest: string }) => {
+      const body = { reason: lifecycleReason.trim(), expected_impact_digest: impactDigest }
+      await parserApi.submitCatalogChange(changeId, body, makeIdempotencyKey('catalog-submit'))
+      return parserApi.decideCatalogChange(changeId, 'approve', body, makeIdempotencyKey('catalog-approve'))
+    },
+    {
+      onSuccess: async () => {
+        message.success('检查项已发布，规则和运行包已切换到新版本')
+        setLifecycleReason('')
+        await refreshAll()
+      },
+      onError: async (error) => {
+        message.error(queryErrorLabel(error))
+        await refreshAll()
+      },
+    },
+  )
   const decisionMutation = useMutation(
     ({
       changeId,
@@ -616,23 +648,6 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
         message.success('命令适配器已删除，关联运行包已停用')
         setDeletingImplementation(undefined)
         setDeleteReason('')
-        await refreshAll()
-      },
-      onError: (error) => message.error(queryErrorLabel(error)),
-    },
-  )
-  const deleteCheckItemMutation = useMutation(
-    ({ checkItemId, reason }: { checkItemId: string; reason?: string }) =>
-      parserApi.deleteCheckItem(
-        checkItemId,
-        reason,
-        makeIdempotencyKey('catalog-check-item-delete'),
-      ),
-    {
-      onSuccess: async () => {
-        message.success('检查项已删除，历史版本与审计记录已保留')
-        setDeletingCheckItem(undefined)
-        setCheckItemDeleteReason('')
         await refreshAll()
       },
       onError: (error) => message.error(queryErrorLabel(error)),
@@ -1194,7 +1209,8 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
     ? selectedChange.candidate as CheckItemCatalogImplementationCandidate
     : undefined
   const impactDrifted = Boolean(
-    selectedChange?.impact_digest
+    selectedChange?.status === 'pending_approval'
+    && selectedChange.impact_digest
     && impact?.impact_digest
     && selectedChange.impact_digest !== impact.impact_digest,
   )
@@ -1210,12 +1226,24 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
       && selectedRolloutIsEligible
     ),
   )
+  const releasePreview = releasePreviewQuery.data
+  // A check item that cannot switch as a whole must not be published at all.
+  const releaseBlocked = Boolean(releasePreview?.applicable && !releasePreview.releasable)
   const canApprove = Boolean(
     canUseRules
     && selectedChange?.status === 'pending_approval'
     && impact
     && !unresolvedBlockers.length
-    && !impactDrifted,
+    && !impactDrifted
+    && !releaseBlocked,
+  )
+  const canPublish = Boolean(
+    canUseRules
+    && selectedChange?.status === 'draft'
+    && selectedChange.asset_kind === 'check_item'
+    && impact
+    && !unresolvedBlockers.length
+    && releasePreview?.releasable,
   )
   const catalogColumns: ColumnsType<CatalogDisplayRow> = [
     {
@@ -1224,7 +1252,18 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
       render: (_, row) => (
         <Space direction="vertical" size={0}>
           <Space size={6}>
-            <Typography.Text strong>{row.display_name || row.name}</Typography.Text>
+            {isPendingCheckItemRow(row)
+              ? <Typography.Text strong>{row.display_name || row.name}</Typography.Text>
+              : (
+                <button
+                  type="button"
+                  className="check-item-name-button"
+                  title="查看详情"
+                  onClick={() => setOverviewCheckItem(row)}
+                >
+                  {row.display_name || row.name}
+                </button>
+              )}
             {isPendingCheckItemRow(row) && <Tag color="orange">样本自动生成</Tag>}
           </Space>
           <Typography.Text type="secondary">
@@ -1238,13 +1277,13 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
     {
       title: '类别',
       dataIndex: 'category',
-      width: 120,
+      width: 100,
       render: (value: string, row) => isPendingCheckItemRow(row) ? '待归类' : value,
     },
     {
       title: '结果模式',
       dataIndex: 'result_mode',
-      width: 150,
+      width: 138,
       render: (value: string, row) => isPendingCheckItemRow(row)
         ? '样本待处理'
         : parserRequirementLabels[value] || value,
@@ -1252,7 +1291,7 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
     {
       title: '命令适配器',
       dataIndex: 'implementation_count',
-      width: 110,
+      width: 96,
       render: (value: number, row) => isPendingCheckItemRow(row)
         ? `${row.pendingCommandGroups?.length || 0} 条`
         : `${value} 个`,
@@ -1260,13 +1299,19 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
     {
       title: '版本',
       key: 'version',
-      width: 100,
+      width: 64,
       render: (_, row) => isPendingCheckItemRow(row) ? '-' : `v${row.version}`,
+    },
+    {
+      title: '巡检状态',
+      key: 'patrol_status',
+      width: 222,
+      render: (_, row) => isPendingCheckItemRow(row) ? '-' : <CheckItemPatrolStatusLabel status={row.patrol_status} />,
     },
     {
       title: '操作',
       key: 'action',
-      width: 128,
+      width: 120,
       render: (_, row) => isPendingCheckItemRow(row) ? null : (
         <Space size={0}>
           <Button
@@ -1292,7 +1337,6 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
             disabled={!canUseRules}
             onClick={() => {
               setDeletingCheckItem(row)
-              setCheckItemDeleteReason('')
             }}
           />
         </Space>
@@ -2008,19 +2052,25 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
                 />
               ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未配置命令适配器" />,
             }}
-            scroll={{ x: 760 }}
-            pagination={sourceJobScope ? false : {
-              current: catalogPage,
-              pageSize: catalogPageSize,
-              total: catalogQuery.data?.total || 0,
-              showSizeChanger: true,
-              showTotal: (total) => `共 ${total} 个检查项${unclassifiedCommandGroups.length ? `，另有 1 个待归类分组` : ''}`,
-              onChange: (page, pageSize) => {
+            scroll={{ x: 1040 }}
+            // The server already returns one page. The pinned 待归类 row makes the list one
+            // longer than the page size, and a table that pages would slice it again.
+            pagination={false}
+          />
+          {!sourceJobScope && (
+            <Pagination
+              align="end"
+              current={catalogPage}
+              pageSize={catalogPageSize}
+              total={catalogQuery.data?.total || 0}
+              showSizeChanger
+              showTotal={(total) => `共 ${total} 个检查项${unclassifiedCommandGroups.length ? `，另有 1 个待归类分组` : ''}`}
+              onChange={(page, pageSize) => {
                 setCatalogPage(pageSize === catalogPageSize ? page : 1)
                 setCatalogPageSize(pageSize)
-              },
-            }}
-          />
+              }}
+            />
+          )}
         </Space>
       ) : (
         <Space direction="vertical" size={12} style={{ width: '100%', marginTop: 14 }}>
@@ -2059,6 +2109,7 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
             locale={{ emptyText: changesQuery.isError ? '变更记录暂不可用，请重试或检查候选资产完整性。' : '尚无变更记录' }}
           />
           <Pagination
+            align="end"
             current={changePage}
             pageSize={changePageSize}
             total={changesQuery.data?.total || 0}
@@ -2071,6 +2122,21 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
           />
         </Space>
       )}
+
+      <CheckItemOverviewDrawer
+        open={Boolean(overviewCheckItem)}
+        mobile={isMobile}
+        checkItem={overviewCheckItem}
+        onClose={() => setOverviewCheckItem(undefined)}
+        onDelete={(checkItem) => {
+          setOverviewCheckItem(undefined)
+          setDeletingCheckItem(checkItem)
+        }}
+        onEdit={(checkItem) => {
+          setOverviewCheckItem(undefined)
+          openCheckItemRevision(checkItem)
+        }}
+      />
 
       <CheckItemEditorDrawer
         open={checkItemEditorOpen}
@@ -2107,6 +2173,11 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
       <Modal
         open={Boolean(associationTarget)}
         title={associationTarget?.implementations[0]?.candidate_check_item_id ? '更换关联检查项' : '关联检查项'}
+        width={720}
+        centered
+        afterOpenChange={(open) => {
+          if (open) associationPickerRef.current?.focus()
+        }}
         okText="确认关联"
         cancelText="取消"
         okButtonProps={{ disabled: !associationCheckItemId }}
@@ -2121,59 +2192,27 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
       >
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
           <Typography.Text>
-            命令：<Typography.Text code>{associationTarget ? sourceContextForGroup(associationTarget)?.command || '-' : '-'}</Typography.Text>
+            这条命令的输出属于哪个检查项？<Typography.Text code>{associationTarget ? sourceContextForGroup(associationTarget)?.command || '-' : '-'}</Typography.Text>
           </Typography.Text>
+          <CheckItemPicker
+            ref={associationPickerRef}
+            items={allCheckItemsQuery.data?.items || []}
+            value={associationCheckItemId}
+            loading={allCheckItemsQuery.isLoading}
+            modeLabels={parserRequirementLabels}
+            onChange={setAssociationCheckItemId}
+          />
           <Typography.Text type="secondary">
             确认后，系统按此检查项自动完成解析、字段转换、规则生成和验证；可随时暂停接管。
           </Typography.Text>
-          <Select
-            aria-label="关联目标检查项"
-            showSearch
-            optionFilterProp="label"
-            placeholder="选择已有 CheckItem"
-            value={associationCheckItemId}
-            loading={allCheckItemsQuery.isLoading}
-            onChange={setAssociationCheckItemId}
-            options={(allCheckItemsQuery.data?.items || []).map((item) => ({
-              value: item.check_item_id,
-              label: `${item.display_name || item.name} · ${item.check_item_id} · ${parserRequirementLabels[item.result_mode] || item.result_mode}`,
-            }))}
-          />
         </Space>
       </Modal>
 
-      <Modal
-        open={Boolean(deletingCheckItem)}
-        title="删除检查项"
-        okText="确认删除"
-        cancelText="取消"
-        okButtonProps={{ danger: true, loading: deleteCheckItemMutation.isLoading }}
-        onCancel={() => {
-          setDeletingCheckItem(undefined)
-          setCheckItemDeleteReason('')
-        }}
-        onOk={() => {
-          if (!deletingCheckItem) return
-          deleteCheckItemMutation.mutate({
-            checkItemId: deletingCheckItem.check_item_id,
-            reason: checkItemDeleteReason.trim(),
-          })
-        }}
-      >
-        <Alert
-          type="warning"
-          showIcon
-          message={`将删除 ${deletingCheckItem?.display_name || deletingCheckItem?.name || ''}`}
-          description="这是可追溯的逻辑删除。存在已发布采集实现或 Active RuntimeBundle 时，系统会阻止删除；请先退出相关生产资产。"
-          style={{ marginBottom: 16 }}
-        />
-        <Input.TextArea
-          rows={3}
-          value={checkItemDeleteReason}
-          onChange={(event) => setCheckItemDeleteReason(event.target.value)}
-          placeholder="删除备注（可选）"
-        />
-      </Modal>
+      <CheckItemDeleteDialog
+        checkItem={deletingCheckItem}
+        onClose={() => setDeletingCheckItem(undefined)}
+        onDeleted={refreshAll}
+      />
 
       <Drawer
         open={draftOpen}
@@ -2673,6 +2712,17 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
               )}
             </Descriptions>
 
+            {selectedChange.asset_kind === 'check_item' && ['draft', 'pending_approval'].includes(selectedChange.status) && (
+              <section className="check-item-catalog-section">
+                <Typography.Title level={5}>发布后巡检会变什么</Typography.Title>
+                <CheckItemReleasePreview
+                  preview={releasePreview}
+                  loading={releasePreviewQuery.isLoading || releasePreviewQuery.isFetching}
+                  error={releasePreviewQuery.isError ? queryErrorLabel(releasePreviewQuery.error) : undefined}
+                />
+              </section>
+            )}
+
             {impactDrifted && (
               <Alert
                 type="warning"
@@ -2775,7 +2825,9 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
             {['draft', 'pending_approval'].includes(selectedChange.status) && (
               <section className="check-item-catalog-section">
                 <Typography.Title level={5}>
-                  {selectedChange.status === 'draft' ? '提交发布审批' : '独立发布决定'}
+                  {selectedChange.asset_kind === 'check_item'
+                    ? '发布'
+                    : selectedChange.status === 'draft' ? '提交发布审批' : '独立发布决定'}
                 </Typography.Title>
                 {selectedChange.status === 'pending_approval' && publicationOptions?.requires_rollout && (
                   <Space direction="vertical" size={8} style={{ width: '100%' }}>
@@ -2809,10 +2861,42 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
                   placeholder="审批备注（可选）"
                 />
                 <div className="check-item-catalog-actions">
-                  <Button icon={<ReloadOutlined />} onClick={() => void impactQuery.refetch()}>
+                  <Button
+                    icon={<ReloadOutlined />}
+                    onClick={() => {
+                      void impactQuery.refetch()
+                      void releasePreviewQuery.refetch()
+                    }}
+                  >
                     重新计算影响
                   </Button>
-                  {selectedChange.status === 'draft' ? (
+                  {selectedChange.status === 'draft' && selectedChange.asset_kind === 'check_item' ? (
+                    <>
+                      <Button
+                        loading={submitMutation.isLoading}
+                        disabled={publishMutation.isLoading}
+                        onClick={() => submitMutation.mutate({
+                          changeId: selectedChange.id,
+                          impactDigest: impact.impact_digest,
+                        })}
+                      >
+                        只提交，由他人批准
+                      </Button>
+                      <Button
+                        type="primary"
+                        className="rule-asset-import-button"
+                        icon={<CheckOutlined />}
+                        disabled={!canPublish}
+                        loading={publishMutation.isLoading}
+                        onClick={() => publishMutation.mutate({
+                          changeId: selectedChange.id,
+                          impactDigest: impact.impact_digest,
+                        })}
+                      >
+                        发布并切换
+                      </Button>
+                    </>
+                  ) : selectedChange.status === 'draft' ? (
                     <Button
                       type="primary"
                       className="rule-asset-import-button"
@@ -2852,7 +2936,9 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
                           rolloutCampaignId: selectedRolloutCampaignId,
                         })}
                       >
-                        {publicationOptions?.requires_rollout ? '批准并切换' : '批准发布'}
+                        {publicationOptions?.requires_rollout || selectedChange.asset_kind === 'check_item'
+                          ? '批准并切换'
+                          : '批准发布'}
                       </Button>
                     </>
                   )}

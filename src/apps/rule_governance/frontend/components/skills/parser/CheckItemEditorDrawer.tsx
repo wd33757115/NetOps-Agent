@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   AutoComplete,
@@ -10,7 +10,6 @@ import {
   Select,
   Space,
   Switch,
-  Tag,
   Typography,
   message,
 } from 'antd'
@@ -23,7 +22,7 @@ import type {
   ParserCheckItem,
 } from '@netops/services/api'
 import { parserApi } from '@netops/services/api'
-import FieldSemanticEditor from './FieldSemanticEditor'
+import FieldSemanticEditor, { pickUse, trendKindForUnit, type FieldRulePreview, type FieldRulesInForce } from './FieldSemanticEditor'
 
 interface CheckItemEditorDrawerProps {
   open: boolean
@@ -45,7 +44,6 @@ interface CheckItemFormValues {
   description?: string
   result_mode: CheckItemCatalogCheckItemDraftInput['result_mode']
   assessment_mode: CheckItemCatalogCheckItemDraftInput['assessment_mode']
-  change_events?: boolean
   entity_type: string
   identity_dimensions: string[]
   canonical_fields: Array<{
@@ -57,7 +55,15 @@ interface CheckItemFormValues {
     change_tracking: boolean
     semantic_definition?: any
     compare_mode?: string
-    threshold_fields?: Record<string, string>
+    threshold_high?: string[]
+    threshold_low?: string[]
+    trend?: {
+      kind: string
+      ratio_percent?: number
+      min_increase_points?: number
+      identity_fields?: string[]
+      require_identity?: boolean
+    }
   }>
   report_projection: string
   max_observation_age?: string
@@ -82,6 +88,17 @@ const jsonObject = (value: string | undefined, label: string): Record<string, un
   }
 }
 
+const modeLabels: Record<string, string> = { health: '健康与风险', change: '变化跟踪', evidence: '审计证据' }
+
+/** The check item judges health if any Value does, else change, else nothing. */
+const deriveMode = (fields: CheckItemFormValues['canonical_fields']): CheckItemFormValues['assessment_mode'] => {
+  const uses = fields.map((field) => pickUse(field?.semantic_definition?.assessment_roles, field?.semantic_definition?.semantic_type))
+  return uses.includes('current_state') ? 'health' : uses.includes('change') ? 'change' : 'evidence'
+}
+
+const referenceNames = (references: any, roles: string[]) => roles
+  .map((role) => references?.[role]?.field_name).filter(Boolean).map(String)
+
 const initialValues = (checkItem?: ParserCheckItem, catalog?: CanonicalObservationCatalog): CheckItemFormValues => {
   const contract = checkItem?.canonical_contract || {}
   const observations = Array.isArray(contract.observations)
@@ -94,7 +111,6 @@ const initialValues = (checkItem?: ParserCheckItem, catalog?: CanonicalObservati
     description: checkItem?.description || '',
     result_mode: (checkItem?.result_mode || 'structured') as CheckItemFormValues['result_mode'],
     assessment_mode: (checkItem?.assessment_mode || 'health') as CheckItemFormValues['assessment_mode'],
-    change_events: typeof contract.change_events === 'boolean' ? contract.change_events : checkItem ? undefined : false,
     entity_type: String(contract.entity_type || 'device'),
     identity_dimensions: Array.isArray(contract.identity_dimensions)
       ? contract.identity_dimensions.map(String)
@@ -103,8 +119,11 @@ const initialValues = (checkItem?: ParserCheckItem, catalog?: CanonicalObservati
       const snapshot = (contract.rule_semantics_snapshot as any)?.observations || []
       const definition = item.semantic_definition || snapshot.find((row: any) => row.id === item.observation_type)
         || catalog?.items.find((row) => row.id === item.observation_type)
+      const policy = item.health_policy as any
+      // A Value the runtime judges from its health policy is a health Value, whatever its stored role says.
       const semantic = definition ? { ...definition as any,
-        assessment_roles: item.assessment_roles || (definition as any).assessment_roles } : undefined
+        assessment_roles: [pickUse(policy ? ['current_state'] : item.assessment_roles as string[] || (definition as any).assessment_roles,
+          String(item.semantic_type || (definition as any).semantic_type))] } : undefined
       return {
         name: String(item.canonical_field || item.observation_type || ''),
         observation_type: String(item.observation_type || ''),
@@ -116,7 +135,15 @@ const initialValues = (checkItem?: ParserCheckItem, catalog?: CanonicalObservati
         compare_mode: (item.policy_constraints as any)?.allowed_compare_modes?.length === 1
           ? (item.policy_constraints as any).allowed_compare_modes[0]
           : (item.policy_constraints as any)?.allowed_compare_modes?.length ? '__existing__' : undefined,
-        threshold_fields: Object.fromEntries(Object.entries(item.threshold_references || {}).map(([role, ref]) => [role, (ref as any).field_name])),
+        threshold_high: referenceNames(item.threshold_references, ['high', 'critical_high']),
+        threshold_low: referenceNames(item.threshold_references, ['low', 'critical_low']),
+        trend: policy?.trend ? {
+          kind: policy.trend.kind,
+          ratio_percent: Math.round(Number(policy.trend.threshold_ratio) * 100),
+          min_increase_points: policy.trend.min_increase_points,
+          identity_fields: policy.trend.identity_fields || [],
+          require_identity: policy.trend.require_identity !== false,
+        } : { kind: 'none' },
       }
     }),
     report_projection: checkItem?.report_projection || 'auto',
@@ -149,15 +176,23 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
 }) => {
   const [form] = Form.useForm<CheckItemFormValues>()
   const resultMode = Form.useWatch('result_mode', form)
-  const assessmentMode = Form.useWatch('assessment_mode', form)
+  const selectedMode = Form.useWatch('assessment_mode', form)
   const coverageModel = Form.useWatch('coverage_model', form)
   const canonicalFields = Form.useWatch('canonical_fields', form) || []
+  const identityDimensions = Form.useWatch('identity_dimensions', form)
+  const contractJson = Form.useWatch('canonical_contract_json', form)
+  const structured = resultMode === 'structured'
+  const assessmentMode = structured ? deriveMode(canonicalFields) : selectedMode
   const [ruleCandidates, setRuleCandidates] = useState<CanonicalRuleCandidates | null>(null)
-  const [rulePreviewLoading, setRulePreviewLoading] = useState(false)
   const [ruleDraftLoading, setRuleDraftLoading] = useState(false)
-  const publishedRows = Array.isArray(checkItem?.canonical_contract?.observations)
-    ? checkItem.canonical_contract.observations as Array<Record<string, unknown>>
-    : []
+  const [preview, setPreview] = useState<{ error?: string; fields: Record<string, FieldRulePreview> }>({ fields: {} })
+  const previewRequest = useRef(0)
+  // Every field offers the whole template catalog; build the list once, not per field per keystroke.
+  const observationOptions = useMemo(() => (canonicalCatalog?.items || []).map((item) => ({
+    value: item.id,
+    label: `${item.id} · ${item.description || item.semantic_type}`,
+  })), [canonicalCatalog])
+  const [inForce, setInForce] = useState<{ leftover: number; fields: Record<string, FieldRulesInForce> }>({ leftover: 0, fields: {} })
 
   useEffect(() => {
     if (open) {
@@ -198,7 +233,6 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
       if (!definition?.description?.trim()) throw new Error(`${field.name}: 请展开“编辑语义与规则用途”填写语义说明`)
       const semantic = { ...definition, id: observationType,
         canonical_unit: field.unit?.trim() || null, value_types: [field.value_type] }
-      const numeric = ['gauge', 'counter', 'threshold'].includes(semantic.semantic_type)
       const state = ['state', 'enum', 'boolean'].includes(semantic.semantic_type)
       if (!state) { semantic.state_groups = {}; semantic.allowed_values = [] }
       if (semantic.value_types[0] === 'boolean') {
@@ -206,17 +240,33 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
         semantic.allowed_values = (semantic.allowed_values || []).map(booleanValue)
         semantic.state_groups = Object.fromEntries(Object.entries(semantic.state_groups || {}).map(([key, values]) => [key, (values as unknown[]).map(booleanValue)]))
       }
+      const use = pickUse(semantic.assessment_roles, semantic.semantic_type)
+      semantic.assessment_roles = [use]
+      const numericHealth = semantic.semantic_type === 'gauge' && use === 'current_state'
       const constraints = { ...(existing?.policy_constraints as any || {}) }
-      if (field.compare_mode === '__existing__') { /* Preserve advanced multi-mode constraints. */ }
+      if (use !== 'change' || field.compare_mode === '__existing__') { /* Preserve advanced constraints. */ }
       else if (field.compare_mode) constraints.allowed_compare_modes = [field.compare_mode]
       else delete constraints.allowed_compare_modes
-      const references = numeric ? Object.fromEntries(Object.entries(field.threshold_fields || {}).filter(([, value]) => value).map(([role, value]) => [role, (existing?.threshold_references as any)?.[role]?.field_name === value ? (existing?.threshold_references as any)[role] : {
-        ...((existing?.threshold_references as any)?.[role] || {}), field_name: value,
-        context_key: `threshold.${role}`, source: 'structured_reference',
-        level: role.startsWith('critical') ? 'alarm' : 'warning',
-      }])) : {}
+      // Limits come from fields the device reports; two on one side means the stricter one wins.
+      const chosen = numericHealth ? [
+        ...(field.threshold_high || []).slice(0, 2).map((value, index) => [index ? 'critical_high' : 'high', value]),
+        ...(field.threshold_low || []).slice(0, 2).map((value, index) => [index ? 'critical_low' : 'low', value]),
+      ] : []
+      const references = Object.fromEntries(chosen.map(([role, value]) => [role, (existing?.threshold_references as any)?.[role]?.field_name === value ? (existing?.threshold_references as any)[role] : {
+        field_name: value, source: 'structured_reference',
+      }]))
+      const trend = numericHealth && field.trend?.kind === trendKindForUnit(field.unit) ? field.trend : undefined
+      if (trend && (!trend.ratio_percent || (trend.kind === 'utilization_increase' && !trend.min_increase_points))) {
+        throw new Error(`${field.name}: 请展开“编辑语义与规则用途”填写趋势提醒的门槛`)
+      }
+      // The server compiles the health policy from the limits above; only the trend is ours to state.
+      const { health_policy: _compiled, ...kept } = (existing || {}) as Record<string, unknown>
       return {
-        ...(existing || {}),
+        ...kept,
+        ...(trend ? { health_policy: { trend: trend.kind === 'utilization_increase'
+          ? { kind: trend.kind, threshold_ratio: trend.ratio_percent! / 100, min_increase_points: trend.min_increase_points }
+          : { kind: trend.kind, threshold_ratio: trend.ratio_percent! / 100,
+            identity_fields: trend.identity_fields || [], require_identity: trend.require_identity !== false } } } : {}),
         observation_type: observationType,
         canonical_field: field.name.trim(),
         semantic_definition: semantic,
@@ -230,7 +280,7 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
         unit: field.unit?.trim() || null,
         dimensions: existing?.dimensions || definition?.dimensions || [],
         required: field.required,
-        change_tracking: field.change_tracking !== false,
+        change_tracking: use === 'change' || field.change_tracking !== false,
       }
     })
     const vocabulary = {
@@ -263,7 +313,9 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
     }
     return {
       ...canonicalBase,
-      ...(typeof values.change_events === 'boolean' ? { change_events: values.change_events, value_contract: 'same-name/v1' } : {}),
+      // Each Value states its own use, so no check-item switch overrides them.
+      change_events: false,
+      value_contract: 'same-name/v1',
       entity_type: values.entity_type,
       identity_dimensions: values.identity_dimensions || [],
       observations,
@@ -271,22 +323,39 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
     }
   }
 
-  const previewPublishedRules = async () => {
-    if (!checkItem?.check_item_version_id) return
-    setRulePreviewLoading(true)
-    try {
-      const result = await parserApi.generateCheckItemRuleCandidates(
-        checkItem.check_item_version_id,
-      )
-      setRuleCandidates(result)
-      if (result.success) message.success('规则候选已按标准语义生成')
-      else message.warning('标准语义仍有缺项，请按阻塞提示补充')
-    } catch (error: any) {
-      message.error(error?.response?.data?.detail || '规则候选生成失败')
-    } finally {
-      setRulePreviewLoading(false)
-    }
-  }
+  // What the published version does today, to set beside what the draft will do.
+  useEffect(() => {
+    setInForce({ leftover: 0, fields: {} })
+    if (!open || !checkItem?.check_item_id || checkItem.status !== 'active') return
+    let current = true
+    parserApi.checkItemRulesInForce(checkItem.check_item_id).then((result) => {
+      if (current) setInForce({ leftover: result.leftover_count,
+        fields: Object.fromEntries(result.fields.map((row) => [row.canonical_field, row])) })
+    }).catch(() => undefined)
+    return () => { current = false }
+  }, [open, checkItem?.check_item_id, checkItem?.check_item_version_id])
+
+  // Show what the draft will do while it is edited, using the functions that save and compile it.
+  useEffect(() => {
+    if (!open || !structured) return
+    const request = ++previewRequest.current
+    const timer = window.setTimeout(async () => {
+      let next: typeof preview
+      try {
+        const values = form.getFieldsValue(true) as CheckItemFormValues
+        const result = await parserApi.previewCheckItemRules({
+          id: values.id || '', result_mode: 'structured', canonical_contract: buildCanonicalContract(values),
+        })
+        next = result.valid
+          ? { fields: Object.fromEntries(result.fields.map((row) => [row.canonical_field, row])) }
+          : { error: result.errors.join('；'), fields: {} }
+      } catch (error: any) {
+        next = { error: error?.response ? '规则预览暂不可用' : error?.message, fields: {} }
+      }
+      if (request === previewRequest.current) setPreview(next)
+    }, 400)
+    return () => window.clearTimeout(timer)
+  }, [open, structured, JSON.stringify(canonicalFields), JSON.stringify(identityDimensions), contractJson])
 
   const createRuleDrafts = async () => {
     if (!checkItem?.check_item_version_id) return
@@ -350,7 +419,7 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
         category: values.category.trim(),
         description: values.description?.trim(),
         result_mode: values.result_mode,
-        assessment_mode: values.change_events === true && values.assessment_mode === 'evidence' ? 'change' : values.assessment_mode,
+        assessment_mode: values.result_mode === 'structured' ? deriveMode(values.canonical_fields || []) : values.assessment_mode,
         canonical_contract: canonicalContract,
         report_projection: values.report_projection.trim(),
         applicability,
@@ -440,16 +509,13 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
               { value: 'evidence_only', label: '仅保留证据' },
             ]} />
           </Form.Item>
-          <Form.Item label="启用全部字段变化事件" name="change_events" valuePropName="checked" extra="开启后每个检查字段的变化都会产生信息事件；对象标识用于匹配。TextFSM Value 必须使用这里定义的字段名。">
-            <Switch />
-          </Form.Item>
-          <Form.Item label="评估模式" name="assessment_mode" rules={[{ required: true }]}>
-            <Select options={[
-              { value: 'health', label: '健康与风险' },
-              { value: 'change', label: '变化跟踪' },
-              { value: 'evidence', label: '审计证据' },
-            ]} />
-          </Form.Item>
+          {structured
+            ? <Form.Item label="评估模式" extra="由下面各字段的用途决定：有健康判断即健康与风险，否则有变化检测即变化跟踪。">
+              <Input aria-label="评估模式" readOnly value={modeLabels[assessmentMode]} />
+            </Form.Item>
+            : <Form.Item label="评估模式" name="assessment_mode" rules={[{ required: true }]}>
+              <Select options={Object.entries(modeLabels).map(([value, label]) => ({ value, label }))} />
+            </Form.Item>}
           <Form.Item className="check-item-catalog-form-wide" label="说明" name="description">
             <Input.TextArea rows={2} placeholder="说明该检查项回答什么运维问题，以及报告如何使用结果" />
           </Form.Item>
@@ -503,12 +569,11 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
                               form.setFieldValue(['canonical_fields', name, 'value_type'], definition.value_types[0] || 'text')
                               form.setFieldValue(['canonical_fields', name, 'unit'], definition.canonical_unit || '')
                               form.setFieldValue(['canonical_fields', name, 'compare_mode'], undefined)
-                              form.setFieldValue(['canonical_fields', name, 'threshold_fields'], {})
+                              form.setFieldValue(['canonical_fields', name, 'threshold_high'], [])
+                              form.setFieldValue(['canonical_fields', name, 'threshold_low'], [])
+                              form.setFieldValue(['canonical_fields', name, 'trend'], { kind: 'none' })
                             }}
-                            options={(canonicalCatalog?.items || []).map((item) => ({
-                              value: item.id,
-                              label: `${item.id} · ${item.description || item.semantic_type}`,
-                            }))}
+                            options={observationOptions}
                           />
                         </Form.Item>
                         <Form.Item
@@ -528,13 +593,16 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
                         <Form.Item
                           {...restField}
                           label="必填"
+                          tooltip="打开后，缺少这个值的记录会被整条丢弃，每个适配器也都必须提供它。只用于对象标识和这个检查项的核心值；其他字段保持关闭，各适配器能提供多少就提供多少。"
                           name={[name, 'required']}
                           valuePropName="checked"
                         >
                           <Switch />
                         </Form.Item>
                       </div>
-                      <FieldSemanticEditor name={name} field={canonicalFields[name]} fields={canonicalFields} />
+                      <FieldSemanticEditor name={name} field={canonicalFields[name]} fields={canonicalFields}
+                        preview={preview.fields[canonicalFields[name]?.name]}
+                        inForce={inForce.fields[canonicalFields[name]?.name]} />
                       <Button
                         type="text"
                         danger
@@ -545,13 +613,23 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
                       </Button>
                     </div>
                   ))}
-                  <Button
-                    type="dashed"
-                    icon={<PlusOutlined />}
-                    onClick={() => add({ value_type: 'text', required: true, semantic_definition: { description: '', semantic_type: 'text', assessment_roles: ['evidence'], dimensions: [], allowed_values: [], state_groups: {}, allowed_dimension_values: {} } })}
-                  >
-                    添加标准字段
-                  </Button>
+                  <Space wrap>
+                    <Button
+                      type="dashed"
+                      icon={<PlusOutlined />}
+                      onClick={() => add({ value_type: 'text', required: false, trend: { kind: 'none' }, semantic_definition: { description: '', semantic_type: 'text', assessment_roles: ['evidence'], dimensions: [], allowed_values: [], state_groups: {}, allowed_dimension_values: {} } })}
+                    >
+                      添加标准字段
+                    </Button>
+                    {canonicalFields.some((field) => pickUse(field?.semantic_definition?.assessment_roles, field?.semantic_definition?.semantic_type) === 'evidence' && field?.semantic_definition?.semantic_type !== 'threshold') && (
+                      <Button onClick={() => form.setFieldValue('canonical_fields', canonicalFields.map((field) => (
+                        pickUse(field?.semantic_definition?.assessment_roles, field?.semantic_definition?.semantic_type) === 'evidence' && field?.semantic_definition?.semantic_type !== 'threshold'
+                          ? { ...field, change_tracking: true, semantic_definition: { ...field.semantic_definition, assessment_roles: ['change'] } }
+                          : field)))}>
+                        全部“仅展示”字段改为“变化检测”
+                      </Button>
+                    )}
+                  </Space>
                 </Space>
               )}
             </Form.List>
@@ -559,136 +637,37 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
           <Typography.Text type="secondary">已有语义用于预填，也可输入新标识并编辑含义。修改仅保存到当前检查项。</Typography.Text>
         </div>
 
-        {resultMode === 'structured' && (
+        {structured && (
           <>
-            <Typography.Title level={5}>规则生成依据</Typography.Title>
-            <Alert
-              type="info"
-              showIcon
-              message="变化策略和事件规则只读取这里的标准语义"
-              description="检查项统一定义字段名称和语义。新契约要求 TextFSM 使用同名 Value；启用全部字段变化事件后，系统直接为每个检查字段生成变化规则与信息事件。"
-              style={{ marginBottom: 16 }}
-            />
-            <Space direction="vertical" size={8} style={{ width: '100%' }}>
-              {canonicalFields.map((field) => {
-                const definition = field.semantic_definition || canonicalCatalog?.items.find(
-                  (item) => item.id === field.observation_type,
-                )
-                if (!definition) return null
-                const published = publishedRows.find((row) => (
-                  String(row.observation_type || '') === field.observation_type
-                  && String(row.canonical_field || '') === field.name
-                )) || {}
-                const thresholdReferences = (
-                  published.threshold_references
-                  && typeof published.threshold_references === 'object'
-                  && !Array.isArray(published.threshold_references)
-                ) ? published.threshold_references as Record<string, Record<string, unknown>> : {}
-                const baseline = (
-                  published.baseline_comparison
-                  && typeof published.baseline_comparison === 'object'
-                  && !Array.isArray(published.baseline_comparison)
-                ) ? published.baseline_comparison as Record<string, unknown> : {}
-                const identityFields = Array.isArray(baseline.identity_fields)
-                  ? baseline.identity_fields.map(String)
-                  : []
-                return (
-                  <div className="check-item-adapter-output" key={`${field.name}-${field.observation_type}`}>
-                    <Space wrap>
-                      <Typography.Text strong>{field.name || field.observation_type}</Typography.Text>
-                      <Tag>{definition.semantic_type}</Tag>
-                      {definition.assessment_roles.map((role) => <Tag key={role} color="blue">{role}</Tag>)}
-                      {Object.keys(thresholdReferences).length > 0 && (
-                        <Tag color="cyan">动态阈值</Tag>
-                      )}
-                      {baseline.kind === 'linear_power_loss_ratio' && (
-                        <Tag color="purple">线性功率基线</Tag>
-                      )}
-                    </Space>
-                    {Object.keys(definition.state_groups || {}).length > 0 && (
-                      <Typography.Paragraph type="secondary" style={{ margin: '8px 0 0' }}>
-                        状态分组：{Object.entries(definition.state_groups).map(([group, values]) => (
-                          `${group}=${(values as unknown[]).map(String).join('/')}`
-                        )).join('；')}
-                      </Typography.Paragraph>
-                    )}
-                    {Object.keys(thresholdReferences).length > 0 && (
-                      <Typography.Paragraph type="secondary" style={{ margin: '8px 0 0' }}>
-                        阈值来源：设备输出优先，其次为设备/型号策略；不使用全局固定值。字段关系：{
-                          Object.entries(thresholdReferences).map(([role, reference]) => (
-                            `${role}→${String(reference.field_name || '未配置')}`
-                          )).join('；')
-                        }
-                      </Typography.Paragraph>
-                    )}
-                    {baseline.kind === 'linear_power_loss_ratio' && (
-                      <Typography.Paragraph type="secondary" style={{ margin: '8px 0 0' }}>
-                        基线：先将 dBm 转换为线性功率，允许衰减 {
-                          Number(baseline.max_loss_ratio || 0) * 100
-                        }%；模块身份字段：{identityFields.join(' + ') || '未配置'}。身份缺失或变化时结果为 Unknown。
-                      </Typography.Paragraph>
-                    )}
-                  </div>
-                )
-              })}
-              {checkItem && (
-                <Button loading={rulePreviewLoading} onClick={() => void previewPublishedRules()}>
-                  按当前已发布语义预览规则
-                </Button>
-              )}
-              {ruleCandidates && (
-                <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                  <Alert
-                    type={ruleCandidates.success ? 'success' : 'warning'}
-                    showIcon
-                    message={ruleCandidates.success
-                      ? `已生成 ${ruleCandidates.change_policies.length} 个变化策略、${ruleCandidates.event_rules.length} 条事件规则`
-                      : '标准语义还不足以生成完整规则'}
-                    description={ruleCandidates.success
-                      ? '输入中包含 0 条样本、0 个 Parser 模板。'
-                      : ruleCandidates.blockers.map((item) => (
-                        `${item.observation_type}：${item.message}`
-                      )).join('；')}
-                  />
-                  {ruleCandidates.success && !ruleCandidates.drafts_created && (
-                    <Button
-                      type="primary"
-                      loading={ruleDraftLoading}
-                      onClick={() => void createRuleDrafts()}
-                    >
-                      创建规则草稿
-                    </Button>
-                  )}
-                  {ruleCandidates.success && ruleCandidates.change_policies.map((policy, index) => {
-                    const references = policy.threshold_references as Record<string, Record<string, unknown>> | undefined
-                    const baseline = policy.baseline_comparison as Record<string, unknown> | undefined
-                    if (!references && !baseline) return null
-                    return (
-                      <div className="check-item-adapter-output" key={`${String(policy.observation_type)}-${index}`}>
-                        <Typography.Text strong>{String(policy.observation_type)}</Typography.Text>
-                        {references && (
-                          <Typography.Paragraph type="secondary" style={{ margin: '6px 0 0' }}>
-                            动态阈值：{Object.entries(references).map(([role, value]) => `${role}→${String(value.field_name || '')}`).join('；')}
-                          </Typography.Paragraph>
-                        )}
-                        {baseline && (
-                          <Typography.Paragraph type="secondary" style={{ margin: '6px 0 0' }}>
-                            基线衰减上限：{Number(baseline.max_loss_ratio || 0) * 100}%（线性功率）
-                          </Typography.Paragraph>
-                        )}
-                      </div>
-                    )
-                  })}
-                  {ruleCandidates.drafts_created && (
-                    <Typography.Text type="success">
-                      {ruleCandidates.bundle_id
-                        ? '规则草稿已进入工程复核与审批发布链。'
-                        : '该检查项没有需要发布的变化策略或事件规则。'}
-                    </Typography.Text>
-                  )}
-                </Space>
-              )}
-            </Space>
+            <Typography.Title level={5}>巡检时会做什么</Typography.Title>
+            {preview.error
+              ? <Alert type="warning" showIcon message="还不能生成规则" description={preview.error} style={{ marginBottom: 16 }} />
+              : <Alert type="info" showIcon style={{ marginBottom: 16 }}
+                message={`评估模式：${modeLabels[assessmentMode]}`}
+                description={checkItem
+                  ? '每个字段下方先写保存并发布后的判断，随表单即时更新；与现在生效的规则不同时，会把现在生效的内容一并列出。'
+                  : '每个字段下方的说明就是巡检实际执行的判断，随表单即时更新；发布后生效。'} />}
+            {inForce.leftover > 0 && (
+              <Alert type="warning" showIcon style={{ marginBottom: 16 }}
+                message={`另有 ${inForce.leftover} 条规则绑定在旧版本已不存在的字段上，仍为生效状态`}
+                description="它们不对应当前版本的任何字段，可在“已发布资产”中按检查项 ID 搜索并停用。" />
+            )}
+            {checkItem && (
+              <Space direction="vertical" size={8} style={{ width: '100%', marginBottom: 16 }}>
+                {!ruleCandidates?.drafts_created && (
+                  <Button loading={ruleDraftLoading} onClick={() => void createRuleDrafts()}>
+                    为已发布版本创建规则草稿
+                  </Button>
+                )}
+                {ruleCandidates?.drafts_created && (
+                  <Typography.Text type="success">
+                    {ruleCandidates.bundle_id
+                      ? '规则草稿已进入工程复核与审批发布链。'
+                      : '该检查项没有需要发布的变化策略或事件规则。'}
+                  </Typography.Text>
+                )}
+              </Space>
+            )}
           </>
         )}
 

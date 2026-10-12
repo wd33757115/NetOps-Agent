@@ -362,12 +362,17 @@ class RuleAssetApprovalService:
         now: datetime,
         allow_same_actor: bool = False,
         automation_authorization: tuple[str, str] | None = None,
+        released_with_check_item: str | None = None,
     ) -> dict[str, Any]:
         if bundle.status != "pending_approval":
             raise RuleGenerationJobStateError(
                 "rule asset bundle must be pending_approval before approval"
             )
         report = dict(bundle.validation_report_json or {})
+        # Rules compiled from a check item are approved with the check item
+        # itself: the catalog change that publishes it is their one review.
+        if released_with_check_item and (bundle.payload_json or {}).get("flow") != "check_item_semantics":
+            raise RuleGenerationJobStateError("only rules compiled from a CheckItem are released with it")
         automated = None
         if automation_authorization:
             from src.apps.rule_governance.backend.rule_control.autopilot_authorization import (
@@ -395,7 +400,11 @@ class RuleAssetApprovalService:
             or gate.get("success") is not True
             or context_gate.get("success") is not True
             or replay_gate.get("success") is not True
-            or (engineering_review.get("decision") != "accepted" and not automated)
+            or (
+                engineering_review.get("decision") != "accepted"
+                and not automated
+                and not released_with_check_item
+            )
         ):
             raise RuleGenerationJobStateError(
                 "rule asset bundle cannot be approved before validation, replay, "
@@ -722,6 +731,7 @@ class RuleAssetApprovalService:
             {
                 "activation_snapshot": activation_snapshot,
                 "automated_approval": automated,
+                "released_with_check_item_change": released_with_check_item,
                 "separation_of_duties_override": bool(
                     allow_same_actor
                     and (same_as_creator or same_as_engineering_reviewer)

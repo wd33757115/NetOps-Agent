@@ -452,6 +452,523 @@
   padding-top: 0;
 }
 
+/* What the patrol will do with one Value, stated under the field itself. */
+.check-item-field-outcome {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border-left: 3px solid var(--rule-line, #e5e7eb);
+  background: rgba(22, 103, 203, 0.04);
+}
+
+.check-item-field-in-force {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--rule-line, #e5e7eb);
+}
+
+/* A check item's name opens its overview. It reads as the row's title, not as a link. */
+.check-item-name-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.check-item-name-button:hover,
+.check-item-name-button:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.check-item-name-button:focus-visible {
+  outline: 2px solid rgba(22, 103, 203, 0.5);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* A check item as wiring: field -> judgment -> events and results. Each row is a
+   five-column grid (node, gap, node, gap, nodes); the wires are one stretched SVG
+   per row whose x runs 0..100 across the same grid. Rendered in drawers and
+   dialogs, outside .parser-control-root, so every colour carries its fallback. */
+.relation-graph__scroll {
+  overflow-x: auto;
+}
+
+.relation-graph {
+  min-width: 660px;
+}
+
+.relation-graph__head,
+.relation-row {
+  display: grid;
+  grid-template-columns: 28% 6% 26% 6% 34%;
+}
+
+.relation-graph__head {
+  margin-bottom: 6px;
+  color: var(--rule-ink-muted, #656b73);
+  font-size: 12px;
+}
+
+.relation-graph__head > :nth-child(1) { grid-column: 1; }
+.relation-graph__head > :nth-child(2) { grid-column: 3; }
+.relation-graph__head > :nth-child(3) { grid-column: 5; }
+
+.relation-row {
+  position: relative;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.relation-row__wires {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.relation-wire {
+  fill: none;
+  stroke: #c3c8cf;
+  stroke-width: 1.25;
+  vector-effect: non-scaling-stroke;
+}
+
+.relation-wire--added {
+  stroke: var(--rule-success, #2f7d4a);
+}
+
+.relation-wire--removed {
+  stroke-dasharray: 3 3;
+}
+
+.relation-row:hover .relation-wire:not(.relation-wire--added) {
+  stroke: var(--rule-ink-muted, #656b73);
+}
+
+.relation-node {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  height: 46px;
+  padding: 4px 10px;
+  border: 1px solid var(--rule-line, #e5e7eb);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.relation-node--field { grid-column: 1; }
+.relation-node--rule { grid-column: 3; }
+
+.relation-row__outcomes {
+  display: flex;
+  flex-direction: column;
+  grid-column: 5;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* Where a wire meets a node. */
+.relation-node--field::after,
+.relation-node--rule::before,
+.relation-node--rule::after,
+.relation-row__outcomes .relation-node::before {
+  position: absolute;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  border: 1px solid #fff;
+  border-radius: 50%;
+  background: #c3c8cf;
+  content: "";
+  transform: translateY(-50%);
+}
+
+.relation-node--field::after,
+.relation-node--rule::after { right: -4px; }
+.relation-node--rule::before,
+.relation-row__outcomes .relation-node::before { left: -4px; }
+.relation-node--group::after { content: none; }
+
+.relation-node--event {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.relation-node__text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.relation-node__title,
+.relation-node__meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.relation-node__title {
+  color: var(--rule-ink, #24272b);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 19px;
+}
+
+.relation-node__title--plain {
+  font-weight: 400;
+}
+
+.relation-node__meta {
+  color: var(--rule-ink-muted, #656b73);
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.relation-node__state {
+  margin-left: 8px;
+}
+
+.relation-node__state--active { color: var(--rule-success, #2f7d4a); }
+.relation-node__state--missing { color: var(--rule-warning, #a86514); }
+
+/* A result is not an event: nothing is stored under it, so it carries no frame. */
+.relation-node--result {
+  border-color: transparent;
+  background: var(--rule-surface, #f7f8f9);
+}
+
+.relation-node--added {
+  border-color: var(--rule-success, #2f7d4a);
+  background: #f4f9f5;
+}
+
+.relation-node--changed {
+  border-color: var(--rule-warning, #a86514);
+}
+
+.relation-node--removed {
+  border-style: dashed;
+  border-color: #c3c8cf;
+  background: transparent;
+}
+
+.relation-node--removed .relation-node__title {
+  color: var(--rule-ink-muted, #656b73);
+  font-weight: 400;
+}
+
+.relation-node__flag {
+  margin-left: 8px;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.relation-node__flag--added { color: var(--rule-success, #2f7d4a); }
+.relation-node__flag--changed { color: var(--rule-warning, #a86514); }
+.relation-node__flag--removed { color: var(--rule-ink-muted, #656b73); }
+
+.relation-count {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: flex-end;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--rule-ink, #24272b);
+  font: inherit;
+  line-height: 1;
+}
+
+button.relation-count {
+  cursor: pointer;
+}
+
+button.relation-count:hover .relation-count__number {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+button.relation-count:focus-visible {
+  outline: 2px solid rgba(22, 103, 203, 0.5);
+  outline-offset: 2px;
+}
+
+.relation-count__number {
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 19px;
+}
+
+.relation-count__label {
+  color: var(--rule-ink-muted, #656b73);
+  font-size: 11px;
+  line-height: 15px;
+}
+
+.relation-count--open .relation-count__number { color: var(--rule-warning, #a86514); }
+.relation-count--none .relation-count__number { color: #a3a9b1; font-weight: 400; }
+
+.relation-row--group {
+  margin-top: 4px;
+}
+
+.relation-node--group {
+  border-style: dashed;
+  border-color: #c3c8cf;
+  background: transparent;
+}
+
+.relation-node--group .relation-node__title {
+  font-weight: 400;
+}
+
+.relation-row__note {
+  grid-column: 3 / 6;
+  color: var(--rule-ink-muted, #656b73);
+  font-size: 13px;
+}
+
+.relation-row__delta {
+  margin-left: 6px;
+  color: var(--rule-ink, #24272b);
+}
+
+.relation-graph__rest {
+  display: block;
+  margin: 2px 0 10px;
+}
+
+.relation-graph__divider {
+  margin: 18px 0 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--rule-line, #e5e7eb);
+  color: var(--rule-ink, #24272b);
+  font-weight: 600;
+}
+
+.relation-graph__legend {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 10px;
+}
+
+.relation-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--rule-ink-muted, #656b73);
+  font-size: 12px;
+}
+
+.relation-legend::before {
+  width: 18px;
+  height: 10px;
+  border: 1px solid #c3c8cf;
+  border-radius: 3px;
+  background: #fff;
+  content: "";
+}
+
+.relation-legend--added::before { border-color: var(--rule-success, #2f7d4a); background: #f4f9f5; }
+.relation-legend--changed::before { border-color: var(--rule-warning, #a86514); }
+.relation-legend--removed::before { border-style: dashed; background: transparent; }
+
+.relation-events {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 340px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.relation-events__item {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--rule-line, #e5e7eb);
+}
+
+/* What happens to the rules and events when the check item changes or goes. */
+.relation-lifecycle {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px 14px;
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 6px;
+  background: var(--rule-surface, #f7f8f9);
+  font-size: 13px;
+}
+
+.relation-lifecycle dt {
+  color: var(--rule-ink, #24272b);
+  font-weight: 600;
+}
+
+.relation-lifecycle dd {
+  margin: 0;
+  color: var(--rule-ink-muted, #656b73);
+}
+
+/* Deleting a check item: what goes with it, top to bottom, on one rail. */
+.cascade-flow {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cascade-flow__step {
+  position: relative;
+  padding: 0 0 16px 26px;
+}
+
+.cascade-flow__step::before {
+  position: absolute;
+  top: 6px;
+  left: 4px;
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--rule-ink, #24272b);
+  border-radius: 50%;
+  background: #fff;
+  content: "";
+}
+
+.cascade-flow__step::after {
+  position: absolute;
+  top: 19px;
+  bottom: -6px;
+  left: 9.5px;
+  width: 2px;
+  background: #c3c8cf;
+  content: "";
+}
+
+.cascade-flow__step:last-child {
+  padding-bottom: 0;
+}
+
+.cascade-flow__step:last-child::after {
+  content: none;
+}
+
+.cascade-flow__what {
+  color: var(--rule-ink, #24272b);
+  font-weight: 600;
+}
+
+.cascade-flow__detail {
+  display: block;
+  color: var(--rule-ink-muted, #656b73);
+  font-size: 13px;
+}
+
+.cascade-flow__kept {
+  margin: 14px 0 0;
+  padding: 10px 14px;
+  border-radius: 6px;
+  background: var(--rule-surface, #f7f8f9);
+  color: var(--rule-ink, #24272b);
+  font-size: 13px;
+}
+
+/* Choosing one check item out of the whole catalog. Rendered in a dialog, outside
+   .parser-control-root, so every colour carries its own fallback. */
+.check-item-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.check-item-picker__list .ant-radio-group {
+  display: block;
+}
+
+.check-item-picker__list {
+  /* The dialog around the list takes about 430px; keep its buttons on screen. */
+  height: clamp(220px, calc(100vh - 470px), 440px);
+  overflow-y: auto;
+  border: 1px solid var(--rule-line, #e5e7eb);
+  border-radius: 8px;
+}
+
+.check-item-picker__option.ant-radio-wrapper {
+  display: flex;
+  align-items: flex-start;
+  margin: 0;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--rule-line, #e5e7eb);
+}
+
+.check-item-picker__option.ant-radio-wrapper:hover {
+  background: var(--rule-surface, #f7f8f9);
+}
+
+.check-item-picker__option.ant-radio-wrapper-checked,
+.check-item-picker__option.ant-radio-wrapper-checked:hover {
+  background: rgba(22, 103, 203, 0.08);
+}
+
+.check-item-picker__option .ant-radio {
+  align-self: flex-start;
+  margin-top: 3px;
+}
+
+.check-item-picker__option .ant-radio-label {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 20px;
+  min-width: 0;
+}
+
+.check-item-picker__name {
+  color: var(--rule-ink, #24272b);
+  font-weight: 600;
+}
+
+.check-item-picker__description,
+.check-item-picker__aside {
+  color: var(--rule-ink-muted, #656b73);
+  font-size: 13px;
+}
+
+.check-item-picker__description {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.check-item-picker__aside {
+  text-align: right;
+}
+
+.check-item-picker__empty {
+  padding: 48px 0;
+}
+
 .check-item-field-mapping-row {
   display: grid;
   grid-template-columns: minmax(150px, 0.9fr) minmax(130px, 0.7fr) minmax(220px, 1.4fr) 34px;

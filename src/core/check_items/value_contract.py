@@ -20,6 +20,15 @@ def _without_change_events(constraints):
     return {key: value for key, value in result.items() if value not in ({}, [])}
 
 
+def _direction_events(row):
+    """A change-tracked state Value that names its normal and abnormal values reports
+    which way it moved: normal→abnormal is a fault, abnormal→normal its recovery."""
+    groups = (row.get('semantic_definition') or {}).get('state_groups') or {}
+    if row.get('semantic_type') not in {'state', 'enum', 'boolean'} or not groups.get('healthy') or not groups.get('unhealthy'):
+        return {}
+    return {'down': f"{row['observation_type']}.degraded", 'up': f"{row['observation_type']}.recovered"}
+
+
 def normalize_value_contract(contract):
     result = deepcopy(contract)
     for row in result.get('observations', []):
@@ -47,10 +56,15 @@ def normalize_value_contract(contract):
         if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", field) or field in seen:
             raise ValueError(f"invalid or duplicate standard Value: {field}")
         seen.add(field)
-        if 'semantic_definition' in row and not result['change_events'] and 'current_state' in row.get('assessment_roles', []) and 'change' not in row.get('assessment_roles', []):
+        local = 'semantic_definition' in row
+        if local:
+            # A form-owned Value is defined by its one use. An event contract written
+            # for its earlier uses would demand events that use no longer produces.
+            row.pop('event_constraints', None)
+        if local and not result['change_events'] and 'current_state' in row.get('assessment_roles', []) and 'change' not in row.get('assessment_roles', []):
             row['event_on_change'] = False
             continue
-        local_change = 'semantic_definition' in row and 'change' in row.get('assessment_roles', [])
+        local_change = local and 'change' in row.get('assessment_roles', [])
         track_change = (result["change_events"] or local_change) and row.get("change_tracking", True)
         row["event_on_change"] = track_change
         roles = set(row.get("assessment_roles") or []) - {"change"}
@@ -58,11 +72,18 @@ def normalize_value_contract(contract):
             roles.discard('evidence')
             roles.add("change")
             event_type = str(row["observation_type"]) + ".changed"
+            directions = _direction_events(row) if local else {}
             constraints = _without_change_events(row.get('event_constraints'))
-            constraints['required_event_types'] = list(dict.fromkeys([*constraints.get('required_event_types', []), event_type]))
-            for key, value in (('role_event_types', {'change': event_type}), ('required_event_classes', {event_type: 'change'}), ('required_severities', {event_type: 'info'})):
+            constraints['required_event_types'] = list(dict.fromkeys([*constraints.get('required_event_types', []), event_type, *directions.values()]))
+            classes, severities = {event_type: 'change'}, {event_type: 'info'}
+            if directions:
+                classes.update({directions['down']: 'fault', directions['up']: 'recovery'})
+                severities.update({directions['down']: 'major', directions['up']: 'info'})
+            for key, value in (('role_event_types', {'change': event_type, **directions}), ('required_event_classes', classes), ('required_severities', severities)):
                 constraints[key] = {**constraints.get(key, {}), **value}
             constraints.setdefault('required_recovery_pairs', [])
+            if directions:
+                constraints['required_recovery_pairs'].append({'fault': directions['down'], 'recovery': directions['up']})
             row['event_constraints'] = constraints
         else:
             if 'event_constraints' in row:
