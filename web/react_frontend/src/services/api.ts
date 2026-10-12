@@ -2414,6 +2414,41 @@ export interface CheckItemDeletePreview {
   events_closed?: CheckItemEventTally[]
 }
 
+/** The last patrol's stored values judged again under a candidate version; nothing is collected or written. */
+export interface CheckItemReleaseTrial {
+  available: boolean
+  reason?: 'new_check_item' | 'not_structured' | 'no_run' | 'error'
+  detail?: string
+  run?: { run_id: string; observed_at: string | null; devices: number; values: number }
+  now?: { abnormal: number; undetermined: number }
+  after?: { abnormal: number; undetermined: number }
+  rules?: Array<{
+    field: string
+    event_type: string
+    text: string
+    change: 'same' | 'added' | 'removed'
+    now: number
+    after: number
+  }>
+  added_count?: number
+  added?: Array<{ device_id: string; entity_key: string; field: string; value: unknown; severity: string; event_type: string }>
+  removed_count?: number
+  removed?: Array<{ device_id: string; entity_key: string; field: string; value: unknown; severity: string; event_type: string }>
+  no_data_fields?: string[]
+}
+
+/** The previous release drafted again as a new version, with what publishing it would switch. */
+export interface CheckItemRollbackPreview {
+  change_id: string
+  check_item_id: string
+  current_version: number
+  restores_version: number
+  new_version: number
+  restores_wording: boolean
+  impact_digest: string
+  preview: CheckItemReleasePreview
+}
+
 /** A trial of publishing one check item change: the switch is tried on the server and rolled back. */
 export interface CheckItemReleasePreview {
   applicable: boolean
@@ -2429,6 +2464,7 @@ export interface CheckItemReleasePreview {
     after: string[]
   }>
   graph?: CheckItemRelations
+  trial?: CheckItemReleaseTrial
   release: {
     events_closed?: CheckItemEventTally[]
     rules_activated: number
@@ -2476,6 +2512,8 @@ export interface CheckItemOverview {
   }>
   leftover_count: number
   graph?: CheckItemRelations
+  /** The version that was in force before this one, if a rollback has something to go back to. */
+  rollback_version?: number | null
 }
 
 export interface CanonicalRuleCandidates {

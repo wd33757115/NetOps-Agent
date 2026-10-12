@@ -244,6 +244,15 @@ def check_item_overview(check_item_id: str) -> dict[str, Any]:
             key = str(implementation.implementation_id)
             earlier[key] = max(earlier.get(key, 0), number)
         graph = published_relations(db, item, patrolled=not topology)
+        # The version that was in force before this one; a rollback publishes its content again.
+        released_before = [
+            int(row.version)
+            for row in db.query(CheckItemVersionRecord).filter(
+                CheckItemVersionRecord.check_item_id == item.id,
+                CheckItemVersionRecord.version < item.version,
+                CheckItemVersionRecord.activated_at.isnot(None),
+            )
+        ]
     ready = loaded["ready"].get(item.version_id, set())
     wanted = _wanted(item)
     in_force = rules_in_force(item.id)
@@ -331,6 +340,7 @@ def check_item_overview(check_item_id: str) -> dict[str, Any]:
         "adapters": adapter_rows,
         "leftover_count": in_force["leftover_count"],
         "graph": graph,
+        "rollback_version": max(released_before) if released_before and not topology else None,
     }
 
 

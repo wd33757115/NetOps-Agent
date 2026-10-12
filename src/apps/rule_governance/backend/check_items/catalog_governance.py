@@ -732,6 +732,183 @@ class CheckItemCatalogGovernanceService:
                 db.rollback()
         return {"deletable": True, "blockers": [], **retired}
 
+    @staticmethod
+    def _previous_release(
+        db: Any, check_item_id: str
+    ) -> tuple[CheckItemVersionRecord | None, CheckItemVersionRecord | None]:
+        """The version in force and the one that was in force before it.
+
+        A draft that was withdrawn or rejected was never in force and is skipped.
+        """
+
+        active = (
+            db.query(CheckItemVersionRecord)
+            .filter(
+                CheckItemVersionRecord.check_item_id == check_item_id,
+                CheckItemVersionRecord.status == "active",
+            )
+            .first()
+        )
+        if active is None:
+            return None, None
+        previous = (
+            db.query(CheckItemVersionRecord)
+            .filter(
+                CheckItemVersionRecord.check_item_id == check_item_id,
+                CheckItemVersionRecord.version < active.version,
+                CheckItemVersionRecord.activated_at.isnot(None),
+            )
+            .order_by(CheckItemVersionRecord.version.desc())
+            .first()
+        )
+        return active, previous
+
+    def preview_rollback(self, check_item_id: str, *, actor: str) -> dict[str, Any]:
+        """Draft the previous release again as a new version and say what publishing it would switch.
+
+        Versions are never reactivated: a rollback is a new version with the
+        earlier content, released like any other, so rules, adapters and runtime
+        bundles go back together or not at all. The draft is kept, so confirming
+        publishes exactly what was shown; discard_draft drops it.
+        """
+
+        check_item_id = _require_text(check_item_id, label="check item id")
+        actor = _require_text(actor, label="actor")
+        with self._session_scope() as db:
+            root = db.get(CheckItemRecord, check_item_id)
+            active, previous = self._previous_release(db, check_item_id)
+            if root is None or active is None:
+                raise ValueError("check item not found")
+            if previous is None:
+                raise CatalogGovernanceConflictError("这个检查项没有更早发布过的版本，无法回退")
+            released = (
+                db.query(CheckItemCatalogChangeRecord)
+                .filter(CheckItemCatalogChangeRecord.version_id == str(previous.id))
+                .first()
+            )
+            # The name and description are kept with the change that released the version. A version
+            # that was seeded or imported has no such change, and keeps the wording in use today.
+            then = dict(released.candidate_payload_json or {}) if released is not None else {}
+            payload = {
+                "id": check_item_id,
+                "name": str(then.get("name") or root.name),
+                "category": str(then.get("category") or root.category),
+                "description": str(
+                    then["description"] if then.get("description") is not None else root.description or ""
+                ),
+                "result_mode": str(previous.result_mode),
+                "assessment_mode": str(previous.assessment_mode),
+                "canonical_contract": dict(previous.canonical_contract_json or {}),
+                "report_projection": str(previous.report_projection),
+                "applicability": dict(previous.applicability_json or {}),
+                "freshness_policy": dict(previous.freshness_policy_json or {}),
+                "empty_result_policy": dict(previous.empty_result_policy_json or {}),
+                "coverage_policy": dict(previous.coverage_policy_json or {}),
+            }
+            current_version, restores_version = int(active.version), int(previous.version)
+            wording_known = released is not None
+        change = self.create_check_item_draft(
+            payload,
+            actor=actor,
+            reason=f"回退到 v{restores_version}",
+            idempotency_key=f"catalog-rollback-{uuid.uuid4()}",
+        )
+        impact = self.preview_impact(change["id"])
+        return {
+            "change_id": change["id"],
+            "check_item_id": check_item_id,
+            "current_version": current_version,
+            "restores_version": restores_version,
+            "new_version": int(change["version"]),
+            "restores_wording": wording_known,
+            "impact_digest": impact["impact_digest"],
+            "preview": self.preview_release(change["id"], actor=actor),
+        }
+
+    def discard_draft(self, change_id: str, *, actor: str) -> dict[str, Any]:
+        """Withdraw a draft nobody submitted. Its version was never in force and stays on record."""
+
+        actor = _require_text(actor, label="actor")
+        now = _utcnow()
+        with self._session_scope() as db:
+            change = (
+                db.query(CheckItemCatalogChangeRecord)
+                .filter(CheckItemCatalogChangeRecord.id == str(change_id))
+                .with_for_update()
+                .first()
+            )
+            if change is None:
+                raise ValueError("catalog change request not found")
+            if change.status == "cancelled":
+                return self._serialize_change(db, change)
+            if change.status != "draft":
+                raise CatalogGovernanceConflictError(
+                    f"catalog change request cannot be discarded from {change.status}"
+                )
+            is_check_item = str(change.asset_kind) == "check_item"
+            version = db.get(
+                CheckItemVersionRecord if is_check_item else CollectionImplementationVersionRecord,
+                str(change.version_id),
+            )
+            if version is not None and str(version.status) == "draft":
+                version.status = "deprecated"
+                version.deprecated_at = now
+            if is_check_item:
+                # Rules drafted for a preview of this version have nothing left to be approved with.
+                from src.infrastructure.db.models import ChangePolicyVersionRecord, EventRuleVersionRecord
+
+                for model in (ChangePolicyVersionRecord, EventRuleVersionRecord):
+                    for row in db.query(model).filter(
+                        model.check_item_version_id == str(change.version_id),
+                        model.status == "draft",
+                    ):
+                        row.status = "rejected"
+            root = db.get(
+                CheckItemRecord if is_check_item else CollectionImplementationRecord,
+                str(change.asset_id),
+            )
+            # An asset that never had a published version goes with its only draft.
+            if root is not None and str(root.status) == "draft" and int(root.current_version or 0) == 0:
+                root.status = "deprecated"
+                root.updated_at = now
+            change.status = "cancelled"
+            change.decided_by = actor
+            change.decision_reason = "草稿已撤销"
+            change.decided_at = now
+            change.updated_at = now
+            self._audit(
+                db,
+                action="check_item_catalog_draft_discarded",
+                actor=actor,
+                resource_id=str(change.id),
+                idempotency_key=None,
+                detail={"asset_id": str(change.asset_id), "version_id": str(change.version_id)},
+            )
+            db.flush()
+            result = self._serialize_change(db, change)
+            version_id = str(change.version_id)
+        if self._release and is_check_item:
+            # Their approval request goes the same way.
+            self._reject_rule_drafts(version_id, actor=actor)
+        return result
+
+    @staticmethod
+    def _reject_rule_drafts(check_item_version_id: str, *, actor: str) -> None:
+        from src.apps.rule_governance.backend.rule_control.approval import RuleAssetApprovalService
+        from src.infrastructure.db.models import RuleGenerationJobRecord
+
+        with get_db_session() as db:
+            bundle_ids = [
+                str(row.id)
+                for row in db.query(RuleGenerationJobRecord.id).filter(
+                    RuleGenerationJobRecord.job_type == "RULE_ASSET_BUNDLE",
+                    RuleGenerationJobRecord.asset_ref == f"check_item_version:{check_item_version_id}",
+                    RuleGenerationJobRecord.status == "pending_approval",
+                )
+            ]
+        for bundle_id in bundle_ids:
+            RuleAssetApprovalService().reject(bundle_id, actor=actor, reason="检查项草稿已撤销")
+
     def retired_rule_events(self, check_item_id: str) -> list[dict[str, Any]]:
         """Open events of a check item whose rule no longer runs."""
 
@@ -1800,6 +1977,7 @@ class CheckItemCatalogGovernanceService:
             describe_compiled_rules,
             rules_in_force,
         )
+        from src.apps.rule_governance.backend.check_items.trial import trial_on_last_patrol
 
         with self._session_scope() as db:
             change = db.get(CheckItemCatalogChangeRecord, str(change_id))
@@ -1840,6 +2018,27 @@ class CheckItemCatalogGovernanceService:
                     ),
                 ),
             )
+            try:
+                result["trial"] = trial_on_last_patrol(
+                    db,
+                    check_item_id=check_item_id,
+                    current={
+                        "version_id": str(baseline.id),
+                        "result_mode": str(baseline.result_mode),
+                        "assessment_mode": str(baseline.assessment_mode),
+                        "canonical_contract": dict(baseline.canonical_contract_json or {}),
+                    }
+                    if baseline is not None
+                    else None,
+                    candidate={
+                        "version_id": version_id,
+                        "result_mode": candidate.result_mode,
+                        "assessment_mode": candidate.assessment_mode,
+                        "canonical_contract": candidate.canonical_contract,
+                    },
+                )
+            except Exception as exc:  # noqa: BLE001 - a trial that cannot run must not hide whether the release can
+                result["trial"] = {"available": False, "reason": "error", "detail": str(exc)}
         after = describe_compiled_rules(
             check_item_id=check_item_id,
             result_mode=candidate.result_mode,

@@ -77,11 +77,12 @@ interface CheckItemOverviewDrawerProps {
   onClose: () => void
   onEdit: (checkItem: ParserCheckItem) => void
   onDelete?: (checkItem: ParserCheckItem) => void
+  onRollback?: (checkItem: ParserCheckItem, restoresVersion: number) => void
 }
 
 /** One check item with the rules it produces and the adapters that run it. Read-only. */
 const CheckItemOverviewDrawer: React.FC<CheckItemOverviewDrawerProps> = ({
-  open, mobile, checkItem, onClose, onEdit, onDelete,
+  open, mobile, checkItem, onClose, onEdit, onDelete, onRollback,
 }) => {
   const queryClient = useQueryClient()
   const checkItemId = checkItem?.check_item_id
@@ -223,6 +224,11 @@ const CheckItemOverviewDrawer: React.FC<CheckItemOverviewDrawerProps> = ({
           {onDelete && status && status.state !== 'topology' && (
             <Button danger onClick={() => onDelete(checkItem)}>删除</Button>
           )}
+          {onRollback && overview?.rollback_version && (
+            <Button onClick={() => onRollback(checkItem, overview.rollback_version as number)}>
+              回退到 v{overview.rollback_version}
+            </Button>
+          )}
           <Button onClick={() => onEdit(checkItem)}>修改</Button>
         </Space>
       )}
@@ -299,6 +305,8 @@ const CheckItemOverviewDrawer: React.FC<CheckItemOverviewDrawerProps> = ({
               <dl className="relation-lifecycle" style={{ marginTop: 16 }}>
                 <dt>修改后发布</dt>
                 <dd>规则随新版本一起切换：不变的照常运行，新增的生效，取消的停用。停用的规则留下的事件在发布时关闭。</dd>
+                <dt>回退</dt>
+                <dd>把上一个发布过的版本的内容作为新版本再发布一次，规则、适配器和运行包一起回去；确认前先试算。</dd>
                 <dt>删除</dt>
                 <dd>规则、运行包和只为它服务的适配器一起停用，事件关闭。历史报告、各个版本和审计记录保留。</dd>
               </dl>

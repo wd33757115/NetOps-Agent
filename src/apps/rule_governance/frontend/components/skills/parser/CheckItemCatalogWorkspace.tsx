@@ -59,6 +59,7 @@ import CheckItemEditorDrawer from './CheckItemEditorDrawer'
 import CheckItemOverviewDrawer, { CheckItemPatrolStatusLabel } from './CheckItemOverviewDrawer'
 import CheckItemPicker, { type CheckItemPickerHandle } from './CheckItemPicker'
 import CheckItemReleasePreview from './CheckItemReleasePreview'
+import CheckItemRollbackDialog from './CheckItemRollbackDialog'
 
 type CatalogView = 'catalog' | 'changes' | 'cutover'
 
@@ -416,6 +417,7 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
   const [editingCheckItem, setEditingCheckItem] = useState<ParserCheckItem>()
   const [checkItemIdempotencyKey, setCheckItemIdempotencyKey] = useState('')
   const [deletingCheckItem, setDeletingCheckItem] = useState<ParserCheckItem>()
+  const [rollingBack, setRollingBack] = useState<{ checkItem: ParserCheckItem; version: number }>()
   const [projectionFeedback, setProjectionFeedback] = useState<Record<number, {
     success: boolean
     errors: string[]
@@ -631,6 +633,18 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
         message.success(variables.decision === 'approve' ? '目录资产已发布' : '候选已拒绝')
         setLifecycleReason('')
         setSelectedRolloutCampaignId(undefined)
+        await refreshAll()
+      },
+      onError: (error) => message.error(queryErrorLabel(error)),
+    },
+  )
+  const discardMutation = useMutation(
+    (changeId: string) => parserApi.discardCatalogDraft(changeId),
+    {
+      onSuccess: async () => {
+        message.success('草稿已撤销，已发布的版本不受影响')
+        setDetailOpen(false)
+        setSelectedChangeId(undefined)
         await refreshAll()
       },
       onError: (error) => message.error(queryErrorLabel(error)),
@@ -2132,6 +2146,10 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
           setOverviewCheckItem(undefined)
           setDeletingCheckItem(checkItem)
         }}
+        onRollback={(checkItem, version) => {
+          setOverviewCheckItem(undefined)
+          setRollingBack({ checkItem, version })
+        }}
         onEdit={(checkItem) => {
           setOverviewCheckItem(undefined)
           openCheckItemRevision(checkItem)
@@ -2212,6 +2230,12 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
         checkItem={deletingCheckItem}
         onClose={() => setDeletingCheckItem(undefined)}
         onDeleted={refreshAll}
+      />
+      <CheckItemRollbackDialog
+        checkItem={rollingBack?.checkItem}
+        restoresVersion={rollingBack?.version}
+        onClose={() => setRollingBack(undefined)}
+        onDone={refreshAll}
       />
 
       <Drawer
@@ -2870,6 +2894,17 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
                   >
                     重新计算影响
                   </Button>
+                  {selectedChange.status === 'draft' && (
+                    <Popconfirm
+                      title="撤销这份草稿？"
+                      description="草稿不会发布，已发布的版本不受影响。"
+                      okText="撤销草稿"
+                      cancelText="保留"
+                      onConfirm={() => discardMutation.mutate(selectedChange.id)}
+                    >
+                      <Button loading={discardMutation.isLoading}>撤销草稿</Button>
+                    </Popconfirm>
+                  )}
                   {selectedChange.status === 'draft' && selectedChange.asset_kind === 'check_item' ? (
                     <>
                       <Button

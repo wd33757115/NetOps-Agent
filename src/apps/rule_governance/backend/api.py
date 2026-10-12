@@ -4252,6 +4252,38 @@ def close_check_item_retired_events(request: Request, check_item_id: str):
         _raise_catalog_governance_error(exc)
 
 
+@router.post(
+    "/catalog/check-items/{check_item_id}/rollback-preview",
+    dependencies=[Depends(app_user)],
+)
+def preview_check_item_rollback(request: Request, check_item_id: str):
+    """Draft the previously released version again and say what publishing it would switch."""
+
+    try:
+        return CheckItemCatalogGovernanceService().preview_rollback(
+            check_item_id,
+            actor=_authenticated_actor(request),
+        )
+    except ValueError as exc:
+        _raise_catalog_governance_error(exc)
+
+
+@router.post(
+    "/catalog/changes/{change_id}/discard",
+    dependencies=[Depends(app_user)],
+)
+def discard_check_item_catalog_draft(request: Request, change_id: str):
+    """Withdraw a draft that was never submitted."""
+
+    try:
+        return CheckItemCatalogGovernanceService().discard_draft(
+            change_id,
+            actor=_authenticated_actor(request),
+        )
+    except ValueError as exc:
+        _raise_catalog_governance_error(exc)
+
+
 @router.post("/catalog/check-items/{check_item_id}/delete-preview")
 def preview_check_item_delete(request: Request, check_item_id: str):
     """What deleting a check item would take with it. The delete is tried and rolled back."""

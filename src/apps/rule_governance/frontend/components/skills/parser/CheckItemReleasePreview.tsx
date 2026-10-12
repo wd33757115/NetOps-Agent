@@ -3,6 +3,7 @@ import { Alert, Space, Table, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import type { CheckItemReleasePreview as ReleasePreview } from '@netops/services/api'
 import CheckItemRelationGraph from './CheckItemRelationGraph'
+import CheckItemReleaseTrial from './CheckItemReleaseTrial'
 
 type ReleaseField = ReleasePreview['fields'][number]
 
@@ -109,6 +110,7 @@ const CheckItemReleasePreview: React.FC<CheckItemReleasePreviewProps> = ({ previ
             : '没有事件需要关闭，现有事件保持原样。'}
         </Typography.Text>
       )}
+      <CheckItemReleaseTrial trial={preview.trial} />
       {changed.length > 0 ? (
         <Table<ReleaseField>
           rowKey="canonical_field"

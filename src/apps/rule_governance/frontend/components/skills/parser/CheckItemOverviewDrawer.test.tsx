@@ -60,10 +60,11 @@ const overview: CheckItemOverview = {
   leftover_count: 0,
 }
 
-const renderDrawer = (onEdit = vi.fn(), onDelete = vi.fn()) => {
+const renderDrawer = (onEdit = vi.fn(), onDelete = vi.fn(), onRollback = vi.fn()) => {
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-      <CheckItemOverviewDrawer open checkItem={checkItem} onClose={vi.fn()} onEdit={onEdit} onDelete={onDelete} />
+      <CheckItemOverviewDrawer open checkItem={checkItem} onClose={vi.fn()} onEdit={onEdit} onDelete={onDelete}
+        onRollback={onRollback} />
     </QueryClientProvider>,
   )
   return onEdit
@@ -163,5 +164,25 @@ describe('CheckItemOverviewDrawer relations', () => {
 
     await userEvent.click(await screen.findByRole('button', { name: /删\s*除/ }))
     expect(onDelete).toHaveBeenCalledWith(checkItem)
+  })
+})
+
+describe('CheckItemOverviewDrawer rollback', () => {
+  it('offers the way back to the previous release and hands it to the dialog', async () => {
+    vi.spyOn(parserApi, 'checkItemOverview').mockResolvedValue({ ...overview, graph, rollback_version: 17 })
+    const onRollback = vi.fn()
+    renderDrawer(vi.fn(), vi.fn(), onRollback)
+
+    await userEvent.click(await screen.findByRole('button', { name: '回退到 v17' }))
+    expect(onRollback).toHaveBeenCalledWith(checkItem, 17)
+    expect(screen.getByText(/把上一个发布过的版本的内容作为新版本再发布一次/)).toBeVisible()
+  })
+
+  it('offers nothing to go back to for a check item released only once', async () => {
+    vi.spyOn(parserApi, 'checkItemOverview').mockResolvedValue({ ...overview, graph, rollback_version: null })
+    renderDrawer()
+
+    await screen.findByText('字段、规则与事件')
+    expect(screen.queryByRole('button', { name: /回退到/ })).not.toBeInTheDocument()
   })
 })

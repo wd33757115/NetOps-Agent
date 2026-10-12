@@ -16,6 +16,7 @@ import type {
   CheckItemCatalogChange,
   CheckItemCatalogCheckItemDeleteResult,
   CheckItemDeletePreview,
+  CheckItemRollbackPreview,
   CheckItemEventList,
   CheckItemEventTally,
   CheckItemCatalogCheckItemDraftInput,
@@ -612,6 +613,14 @@ export const parserApi = {
     await api.post<{ events_closed: CheckItemEventTally[] }>(
       `/parser/catalog/check-items/${encodeURIComponent(checkItemId)}/retired-events/close/`,
     )
+  ).data,
+  previewCheckItemRollback: async (checkItemId: string): Promise<CheckItemRollbackPreview> => (
+    await api.post<CheckItemRollbackPreview>(
+      `/parser/catalog/check-items/${encodeURIComponent(checkItemId)}/rollback-preview/`,
+    )
+  ).data,
+  discardCatalogDraft: async (changeId: string): Promise<CheckItemCatalogChange> => (
+    await api.post<CheckItemCatalogChange>(`/parser/catalog/changes/${changeId}/discard/`)
   ).data,
   previewCheckItemDelete: async (checkItemId: string): Promise<CheckItemDeletePreview> => (
     await api.post<CheckItemDeletePreview>(

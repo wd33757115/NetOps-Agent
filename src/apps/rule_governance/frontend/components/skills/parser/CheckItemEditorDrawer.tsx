@@ -235,6 +235,9 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
         canonical_unit: field.unit?.trim() || null, value_types: [field.value_type] }
       const state = ['state', 'enum', 'boolean'].includes(semantic.semantic_type)
       if (!state) { semantic.state_groups = {}; semantic.allowed_values = [] }
+      // The form shows every group; one nobody filled in is no group at all.
+      else semantic.state_groups = Object.fromEntries(
+        Object.entries(semantic.state_groups || {}).filter(([, values]) => Array.isArray(values)))
       if (semantic.value_types[0] === 'boolean') {
         const booleanValue = (value: unknown) => value === 'true' ? true : value === 'false' ? false : value
         semantic.allowed_values = (semantic.allowed_values || []).map(booleanValue)

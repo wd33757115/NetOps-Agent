@@ -810,6 +810,135 @@ button.relation-count:focus-visible {
   border-bottom: 1px solid var(--rule-line, #e5e7eb);
 }
 
+/* Going back to the previous release: the same preview as any release, in a dialog. */
+.check-item-rollback {
+  max-height: calc(100vh - 260px);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+/* The last patrol judged again under the version about to be published. */
+.release-trial {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--rule-line, #e5e7eb);
+  border-radius: 6px;
+}
+
+.release-trial__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 16px;
+}
+
+.release-trial__lead {
+  margin-top: -6px;
+}
+
+.release-trial__tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.release-trial__tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 14px;
+  border-radius: 6px;
+  background: var(--rule-surface, #f7f8f9);
+  color: var(--rule-ink, #24272b);
+}
+
+.release-trial__tile--attention {
+  background: #fbf3e6;
+  color: #7a4a0c;
+}
+
+.release-trial__tile-label,
+.release-trial__tile-note {
+  font-size: 13px;
+}
+
+.release-trial__tile:not(.release-trial__tile--attention) .release-trial__tile-label,
+.release-trial__tile:not(.release-trial__tile--attention) .release-trial__tile-note {
+  color: var(--rule-ink-muted, #656b73);
+}
+
+.release-trial__tile-figure {
+  font-size: 15px;
+}
+
+.release-trial__tile-figure b {
+  font-size: 22px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.release-trial__group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.release-trial__common {
+  margin-top: -4px;
+}
+
+.release-trial__rules,
+.release-trial__items {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--rule-line, #e5e7eb);
+  list-style: none;
+}
+
+.release-trial__rules li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.7fr) auto;
+  gap: 12px;
+  align-items: baseline;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--rule-line, #e5e7eb);
+}
+
+.release-trial__items li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 2px 16px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--rule-line, #e5e7eb);
+}
+
+.release-trial__object {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+}
+
+.release-trial__count {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.release-trial__flag {
+  margin-left: 8px;
+  color: var(--rule-ink-muted, #656b73);
+}
+
+.release-trial__flag--added {
+  color: var(--rule-success, #2f7d4a);
+}
+
 /* What happens to the rules and events when the check item changes or goes. */
 .relation-lifecycle {
   display: grid;

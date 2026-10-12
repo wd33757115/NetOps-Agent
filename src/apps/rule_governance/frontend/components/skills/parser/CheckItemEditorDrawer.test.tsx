@@ -270,3 +270,30 @@ describe('CheckItemEditorDrawer', () => {
     inForce.mockRestore()
   })
 })
+
+describe('CheckItemEditorDrawer boolean states', () => {
+  // interface.optical_power stores transceiver_present this way: a state whose value type is boolean
+  // and which names no transitional group.
+  it('saves a boolean state whose groups are only partly filled in', async () => {
+    const onSubmit = vi.fn()
+    const user = userEvent.setup()
+    vi.spyOn(parserApi, 'previewCheckItemRules').mockResolvedValue({ valid: true, errors: [], fields: [] } as any)
+    const definition = { id: 'interface.optical.presence', description: '光模块是否在位',
+      semantic_type: 'state', value_types: ['boolean'], dimensions: [], assessment_roles: ['current_state'],
+      state_groups: { healthy: ['present'], unhealthy: ['absent'], unknown: ['unknown'] },
+      allowed_values: ['present', 'absent', 'unknown'] }
+    render(<CheckItemEditorDrawer open mobile={false} onClose={vi.fn()} onSubmit={onSubmit}
+      checkItem={{ ...checkItem, canonical_contract: { ...checkItem.canonical_contract,
+        observations: [{ observation_type: 'interface.optical.presence', semantic_type: 'state',
+          canonical_field: 'transceiver_present', value_type: 'boolean', semantic_definition: definition }] } }}
+      canonicalCatalog={{ items: [] } as any} />)
+
+    await user.click(screen.getByText('编辑语义与规则用途'))
+    await user.click(screen.getByRole('button', { name: /保存草稿并预览影响/ }))
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledOnce())
+    expect(onSubmit.mock.calls[0][0].canonical_contract.observations[0].semantic_definition.state_groups).toEqual({
+      healthy: ['present'], unhealthy: ['absent'], unknown: ['unknown'],
+    })
+  })
+})
