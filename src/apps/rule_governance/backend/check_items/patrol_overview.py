@@ -259,8 +259,13 @@ def check_item_overview(check_item_id: str) -> dict[str, Any]:
     contract = {"version_id": item.version_id, "canonical_contract": item.canonical_contract}
     rows = {row.get("canonical_field"): row for row in item.canonical_contract.get("observations") or []}
 
+    from src.apps.rule_governance.backend.check_items.adapter_field_service import recorded
+
+    # What trials found: a field the device does not print is not a gap someone still has to close.
+    trials = recorded(item.id) if not topology else {}
     adapter_rows = []
     provided_by: Counter[str] = Counter()
+    absent_by: Counter[str] = Counter()
     structured = 0
     for adapter in adapters:
         produced: list[str] | None = None
@@ -275,9 +280,13 @@ def check_item_overview(check_item_id: str) -> dict[str, Any]:
                 produced = sorted({field for output in manifest["outputs"] for field in output["target_fields"]})
             except (ValueError, KeyError, TypeError):
                 produced = None
+        missing = None if produced is None else [field for field in rows if field not in produced]
+        trial = trials.get(adapter.id, {})
+        absent = [field for field in trial.get("absent_fields", []) if field in (missing or [])]
         if produced is not None:
             structured += 1
             provided_by.update(field for field in produced if field in rows)
+            absent_by.update(absent)
         if topology:
             state = "not_required"
         elif adapter.version_id in ready:
@@ -296,7 +305,10 @@ def check_item_overview(check_item_id: str) -> dict[str, Any]:
                 "state": state,
                 "running_check_item_version": earlier.get(adapter.id) if state == "previous_version" else None,
                 "fields_provided": None if produced is None else len([field for field in produced if field in rows]),
-                "missing_fields": None if produced is None else [field for field in rows if field not in produced],
+                "missing_fields": missing,
+                # Of the missing ones: those a trial on this adapter's own outputs did not find.
+                "absent_fields": absent,
+                "field_trial": str(trial.get("trial_status") or "idle"),
             }
         )
 
@@ -319,6 +331,7 @@ def check_item_overview(check_item_id: str) -> dict[str, Any]:
                 "rules_missing": use in {"health", "change"} and not entry["lines"],
                 "stale_count": entry["stale_count"],
                 "provided_by": provided_by[name] if structured else None,
+                "absent_by": absent_by[name] if structured else None,
             }
         )
     return {

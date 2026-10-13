@@ -2352,6 +2352,73 @@ export interface CheckItemEventTally {
   count?: number
 }
 
+/** A new field as one stored output shows it: the captured value, its line, and the line above. */
+export interface AdapterFieldSource {
+  value: string
+  line: string
+  above: string
+}
+
+/** What a trial of adding fields to an adapter found. A trial saves nothing. */
+export interface AdapterFieldTrial {
+  status: 'ready' | 'no_data' | 'regressed' | 'failed' | 'unsupported'
+  requested_fields: string[]
+  sample_count: number
+  record_count?: number
+  model_calls: number
+  existing_field_count: number
+  rules_in_force: number
+  rules_added?: number
+  added_lines?: string[]
+  fields: Array<{
+    name: string
+    description: string
+    records: number
+    samples: number
+    examples: string[]
+    sources: AdapterFieldSource[]
+  }>
+  provided_fields: string[]
+  absent_fields: string[]
+  regression: { passed: boolean; differences: string[] } | null
+  reason?: string
+  detail?: string
+  /** The adapter, the check item or the template changed after the trial. */
+  stale: boolean
+}
+
+export interface AdapterFieldsSaved {
+  fields: string[]
+  left_out_fields: string[]
+  implementation_version: number
+  previous_implementation_version: number
+  runtime_bundle_version_ids: string[]
+  outputs_replayed: number
+  records_replayed: number
+  at: string
+  by: string
+}
+
+/** The fields an adapter lacks for one check item, and the last trial of adding some. */
+export interface AdapterFieldsState {
+  implementation_id: string
+  implementation_name: string
+  check_item_id: string
+  status: 'idle' | 'queued' | 'running' | 'ready' | 'no_data' | 'regressed' | 'failed' | 'unsupported' | 'saved' | 'cancelled'
+  requested_fields: string[]
+  started_at?: string | null
+  finished_at?: string | null
+  sample_count: number
+  /** The check item's fields, and how many of them the adapter provides: the detail page's "4 / 7". */
+  field_count: number
+  provided_count: number
+  missing_fields: Array<{ name: string; description: string; use: string; absent: boolean }>
+  result: AdapterFieldTrial | null
+  saved?: AdapterFieldsSaved | null
+  error?: string | null
+  error_detail?: string | null
+}
+
 /** How a field's settings become rules: one row per kind of setting. */
 export interface RuleGenerationGuide {
   rows: Array<{
@@ -2552,6 +2619,8 @@ export interface CheckItemOverview {
     rules_missing: boolean
     stale_count: number
     provided_by: number | null
+    /** Adapters whose device was found not to print this field. */
+    absent_by?: number | null
   }>
   structured_adapters: number
   adapters: Array<{
@@ -2564,6 +2633,9 @@ export interface CheckItemOverview {
     running_check_item_version: number | null
     fields_provided: number | null
     missing_fields: string[] | null
+    /** Of the missing fields, those a trial on this adapter's own outputs did not find. */
+    absent_fields?: string[]
+    field_trial?: AdapterFieldsState['status']
   }>
   leftover_count: number
   graph?: CheckItemRelations

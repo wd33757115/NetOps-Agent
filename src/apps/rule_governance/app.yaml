@@ -1,7 +1,7 @@
 manifest_version: 1
 id: rule-governance
 name: 规则治理
-version: 1.17.4
+version: 1.18.2
 platform_api: '>=1.0,<2.0'
 icon: rules
 aliases:
@@ -14,6 +14,7 @@ backend:
   - src.apps.rule_governance.backend.rule_control.tasks
   - src.apps.rule_governance.backend.source_tasks
   - src.apps.rule_governance.backend.rollout_tasks
+  - src.apps.rule_governance.backend.adapter_field_tasks
   task_names:
   - dispatch_parser_jobs
   - publish_parser_outbox
@@ -31,6 +32,7 @@ backend:
   - reconcile_rollout_live_captures
   - netops.rule_governance.dispatch_capture
   - netops.rule_governance.recover_capture_dispatch
+  - netops.rule_governance.adapter_fields_trial
   queue: app.rule-governance
   legacy_queues:
   - netops.ai

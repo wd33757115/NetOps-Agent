@@ -6,6 +6,12 @@ sanitized, and afterwards every stored output is parsed with the template in
 force and with the extended one. Every value the adapter already provided must
 come out the same, and a new field counts only where the outputs contain it.
 The trial saves nothing.
+
+What the model returns is held to three things, because real trials showed it
+breaking each of them. A Value in force is put back to the letter. A rule in
+force stays where it is, in order: few samples cannot tell a rewrite from an
+extension. And a value that parses is not yet the right value, so every new
+field comes with the output line it was read from, for a person to confirm.
 """
 
 from __future__ import annotations
@@ -159,12 +165,126 @@ def value_definitions(template_text: str) -> dict[str, tuple[str, tuple[str, ...
     return {str(value.name): (str(value.regex), tuple(sorted(value.OptionNames()))) for value in parsed.values}
 
 
+_VALUE_LINE = re.compile(r"^Value\s+(?:[A-Za-z,]+\s+)?(\w+)\s+\(")
+_STATE_LINE = re.compile(r"^[A-Za-z_]\w*\s*$")
+
+
+def _value_lines(template_text: str) -> dict[str, str]:
+    lines = {}
+    for line in template_text.splitlines():
+        match = _VALUE_LINE.match(line)
+        if match:
+            lines[match.group(1)] = line
+    return lines
+
+
+def restore_values(current_text: str, candidate_text: str) -> str:
+    """Put every Value in force back into the candidate exactly as it is written today.
+
+    Asked to add fields, the model also drops ``Required`` or ``Filldown`` or
+    loosens a regex it was not asked about. Sending that back costs a model
+    call each time and ended trials as failures; undoing it costs nothing, and
+    the replay afterwards still decides whether the candidate works.
+    """
+
+    in_force = _value_lines(current_text)
+    seen: set[str] = set()
+    lines = []
+    for line in candidate_text.splitlines():
+        match = _VALUE_LINE.match(line)
+        if match and match.group(1) in in_force:
+            seen.add(match.group(1))
+            lines.append(in_force[match.group(1)])
+        else:
+            lines.append(line)
+    dropped = [line for name, line in in_force.items() if name not in seen]
+    if dropped:
+        first = next((index for index, line in enumerate(lines) if line.startswith("Value ")), 0)
+        lines[first:first] = dropped
+    return "\n".join(lines) + "\n"
+
+
+def state_rules(template_text: str) -> dict[str, list[str]]:
+    """The rule lines of each state, in order and without their indentation."""
+
+    states: dict[str, list[str]] = {}
+    current = None
+    for line in template_text.splitlines():
+        if line.startswith(("Value ", "#")) or not line.strip():
+            continue
+        if not line.startswith((" ", "\t")) and _STATE_LINE.match(line):
+            current = line.strip()
+            states.setdefault(current, [])
+        elif current is not None:
+            states[current].append(line.strip())
+    return states
+
+
+def rules_lost(current_text: str, candidate_text: str) -> list[str]:
+    """Rules in force that the candidate no longer has, in their state and in the same order.
+
+    Replaying samples cannot stand in for this: with one stored output, a
+    template rewritten to fit that output alone parses it exactly as before.
+    """
+
+    theirs = state_rules(candidate_text)
+    lost = []
+    for state, rules in state_rules(current_text).items():
+        kept, position = theirs.get(state, []), 0
+        for rule in rules:
+            try:
+                position = kept.index(rule, position) + 1
+            except ValueError:
+                lost.append(f"{state}: {rule}")
+    return lost
+
+
+def added_lines(current_text: str, candidate_text: str) -> list[str]:
+    """What the candidate adds to the template in force: its new Values, then its new rules."""
+
+    in_force = set(_value_lines(current_text).values())
+    values = [line for line in _value_lines(candidate_text).values() if line not in in_force]
+    rules = []
+    ours = state_rules(current_text)
+    for state, lines in state_rules(candidate_text).items():
+        remaining = list(ours.get(state, []))
+        for line in lines:
+            if remaining and line == remaining[0]:
+                remaining.pop(0)
+            else:
+                rules.append(line)
+    return [*values, *rules]
+
+
+class _KeepsValues:
+    """The generation model, with the Values in force restored in whatever it returns."""
+
+    def __init__(self, model: Any, current_text: str) -> None:
+        self._model, self._current_text = model, current_text
+
+    def open_session(self, spec: Any, samples: Any) -> Any:
+        session, current_text = self._model.open_session(spec, samples), self._current_text
+
+        class Session:
+            def next(self, validation_feedback: dict[str, object] | None = None) -> Any:
+                turn = session.next(validation_feedback)
+                if turn.candidate is None:
+                    return turn
+                restored = restore_values(current_text, turn.candidate.template_text)
+                return replace(turn, candidate=replace(turn.candidate, template_text=restored))
+
+        return Session()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._model, name)
+
+
 def extension_only(current_text: str, texts: dict[str, str]) -> Any:
     """A validator that sends back any candidate which touches what the adapter already provides.
 
     The model is free to add; it is not free to rewrite. A Value in force keeps
-    its regex and options to the letter, and every sample still yields the same
-    records for those Values.
+    its regex and options to the letter, a rule in force stays in its state and
+    in order, and every sample still yields the same records for those Values.
     """
 
     in_force = value_definitions(current_text)
@@ -176,13 +296,20 @@ def extension_only(current_text: str, texts: dict[str, str]) -> Any:
         except textfsm.TextFSMTemplateError:
             return report
         rewritten = sorted(name for name, definition in in_force.items() if candidate.get(name) != definition)
+        lost = rules_lost(current_text, template_text)
         problems = []
         if rewritten:
             problems.append(
                 "existing Value definitions must stay exactly as they are; restore the regex and options of: "
                 + ", ".join(f"{name} {in_force[name][0]}" for name in rewritten)
             )
-        else:
+        if lost:
+            problems.append(
+                "existing rules must stay exactly as they are, in their state and in the same order; only add "
+                "lines, and end an added line with '-> Continue' when an existing rule must still see the same "
+                "input line. Put these back unchanged: " + " | ".join(lost[:12])
+            )
+        if not problems:
             moved = replay(backend, current_text, template_text, texts, [])["differences"]
             if moved:
                 problems.append(
@@ -201,18 +328,90 @@ def extension_only(current_text: str, texts: dict[str, str]) -> Any:
     return validate
 
 
-def without_values(template_text: str, names: list[str]) -> str | None:
-    """Drop Values no rule refers to; None when a rule still uses one of them."""
+def drop_values(template_text: str, names: list[str]) -> str:
+    """Take Values out of a template again, with every rule still matching the lines it matched.
 
-    lines = template_text.splitlines()
-    rules = "\n".join(line for line in lines if not line.startswith("Value "))
-    if any(f"${{{name}}}" in rules or re.search(rf"\${name}\b", rules) for name in names):
-        return None
-    kept = [
-        line for line in lines
-        if not (line.startswith("Value ") and any(re.search(rf"\s{re.escape(name)}\s+\(", line) for name in names))
-    ]
-    return "\n".join(kept) + "\n"
+    Where a rule captured one of them the capture becomes a plain group, so what
+    the rule consumes does not change. A rule left capturing nothing that only
+    continues does nothing at all and goes too.
+    """
+
+    definitions = value_definitions(template_text)
+    plain = {}
+    for name in names:
+        if name in definitions:
+            regex = definitions[name][0]
+            plain[name] = "(?:" + regex[1:] if regex.startswith("(") and not regex.startswith("(?") else f"(?:{regex})"
+    lines = []
+    for line in template_text.splitlines():
+        match = _VALUE_LINE.match(line)
+        if match and match.group(1) in names:
+            continue
+        if line.startswith((" ", "\t")):
+            rule = line
+            for name, group in plain.items():
+                rule = rule.replace("${" + name + "}", group)
+            if rule != line and "${" not in rule and rule.rstrip().endswith("-> Continue"):
+                continue
+            line = rule
+        lines.append(line)
+    return "\n".join(lines) + "\n"
+
+
+def field_sources(template_text: str, fields: list[str], text: str, limit: int = 2) -> dict[str, list[dict[str, str]]]:
+    """For each field, output lines a rule read it from, with the captured part and the line above.
+
+    A value that parses is not thereby the right value: a speed level reads as
+    well as a speed. The line it came from is what lets a person tell them
+    apart, and in tabular output the line above is the column heading.
+    """
+
+    try:
+        rules = [rule for state in textfsm.TextFSM(io.StringIO(template_text)).states.values() for rule in state]
+    except textfsm.TextFSMTemplateError:
+        return {name: [] for name in fields}
+    found: dict[str, list[dict[str, str]]] = {name: [] for name in fields}
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        if all(len(found[name]) >= limit for name in fields):
+            break
+        for rule in rules:
+            match = rule.regex_obj.match(line)
+            if not match:
+                continue
+            for name in fields:
+                value = match.groupdict().get(name)
+                if not value or len(found[name]) >= limit or any(item["line"] == line.rstrip() for item in found[name]):
+                    continue
+                above = next(
+                    (item.rstrip() for item in reversed(lines[:index]) if item.strip() and set(item.strip()) - set("-=+| ")),
+                    "",
+                )
+                found[name].append({"value": str(value), "line": line.rstrip(), "above": above})
+    return found
+
+
+def check_extension(
+    backend: Any, current_text: str, candidate_text: str, texts: dict[str, str], fields: list[str]
+) -> dict[str, Any]:
+    """Everything about an extended template that can be decided without a model.
+
+    The trial reports it and the save decides on it again, on the outputs as
+    they are stored at that moment: nothing is taken on trust from the trial.
+    """
+
+    try:
+        candidate = value_definitions(candidate_text)
+    except textfsm.TextFSMTemplateError as exc:
+        raise AdapterFieldsError(f"补充后的解析模板无法编译：{exc}") from exc
+    in_force = value_definitions(current_text)
+    replayed = replay(backend, current_text, candidate_text, texts, fields)
+    return {
+        **replayed,
+        "rewritten": sorted(name for name, definition in in_force.items() if candidate.get(name) != definition),
+        "rules_lost": rules_lost(current_text, candidate_text),
+        "undeclared": sorted(set(candidate) - set(in_force) - set(fields)),
+    }
 
 
 def replay(backend: Any, current_text: str, candidate_text: str, texts: dict[str, str], wanted: list[str]) -> dict[str, Any]:
@@ -237,8 +436,57 @@ def replay(backend: Any, current_text: str, candidate_text: str, texts: dict[str
             if values:
                 found[name]["samples"] += 1
                 found[name]["records"] += len(values)
-                found[name]["examples"] = [*found[name]["examples"], *map(str, values)][:3]
+                # Distinct values say more about a field than the first three records.
+                found[name]["examples"] = list(dict.fromkeys([*found[name]["examples"], *map(str, values)]))[:3]
     return {"record_count": records, "found": found, "differences": differences}
+
+
+def extension_context(implementation_id: str, check_item_id: str) -> dict[str, Any]:
+    """The adapter in force, the template it reads for this check item, and the outputs it has parsed."""
+
+    catalog = CheckItemCatalogRepository().load_active()
+    adapter = next((row for row in catalog.implementations if row.id == implementation_id), None)
+    item = catalog.check_item(check_item_id)
+    if adapter is None or item is None or item.id not in adapter.check_item_ids:
+        raise AdapterFieldsError("适配器或检查项不存在，或两者没有关联")
+    projection = _projection(adapter, item.id)
+    template = ParserTemplateRepository().get_template(
+        str(dict(adapter.adapter_spec.get("parser") or {}).get("template_id") or "")
+    )
+    if template is None:
+        raise AdapterFieldsError("找不到这个适配器的解析模板")
+    record_set = str(projection.get("source_record_set") or "")
+    outputs = stored_outputs(adapter.id)
+    return {
+        "adapter": adapter,
+        "item": item,
+        "template": template,
+        "record_set": record_set,
+        "current_text": record_set_template(str(template.template_text), record_set),
+        "outputs": {output["id"]: output["text"] for output in outputs},
+        "provided": sorted(dict(projection.get("projection") or {}).get("fields") or {}),
+        "base": {
+            "implementation_version_id": str(adapter.version_id),
+            "check_item_version_id": str(item.version_id),
+            "template_id": str(template.id),
+            "template_sha256": str(template.sha256),
+            "record_set": record_set,
+        },
+    }
+
+
+def _why_not(outcome: Any, detail: str) -> str:
+    """Why the model's work was not taken, in words an engineer can act on."""
+
+    stopped = str(outcome.stop_reason or "")
+    if any(word in stopped for word in ("timeout", "provider", "deadline")):
+        return "AI 服务没有响应，请稍后再试。"
+    if "rules must stay" in detail or "Value definitions must stay" in detail or "already provided changed" in detail:
+        return (
+            f"AI 试了 {outcome.model_calls} 次，每次都改动了已有的解析规则，结果没有采用。"
+            "可以减少一次要补的字段再试。"
+        )
+    return f"AI 试了 {outcome.model_calls} 次，没能补上这些字段。可以减少一次要补的字段再试。"
 
 
 def trial_add_fields(
@@ -253,30 +501,18 @@ def trial_add_fields(
     ``model`` replaces the production generation agent in tests.
     """
 
-    catalog = CheckItemCatalogRepository().load_active()
-    adapter = next((row for row in catalog.implementations if row.id == implementation_id), None)
-    item = catalog.check_item(check_item_id)
-    if adapter is None or item is None or item.id not in adapter.check_item_ids:
-        raise AdapterFieldsError("适配器或检查项不存在，或两者没有关联")
+    context = extension_context(implementation_id, check_item_id)
+    adapter, item, template = context["adapter"], context["item"], context["template"]
+    current_text, raw = context["current_text"], context["outputs"]
     missing = missing_fields(adapter, item)
     wanted = [name for name in (fields or missing) if name in missing]
     if not wanted:
         raise AdapterFieldsError("这个适配器已经提供了所选字段")
-    rows = {row["canonical_field"]: row for row in item.canonical_contract.get("observations") or []}
-    template = ParserTemplateRepository().get_template(
-        str(dict(adapter.adapter_spec.get("parser") or {}).get("template_id") or "")
-    )
-    if template is None:
-        raise AdapterFieldsError("找不到这个适配器的解析模板")
-    outputs = stored_outputs(adapter.id)
-    if not outputs:
+    if not raw:
         raise AdapterFieldsError("这个适配器还没有在巡检中解析过任何输出，没有样本可用来验证")
+    rows = {row["canonical_field"]: row for row in item.canonical_contract.get("observations") or []}
 
     backend = TextFSMValidationBackend()
-    current_text = record_set_template(
-        str(template.template_text), str(_projection(adapter, item.id).get("source_record_set") or "")
-    )
-    raw = {output["id"]: output["text"] for output in outputs}
     sanitized = {key: sanitize_parser_sample(text).text for key, text in raw.items()}
     samples = tuple(
         ParserSample(
@@ -288,22 +524,28 @@ def trial_add_fields(
         )
         for index, (key, text) in enumerate(sanitized.items())
     )
+    in_force = sum(len(rules) for rules in state_rules(current_text).values())
     result: dict[str, Any] = {
         "implementation_id": adapter.id,
         "check_item_id": item.id,
         "template_id": str(template.id),
+        "base": context["base"],
         "requested_fields": wanted,
-        "sample_count": len(outputs),
+        "sample_count": len(raw),
+        "existing_field_count": len(context["provided"]),
+        "rules_in_force": in_force,
         "model_calls": 0,
     }
+    nothing = {"fields": [], "provided_fields": [], "absent_fields": [], "regression": None, "template_text": None}
     current_records = [record for text in sanitized.values() for record in backend.parse(current_text, text)]
     spec = base_spec(item, current_text, current_records, backend)
     # The model is asked for the new fields only. If the template in force does not
     # pass as it is, it would start repairing things that are in production.
     untouched = validate_template_runtime_compatibility(current_text, spec, samples, backend)
     if not untouched.passed:
-        return {**result, "status": "unsupported", "fields": [], "regression": None, "template_text": None,
-                "reason": f"现有模板没有通过基线校验，不交给 AI 修改：{untouched.primary_diagnostic}"}
+        return {**result, **nothing, "status": "unsupported",
+                "reason": "这个适配器现有的解析模板在它自己的输出上没有通过校验，不交给 AI 修改。",
+                "detail": str(untouched.primary_diagnostic)}
 
     if model is None:
         # Imported here: the generator scripts pull in the model client.
@@ -320,7 +562,7 @@ def trial_add_fields(
     extended = replace(spec, fields=(*spec.fields, *(_field_spec(rows[name]) for name in wanted)))
     outcome = SimpleParserGenerationService(
         compilers=(),
-        model=model,
+        model=_KeepsValues(model, current_text),
         backend=backend,
         max_model_calls=MAX_MODEL_CALLS,
         # The template in force is the starting point; it fails only for the fields it lacks.
@@ -336,33 +578,58 @@ def trial_add_fields(
     candidate = outcome.candidate
     if not outcome.passed or candidate is None or candidate.template_text == current_text:
         final = outcome.attempts[-1].generation_validation if outcome.attempts else None
-        return {**result, "status": "failed", "fields": [], "regression": None, "template_text": None,
-                "reason": final.primary_diagnostic if final is not None and not final.passed else outcome.stop_reason}
+        detail = str(final.primary_diagnostic if final is not None and not final.passed else outcome.stop_reason)
+        return {**result, **nothing, "status": "failed", "reason": _why_not(outcome, detail), "detail": detail}
 
     # Judged on the outputs as the devices printed them, not on the sanitized copies the model saw.
-    replayed = replay(backend, current_text, candidate.template_text, raw, wanted)
-    found, differences = replayed["found"], replayed["differences"]
+    final_text = candidate.template_text
+    checked = check_extension(backend, current_text, final_text, raw, wanted)
+    found = checked["found"]
     provided = [name for name in wanted if found[name]["records"]]
     absent = [name for name in wanted if not found[name]["records"]]
-    final_text = candidate.template_text
-    if provided and absent and not differences:
+    if provided and absent and not checked["differences"]:
         # A field the outputs never show is not something this device provides; it stays out of the template.
-        trimmed = without_values(final_text, absent)
-        if trimmed is not None and not replay(backend, final_text, trimmed, raw, provided)["differences"]:
-            final_text = trimmed
+        trimmed = drop_values(final_text, absent)
+        again = check_extension(backend, current_text, trimmed, raw, provided)
+        if not (again["differences"] or again["rewritten"] or again["rules_lost"]):
+            final_text, checked = trimmed, again
+    differences = [
+        *checked["differences"],
+        *(f"已有字段 {name} 的定义被改动" for name in checked["rewritten"]),
+        *(f"已有规则被改动：{rule}" for rule in checked["rules_lost"]),
+    ]
+    sources: dict[str, list[dict[str, str]]] = {name: [] for name in provided}
+    for text in raw.values():
+        for name, lines in field_sources(final_text, provided, text).items():
+            sources[name] = [*sources[name], *lines][:2]
+        if all(len(lines) >= 2 for lines in sources.values()):
+            break
+    added = added_lines(current_text, final_text) if provided and not differences else []
     return {
         **result,
         "status": "regressed" if differences else "ready" if provided else "no_data",
-        "record_count": replayed["record_count"],
-        "fields": [{"name": name, **found[name]} for name in wanted],
+        "record_count": checked["record_count"],
+        "fields": [
+            {
+                "name": name,
+                "description": str(rows[name].get("description") or ""),
+                **found[name],
+                "sources": sources.get(name, []),
+            }
+            for name in wanted
+        ],
         "provided_fields": provided,
         "absent_fields": absent,
         "regression": {"passed": not differences, "differences": differences[:10]},
+        "rules_added": sum(1 for line in added if not line.startswith("Value ")),
+        "added_lines": added,
         "template_text": final_text if provided and not differences else None,
+        **({"reason": "补上字段的同时，已有字段的解析结果变了，所以没有采用。"} if differences else {}),
     }
 
 
 __all__ = [
-    "AdapterFieldsError", "base_spec", "extension_only", "missing_fields", "record_set_template", "replay",
-    "stored_outputs", "trial_add_fields", "value_definitions", "without_values",
+    "AdapterFieldsError", "added_lines", "base_spec", "check_extension", "drop_values", "extension_context",
+    "extension_only", "field_sources", "missing_fields", "record_set_template", "replay", "restore_values",
+    "rules_lost", "state_rules", "stored_outputs", "trial_add_fields", "value_definitions",
 ]

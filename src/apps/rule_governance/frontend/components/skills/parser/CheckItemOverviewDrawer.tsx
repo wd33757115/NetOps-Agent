@@ -4,6 +4,7 @@ import type { ColumnsType } from 'antd/es/table'
 import { useMutation, useQuery, useQueryClient } from 'react-query'
 import type { CheckItemOverview, CheckItemPatrolStatus, ParserCheckItem } from '@netops/services/api'
 import { parserApi } from '@netops/services/api'
+import AdapterFieldsDialog, { type AdapterFieldsTarget } from './AdapterFieldsDialog'
 import CheckItemRelationGraph from './CheckItemRelationGraph'
 import RuleGuideDialog from './RuleGuideDialog'
 import { queryErrorLabel } from './parserUi'
@@ -97,6 +98,7 @@ const CheckItemOverviewDrawer: React.FC<CheckItemOverviewDrawerProps> = ({
   const waiting = status ? status.adapters - status.adapters_ready : 0
   const graph = overview?.graph
   const [guideOpen, setGuideOpen] = useState(false)
+  const [fieldsTarget, setFieldsTarget] = useState<AdapterFieldsTarget>()
   const retiredOpen = (graph?.retired || []).reduce((sum, event) => sum + (event.open || 0), 0)
   const closeRetired = useMutation(() => parserApi.closeRetiredRuleEvents(checkItemId || ''), {
     onSuccess: async (result) => {
@@ -158,13 +160,20 @@ const CheckItemOverviewDrawer: React.FC<CheckItemOverviewDrawerProps> = ({
       title: '适配器提供',
       dataIndex: 'provided_by',
       width: 104,
-      render: (count: number | null) => count === null
-        ? '-'
-        : (
-          <Typography.Text type={count < (overview?.structured_adapters || 0) ? 'warning' : undefined}>
-            {count} / {overview?.structured_adapters}
-          </Typography.Text>
-        ),
+      render: (count: number | null, field) => {
+        if (count === null) return '-'
+        const absent = field.absent_by || 0
+        // A device that does not print a field is not a gap someone still has to close.
+        const gap = count + absent < (overview?.structured_adapters || 0)
+        return (
+          <Space direction="vertical" size={0}>
+            <Typography.Text type={gap ? 'warning' : undefined}>
+              {count} / {overview?.structured_adapters}
+            </Typography.Text>
+            {absent > 0 && <Typography.Text type="secondary">{absent} 个设备不输出</Typography.Text>}
+          </Space>
+        )
+      },
     },
   ]
 
@@ -188,18 +197,26 @@ const CheckItemOverviewDrawer: React.FC<CheckItemOverviewDrawerProps> = ({
       title: '提供字段',
       key: 'fields',
       width: 220,
-      render: (_, adapter) => adapter.fields_provided === null
-        ? <Typography.Text type="secondary">不按字段解析</Typography.Text>
-        : (
+      render: (_, adapter) => {
+        if (adapter.fields_provided === null) return <Typography.Text type="secondary">不按字段解析</Typography.Text>
+        const absent = adapter.absent_fields || []
+        const untried = (adapter.missing_fields || []).filter((name) => !absent.includes(name))
+        return (
           <Space direction="vertical" size={0}>
             <Typography.Text>{adapter.fields_provided} / {overview?.fields.length}</Typography.Text>
-            {Boolean(adapter.missing_fields?.length) && (
-              <Typography.Text type="secondary" title={adapter.missing_fields?.join('、')}>
-                不提供：{someOf(adapter.missing_fields || [])}
+            {Boolean(untried.length) && (
+              <Typography.Text type="secondary" title={untried.join('、')}>
+                不提供：{someOf(untried)}
+              </Typography.Text>
+            )}
+            {Boolean(absent.length) && (
+              <Typography.Text type="secondary" title={absent.join('、')}>
+                设备不输出：{someOf(absent)}
               </Typography.Text>
             )}
           </Space>
-        ),
+        )
+      },
     },
     {
       title: '状态',
@@ -212,6 +229,26 @@ const CheckItemOverviewDrawer: React.FC<CheckItemOverviewDrawerProps> = ({
             : adapterState[adapter.state].label}
         </Tag>
       ),
+    },
+    {
+      title: '',
+      key: 'fields-action',
+      width: 104,
+      render: (_, adapter) => {
+        if (!checkItemId || !adapter.missing_fields?.length || status?.state === 'topology') return null
+        const trial = adapter.field_trial
+        return (
+          <Button
+            size="small"
+            aria-label={`给 ${adapter.name} 补字段`}
+            onClick={() => setFieldsTarget({
+              implementationId: adapter.implementation_id, name: adapter.name, checkItemId,
+            })}
+          >
+            {trial === 'queued' || trial === 'running' ? '试算中' : trial === 'ready' ? '核对结果' : '补字段'}
+          </Button>
+        )
+      },
     },
   ]
 
@@ -340,12 +377,17 @@ const CheckItemOverviewDrawer: React.FC<CheckItemOverviewDrawerProps> = ({
             dataSource={overview?.adapters || []}
             columns={adapterColumns}
             pagination={false}
-            scroll={{ x: 720 }}
+            scroll={{ x: 820 }}
             locale={{ emptyText: '还没有命令适配器' }}
           />
         </div>
       </Space>
       <RuleGuideDialog open={guideOpen} onClose={() => setGuideOpen(false)} />
+      <AdapterFieldsDialog
+        target={fieldsTarget}
+        onClose={() => setFieldsTarget(undefined)}
+        onChanged={() => queryClient.invalidateQueries('check-item-overview')}
+      />
     </Drawer>
   )
 }

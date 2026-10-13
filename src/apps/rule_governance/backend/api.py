@@ -4271,6 +4271,62 @@ def get_check_item_overview(check_item_id: str):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+class AdapterFieldsRequest(BaseModel):
+    check_item_id: str = Field(min_length=1, max_length=128)
+    fields: list[str] = Field(default_factory=list, max_length=64)
+
+
+def _adapter_fields(call):
+    """Run one adapter field operation; what cannot be done is said in the engineer's words."""
+
+    from src.apps.rule_governance.backend.check_items.adapter_fields import AdapterFieldsError
+
+    try:
+        return call()
+    except AdapterFieldsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/catalog/adapters/{implementation_id}/fields")
+def get_adapter_fields(implementation_id: str, check_item_id: str):
+    """The fields an adapter does not provide yet, and the last trial of adding some."""
+
+    from src.apps.rule_governance.backend.check_items.adapter_field_service import AdapterFieldService
+
+    return _adapter_fields(lambda: AdapterFieldService().get(implementation_id, check_item_id))
+
+
+@router.post("/catalog/adapters/{implementation_id}/fields/trial", dependencies=[Depends(app_user)])
+def try_adapter_fields(implementation_id: str, payload: AdapterFieldsRequest, request: Request):
+    """Start a trial in the background. It saves nothing."""
+
+    from src.apps.rule_governance.backend.check_items.adapter_field_service import AdapterFieldService
+
+    user = _authenticated_user(request)
+    return _adapter_fields(lambda: AdapterFieldService().start(
+        implementation_id,
+        payload.check_item_id,
+        fields=payload.fields or None,
+        actor=_authenticated_actor(request),
+        actor_user_id=str(user.user_id or "") or None,
+    ))
+
+
+@router.post("/catalog/adapters/{implementation_id}/fields/save", dependencies=[Depends(app_user)])
+def save_adapter_fields(implementation_id: str, payload: AdapterFieldsRequest, request: Request):
+    """Put the fields a person confirmed into force: template, adapter version and runtime bundles together."""
+
+    from src.apps.rule_governance.backend.check_items.adapter_field_service import AdapterFieldService
+
+    _authenticated_user(request)
+    return _adapter_fields(lambda: AdapterFieldService().save(
+        implementation_id,
+        payload.check_item_id,
+        fields=payload.fields,
+        actor=_authenticated_actor(request),
+    ))
+
+
 @router.get("/catalog/check-items/{check_item_id}/events")
 def list_check_item_events(check_item_id: str, event_type: str, limit: int = 10):
     """The latest stored events of one event type a rule of this check item produces."""

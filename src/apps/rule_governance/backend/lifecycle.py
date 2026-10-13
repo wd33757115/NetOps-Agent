@@ -26,6 +26,10 @@ def drain():
     from .access import execution_lock
 
     with execution_lock(exclusive=True), get_db_session() as db:
+        from .check_items.adapter_field_service import cancel_active
+
+        # A field trial has saved nothing; it is simply ended and can be started again.
+        cancel_active(db)
         for row in db.query(ParserControlSetting).with_for_update().all():
             if not row.key.startswith(PREFIXES):
                 continue
@@ -129,4 +133,6 @@ def pending():
             )
             .count()
         )
-        return controls + parsers + legacy + sources + stages
+        from .check_items.adapter_field_service import active_trials
+
+        return controls + parsers + legacy + sources + stages + active_trials()

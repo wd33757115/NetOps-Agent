@@ -186,3 +186,58 @@ describe('CheckItemOverviewDrawer rollback', () => {
     expect(screen.queryByRole('button', { name: /回退到/ })).not.toBeInTheDocument()
   })
 })
+
+describe('CheckItemOverviewDrawer adapter fields', () => {
+  const withTrials: CheckItemOverview = {
+    ...overview,
+    fields: overview.fields.map((field) => (
+      field.canonical_field === 'serial_number' ? { ...field, provided_by: 5, absent_by: 2 } : field
+    )),
+    adapters: [
+      { ...overview.adapters[0], missing_fields: ['lane_status', 'serial_number'], absent_fields: ['serial_number'],
+        field_trial: 'no_data' },
+      overview.adapters[1],
+    ],
+  }
+
+  it('sets what a device does not print apart from what nobody has tried, and stops counting it as a gap', async () => {
+    vi.spyOn(parserApi, 'checkItemOverview').mockResolvedValue(withTrials)
+    renderDrawer()
+
+    expect(await screen.findByText('不提供：lane_status')).toBeVisible()
+    expect(screen.getByText('设备不输出：serial_number')).toBeVisible()
+    // lane_status: 5 of 7 and nothing known about the other two, still a gap.
+    // serial_number: 5 provide it and 2 devices do not print it, so all 7 are accounted for.
+    const [laneStatus, serialNumber] = screen.getAllByText('5 / 7')
+    expect(laneStatus.className).toContain('warning')
+    expect(serialNumber.className).not.toContain('warning')
+    expect(screen.getByText('2 个设备不输出')).toBeVisible()
+  })
+
+  it('opens the dialog for the adapter whose row was used, and only for adapters that lack fields', async () => {
+    vi.spyOn(parserApi, 'checkItemOverview').mockResolvedValue(withTrials)
+    const load = vi.spyOn(parserApi, 'adapterFields').mockResolvedValue({
+      implementation_id: 'n9k', implementation_name: 'N9K-C9364C', check_item_id: 'interface.optical_power',
+      status: 'idle', requested_fields: [], sample_count: 4, field_count: 3, provided_count: 2, result: null,
+      missing_fields: [{ name: 'lane_status', description: '', use: 'change', absent: false }],
+    })
+    renderDrawer()
+
+    await userEvent.click(await screen.findByRole('button', { name: '给 N9K-C9364C 补字段' }))
+
+    expect(load).toHaveBeenCalledWith('n9k', 'interface.optical_power')
+    // antd keeps a dialog's content hidden in jsdom while it animates in.
+    expect(await screen.findByText('给 N9K-C9364C 补字段', { selector: '.ant-modal-title' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '给 H3C optical diagnostics 补字段' })).not.toBeInTheDocument()
+  })
+
+  it('says on the row when a trial is running or waiting to be checked', async () => {
+    vi.spyOn(parserApi, 'checkItemOverview').mockResolvedValue({
+      ...withTrials,
+      adapters: [{ ...withTrials.adapters[0], field_trial: 'ready' }, withTrials.adapters[1]],
+    })
+    renderDrawer()
+
+    expect(await screen.findByRole('button', { name: '给 N9K-C9364C 补字段' })).toHaveTextContent('核对结果')
+  })
+})

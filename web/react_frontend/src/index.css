@@ -864,6 +864,164 @@ button.relation-count:focus-visible {
 }
 
 /* Going back to the previous release: the same preview as any release, in a dialog. */
+/* Adding fields to an adapter: each new field beside the output line it was read from. */
+.adapter-fields {
+  max-height: calc(100vh - 260px);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.adapter-fields__wait {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 36px 12px;
+  text-align: center;
+}
+
+.adapter-fields__alert {
+  margin-bottom: 14px;
+}
+
+.adapter-fields__list {
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 8px;
+}
+
+.adapter-fields__field {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  padding: 12px 14px;
+}
+
+.adapter-fields__field + .adapter-fields__field {
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.adapter-fields__field--absent {
+  color: rgba(15, 23, 42, 0.45);
+}
+
+.adapter-fields__field--absent .adapter-fields__name {
+  margin-right: 10px;
+  font-weight: 400;
+}
+
+.adapter-fields__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
+.adapter-fields__name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.adapter-fields__count {
+  margin-left: auto;
+  font-size: 12px;
+}
+
+.adapter-fields__label {
+  margin-top: 8px;
+  color: rgba(15, 23, 42, 0.55);
+  font-size: 12px;
+}
+
+.adapter-fields__values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.adapter-fields__values code {
+  padding: 1px 8px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 6px;
+  background: transparent;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+/* The device's own text, kept in its columns so a heading stays above its value. */
+.adapter-fields__source {
+  margin-top: 2px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.04);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.adapter-fields__source-above {
+  color: rgba(15, 23, 42, 0.45);
+}
+
+.adapter-fields__source mark {
+  padding: 0 2px;
+  border-radius: 3px;
+  background: rgba(250, 173, 20, 0.3);
+  color: inherit;
+}
+
+.adapter-fields__kept {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 14px;
+  border-left: 3px solid #52c41a;
+  background: rgba(82, 196, 26, 0.06);
+}
+
+.adapter-fields__toggle {
+  margin-left: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.adapter-fields__lines {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.04);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.adapter-fields__detail {
+  margin-top: 6px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+/* What saving does, read before the buttons rather than squeezed in beside them. */
+.adapter-fields__footnote {
+  display: block;
+  margin-bottom: 12px;
+  font-size: 12px;
+  text-align: left;
+}
+
 .check-item-rollback {
   max-height: calc(100vh - 260px);
   overflow-y: auto;

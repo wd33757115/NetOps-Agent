@@ -4,6 +4,8 @@
 import { api } from '@netops/config/api'
 import { createOfflineJobApi } from '@netops/services/offlineJobApi'
 import type {
+  AdapterFieldsSaved,
+  AdapterFieldsState,
   AdapterProjectionCandidateInput,
   AdapterProjectionCandidateResult,
   AdapterProjectionCutoverAuthorizationResult,
@@ -617,6 +619,28 @@ export const parserApi = {
   ).data,
   ruleGenerationGuide: async (): Promise<RuleGenerationGuide> => (
     await api.get<RuleGenerationGuide>('/parser/catalog/rule-generation-guide/')
+  ).data,
+  adapterFields: async (implementationId: string, checkItemId: string): Promise<AdapterFieldsState> => (
+    await api.get<AdapterFieldsState>(
+      `/parser/catalog/adapters/${encodeURIComponent(implementationId)}/fields/`,
+      { params: { check_item_id: checkItemId } },
+    )
+  ).data,
+  tryAdapterFields: async (
+    implementationId: string, checkItemId: string, fields: string[],
+  ): Promise<AdapterFieldsState> => (
+    await api.post<AdapterFieldsState>(
+      `/parser/catalog/adapters/${encodeURIComponent(implementationId)}/fields/trial/`,
+      { check_item_id: checkItemId, fields },
+    )
+  ).data,
+  saveAdapterFields: async (
+    implementationId: string, checkItemId: string, fields: string[],
+  ): Promise<AdapterFieldsSaved> => (
+    await api.post<AdapterFieldsSaved>(
+      `/parser/catalog/adapters/${encodeURIComponent(implementationId)}/fields/save/`,
+      { check_item_id: checkItemId, fields },
+    )
   ).data,
   previewCheckItemRollback: async (checkItemId: string): Promise<CheckItemRollbackPreview> => (
     await api.post<CheckItemRollbackPreview>(
