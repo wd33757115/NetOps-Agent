@@ -2915,7 +2915,7 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
                           impactDigest: impact.impact_digest,
                         })}
                       >
-                        只提交，由他人批准
+                        只提交，暂不发布
                       </Button>
                       <Button
                         type="primary"
@@ -2980,6 +2980,12 @@ const CheckItemCatalogWorkspace: React.FC<CheckItemCatalogWorkspaceProps> = ({
                 </div>
                 {selectedChange.status === 'pending_approval' && !canUseRules && (
                   <Typography.Text type="secondary">当前账号没有规则治理应用使用权。</Typography.Text>
+                )}
+                {selectedChange.status === 'pending_approval' && canUseRules && (
+                  // Nothing asks for a second account; the wording used to suggest it did.
+                  <Typography.Text type="secondary">
+                    提交人自己也可以批准，不需要换账号；批准人会记入审计记录。
+                  </Typography.Text>
                 )}
               </section>
             )}
