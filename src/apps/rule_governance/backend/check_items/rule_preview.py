@@ -15,6 +15,7 @@ from src.apps.rule_governance.backend.check_items.canonical_rule_context import 
     build_canonical_rule_context,
     generate_canonical_rule_candidates,
 )
+from src.apps.rule_governance.backend.check_items.rule_guide import explain
 from src.core.check_items.canonical import freeze_rule_semantics
 from src.core.check_items.local_semantics import derive_assessment_mode
 
@@ -308,7 +309,6 @@ def preview_check_item_rules(
         name, observation_type = target["canonical_field"], target["observation_type"]
         roles = list(target.get("assessment_roles") or [])
         warnings = list(blockers.get(observation_type, []))
-        tracked = target.get("change_tracking", True) is not False
         if "current_state" in roles and target.get("health_policy"):
             outcome, lines = "health", _health_lines(target["health_policy"])
         elif "current_state" in roles:
@@ -326,10 +326,10 @@ def preview_check_item_rules(
         else:
             outcome = "evidence"
             lines = ["只在报告中展示，不判断是否正常。"]
-            if tracked:
-                lines.append("两次巡检的值不同会计入变化统计，但不产生事件。")
         if outcome in {"health", "change"} and not lines and not warnings:
             warnings.append("这个字段不会生成任何规则。")
+        groups = dict(target.get("state_groups") or {})
+        policy = policies.get(observation_type)
         fields.append(
             {
                 "canonical_field": name,
@@ -337,6 +337,15 @@ def preview_check_item_rules(
                 "outcome": outcome,
                 "lines": lines,
                 "warnings": warnings,
+                # What the field compiles to and which row of the guide says so.
+                **explain(
+                    semantic_type=str(target.get("semantic_type") or ""),
+                    use="current_state" if outcome == "health" else outcome,
+                    compare_mode=str(policy.get("compare_mode")) if policy else None,
+                    event_classes=[str(rule.get("event_class") or "fault") for rule in rules.get(observation_type, [])],
+                    health=bool(target.get("health_policy")),
+                    grouped=bool(groups.get("healthy") and groups.get("unhealthy")),
+                ),
             }
         )
     return {

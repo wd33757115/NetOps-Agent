@@ -36,6 +36,16 @@ def norm(value: Any) -> str:
     return str(value or "").strip().lower()
 
 
+def norm_value(value: Any) -> str:
+    """Normalize a value for comparison with the values a rule lists.
+
+    Unlike ``norm``, False and 0 are values here, not blanks: a boolean field
+    whose abnormal value is False has to be able to match it.
+    """
+
+    return "" if value is None else str(value).strip().lower()
+
+
 def norm_field(value: Any) -> str:
     return norm(value).replace("-", "_")
 
@@ -549,11 +559,11 @@ def condition_matches(condition: dict[str, Any], change: dict[str, Any]) -> bool
         entity_types = {norm(item) for item in condition.get("entity_types") or []}
         if entity_types and norm(change.get("entity_type")) not in entity_types:
             return False
-        from_values = {norm(item) for item in condition.get("from_values") or []}
-        to_values = {norm(item) for item in condition.get("to_values") or []}
+        from_values = {norm_value(item) for item in condition.get("from_values") or []}
+        to_values = {norm_value(item) for item in condition.get("to_values") or []}
         new_group = _state_group(change.get("new"))
         new_matches = (
-            norm(change.get("new")) in to_values
+            norm_value(change.get("new")) in to_values
             if to_values
             else new_group == str(condition.get("to_group"))
         )
@@ -566,7 +576,7 @@ def condition_matches(condition: dict[str, Any], change: dict[str, Any]) -> bool
             )
         old_group = _state_group(change.get("old"))
         old_matches = (
-            norm(change.get("old")) in from_values
+            norm_value(change.get("old")) in from_values
             if from_values
             else old_group == str(condition.get("from_group"))
         )
@@ -614,12 +624,12 @@ def condition_matches(condition: dict[str, Any], change: dict[str, Any]) -> bool
     if kind == "entity_status_down":
         entity_types = {norm(item) for item in condition.get("entity_types") or []}
         fields = {norm_field(item) for item in condition.get("fields") or []}
-        explicit_values = {norm(item) for item in condition.get("values") or []}
+        explicit_values = {norm_value(item) for item in condition.get("values") or []}
         return (
             norm(change.get("entity_type")) in entity_types
             and norm_field(change.get("field")) in fields
             and (
-                norm(change.get("new")) in explicit_values
+                norm_value(change.get("new")) in explicit_values
                 if explicit_values
                 else is_down(change.get("new"))
             )
@@ -698,8 +708,8 @@ def current_state_condition_matches(
             and (norm(value) == "established") is bool(condition.get("to_established"))
         )
     if kind == "entity_status_down":
-        explicit_values = {norm(item) for item in condition.get("values") or []}
-        return norm(value) in explicit_values if explicit_values else is_down(value)
+        explicit_values = {norm_value(item) for item in condition.get("values") or []}
+        return norm_value(value) in explicit_values if explicit_values else is_down(value)
     return False
 
 

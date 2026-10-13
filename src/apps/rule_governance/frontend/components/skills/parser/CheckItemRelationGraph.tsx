@@ -112,7 +112,9 @@ const nodeClass = (kind: string, change?: Change) => (
   `relation-node relation-node--${kind}${change && change !== 'same' ? ` relation-node--${change}` : ''}`
 )
 
-const OutcomeNode: React.FC<{ outcome: Outcome; checkItemId: string; diff: boolean }> = ({ outcome, checkItemId, diff }) => {
+const OutcomeNode: React.FC<{ outcome: Outcome; checkItemId: string; diff: boolean; draft?: boolean }> = ({
+  outcome, checkItemId, diff, draft,
+}) => {
   if (outcome.kind !== 'event') {
     return (
       <div className={nodeClass('result', outcome.change)}>
@@ -127,7 +129,8 @@ const OutcomeNode: React.FC<{ outcome: Outcome; checkItemId: string; diff: boole
   const fault = outcome.event_class === 'fault'
   const number = fault ? outcome.open || 0 : outcome.total || 0
   const closing = diff && outcome.change === 'removed' && Boolean(outcome.open)
-  const counted = outcome.event_class !== 'recovery' && (number > 0 || !diff)
+  // A draft has produced nothing yet, and a comparison only counts what is on record.
+  const counted = !draft && outcome.event_class !== 'recovery' && (number > 0 || !diff)
   const tip = outcome.before_text ? `${outcome.text}（原为：${outcome.before_text}）` : outcome.text
   return (
     <div className={nodeClass('event', outcome.change)}>
@@ -222,7 +225,7 @@ const RelationRow: React.FC<{ row: Row; checkItemId: string; diff: boolean; patr
       </Tooltip>
       <div className="relation-row__outcomes">
         {row.outcomes.map((outcome) => (
-          <OutcomeNode key={outcome.key} outcome={outcome} checkItemId={checkItemId} diff={diff} />
+          <OutcomeNode key={outcome.key} outcome={outcome} checkItemId={checkItemId} diff={diff} draft={!patrolled} />
         ))}
       </div>
     </div>
@@ -333,7 +336,7 @@ const CheckItemRelationGraph: React.FC<CheckItemRelationGraphProps> = ({ checkIt
             row={row}
             checkItemId={checkItemId}
             diff={diff}
-            patrolled={graph.patrolled !== false}
+            patrolled={graph.patrolled !== false && graph.mode !== 'draft'}
           />
         ))}
         {!diff && graph.rows.length === 0 && evidence.fields.length + reference.fields.length > 0 && (

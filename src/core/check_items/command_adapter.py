@@ -1073,6 +1073,13 @@ def _validate_target_contract(
             if dimensions:
                 expected["dimensions"] = {dimension: {"field": dimension} for dimension in dimensions}
             if dict(binding) != expected:
+                bound = sorted(dict(binding.get("dimensions") or {}))
+                if {key: value for key, value in dict(binding).items() if key != "dimensions"} == {"source": name}:
+                    # Nothing is renamed or converted: the two sides only disagree on the dimensions.
+                    raise CommandAdapterError(
+                        f"同名 Value {name} 的维度不一致：检查项声明 {'、'.join(sorted(dimensions)) or '无'}，"
+                        f"适配器输出 {'、'.join(bound) or '无'}"
+                    )
                 raise CommandAdapterError(f"同名 Value {name} 不允许改名或转换；请修正 TextFSM")
     primary_keys = set(_primary_keys(check_item))
     allowed = set(field_specs) | primary_keys

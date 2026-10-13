@@ -17,6 +17,7 @@ import type {
   CheckItemCatalogCheckItemDeleteResult,
   CheckItemDeletePreview,
   CheckItemRollbackPreview,
+  RuleGenerationGuide,
   CheckItemEventList,
   CheckItemEventTally,
   CheckItemCatalogCheckItemDraftInput,
@@ -613,6 +614,9 @@ export const parserApi = {
     await api.post<{ events_closed: CheckItemEventTally[] }>(
       `/parser/catalog/check-items/${encodeURIComponent(checkItemId)}/retired-events/close/`,
     )
+  ).data,
+  ruleGenerationGuide: async (): Promise<RuleGenerationGuide> => (
+    await api.get<RuleGenerationGuide>('/parser/catalog/rule-generation-guide/')
   ).data,
   previewCheckItemRollback: async (checkItemId: string): Promise<CheckItemRollbackPreview> => (
     await api.post<CheckItemRollbackPreview>(

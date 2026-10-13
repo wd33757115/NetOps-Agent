@@ -104,6 +104,41 @@ def _fit_projection(pinned: list[dict[str, Any]], target: dict[str, Any]) -> tup
     return sorted(set(dropped)), sorted(missing)
 
 
+def _dimension_misfit(pinned: list[dict[str, Any]], target: dict[str, Any]) -> str:
+    """Name the fields the version tells apart by other dimensions than the adapter outputs them by.
+
+    A field's dimensions are part of what identifies each value, so an adapter is
+    never moved onto different ones silently. The form does not edit them either:
+    a draft that differs was not made that way on purpose.
+    """
+
+    from src.core.check_items.command_adapter import _field_specs
+
+    specs = _field_specs(target)
+    groups: dict[tuple[tuple[str, ...], tuple[str, ...]], set[str]] = {}
+    for output in pinned:
+        fields = dict(output.get("projection") or {}).get("fields")
+        if not isinstance(fields, dict):
+            continue
+        for name, binding in fields.items():
+            declared = tuple(sorted(str(item) for item in specs.get(name, {}).get("dimensions") or []))
+            bound = tuple(sorted(dict(binding.get("dimensions") or {}))) if isinstance(binding, dict) else ()
+            if declared != bound:
+                groups.setdefault((declared, bound), set()).add(name)
+    if not groups:
+        return ""
+    parts = []
+    for (declared, bound), names in sorted(groups.items()):
+        listed = "、".join(sorted(names)[:3]) + (" 等" if len(names) > 3 else "")
+        parts.append(
+            f"{len(names)} 个字段（{listed}）在新版本里"
+            + (f"按 {'、'.join(declared)} 区分" if declared else "不分维度")
+            + "，适配器"
+            + (f"按 {'、'.join(bound)} 输出" if bound else "输出时不分维度")
+        )
+    return "；".join(parts) + "。表单不修改维度：撤销这份草稿后重新修改，字段会保持已发布版本的维度"
+
+
 def _repin_adapters(
     db: Any,
     root: CheckItemRecord,
@@ -220,7 +255,10 @@ def _repin_adapters(
             reason = (
                 f"不提供必填字段 {'、'.join(missing)}。可以先把这些字段设为选填发布，适配器补上后再改为必填"
                 if missing
-                else str(exc)
+                else _dimension_misfit(
+                    pinned,
+                    {"version_id": str(version.id), "canonical_contract": dict(version.canonical_contract_json or {})},
+                ) or str(exc)
             )
             misfits.setdefault(reason, []).append(str(adapter.name))
             continue

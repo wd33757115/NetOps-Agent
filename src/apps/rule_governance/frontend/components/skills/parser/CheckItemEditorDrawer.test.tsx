@@ -62,8 +62,8 @@ describe('CheckItemEditorDrawer', () => {
         rule_semantics_snapshot: { digest: 'frozen', observations: [definition] } } }}
       canonicalCatalog={{ items: [{ ...definition, description: '全局目录说明' }] } as any} />)
     await user.click(screen.getByText('编辑语义与规则用途'))
-    expect(screen.getByRole('checkbox', { name: '参与普通变化比较' })).toBeChecked()
-    await user.click(screen.getByRole('checkbox', { name: '参与普通变化比较' }))
+    // The tracking switch is gone: only the one use decides whether a field is compared.
+    expect(screen.queryByRole('checkbox', { name: '参与普通变化比较' })).not.toBeInTheDocument()
     expect(screen.getByLabelText('含义说明')).toHaveValue('检查项自己的说明')
     await user.clear(screen.getByLabelText('含义说明'))
     await user.type(screen.getByLabelText('含义说明'), '现场风扇状态')
@@ -75,7 +75,6 @@ describe('CheckItemEditorDrawer', () => {
       observation_type: 'custom.fan.state', semantic_definition: {
         description: '现场风扇状态', state_groups: { unhealthy: ['broken'] },
       },
-      change_tracking: false,
     })
     expect(definition.description).toBe('检查项自己的说明')
   })
@@ -122,6 +121,29 @@ describe('CheckItemEditorDrawer', () => {
       expect.objectContaining({ canonical_field: 'UPTIME', change_tracking: false }),
       expect.objectContaining({ canonical_field: 'SUBSLOT', collection: 'list', paired_with: 'SUBSLOT_INFO', unique_items: true }),
     ]))
+  })
+
+  it('keeps a published field on the dimensions it was published with, whatever its definition lists', async () => {
+    const onSubmit = vi.fn()
+    const row = (name: string, extra: Record<string, unknown> = {}) => ({ canonical_field: name,
+      observation_type: `configuration.startup_files.${name.toLowerCase()}`, semantic_type: 'text', value_type: 'text',
+      required: false, assessment_roles: ['evidence'], ...extra })
+    const observations = [row('CURRENT_FILE'), row('NEXT_MAIN_FILE', { dimensions: ['BOARD'] })]
+    render(<CheckItemEditorDrawer open mobile={false}
+      checkItem={{ ...checkItem, check_item_id: 'configuration.startup_files', report_projection: 'auto@1',
+        canonical_contract: { value_contract: 'same-name/v1', entity_type: 'device_board',
+          identity_dimensions: ['BOARD'], observations,
+          // An early import: the frozen definitions name the identity as a dimension, the fields do not.
+          rule_semantics_snapshot: { digest: 'frozen', observations: observations.map(item => ({
+            id: item.observation_type, description: item.canonical_field, semantic_type: 'text',
+            value_types: ['text'], dimensions: ['BOARD'], assessment_roles: ['evidence'] })) } } }}
+      onClose={vi.fn()} onSubmit={onSubmit} />)
+    await userEvent.click(screen.getByRole('button', { name: /保存草稿并预览影响/ }))
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1))
+    const saved = onSubmit.mock.calls[0][0].canonical_contract.observations as Array<Record<string, unknown>>
+    // The adapters output CURRENT_FILE without a dimension: a draft that gave it one could not be published.
+    expect(saved.find(item => item.canonical_field === 'CURRENT_FILE')?.dimensions).toEqual([])
+    expect(saved.find(item => item.canonical_field === 'NEXT_MAIN_FILE')?.dimensions).toEqual(['BOARD'])
   })
 
   it('preserves advanced contract fields when they remain collapsed', async () => {
@@ -295,5 +317,70 @@ describe('CheckItemEditorDrawer boolean states', () => {
     expect(onSubmit.mock.calls[0][0].canonical_contract.observations[0].semantic_definition.state_groups).toEqual({
       healthy: ['present'], unhealthy: ['absent'], unknown: ['unknown'],
     })
+  })
+})
+
+describe('CheckItemEditorDrawer rule generation', () => {
+  const definition = { id: 'environment.fan.state', description: '风扇状态', semantic_type: 'state',
+    value_types: ['text'], dimensions: [], assessment_roles: ['change'], allowed_values: ['ok', 'broken'],
+    state_groups: { healthy: ['ok'], unhealthy: ['broken'] } }
+  const fan = { ...checkItem, canonical_contract: { ...checkItem.canonical_contract,
+    observations: [{ ...(checkItem.canonical_contract.observations as any[])[0], assessment_roles: ['change'] }],
+    rule_semantics_snapshot: { digest: 'frozen', observations: [definition] } } }
+  const generated = {
+    canonical_field: 'fan_status', observation_type: 'environment.fan.state', outcome: 'change',
+    lines: ['从 ok 变为 broken 时产生故障事件（重要）。'], warnings: [],
+    guide_row: 'change_state_grouped', summary: '会生成 1 条变化规则（状态转换）和 3 条事件规则。',
+    reason: '因为它是状态、用于变化检测，并且填了正常和异常状态。', change_rules: 1, event_rules: 3,
+  }
+
+  it('says under each field what it generates and why, and opens the guide on its row', async () => {
+    vi.spyOn(parserApi, 'previewCheckItemRules').mockResolvedValue({
+      valid: true, errors: [], assessment_mode: 'change', fields: [generated] } as any)
+    vi.spyOn(parserApi, 'ruleGenerationGuide').mockResolvedValue({
+      rows: [
+        { key: 'change_text', kinds: '文本', use: '变化检测', needs: '', change_rule: '1 条，精确比较', event_rules: '1 条提示', effect: '值变了就提示。' },
+        { key: 'change_state_grouped', kinds: '状态、枚举、布尔', use: '变化检测', needs: '正常状态和异常状态',
+          change_rule: '1 条，状态转换', event_rules: '3 条：故障（重要）、恢复、提示', effect: '变坏报故障。' },
+      ],
+      fixed: ['级别是固定的。'], timing: ['发布时生效。'],
+    })
+    render(<CheckItemEditorDrawer open mobile={false} onClose={vi.fn()} onSubmit={vi.fn()} checkItem={fan} />)
+
+    expect(await screen.findByText('会生成 1 条变化规则（状态转换）和 3 条事件规则。')).toBeInTheDocument()
+    expect(screen.getByText(/因为它是状态、用于变化检测，并且填了正常和异常状态。/)).toBeInTheDocument()
+
+    await userEvent.click(screen.getAllByRole('button', { name: '规则是怎么生成的' })[0])
+    // antd keeps a dialog's content hidden in jsdom while it animates in.
+    expect(await screen.findByText('3 条：故障（重要）、恢复、提示')).toBeInTheDocument()
+    expect(screen.getByText('标出的一行是字段 fan_status 现在的设置。')).toBeInTheDocument()
+    const current = document.querySelector('tr.rule-guide__row--current')
+    expect(current?.textContent).toContain('状态、枚举、布尔')
+    expect(document.querySelectorAll('tr.rule-guide__row--current')).toHaveLength(1)
+    expect(screen.getByText('级别是固定的。')).toBeInTheDocument()
+  })
+
+  it('draws what the draft generates while it is edited', async () => {
+    vi.spyOn(parserApi, 'previewCheckItemRules').mockResolvedValue({
+      valid: true, errors: [], assessment_mode: 'change', fields: [generated],
+      graph: {
+        mode: 'draft',
+        rows: [{
+          field: { name: 'fan_status', description: '风扇状态', observation_type: 'environment.fan.state' },
+          rule: { kind: 'change', title: '变化规则', detail: '状态转换', lines: [] },
+          outcomes: [{ key: 'event:environment.fan.state.degraded', kind: 'event', event_type: 'environment.fan.state.degraded',
+            event_class: 'fault', severity: 'major', text: '从 ok 变为 broken 时产生故障事件（重要）。' }],
+        }],
+        reference: [], evidence: [], errors: [],
+      },
+    } as any)
+    render(<CheckItemEditorDrawer open mobile={false} onClose={vi.fn()} onSubmit={vi.fn()} checkItem={fan} />)
+
+    const row = await screen.findByRole('listitem', { name: 'fan_status：变化规则，状态转换' })
+    expect(row.textContent).toContain('故障事件，重要')
+    // A draft is in force nowhere and has produced nothing: no state, no counts.
+    expect(row.textContent).not.toContain('生效')
+    expect(row.querySelector('.relation-count')).toBeNull()
+    expect(screen.getByText(/下图是这份草稿会生成的规则和事件/)).toBeInTheDocument()
   })
 })

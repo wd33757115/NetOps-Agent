@@ -19,10 +19,13 @@ import type {
   CanonicalRuleCandidates,
   CanonicalObservationCatalog,
   CheckItemCatalogCheckItemDraftInput,
+  CheckItemRelations,
   ParserCheckItem,
 } from '@netops/services/api'
 import { parserApi } from '@netops/services/api'
+import CheckItemRelationGraph from './CheckItemRelationGraph'
 import FieldSemanticEditor, { pickUse, trendKindForUnit, type FieldRulePreview, type FieldRulesInForce } from './FieldSemanticEditor'
+import RuleGuideDialog from './RuleGuideDialog'
 
 interface CheckItemEditorDrawerProps {
   open: boolean
@@ -185,7 +188,10 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
   const assessmentMode = structured ? deriveMode(canonicalFields) : selectedMode
   const [ruleCandidates, setRuleCandidates] = useState<CanonicalRuleCandidates | null>(null)
   const [ruleDraftLoading, setRuleDraftLoading] = useState(false)
-  const [preview, setPreview] = useState<{ error?: string; fields: Record<string, FieldRulePreview> }>({ fields: {} })
+  const [preview, setPreview] = useState<{
+    error?: string; fields: Record<string, FieldRulePreview>; graph?: CheckItemRelations
+  }>({ fields: {} })
+  const [guide, setGuide] = useState<{ open: boolean; row?: string; field?: string }>({ open: false })
   const previewRequest = useRef(0)
   // Every field offers the whole template catalog; build the list once, not per field per keystroke.
   const observationOptions = useMemo(() => (canonicalCatalog?.items || []).map((item) => ({
@@ -281,7 +287,9 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
         context_fields: [...new Set([...(existing?.context_fields as string[] || []).filter((value) => !Object.values((existing?.threshold_references as any) || {}).some((ref: any) => ref.field_name === value)), ...Object.values(references).map((ref: any) => ref.field_name)])],
         value_type: field.value_type,
         unit: field.unit?.trim() || null,
-        dimensions: existing?.dimensions || definition?.dimensions || [],
+        // The form has no control for dimensions, and adapters output a field by the ones it was
+        // published with: a field already there keeps exactly its own, never the definition's.
+        dimensions: existing ? existing.dimensions || [] : definition?.dimensions || [],
         required: field.required,
         change_tracking: use === 'change' || field.change_tracking !== false,
       }
@@ -350,7 +358,7 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
           id: values.id || '', result_mode: 'structured', canonical_contract: buildCanonicalContract(values),
         })
         next = result.valid
-          ? { fields: Object.fromEntries(result.fields.map((row) => [row.canonical_field, row])) }
+          ? { fields: Object.fromEntries(result.fields.map((row) => [row.canonical_field, row])), graph: result.graph }
           : { error: result.errors.join('；'), fields: {} }
       } catch (error: any) {
         next = { error: error?.response ? '规则预览暂不可用' : error?.message, fields: {} }
@@ -605,7 +613,8 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
                       </div>
                       <FieldSemanticEditor name={name} field={canonicalFields[name]} fields={canonicalFields}
                         preview={preview.fields[canonicalFields[name]?.name]}
-                        inForce={inForce.fields[canonicalFields[name]?.name]} />
+                        inForce={inForce.fields[canonicalFields[name]?.name]}
+                        onOpenGuide={(row, field) => setGuide({ open: true, row, field })} />
                       <Button
                         type="text"
                         danger
@@ -642,7 +651,10 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
 
         {structured && (
           <>
-            <Typography.Title level={5}>巡检时会做什么</Typography.Title>
+            <div className="check-item-editor-heading">
+              <Typography.Title level={5}>巡检时会做什么</Typography.Title>
+              <Button size="small" onClick={() => setGuide({ open: true })}>规则是怎么生成的</Button>
+            </div>
             {preview.error
               ? <Alert type="warning" showIcon message="还不能生成规则" description={preview.error} style={{ marginBottom: 16 }} />
               : <Alert type="info" showIcon style={{ marginBottom: 16 }}
@@ -650,6 +662,16 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
                 description={checkItem
                   ? '每个字段下方先写保存并发布后的判断，随表单即时更新；与现在生效的规则不同时，会把现在生效的内容一并列出。'
                   : '每个字段下方的说明就是巡检实际执行的判断，随表单即时更新；发布后生效。'} />}
+            {preview.graph && !preview.error && (
+              <div className="check-item-editor-graph">
+                <Typography.Text type="secondary">
+                  {preview.graph.mode === 'diff'
+                    ? '下图是这份草稿会生成的规则和事件，和已发布的版本不同的地方标了出来。随表单更新，保存前不生效。'
+                    : '下图是这份草稿会生成的规则和事件。随表单更新，发布后生效。'}
+                </Typography.Text>
+                <CheckItemRelationGraph checkItemId={checkItem?.check_item_id || ''} graph={preview.graph} />
+              </div>
+            )}
             {inForce.leftover > 0 && (
               <Alert type="warning" showIcon style={{ marginBottom: 16 }}
                 message={`另有 ${inForce.leftover} 条规则绑定在旧版本已不存在的字段上，仍为生效状态`}
@@ -756,6 +778,11 @@ const CheckItemEditorDrawer: React.FC<CheckItemEditorDrawerProps> = ({
           <Input.TextArea rows={3} placeholder="可选；版本差异和操作审计会自动留痕" />
         </Form.Item>
       </Form>
+      <RuleGuideDialog
+        open={guide.open}
+        current={guide.row ? { row: guide.row, field: guide.field } : undefined}
+        onClose={() => setGuide({ open: false })}
+      />
     </Drawer>
   )
 }

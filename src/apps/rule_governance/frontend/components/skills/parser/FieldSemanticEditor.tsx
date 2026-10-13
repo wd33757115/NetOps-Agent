@@ -1,5 +1,5 @@
 import React from 'react'
-import { Checkbox, Collapse, Form, Input, InputNumber, Select, Tag, Typography } from 'antd'
+import { Button, Checkbox, Collapse, Form, Input, InputNumber, Select, Tag, Typography } from 'antd'
 
 export const semanticKinds = [
   { value: 'state', label: '状态' }, { value: 'text', label: '文本' },
@@ -39,7 +39,11 @@ export const trendKindForUnit = (unit?: string) => {
   return value === 'percent' || value === '%' ? 'utilization_increase' : value === 'dbm' ? 'linear_power_drop' : undefined
 }
 
-export interface FieldRulePreview { outcome: string; lines: string[]; warnings: string[] }
+export interface FieldRulePreview {
+  outcome: string; lines: string[]; warnings: string[]
+  /** What the field compiles to, why, and which row of the guide says so. */
+  summary?: string; reason?: string; guide_row?: string
+}
 export interface FieldRulesInForce { lines: string[]; stale_count: number; stale_versions: number[] }
 
 /** A Value that is only shown or only referenced has no rule, before or after saving. */
@@ -49,8 +53,9 @@ const unchanged = (preview: FieldRulePreview, inForce: FieldRulesInForce) => (
     : preview.lines.join('\n') === inForce.lines.join('\n')
 )
 
-export default function FieldSemanticEditor({ name, field, fields, preview, inForce }: {
+export default function FieldSemanticEditor({ name, field, fields, preview, inForce, onOpenGuide }: {
   name: number; field: any; fields: any[]; preview?: FieldRulePreview; inForce?: FieldRulesInForce
+  onOpenGuide?: (row: string, field: string) => void
 }) {
   const form = Form.useFormInstance()
   const kind = field?.semantic_definition?.semantic_type
@@ -58,6 +63,8 @@ export default function FieldSemanticEditor({ name, field, fields, preview, inFo
   const state = stateKinds.includes(kind)
   const numericHealth = kind === 'gauge' && use === 'current_state'
   const trendKind = trendKindForUnit(field?.unit)
+  const groups = field?.semantic_definition?.state_groups || {}
+  const grouped = Boolean(groups.healthy?.length && groups.unhealthy?.length)
   const path = (key: string) => [name, 'semantic_definition', key]
   const set = (key: string, value: unknown) => form.setFieldValue(['canonical_fields', name, key], value)
   const thresholdOptions = fields
@@ -67,6 +74,20 @@ export default function FieldSemanticEditor({ name, field, fields, preview, inFo
   return <>
     <div className="check-item-field-outcome" aria-label={`${field?.name || '字段'} 的巡检行为`}>
       <Tag color={fieldUses[use].color}>{fieldUses[use].label}</Tag>
+      {preview?.summary && (
+        <div className="check-item-field-generates">
+          <Typography.Text strong>{preview.summary}</Typography.Text>
+          <Typography.Text type="secondary">
+            {preview.reason}
+            {onOpenGuide && preview.guide_row && (
+              <Button type="link" size="small" className="check-item-field-generates__link"
+                onClick={() => onOpenGuide(preview.guide_row as string, field?.name || '')}>
+                规则是怎么生成的
+              </Button>
+            )}
+          </Typography.Text>
+        </div>
+      )}
       {preview ? <>
         {preview.lines.map((line) => <Typography.Text key={line}>{line}</Typography.Text>)}
         {preview.warnings.map((line) => <Typography.Text key={line} type="warning">{line}</Typography.Text>)}
@@ -104,11 +125,6 @@ export default function FieldSemanticEditor({ name, field, fields, preview, inFo
               value, label: `${fieldUses[value].label} · ${fieldUses[value].hint}`,
             }))} onChange={(value) => { if (value === 'change') set('change_tracking', true) }} />
           </Form.Item>
-          <Form.Item name={[name, 'change_tracking']} valuePropName="checked" initialValue={true}
-            className="check-item-catalog-form-wide"
-            extra={use === 'change' ? '变化检测必须比较两次巡检的值。' : '关闭后仍采集、保存并展示该 Value，只是不计入两次巡检之间的变化统计。'}>
-            <Checkbox disabled={use === 'change'}>参与普通变化比较</Checkbox>
-          </Form.Item>
 
           {state && use !== 'evidence' && <>
             <Typography.Paragraph className="check-item-catalog-form-wide" type="secondary">
@@ -125,7 +141,10 @@ export default function FieldSemanticEditor({ name, field, fields, preview, inFo
               </Form.Item>)}
           </>}
 
-          {use === 'change' && <Form.Item label="变化比较方式" name={[name, 'compare_mode']} extra="未指定时按语义类型自动选择。">
+          {use === 'change' && <Form.Item label="变化比较方式" name={[name, 'compare_mode']}
+            extra={state && grouped && field?.compare_mode === 'exact'
+              ? <Typography.Text type="warning">选精确比较后不再区分变坏和恢复，只产生提示事件。要保留故障和恢复事件，请清空这一项。</Typography.Text>
+              : '未指定时按语义类型自动选择。'}>
             <Select allowClear placeholder="按语义类型自动选择" options={[
               ...(field?.compare_mode === '__existing__' ? [{ value: '__existing__', label: '保留已有多种比较约束' }] : []),
               ...(kind === 'gauge' ? [{ value: 'numeric_delta', label: '数值变化' }]

@@ -464,6 +464,59 @@
   background: rgba(22, 103, 203, 0.04);
 }
 
+/* What a field compiles to and why, stated before the sentences that follow from it. */
+.check-item-field-generates {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.check-item-field-generates__link.ant-btn {
+  height: auto;
+  padding: 0 0 0 4px;
+}
+
+.check-item-editor-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.check-item-editor-graph {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+/* The guide is longer than most screens: it scrolls inside the dialog so its button stays in reach. */
+.rule-guide__body {
+  max-height: calc(100vh - 300px);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+/* The row of the rule generation guide that the field being edited falls in. */
+.rule-guide__row--current > td {
+  background: #f4f9f5 !important;
+  font-weight: 600;
+}
+
+.rule-guide__notes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 8px 24px;
+  margin-top: 16px;
+}
+
+.rule-guide__notes ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  color: var(--rule-ink-muted, #656b73);
+  font-size: 13px;
+}
+
 .check-item-field-in-force {
   display: flex;
   flex-direction: column;
@@ -890,6 +943,16 @@ button.relation-count:focus-visible {
 
 .release-trial__common {
   margin-top: -4px;
+}
+
+/* A second question asked of the same patrol, set apart from the first. */
+.release-trial__part {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--rule-line, #e5e7eb);
 }
 
 .release-trial__rules,

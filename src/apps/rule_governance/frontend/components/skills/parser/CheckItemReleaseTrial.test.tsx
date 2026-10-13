@@ -49,7 +49,6 @@ describe('CheckItemReleaseTrial', () => {
     expect(within(rules).getByText('0 变为 40')).toBeVisible()
     expect(within(rules).getByText('新增')).toBeVisible()
     expect(within(section).getByText('其余 1 条判断的结果不变。')).toBeVisible()
-    expect(within(section).getByText('两次巡检之间的变化事件不在这次试算里。')).toBeVisible()
   })
 
   it('lists the newly reported objects, a few first, and says what they have in common', async () => {
@@ -106,5 +105,85 @@ describe('CheckItemReleaseTrial', () => {
     render(<CheckItemReleaseTrial trial={{ available: false, reason: 'error', detail: 'boom' }} />)
     expect(screen.getByText('试算没有完成，不影响发布')).toBeVisible()
     expect(screen.getByText('boom')).toBeVisible()
+  })
+})
+
+describe('CheckItemReleaseTrial comparison', () => {
+  const wentDown = (slot: number) => ({
+    device_id: 'core-1', entity_key: JSON.stringify([`Ethernet1/${slot}`]), field: 'status', old: 'UP', new: 'DOWN',
+    change_type: 'modified', event_type: 'probe.status.degraded', event_class: 'fault', severity: 'major',
+  })
+
+  it('shows the changes and events the same patrol would have produced against its baseline', () => {
+    render(<CheckItemReleaseTrial trial={trial({
+      comparison: {
+        available: true,
+        baseline: { run_id: 'offline-1-baseline', observed_at: '2026-10-08T00:00:00+08:00' },
+        now: { changes: 1, events: { fault: 0, recovery: 0, change: 1 } },
+        after: { changes: 3, events: { fault: 2, recovery: 0, change: 1 } },
+        rules: [
+          { field: 'status', event_type: 'probe.status.degraded', text: '从 UP 变为 DOWN 时产生故障事件（重要）。',
+            change: 'added', now: 0, after: 2 },
+          { field: 'description', event_type: 'probe.description.changed', text: '与上次巡检相比有变化时产生提示事件。',
+            change: 'same', now: 1, after: 1 },
+        ],
+        added_count: 2,
+        added: [wentDown(1), wentDown(2)],
+        removed_count: 0,
+        removed: [],
+      },
+    })} />)
+
+    const part = screen.getByRole('group', { name: '和上一次巡检相比' })
+    expect(within(part).getByText('基线是 10 月 8 日 00:00 的巡检')).toBeVisible()
+    expect(part.textContent).toContain('1 项，发布后 3 项')
+    expect(part.querySelector('.release-trial__tile--attention')?.textContent).toContain('1 条，发布后 3 条')
+    expect(within(part).getByText('发布后：故障 2 条，恢复 0 条，提示 1 条')).toBeVisible()
+
+    const rules = within(part).getByRole('list', { name: '事件来自哪条规则' })
+    expect(within(rules).getAllByRole('listitem')).toHaveLength(1)
+    expect(within(rules).getByText('0 变为 2')).toBeVisible()
+
+    const list = within(part).getByRole('list', { name: '多出的 2 项' })
+    expect(within(list).getAllByText('status 从 UP 变为 DOWN，故障事件，重要')).toHaveLength(2)
+    expect(within(part).getByText('全部是 status 从 UP 变为 DOWN，故障事件，重要，都在 core-1 上。')).toBeVisible()
+  })
+
+  it('names a change that no rule turns into an event, and one that is no longer found', () => {
+    render(<CheckItemReleaseTrial trial={trial({
+      comparison: {
+        available: true,
+        baseline: { run_id: 'offline-1-baseline', observed_at: null },
+        now: { changes: 1, events: { fault: 0, recovery: 0, change: 0 } },
+        after: { changes: 0, events: { fault: 0, recovery: 0, change: 0 } },
+        rules: [],
+        added_count: 0,
+        added: [],
+        removed_count: 1,
+        removed: [{ device_id: 'core-1', entity_key: '["Ethernet1/1"]', field: 'note', old: 'a', new: 'b',
+          change_type: 'modified', event_type: '', event_class: '', severity: '' }],
+      },
+    })} />)
+
+    const list = screen.getByRole('list', { name: '不再有的 1 项' })
+    expect(within(list).getByText('note 从 a 变为 b，只计入变化，不产生事件')).toBeVisible()
+    expect(screen.getByRole('group', { name: '和上一次巡检相比' }).querySelector('.release-trial__tile--attention'))
+      .not.toBeNull()
+  })
+
+  it('says so when both versions find the same changes', () => {
+    const same = { changes: 1, events: { fault: 0, recovery: 0, change: 1 } }
+    render(<CheckItemReleaseTrial trial={trial({
+      comparison: { available: true, baseline: { run_id: 'b', observed_at: null }, now: same, after: same, rules: [],
+        added_count: 0, added: [], removed_count: 0, removed: [] },
+    })} />)
+
+    expect(screen.getByText('变化和事件一项不多、一项不少。')).toBeVisible()
+    expect(screen.getByRole('group', { name: '和上一次巡检相比' }).textContent).toContain('1 条，发布后不变')
+  })
+
+  it('says why changes cannot be tried when the patrol was compared with nothing', () => {
+    render(<CheckItemReleaseTrial trial={trial({ comparison: { available: false, reason: 'no_baseline' } })} />)
+    expect(screen.getByText('上次巡检没有和它比较的基线，变化和事件无法试算。')).toBeVisible()
   })
 })

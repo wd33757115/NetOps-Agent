@@ -252,6 +252,9 @@ def _compile_policy_candidate(target: Mapping[str, Any]) -> dict[str, Any]:
         },
         dimension_selector=dimension_selector,
     ).to_dict()
+    if target.get("semantic_type") in {"enum", "boolean"}:
+        # An enum or a boolean names its normal and abnormal values the way a state does.
+        proposal["compare_mode"] = "state_transition"
     references = dict(target.get('threshold_references') or {})
     if references and target.get('semantic_type') in {'gauge', 'threshold'}:
         proposal['threshold_references'] = references
@@ -260,7 +263,12 @@ def _compile_policy_candidate(target: Mapping[str, Any]) -> dict[str, Any]:
         proposal['compare_mode'] = 'threshold_and_deadband' if {'high', 'critical_high'} & references.keys() else 'threshold_low_and_deadband'
     if target.get("event_on_change"):
         proposal.update(deadband=0, thresholds={}, threshold_references={})
-        proposal["compare_mode"] = {"counter": "counter_delta", "gauge": "numeric_delta", "threshold": "numeric_delta", "state": "state_transition"}.get(target.get("semantic_type"), "exact")
+        # State, enum and boolean are compared as a move between values, so that one
+        # with normal and abnormal values can say which way it moved.
+        proposal["compare_mode"] = {
+            "counter": "counter_delta", "gauge": "numeric_delta", "threshold": "numeric_delta",
+            "state": "state_transition", "enum": "state_transition", "boolean": "state_transition",
+        }.get(target.get("semantic_type"), "exact")
         modes = constraints.get('allowed_compare_modes') or []
         if len(modes) == 1 and modes[0] in {'exact', 'state_transition', 'enum_transition', 'numeric_delta', 'counter_delta', 'hash_diff'}:
             proposal['compare_mode'] = modes[0]

@@ -1,10 +1,11 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { Alert, Button, Drawer, Space, Table, Tag, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useMutation, useQuery, useQueryClient } from 'react-query'
 import type { CheckItemOverview, CheckItemPatrolStatus, ParserCheckItem } from '@netops/services/api'
 import { parserApi } from '@netops/services/api'
 import CheckItemRelationGraph from './CheckItemRelationGraph'
+import RuleGuideDialog from './RuleGuideDialog'
 import { queryErrorLabel } from './parserUi'
 
 type OverviewField = CheckItemOverview['fields'][number]
@@ -95,6 +96,7 @@ const CheckItemOverviewDrawer: React.FC<CheckItemOverviewDrawerProps> = ({
   const status = overview?.status
   const waiting = status ? status.adapters - status.adapters_ready : 0
   const graph = overview?.graph
+  const [guideOpen, setGuideOpen] = useState(false)
   const retiredOpen = (graph?.retired || []).reduce((sum, event) => sum + (event.open || 0), 0)
   const closeRetired = useMutation(() => parserApi.closeRetiredRuleEvents(checkItemId || ''), {
     onSuccess: async (result) => {
@@ -283,7 +285,10 @@ const CheckItemOverviewDrawer: React.FC<CheckItemOverviewDrawerProps> = ({
 
         {graph && checkItemId && (
           <div>
-            <Typography.Title level={5}>字段、规则与事件</Typography.Title>
+            <div className="check-item-editor-heading">
+              <Typography.Title level={5}>字段、规则与事件</Typography.Title>
+              <Button size="small" onClick={() => setGuideOpen(true)}>规则是怎么生成的</Button>
+            </div>
             {Boolean(graph.errors.length) && !status?.blockers.length && (
               <Alert type="warning" showIcon message="规则无法生成" description={graph.errors.join('；')} style={{ marginBottom: 12 }} />
             )}
@@ -340,6 +345,7 @@ const CheckItemOverviewDrawer: React.FC<CheckItemOverviewDrawerProps> = ({
           />
         </div>
       </Space>
+      <RuleGuideDialog open={guideOpen} onClose={() => setGuideOpen(false)} />
     </Drawer>
   )
 }

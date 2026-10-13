@@ -109,3 +109,42 @@ def test_a_required_field_the_adapter_does_not_provide_blocks_the_switch(tmp_pat
     assert adapter.name in str(blocked.value)
     still_active = {item.id: item.version_id for item in repository.load_active().implementations}
     assert still_active[adapter.id] == adapter.version_id
+
+
+def test_a_field_given_a_dimension_the_adapter_does_not_output_blocks_the_switch_and_says_so(tmp_path):
+    repository, service, session_factory = _environment(tmp_path)
+    adapter, source = _projection_adapter(repository)
+    bound = adapter.adapter_spec["outputs"][0]["projection"]["fields"]
+    contract = deepcopy(source.canonical_contract)
+    identity = [name for name in contract["identity_dimensions"] if name != "device_id"]
+    # What an early imported check item looks like after the old form filled its fields' dimensions in.
+    moved = sorted(
+        row["canonical_field"]
+        for row in contract["observations"]
+        if row["canonical_field"] in bound and not row.get("dimensions") and not bound[row["canonical_field"]].get("dimensions")
+    )
+    assert identity and moved
+    types = set()
+    for row in contract["observations"]:
+        if row["canonical_field"] in moved:
+            row["dimensions"] = list(identity)
+            types.add(row["observation_type"])
+            if "semantic_definition" in row:
+                row["semantic_definition"]["dimensions"] = list(identity)
+    # Its frozen definitions name the identity as a dimension, which is where the form took it from.
+    for definition in contract["rule_semantics_snapshot"]["observations"]:
+        if definition["id"] in types:
+            definition["dimensions"] = list(identity)
+
+    with pytest.raises(CheckItemReleaseBlocked) as blocked:
+        _switch(session_factory, service, source, canonical_contract=contract)
+
+    reason = str(blocked.value)
+    assert f"{len(moved)} 个字段（{'、'.join(moved[:3])}" in reason
+    assert f"在新版本里按 {'、'.join(sorted(identity))} 区分，适配器输出时不分维度" in reason
+    assert "撤销这份草稿后重新修改" in reason
+    # Nothing was renamed and the template is fine: the reason must not send anyone to fix it.
+    assert "TextFSM" not in reason and "改名" not in reason
+    assert adapter.name in reason
+    still_active = {item.id: item.version_id for item in repository.load_active().implementations}
+    assert still_active[adapter.id] == adapter.version_id

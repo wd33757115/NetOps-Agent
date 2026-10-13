@@ -4191,11 +4191,60 @@ def preview_check_item_draft_rules(payload: CheckItemRulePreviewRequest):
         preview_check_item_rules,
     )
 
-    return preview_check_item_rules(
+    preview = preview_check_item_rules(
         check_item_id=payload.id,
         result_mode=payload.result_mode,
         canonical_contract=payload.canonical_contract,
     )
+    if preview["valid"] and payload.result_mode == "structured":
+        preview["graph"] = _draft_relations(payload, str(preview["assessment_mode"]))
+    return preview
+
+
+def _draft_relations(payload: "CheckItemRulePreviewRequest", assessment_mode: str) -> dict[str, Any]:
+    """The draft as field -> judgment -> outcomes, set against the published version when there is one."""
+
+    from src.apps.rule_governance.backend.check_items.relations import compile_relations, diff_relations
+    from src.core.check_items.canonical import freeze_rule_semantics
+    from src.infrastructure.db.models import CheckItemVersionRecord
+    from src.infrastructure.db.postgres import get_db_session
+
+    draft = compile_relations(
+        check_item_id=payload.id or "draft",
+        result_mode=payload.result_mode,
+        assessment_mode=assessment_mode,
+        canonical_contract=freeze_rule_semantics(dict(payload.canonical_contract or {})),
+    )
+    published = None
+    if payload.id:
+        with get_db_session() as db:
+            version = (
+                db.query(CheckItemVersionRecord)
+                .filter(
+                    CheckItemVersionRecord.check_item_id == payload.id,
+                    CheckItemVersionRecord.status == "active",
+                )
+                .first()
+            )
+            if version is not None and str(version.result_mode) == "structured":
+                published = compile_relations(
+                    check_item_id=payload.id,
+                    result_mode=str(version.result_mode),
+                    assessment_mode=str(version.assessment_mode),
+                    canonical_contract=dict(version.canonical_contract_json or {}),
+                )
+    if published is None:
+        return {**draft, "mode": "draft"}
+    return diff_relations(published, draft)
+
+
+@router.get("/catalog/rule-generation-guide")
+def get_rule_generation_guide():
+    """How a field's settings become change rules and event rules."""
+
+    from src.apps.rule_governance.backend.check_items.rule_guide import rule_guide
+
+    return rule_guide()
 
 
 @router.get("/catalog/check-items/{check_item_id}/active-rules")

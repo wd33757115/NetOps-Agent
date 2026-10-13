@@ -2300,7 +2300,15 @@ export interface CheckItemRulePreview {
     outcome: 'health' | 'change' | 'reference' | 'evidence'
     lines: string[]
     warnings: string[]
+    /** Which row of the rule generation guide the field falls in, what it generates and why. */
+    guide_row?: string
+    summary?: string
+    reason?: string
+    change_rules?: number
+    event_rules?: number
   }>
+  /** The draft as field -> judgment -> outcomes, compared with the published version when there is one. */
+  graph?: CheckItemRelations
 }
 
 /** What the published version of a check item judges today, in the same sentences as the preview. */
@@ -2344,9 +2352,25 @@ export interface CheckItemEventTally {
   count?: number
 }
 
+/** How a field's settings become rules: one row per kind of setting. */
+export interface RuleGenerationGuide {
+  rows: Array<{
+    key: string
+    kinds: string
+    use: string
+    needs: string
+    change_rule: string
+    event_rules: string
+    effect: string
+  }>
+  fixed: string[]
+  timing: string[]
+}
+
 /** A check item as field -> judgment -> outcomes; `change` is set when two versions are compared. */
 export interface CheckItemRelations {
-  mode: 'current' | 'diff'
+  /** `draft` is an unsaved definition: nothing is in force yet and no events are on record. */
+  mode: 'current' | 'diff' | 'draft'
   patrolled?: boolean
   rows: Array<{
     field: { name: string; description: string; observation_type: string; change?: RelationChange }
@@ -2435,6 +2459,37 @@ export interface CheckItemReleaseTrial {
   removed_count?: number
   removed?: Array<{ device_id: string; entity_key: string; field: string; value: unknown; severity: string; event_type: string }>
   no_data_fields?: string[]
+  /** The same patrol compared with its baseline again: changes found and the events made of them. */
+  comparison?: {
+    available: boolean
+    reason?: 'no_baseline'
+    baseline?: { run_id: string; observed_at: string | null }
+    now?: CheckItemTrialComparisonCount
+    after?: CheckItemTrialComparisonCount
+    rules?: CheckItemReleaseTrial['rules']
+    added_count?: number
+    added?: CheckItemTrialChange[]
+    removed_count?: number
+    removed?: CheckItemTrialChange[]
+  }
+}
+
+export interface CheckItemTrialComparisonCount {
+  changes: number
+  events: { fault: number; recovery: number; change: number }
+}
+
+/** One change between two patrols and the event a rule makes of it; no event type means it is only counted. */
+export interface CheckItemTrialChange {
+  device_id: string
+  entity_key: string
+  field: string
+  old: unknown
+  new: unknown
+  change_type: string
+  event_type: string
+  event_class: string
+  severity: string
 }
 
 /** The previous release drafted again as a new version, with what publishing it would switch. */
