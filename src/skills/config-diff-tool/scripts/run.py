@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -34,7 +35,12 @@ def run_config_diff(payload: dict) -> dict:
 
 
 def main() -> int:
-    payload = json.loads(sys.stdin.read() or "{}")
+    # The platform calls entry scripts with --params <file>; stdin stays for running it by hand.
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--params")
+    args, _ = parser.parse_known_args()
+    text = Path(args.params).read_text(encoding="utf-8") if args.params else sys.stdin.read()
+    payload = json.loads(text or "{}")
     result = run_config_diff(payload)
     print(json.dumps(result, ensure_ascii=False))
     return 0 if result.get("success") else 1

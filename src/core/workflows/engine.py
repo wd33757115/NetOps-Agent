@@ -82,11 +82,15 @@ class WorkflowEngine:
     @classmethod
     def _publish_workflow_notify(
         cls, event_type: str, run_id: str, payload: dict[str, Any]
-    ) -> bool:
-        """发布 Workflow 通知领域事件；返回 True 表示无需再走直接 create_notification。"""
+    ) -> tuple[bool, str | None]:
+        """发布 Workflow 通知领域事件。
+
+        返回 (是否无需再直接写通知, 直接写通知时使用的幂等键)。双写时两条路径用同一个键，
+        Consumer 写入的通知和直接写入的通知只保留一条。
+        """
         settings = get_settings()
         if not settings.EVENT_BUS_ENABLED:
-            return False
+            return False, None
         run = get_workflow_run(run_id)
         enriched = dict(payload)
         if run:
@@ -94,7 +98,7 @@ class WorkflowEngine:
             enriched.setdefault("thread_id", run.thread_id)
             enriched.setdefault("ticket_id", run.ticket_id)
         trace_id = (run.context or {}).get("langfuse_trace_id") if run else None
-        from src.core.events.publishers import publish_workflow_event
+        from src.core.events.publishers import publish_workflow_event, workflow_event_key
 
         msg_id = publish_workflow_event(
             event_type,
@@ -102,10 +106,11 @@ class WorkflowEngine:
             trace_id=str(trace_id) if trace_id else None,
             payload=enriched,
         )
+        key = workflow_event_key(event_type, run_id=run_id, payload=enriched)
         # 默认双写：EventBus 发布成功仍走 sync create_notification，避免 Consumer 未启动时无通知
         if msg_id and not settings.EVENT_BUS_DIRECT_NOTIFY_FALLBACK:
-            return True
-        return False
+            return True, key
+        return False, key
 
     @classmethod
     def ensure_wf_trace(cls, run_id: str):
@@ -755,7 +760,7 @@ class WorkflowEngine:
                 + "\n".join(f"下载 {lnk['label']}: {lnk['url']}" for lnk in links)
             )
 
-        if cls._publish_workflow_notify(
+        published, notify_key = cls._publish_workflow_notify(
             "workflow.completed",
             run_id,
             {
@@ -764,7 +769,8 @@ class WorkflowEngine:
                 "artifacts": artifacts,
                 "level": (oc.notification_level if oc else "success"),
             },
-        ):
+        )
+        if published:
             return
         create_notification(
             user_id=run.user_id,
@@ -774,6 +780,7 @@ class WorkflowEngine:
             thread_id=run.thread_id,
             payload=notification_download_payload(artifacts=artifacts),
             level=(oc.notification_level if oc else "success"),
+            idempotency_key=notify_key,
         )
 
     @classmethod
@@ -798,7 +805,7 @@ class WorkflowEngine:
                 + "\n".join(f"下载 {lnk['label']}: {lnk['url']}" for lnk in links)
             )
 
-        if cls._publish_workflow_notify(
+        published, notify_key = cls._publish_workflow_notify(
             "workflow.step.completed",
             run_id,
             {
@@ -808,7 +815,8 @@ class WorkflowEngine:
                 "notify_user": True,
                 "result": result if isinstance(result, dict) else None,
             },
-        ):
+        )
+        if published:
             return
         create_notification(
             user_id=run.user_id,
@@ -820,6 +828,7 @@ class WorkflowEngine:
                 result=result if isinstance(result, dict) else None
             ),
             level="info",
+            idempotency_key=notify_key,
         )
 
     @classmethod
@@ -830,14 +839,15 @@ class WorkflowEngine:
         template = get_template(run.template_name)
         if template and not template.on_complete.notify_on_failure:
             return
-        if cls._publish_workflow_notify(
+        published, notify_key = cls._publish_workflow_notify(
             "workflow.failed",
             run_id,
             {
                 "error": error,
                 "notify_on_failure": template.on_complete.notify_on_failure if template else True,
             },
-        ):
+        )
+        if published:
             return
         create_notification(
             user_id=run.user_id,
@@ -846,6 +856,7 @@ class WorkflowEngine:
             workflow_run_id=run_id,
             thread_id=run.thread_id,
             level="error",
+            idempotency_key=notify_key,
         )
 
     @classmethod
@@ -855,7 +866,7 @@ class WorkflowEngine:
             return
         title = f"Workflow cancelled ({run.ticket_id or run_id[:8]})"
         body = f"Cancelled by {actor}: {reason}"
-        if cls._publish_workflow_notify(
+        published, notify_key = cls._publish_workflow_notify(
             "workflow.cancelled",
             run_id,
             {
@@ -865,7 +876,8 @@ class WorkflowEngine:
                 "cancelled_by": actor,
                 "reason": reason,
             },
-        ):
+        )
+        if published:
             return
         create_notification(
             user_id=run.user_id,
@@ -874,7 +886,7 @@ class WorkflowEngine:
             workflow_run_id=run_id,
             thread_id=run.thread_id,
             level="warning",
-            idempotency_key=f"workflow-cancelled|{run_id}",
+            idempotency_key=notify_key or f"workflow-cancelled|{run_id}",
         )
 
     @classmethod

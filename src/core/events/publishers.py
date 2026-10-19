@@ -61,6 +61,11 @@ def publish_skill_execution_event(result: SkillExecutionResult) -> str | None:
     return EventBus.publish(STREAM_SKILL_EXECUTION, event)
 
 
+def workflow_event_key(event_type: str, *, run_id: str, payload: dict[str, Any] | None = None) -> str:
+    """The idempotency key consumers will see for this workflow event."""
+    return _stable_event_id(event_type, {"run_id": run_id, **(payload or {})})
+
+
 def publish_workflow_event(
     event_type: str,
     *,

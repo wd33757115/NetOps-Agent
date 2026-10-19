@@ -103,13 +103,26 @@ def main() -> int:
         execution_time_ms=int((time.perf_counter() - started) * 1000),
         workflow_run_id=p.get("workflow_run_id"),
     )
+    # Without PUBLIC_APP_URL the platform signs same-origin paths, which an ITSM system cannot fetch.
+    relative = [
+        item["filename"]
+        for item in payload["result"]["ticket_update"]["attachments"]
+        if not str(item["download_url"]).startswith(("http://", "https://"))
+    ]
+    warning = (
+        f"附件下载地址是相对路径（{'、'.join(relative)}），ITSM 系统无法直接下载；"
+        "请为平台配置 PUBLIC_APP_URL"
+        if relative else None
+    )
     headers = {"Content-Type": "application/json", **(p.get("callback_headers") or {})}
     try:
         resp = requests.post(callback_url, json=payload, headers=headers, timeout=30)
         ok = 200 <= resp.status_code < 300
+        message = "ITSM 回调成功" if ok else f"ITSM 回调失败: HTTP {resp.status_code}"
         result = {
             "success": ok,
-            "message": "ITSM 回调成功" if ok else f"ITSM 回调失败: HTTP {resp.status_code}",
+            "message": f"{message}；{warning}" if warning else message,
+            "warning": warning,
             "callback_status": "success" if ok else "failed",
             "http_status": resp.status_code,
             "response_body": resp.text[:500],

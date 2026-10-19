@@ -201,6 +201,8 @@ def _run_subprocess_skill(skill_name: str, params: dict[str, Any]) -> dict[str, 
             result = subprocess.run(
                 cmd,
                 capture_output=True,
+                # Input is params.json; a script reading stdin gets end-of-input, not the parent's open stdin.
+                stdin=subprocess.DEVNULL,
                 timeout=timeout_seconds,
                 cwd=str(get_skill_cwd(skill_name)),
                 env=_skill_subprocess_env(),

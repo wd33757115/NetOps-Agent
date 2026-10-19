@@ -40,6 +40,7 @@ outputs:
 enabled: true
 execution_mode: sync
 entry_script: scripts/run.py
+entry_output: none
 fallback_to_rag: true
 ---
 
