@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: itsm-firewall-llm-analysis
-description: ITSM 防火墙变更 + LLM 结果分析（模式 A）
-version: "1.0"
+description: ITSM 防火墙变更 + LLM 结果分析：防火墙策略应用生成策略与变更工单，再由模型解读
+version: "2.0"
 
 test:
   context:
@@ -11,13 +11,11 @@ test:
     ticket_title: Workflow UI test
     policy_file_url: ""
     topology_file_url:
-    requester: tester
-    assignee:
-    priority: normal
-    parameters: {}
     change_background: Workflow UI test
     change_purpose: Validate workflow execution
+    requester: tester
     requester_dept: NetOps
+    assignee:
     due_date:
     analysis_prompt: Summarize change risk
     analysis_focus: summary
@@ -27,50 +25,35 @@ test:
 
 steps:
   - name: policy_generation
-    label: 生成配置 ZIP
-    skill: firewall-policy-generator
+    label: 生成防火墙策略
+    skill: app:firewall-policy/generate_policy
     inputs:
       ticket_id: ${context.ticket_id}
-      ticket_title: ${context.ticket_title}
       policy_file_url: ${context.policy_file_url}
       topology_file_url: ${context.topology_file_url}
-      requester: ${context.requester}
-      assignee: ${context.assignee}
-      priority: ${context.priority}
-      parameters: ${context.parameters}
-      change_background: ${context.change_background}
-      change_purpose: ${context.change_purpose}
-      requester_dept: ${context.requester_dept}
-      due_date: ${context.due_date}
-      workflow_run_id: ${run.id}
 
   - name: change_ticket
-    label: 编写变更工单 Excel
-    skill: itsm-change-ticket-writer
+    label: 编写变更工单
+    skill: app:firewall-policy/write_change_ticket
     inputs:
-      ticket_id: ${context.ticket_id}
+      policy_run_id: ${steps.policy_generation.result.policy_run_id}
       ticket_title: ${context.ticket_title}
       change_background: ${context.change_background}
       change_purpose: ${context.change_purpose}
       requester: ${context.requester}
       requester_dept: ${context.requester_dept}
-      priority: ${context.priority}
-      due_date: ${context.due_date}
       assignee: ${context.assignee}
-      manifest: ${steps.policy_generation.result.manifest}
-      config_file_key: ${steps.policy_generation.artifacts.config_zip.file_key}
-      config_files_url: ${steps.policy_generation.artifacts.config_zip.download_url}
-      workflow_run_id: ${run.id}
+      due_date: ${context.due_date}
 
   - name: llm_analysis
     label: LLM 结果分析
     skill: llm-result-analyzer
     inputs:
       ticket_id: ${context.ticket_id}
-      prev_result: ${steps.change_ticket.result}
+      prev_result: ${steps.policy_generation.result}
       analysis_prompt: ${context.analysis_prompt}
       analysis_focus: ${context.analysis_focus}
-      source_step: change_ticket
+      source_step: policy_generation
       workflow_run_id: ${run.id}
 
 on_complete:

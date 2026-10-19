@@ -26,8 +26,14 @@ _COMMON_CONTEXT_FIELDS = (
     "due_date",
 )
 
+FIREWALL_POLICY = "app:firewall-policy/generate_policy"
+FIREWALL_TICKET = "app:firewall-policy/write_change_ticket"
+
 # Skill 对之间的已知映射规则：(prev_skill, skill) -> {input: expression}
 _KNOWN_PAIR_MAPPINGS: dict[tuple[str, str], dict[str, str]] = {
+    (FIREWALL_POLICY, FIREWALL_TICKET): {
+        "policy_run_id": "${steps.{prev}.result.policy_run_id}",
+    },
     (
         "firewall-policy-generator",
         "itsm-change-ticket-writer",
@@ -71,7 +77,12 @@ def _step_result_expr(step_name: str, path: str = "result") -> str:
 
 
 def get_skill_input_names(skill_name: str) -> set[str]:
-    """读取 Skill SKILL.md 中声明的 input 参数名。"""
+    """读取 Skill SKILL.md 中声明的 input 参数名；应用动作读它的输入模型。"""
+    from src.platform.tools import actions
+
+    if actions.is_action(skill_name):
+        found = actions.catalog().get(skill_name)
+        return set(found[1].input_model.model_fields) if found else set()
     manager = get_skill_manager()
     skill_md = manager._find_skill_md_path(skill_name)  # noqa: SLF001 — 管理器内部路径解析
     if not skill_md:

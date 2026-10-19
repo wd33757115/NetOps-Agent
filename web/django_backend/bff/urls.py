@@ -212,6 +212,11 @@ urlpatterns = [
         name="bff_itsm_firewall_policy",
     ),
     path("itsm/webhook/callback/", itsm.proxy_itsm_callback, name="bff_itsm_callback"),
+    path(
+        "itsm/webhook/<slug:route_key>/",
+        itsm.proxy_plugin_webhook,
+        name="bff_itsm_plugin_webhook",
+    ),
     path("skills/", skills.proxy_skills_list, name="bff_skills_list"),
     path("skills/stats/", skills.proxy_skills_stats, name="bff_skills_stats"),
     path("skills/catalog/stats/", skills.proxy_catalog_stats, name="bff_skills_catalog_stats"),

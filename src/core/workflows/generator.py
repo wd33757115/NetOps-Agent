@@ -304,14 +304,17 @@ def dsl_from_collab_template(
         WorkflowTriggersDSL,
     )
 
-    is_firewall_chain = (
-        step1_skill == "firewall-policy-generator"
-        and (step2_skill == "itsm-change-ticket-writer" or not step2_skill)
-    )
+    from src.core.workflows.mapping import FIREWALL_POLICY, FIREWALL_TICKET
+
+    # The firewall Skills moved into the firewall-policy App; the chain calls its actions.
+    legacy = {"firewall-policy-generator": FIREWALL_POLICY, "itsm-change-ticket-writer": FIREWALL_TICKET}
+    step1_skill = legacy.get(step1_skill, step1_skill)
+    step2_skill = legacy.get(step2_skill, step2_skill) if step2_skill else step2_skill
+    is_firewall_chain = step1_skill == FIREWALL_POLICY and step2_skill in (FIREWALL_TICKET, None, "")
     step1_name = "policy_generation" if is_firewall_chain else "step_one"
-    step1_label = "生成配置 ZIP" if is_firewall_chain else "第一步"
+    step1_label = "生成防火墙策略" if is_firewall_chain else "第一步"
     step2_name = "change_ticket" if is_firewall_chain else "step_two"
-    step2_label = "编写变更工单 Excel" if is_firewall_chain else "第二步"
+    step2_label = "编写变更工单" if is_firewall_chain else "第二步"
 
     steps: list[WorkflowStepDSL] = [
         WorkflowStepDSL(
@@ -350,7 +353,7 @@ def dsl_from_collab_template(
             require_any=chat_match_any or ["关键词"],
             require_any_secondary=chat_match_secondary or (["LLM", "分析"] if include_llm else []),
         ),
-        required_context=["ticket_id"] if is_firewall_chain else [],
+        required_context=["ticket_id", "policy_file_url"] if is_firewall_chain else [],
         context_defaults={"analysis_focus": "summary"},
         response_template=(
             "[OK] 已启动 Workflow\n\n"
@@ -486,7 +489,7 @@ def dsl_from_plugin_files(
             version=str(wf_raw.get("version") or "1.0"),
         ),
         steps=steps or [
-            WorkflowStepDSL(id="s1", name="step_one", label="步骤", skill="firewall-policy-generator")
+            WorkflowStepDSL(id="s1", name="step_one", label="步骤", skill="demo-text-stats")
         ],
         triggers=triggers,
         on_complete=on_complete,

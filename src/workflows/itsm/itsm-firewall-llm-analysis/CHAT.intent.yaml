@@ -3,7 +3,7 @@
 
 workflow: itsm-firewall-llm-analysis
 priority: 110
-description: 聊天触发防火墙变更 + LLM 结果分析（模式 A）
+description: 按工单的策略申请表（policy_file_url，http 地址）生成防火墙策略和变更工单，再由模型分析变更风险
 
 match:
   require_any:
@@ -17,11 +17,7 @@ match:
 
 required_context:
   - ticket_id
-
-context_from_state:
-  ticket_title: ticket_title
-  policy_file_url: uploaded_file_path
-  analysis_prompt: analysis_prompt
+  - policy_file_url
 
 context_defaults:
   ticket_title: 防火墙策略变更

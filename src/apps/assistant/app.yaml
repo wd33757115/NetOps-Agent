@@ -1,13 +1,15 @@
 manifest_version: 1
 id: assistant
 name: 知识问答
-version: 0.8.10
+version: 0.9.0
 platform_api: '>=1.0,<2.0'
 icon: document
 dependencies:
   materials: '>=1.0,<2.0'
 backend:
   router: src.apps.assistant.backend.api:router
+agent:
+  tools: src.apps.assistant.backend.automation:TOOLS
 frontend:
   entry: frontend/index.tsx
 database:

@@ -19,7 +19,13 @@ from src.core.workflows.registry import get_template
 from src.gateway.schemas import ITSMWorkflowStartResponse
 
 
-async def handle_itsm_webhook(route_key: str, body: dict[str, Any]) -> JSONResponse:
+async def handle_itsm_webhook(route_key: str, body: dict[str, Any], user) -> JSONResponse:
+    """Start the route's Workflow for the account Django authenticated (HTTP Basic)."""
+    if user is None:
+        raise HTTPException(
+            status_code=401,
+            detail="ITSM Webhook 需要平台账号：请经工作台 /api/itsm/webhook/<route_key>/ 调用并携带用户名和密码",
+        )
     registry = get_itsm_webhook_registry()
     plugin = registry.get_by_route(route_key)
     if not plugin:
@@ -35,6 +41,7 @@ async def handle_itsm_webhook(route_key: str, body: dict[str, Any]) -> JSONRespo
             plugin.workflow,
             context,
             source="itsm_webhook",
+            user_id=user.user_id,
         )
         ticket_id = context.get("ticket_id") or body.get("ticket_id") or ""
         resp = ITSMWorkflowStartResponse(

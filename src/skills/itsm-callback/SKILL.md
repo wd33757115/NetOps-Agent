@@ -36,6 +36,7 @@ inputs:
 outputs:
 - name: callback_status
   type: string
+disable-model-invocation: true
 enabled: true
 fallback_to_rag: false
 ---

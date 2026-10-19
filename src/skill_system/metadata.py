@@ -86,6 +86,9 @@ class SkillMetadata(BaseModel):
     enabled: bool = Field(True, description="是否启用")
     hidden: bool = Field(False, description="是否隐藏（不显示在列表）")
     fallback_to_rag: bool = Field(True, description="失败时是否走 RAG")
+    # DSH skill standard: model-invocable unless `disable-model-invocation: true`.
+    model_invocable: bool = Field(True, description="问答助手可加载并按用户要求执行（DSH disable-model-invocation 取反）")
+    when_to_use: str | None = Field(None, description="DSH whenToUse：何时使用，写入问答的技能目录")
     celery_task: str | None = Field(None, description="关联的 Celery 任务（execution_mode=async 时）")
     execution_mode: Literal["sync", "async"] = Field(
         "async",
@@ -175,6 +178,13 @@ def parse_frontmatter(content: str) -> tuple[dict[str, Any], str]:
     return {}, text
 
 
+def _dsh_boolean(value: Any) -> bool:
+    """DSH frontmatter boolean grammar (true/yes/on/1); absent means false."""
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"true", "yes", "on", "1"} if value is not None else False
+
+
 def parse_skill_md(file_path: Path, include_instructions: bool = True) -> SkillMetadata:
     """
     解析 SKILL.md 文件
@@ -241,6 +251,8 @@ def parse_skill_md(file_path: Path, include_instructions: bool = True) -> SkillM
         enabled=frontmatter.get('enabled', True),
         hidden=frontmatter.get('hidden', False),
         fallback_to_rag=frontmatter.get('fallback_to_rag', True),
+        model_invocable=not _dsh_boolean(frontmatter.get('disable-model-invocation')),
+        when_to_use=frontmatter.get('whenToUse') or None,
         celery_task=frontmatter.get('celery_task'),
         execution_mode=str(frontmatter.get('execution_mode', 'async')).strip().lower(),
         skill_path=str(skill_dir),

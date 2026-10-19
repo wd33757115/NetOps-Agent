@@ -58,6 +58,7 @@ outputs:
 - name: analysis_json
   type: object
   description: 结构化元数据
+disable-model-invocation: true
 enabled: true
 fallback_to_rag: false
 ---

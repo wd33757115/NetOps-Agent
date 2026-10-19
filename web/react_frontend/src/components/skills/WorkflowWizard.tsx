@@ -26,6 +26,7 @@ import {
   type WorkflowGraph,
 } from '../../types/workflowGraph'
 import {
+  FIREWALL_POLICY_ACTION,
   buildDslFromWizard,
   mergeChatYamlIntoDsl,
   type WorkflowDSL,
@@ -366,7 +367,7 @@ const WorkflowWizard: React.FC<WorkflowWizardProps> = ({ open, onClose, initial,
     if (chainMode === 'canvas') {
       const templateDsl = buildDslFromWizard({
         ...values,
-        step1_skill: values.step1_skill || 'firewall-policy-generator',
+        step1_skill: values.step1_skill || FIREWALL_POLICY_ACTION,
       })
       const { dsl, errors } = graphToWorkflowDsl(workflowGraph, {
         meta: templateDsl.meta,
@@ -441,7 +442,7 @@ const WorkflowWizard: React.FC<WorkflowWizardProps> = ({ open, onClose, initial,
       let dsl = buildCurrentDsl()
       if (!dsl) {
         dsl = applyTriggersToDsl(
-          buildDslFromWizard({ ...values, step1_skill: values.step1_skill || 'firewall-policy-generator' }),
+          buildDslFromWizard({ ...values, step1_skill: values.step1_skill || FIREWALL_POLICY_ACTION }),
         )
       }
 

@@ -19,7 +19,8 @@ def test_load_firewall_workflow_plugin():
     tpl = get_template("itsm-firewall-change")
     assert tpl is not None
     assert len(tpl.steps) == 3
-    assert tpl.steps[0].skill_name == "firewall-policy-generator"
+    assert tpl.steps[0].skill_name == "app:firewall-policy/generate_policy"
+    assert tpl.steps[1].inputs["policy_run_id"] == "${steps.policy_generation.result.policy_run_id}"
     assert tpl.steps[2].when == "${context.callback_url}"
 
 
@@ -254,7 +255,7 @@ def test_resolve_active_steps_without_callback():
     active = resolve_active_steps(tpl, ctx)
     assert len(active) == 2
     assert active[-1].name == "change_ticket"
-    assert format_steps_flow(active) == "生成配置 ZIP → 编写变更工单 Excel"
+    assert format_steps_flow(active) == "生成防火墙策略 → 编写变更工单"
 
 
 def test_resolve_active_steps_with_callback():

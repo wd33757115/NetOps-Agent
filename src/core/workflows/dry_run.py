@@ -25,22 +25,25 @@ class _MockStepRecord:
 
 
 def _default_mock_result(step: WorkflowStepDSL) -> dict[str, Any]:
-    return {
+    result = {
         "success": True,
         "message": f"[模拟] {step.skill} 执行成功",
         "skill": step.skill,
     }
+    if step.skill == "app:firewall-policy/generate_policy":
+        result["policy_run_id"] = "0" * 32
+    return result
 
 
 def _default_mock_artifacts(step: WorkflowStepDSL) -> dict[str, Any]:
-    if step.skill == "firewall-policy-generator":
+    if step.skill in {"firewall-policy-generator", "app:firewall-policy/generate_policy"}:
         return {
             "config_zip": {
                 "file_key": f"mock/{step.name}/config.zip",
                 "download_url": f"https://mock.local/{step.name}/config.zip",
             }
         }
-    if step.skill == "itsm-change-ticket-writer":
+    if step.skill in {"itsm-change-ticket-writer", "app:firewall-policy/write_change_ticket"}:
         return {
             "change_excel": {
                 "file_key": f"mock/{step.name}/change.xlsx",

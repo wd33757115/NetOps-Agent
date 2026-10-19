@@ -143,27 +143,37 @@ export interface WizardFormValues {
   chat_require_secondary?: string[]
 }
 
+/** 防火墙策略应用导出的 Workflow 动作（原 firewall-policy-generator / itsm-change-ticket-writer） */
+export const FIREWALL_POLICY_ACTION = 'app:firewall-policy/generate_policy'
+export const FIREWALL_TICKET_ACTION = 'app:firewall-policy/write_change_ticket'
+const LEGACY_FIREWALL_SKILLS: Record<string, string> = {
+  'firewall-policy-generator': FIREWALL_POLICY_ACTION,
+  'itsm-change-ticket-writer': FIREWALL_TICKET_ACTION,
+}
+
 /** 从向导表单构建 WorkflowDSL（逻辑与后端 dsl_from_collab_template 对齐） */
 export function buildDslFromWizard(values: WizardFormValues): WorkflowDSL {
   const {
     plugin_name,
     category = 'itsm',
     description = '自定义 Workflow',
-    step1_skill,
-    step2_skill,
     include_llm = true,
     chat_require_any,
     chat_require_secondary,
   } = values
+  const step1_skill = LEGACY_FIREWALL_SKILLS[values.step1_skill] ?? values.step1_skill
+  const step2_skill = values.step2_skill
+    ? LEGACY_FIREWALL_SKILLS[values.step2_skill] ?? values.step2_skill
+    : values.step2_skill
 
   const isFirewallChain =
-    step1_skill === 'firewall-policy-generator' &&
-    (step2_skill === 'itsm-change-ticket-writer' || !step2_skill)
+    step1_skill === FIREWALL_POLICY_ACTION &&
+    (step2_skill === FIREWALL_TICKET_ACTION || !step2_skill)
 
   const step1Name = isFirewallChain ? 'policy_generation' : 'step_one'
-  const step1Label = isFirewallChain ? '生成配置 ZIP' : '第一步'
+  const step1Label = isFirewallChain ? '生成防火墙策略' : '第一步'
   const step2Name = isFirewallChain ? 'change_ticket' : 'step_two'
-  const step2Label = isFirewallChain ? '编写变更工单 Excel' : '第二步'
+  const step2Label = isFirewallChain ? '编写变更工单' : '第二步'
 
   const steps: WorkflowStepDSL[] = [
     {
@@ -216,7 +226,7 @@ export function buildDslFromWizard(values: WizardFormValues): WorkflowDSL {
                 ? ['LLM', '分析']
                 : [],
         },
-        required_context: isFirewallChain ? ['ticket_id'] : [],
+        required_context: isFirewallChain ? ['ticket_id', 'policy_file_url'] : [],
         context_defaults: { analysis_focus: 'summary' },
         response_template: isFirewallChain
           ? '[OK] 已启动 Workflow\n\n- **流程 ID**: `{run_id}`\n- **工单**: {ticket_id}\n- **步骤**: {workflow_description}\n'

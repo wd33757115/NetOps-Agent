@@ -13,7 +13,9 @@ from threading import Lock
 from src.platform.clock import in_beijing
 from src.platform.tools import registry
 
-from . import evidence
+from src.platform.authorization.client import authorize_worker
+
+from . import automation, evidence
 from .workspace import DocumentWorkspace
 
 RUN = "device_access__run"
@@ -42,13 +44,19 @@ class DiagnosticWorkspace(DocumentWorkspace):
         super().__init__(actor_id, **kwargs)
         self.run_id = run_id
         self.scope = {}  # management address -> identified platform
+        self.automation = set()  # Skill/Workflow tools offered this turn
+        self.skills_dir = None  # the turn's DSH skill root, when it has one
         self.lock = Lock()
 
     def definitions(self):
         definitions = super().definitions()
         available = registry.available_tools(
-            actor_id=self.actor_id, names={RUN, COMPARE, ROWS, BASELINE}
+            actor_id=self.actor_id, names={RUN, COMPARE, ROWS, BASELINE, *automation.NAMES}
         )
+        offered = self.automation_tools(
+            [tool for tool in available if tool["name"] in automation.NAMES]
+        )
+        available = [tool for tool in available if tool["name"] not in automation.NAMES]
         has_baseline = any(tool["name"] == BASELINE for tool in available)
         extra = [tool for tool in available if tool["name"] == RUN
                  or (tool["name"] in {COMPARE, ROWS} and has_baseline)]
@@ -65,7 +73,39 @@ class DiagnosticWorkspace(DocumentWorkspace):
                 else f"。只能登录{scope}已采集设备；按设备平台写命令（comware/vrp 用 display，"
                 "ios/nxos 用 show）"
             )
-        return definitions + extra
+        return definitions + extra + offered
+
+    def automation_tools(self, tools):
+        """Skill and Workflow tools for accounts that may execute (admin, operator).
+
+        What the account may run is written as a DSH skill root; DSH lists it in the
+        session's skill catalog and its ``skill`` tool loads one before the model acts.
+        """
+        self.automation, self.skills_dir = set(), None
+        if not tools or not automation.can_execute(authorize_worker(self.actor_id, "assistant")):
+            return []
+        skills = automation.chat_skills(self.actor_id)
+        workflows = automation.chat_workflows()
+        if not skills and not workflows:
+            return []
+        self.skills_dir = automation.write_skill_catalog(self.root.parent / "skills", skills, workflows)
+        offered = []
+        for tool in tools:
+            properties = tool["input_schema"]["properties"]
+            if tool["name"] == automation.RUN_SKILL:
+                if not skills:
+                    continue
+                properties["skill"]["enum"] = [skill["name"] for skill in skills]
+            elif tool["name"] == automation.START_WORKFLOW:
+                if not workflows:
+                    continue
+                properties["workflow"]["enum"] = [flow["name"] for flow in workflows]
+            elif not workflows:
+                continue
+            tool["description"] += "；先用 skill 工具加载对应技能的说明，按说明填写参数"
+            offered.append(tool)
+        self.automation = {tool["name"] for tool in offered}
+        return offered
 
     def widen(self, result):
         with self.lock:
@@ -76,6 +116,8 @@ class DiagnosticWorkspace(DocumentWorkspace):
     def invoke(self, name, arguments):
         if name == ROWS:
             return self.rows(arguments)
+        if name in automation.NAMES:
+            return self.automate(name, arguments)
         if name not in {RUN, COMPARE}:
             result = super().invoke(name, arguments)
             if name in SCOPE_TOOLS:
@@ -117,6 +159,21 @@ class DiagnosticWorkspace(DocumentWorkspace):
             "citation": reference["citation"],
             "retrieved_at": reference["retrieved_at"],
             "notice": "本轮只读命令的现场观测；未执行的命令不能作为证据，登录失败不得重试。",
+        }
+
+    def automate(self, name, arguments):
+        """Run a Skill or a Workflow for the user; the answer cites what it returned."""
+        self.check()
+        if name not in self.automation:
+            raise PermissionError("Tool is outside this turn's contract")
+        result = in_beijing(registry.invoke(name, arguments, actor_id=self.actor_id))
+        reference = evidence.capture(name, result)
+        self.business_evidence[reference["id"]] = reference
+        return {
+            "data": result,
+            "citation": reference["citation"],
+            "retrieved_at": reference["retrieved_at"],
+            "notice": "这是本轮按用户要求执行的结果；下载链接原样提供给用户。",
         }
 
     def rows(self, arguments):

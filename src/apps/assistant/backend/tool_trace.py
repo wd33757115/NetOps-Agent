@@ -8,6 +8,7 @@ FIELDS = {
     "read": ("file_path", "offset", "limit"),
     "glob": ("pattern", "path"),
     "grep": ("pattern", "path", "include"),
+    "skill": ("name",),
 }
 BUSINESS_FIELDS = {
     "device_id",
@@ -27,6 +28,8 @@ BUSINESS_FIELDS = {
     "dst",
     "host",
     "commands",
+    "skill",
+    "workflow",
 }
 
 

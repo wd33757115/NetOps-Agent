@@ -38,8 +38,12 @@ ROOT = Path(__file__).resolve().parents[3]
 # Real characters per model request (the model window is 1M tokens). Thinking keeps
 # each round's reasoning in the history; 160k escaped characters stopped at round 9.
 MAX_CONTEXT_CHARACTERS = 400_000
-# Tools that log in to a device get the live timeout, not the 10 s query one.
-LIVE_TOOLS = frozenset({"device_access__run", "device_access__compare_baseline"})
+# Tools that log in to a device, run a Skill or start a Workflow get the live timeout,
+# not the 10 s query one.
+LIVE_TOOLS = frozenset({
+    "device_access__run", "device_access__compare_baseline",
+    "assistant__run_skill", "assistant__start_workflow",
+})
 UNAVAILABLE = "Business query unavailable; do not infer absence or health"
 
 
@@ -69,6 +73,7 @@ def tool_failure(exc, seconds):
         return UNAVAILABLE
     return text + "；不要据此推断正常或故障"
 NATIVE = {"read", "glob", "grep"}
+SKILL_TOOL = "skill"
 SUBMIT_ANSWER = "mcp__netops__submit_answer"
 MAX_OUTPUT_TOKENS = 8192
 # Shares of a run's token budget: past the first the model is asked to converge, past the
@@ -412,6 +417,9 @@ class Bridge:
         definitions = await asyncio.to_thread(self.catalog.definitions)
         definitions = [answer_gate.DEFINITION, *definitions]
         self.allowed.update("mcp__netops__" + t["name"] for t in definitions)
+        if getattr(self.catalog, "skills_dir", None):
+            # DSH's own loader for the turn's skill catalog.
+            self.allowed.add(SKILL_TOOL)
         by_name = {t["name"]: t for t in definitions}
         mcp = FastMCP("netops", log_level="ERROR", json_response=True, stateless_http=True)
 
@@ -444,7 +452,7 @@ class Bridge:
                     result = await asyncio.to_thread(self.catalog.submit_answer, arguments)
                     self.answer_feedback = result
                 else:
-                    # Both log in to a device; the comparison was cut off at 10 s.
+                    # Device logins, Skills and Workflow starts; the comparison was cut off at 10 s.
                     live = name in LIVE_TOOLS and getattr(
                         self.catalog, "active_diagnostics", False
                     )
@@ -566,9 +574,18 @@ DIAGNOSIS = """## 网络故障诊断
 回答末尾固定用四个小节列出结论：已证实（每条附上证据编号）、候选、已排除、待验证；
 某节没有内容时写“无”。
 """
+AUTOMATION = """## 执行 Skill 与启动 Workflow
+会话的技能目录（available_skills）列出当前账号可执行的 Skill 和可启动的 Workflow。
+用户明确要求执行或启动其中一项时（例如“统计这段文本”“按工单 REQ-1 生成防火墙策略”），
+先用 skill 工具加载它的说明，再按说明调用 mcp__netops__assistant__run_skill 或
+mcp__netops__assistant__start_workflow；只是提问或咨询时不要执行。
+上文“不生成规则、不修改配置”指你自己不做；这些工具按用户要求执行，生成的是文件和记录，不下发设备配置。
+参数只取用户给出的内容，不编造工单号、文件地址；工具返回 missing 时向用户询问缺少的项。同一请求只执行一次。
+回答引用工具返回的证据编号；下载链接按工具返回的 download_url 原样写成链接。
+"""
 
 
-def system_prompt(diagnostics=False):
+def system_prompt(diagnostics=False, automation=False):
     """Role and language first, then each kind of work under its own heading."""
     role = (
         "你是 NetOps 网络助手，服务网络工程师。所有思考、说明和回答都用中文。\n"
@@ -580,12 +597,32 @@ def system_prompt(diagnostics=False):
         )
     )
     sections = [DIAGNOSIS, DOCS] if diagnostics else [DOCS]
+    if automation:
+        sections.append(AUTOMATION)
     return "\n".join(
         [role, *sections, EVIDENCE.format(actions=LIVE if diagnostics else READ_ONLY)]
     )
 
 
-def patch_file(home, port, *, active_diagnostics=False, durable=False, thinking=False):
+def skill_rows(skills_dir):
+    """Official DSH skills: one generated root per turn, no project or user roots."""
+    return [
+        {"id": "skills", "name": "@deepseek-ai/dsh-skill"},
+        {
+            "id": "skill-files",
+            "name": "@deepseek-ai/dsh-skill-filesystem",
+            "config": {
+                "includeDefaultRoots": False,
+                "customSkillDirs": [str(skills_dir)],
+                "watch": False,
+            },
+        },
+        {"id": "skill-tool", "name": "@deepseek-ai/dsh-tool-skill"},
+    ]
+
+
+def patch_file(home, port, *, active_diagnostics=False, durable=False, thinking=False,
+               skills_dir=None):
     import yaml
 
     rows = [
@@ -634,6 +671,7 @@ def patch_file(home, port, *, active_diagnostics=False, durable=False, thinking=
                         "timeoutMs": 10000,
                     },
                 },
+                *(skill_rows(skills_dir) if skills_dir else []),
                 {"id": "netops-boundary", "name": str(Path(__file__).with_name("dsh_guard.cjs"))},
                 {
                     "id": "netops-mcp",
@@ -782,6 +820,7 @@ class DshRuntime:
                 active_diagnostics=getattr(bridge.catalog, "active_diagnostics", False),
                 durable=durable,
                 thinking=context.reasoning_effort != "off",
+                skills_dir=getattr(bridge.catalog, "skills_dir", None),
             )
             env = {
                 k: v
@@ -794,7 +833,8 @@ class DshRuntime:
                 NETOPS_DSH_TOOLS=json.dumps(sorted(bridge.allowed)),
                 NETOPS_DSH_SESSION_ID=session_id,
                 DSH_SYSTEM_PROMPT=system_prompt(
-                    getattr(bridge.catalog, "active_diagnostics", False)
+                    getattr(bridge.catalog, "active_diagnostics", False),
+                    bool(getattr(bridge.catalog, "automation", None)),
                 ),
             )
             from src.common.config import get_settings

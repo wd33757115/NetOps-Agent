@@ -53,6 +53,7 @@ references:
   - type: rag
     source: device-backup-guide
     description: 设备配置备份指南
+disable-model-invocation: true
 enabled: true
 fallback_to_rag: true
 ---

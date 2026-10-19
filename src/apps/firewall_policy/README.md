@@ -1,6 +1,6 @@
 # 防火墙策略业务能力包
 
-`firewall-policy` 1.0.0 包含策略计算、拓扑证据、配置校验、预览、申请表导出、变更工单、前端、API、任务、独立迁移和 Agent 工具。`app.yaml` 是唯一平台注册入口。复制本目录并按平台安装流程构建、安装、校验和启用即可接入；不在运行时安装依赖。
+`firewall-policy` 1.1.0 包含策略计算、拓扑证据、配置校验、预览、申请表导出、变更工单、前端、API、任务、独立迁移和 Agent 工具。`app.yaml` 是唯一平台注册入口。复制本目录并按平台安装流程构建、安装、校验和启用即可接入；不在运行时安装依赖。
 
 ## 使用
 
@@ -27,6 +27,17 @@
 
 Agent 工具与 HTTP API 调用同一业务服务，身份由平台提供。文件需先由应用上传接口接收，不能将聊天附件路径当作上传 ID。
 
+## Workflow 动作
+
+`app.yaml` 的 `workflow.actions` 导出两个动作，供 Workflow 步骤以 `skill: app:firewall-policy/<动作>` 调用（`src/workflows/itsm/` 下的两个 ITSM 流程即如此）：
+
+| 动作 | 做什么 | 结果与产物 |
+|---|---|---|
+| `generate_policy` | 下载 `policy_file_url`（及可选 `topology_file_url`，只接受 http(s)，不超过 10 MB），作为运行所属用户的上传保存，提交策略任务并等待完成（最长 360 秒） | `policy_run_id`、`devices`、`risk_level`；产物 `config_zip`、`policy_preview`、`policy_request` |
+| `write_change_ticket` | 按 `policy_run_id` 生成变更工单，只接受工单头字段 | `ticket_run_id`；产物 `change_excel` |
+
+动作以 Workflow 运行所属的用户执行，受该用户的应用授权约束；没有用户的运行（未认证的 Webhook）直接失败。任务和上传与页面提交的一样出现在该用户的历史记录里。请求标识由 Workflow 运行编号生成，同一运行重投递不会重复提交，重试 Workflow 会提交新任务。产物由平台保存为步骤产物，下载链接由平台签名，本包仍不发布 MinIO 签名地址。
+
 ## 持久化与执行
 
 包拥有 `app_firewall_uploads`、`app_firewall_runs` 和独立迁移链 `firewall_policy_0001`。文件存入私有 MinIO `apps/firewall-policy/`；数据库只记录校验值和私有对象键。
@@ -39,6 +50,6 @@ Agent 工具与 HTTP API 调用同一业务服务，身份由平台提供。文�
 
 ## 兼容边界
 
-旧 `src/skills` 脚本路径是到本包的兼容导入/CLI 入口，不再维护第二份实现。旧 Skill/test-run 和旧工作流中的对应 Skill 调用返回应用入口提示，避免绕过 App 授权。历史 Skill 产物保留原路径，未自动转换为新任务；旧 ITSM 自动流程尚未重写为本包调用。宿主页面及服务文件仅保留兼容导出。
+旧 `src/skills` 脚本路径是到本包的兼容导入/CLI 入口，不再维护第二份实现。旧 Skill/test-run 和旧工作流中的对应 Skill 调用返回应用入口提示，避免绕过 App 授权。历史 Skill 产物保留原路径，未自动转换为新任务；ITSM 自动流程已改为调用本包的 Workflow 动作。宿主页面及服务文件仅保留兼容导出。
 
 验证见 `tests/unit/test_firewall_package.py`、原策略算法回归、`web/django_backend/bff/test_firewall_deployment.py` 和 `web/react_frontend/e2e/firewall-policy.spec.ts`。真实交付测试要求显式设置独立的 `TEST_PACKAGE_BROKER_URL`，会在本地 MinIO 创建随机对象并清理，不使用生产队列。

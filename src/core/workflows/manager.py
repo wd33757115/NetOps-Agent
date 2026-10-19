@@ -13,6 +13,7 @@ import yaml
 
 from src.core.logging import get_logger
 from src.core.plugins.chat_intent import match_chat_workflow
+from src.core.workflows.mapping import FIREWALL_POLICY, FIREWALL_TICKET
 from src.core.workflows.registry import (
     WORKFLOWS_ROOT,
     WorkflowTemplate,
@@ -22,6 +23,9 @@ from src.core.workflows.registry import (
     resolve_active_steps,
     format_steps_flow,
 )
+from src.platform.tools.actions import catalog as app_action_catalog
+from src.platform.tools.actions import is_action as is_app_action
+from src.platform.tools.actions import parse as parse_app_action
 from src.skills.skill_manager import get_skill_manager
 
 log = get_logger(__name__)
@@ -100,6 +104,10 @@ def validate_workflow_yaml(content: str) -> dict[str, Any]:
         errors.append("steps 不能为空")
 
     skill_names = {s["name"] for s in get_skill_manager().list_all_skills() if s.get("name")}
+    try:
+        app_actions = set(app_action_catalog())
+    except Exception:
+        app_actions = set()
     enabled_skills = {
         s["name"] for s in get_skill_manager().list_all_skills() if s.get("name") and s.get("enabled", True)
     }
@@ -110,6 +118,11 @@ def validate_workflow_yaml(content: str) -> dict[str, Any]:
             errors.append(f"steps[{idx}] 缺少 name")
         if not skill:
             errors.append(f"steps[{idx}] 缺少 skill")
+        elif is_app_action(skill):
+            if parse_app_action(skill) is None:
+                errors.append(f"steps[{idx}] 应用动作应写成 app:<应用ID>/<动作名>：{skill}")
+            elif skill not in app_actions:
+                warnings.append(f"应用动作 '{skill}' 不存在或应用未安装")
         elif skill not in skill_names:
             warnings.append(f"Skill '{skill}' 未注册或已禁用")
         elif skill not in enabled_skills:
@@ -283,52 +296,55 @@ MODE_A_WORKFLOW = """name: {name}
 description: {description}
 version: "1.0"
 
+test:
+  context:
+    ticket_id: REQ-TEST-001
+    ticket_title: 防火墙策略变更
+    policy_file_url: ""
+    topology_file_url:
+    change_background:
+    change_purpose:
+    requester:
+    requester_dept:
+    assignee:
+    due_date:
+    analysis_prompt:
+    analysis_focus: summary
+  required_context:
+    - ticket_id
+    - policy_file_url
+
 steps:
   - name: {step1_name}
     label: {step1_label}
     skill: {step1_skill}
     inputs:
       ticket_id: ${{context.ticket_id}}
-      ticket_title: ${{context.ticket_title}}
       policy_file_url: ${{context.policy_file_url}}
       topology_file_url: ${{context.topology_file_url}}
-      requester: ${{context.requester}}
-      assignee: ${{context.assignee}}
-      priority: ${{context.priority}}
-      parameters: ${{context.parameters}}
-      change_background: ${{context.change_background}}
-      change_purpose: ${{context.change_purpose}}
-      requester_dept: ${{context.requester_dept}}
-      due_date: ${{context.due_date}}
-      workflow_run_id: ${{run.id}}
 
   - name: {step2_name}
     label: {step2_label}
     skill: {step2_skill}
     inputs:
-      ticket_id: ${{context.ticket_id}}
+      policy_run_id: ${{steps.{step1_name}.result.policy_run_id}}
       ticket_title: ${{context.ticket_title}}
       change_background: ${{context.change_background}}
       change_purpose: ${{context.change_purpose}}
       requester: ${{context.requester}}
       requester_dept: ${{context.requester_dept}}
-      priority: ${{context.priority}}
-      due_date: ${{context.due_date}}
       assignee: ${{context.assignee}}
-      manifest: ${{steps.{step1_name}.result.manifest}}
-      config_file_key: ${{steps.{step1_name}.artifacts.config_zip.file_key}}
-      config_files_url: ${{steps.{step1_name}.artifacts.config_zip.download_url}}
-      workflow_run_id: ${{run.id}}
+      due_date: ${{context.due_date}}
 
   - name: llm_analysis
     label: LLM 结果分析
     skill: llm-result-analyzer
     inputs:
       ticket_id: ${{context.ticket_id}}
-      prev_result: ${{steps.{step2_name}.result}}
+      prev_result: ${{steps.{step1_name}.result}}
       analysis_prompt: ${{context.analysis_prompt}}
       analysis_focus: ${{context.analysis_focus}}
-      source_step: {step2_name}
+      source_step: {step1_name}
       workflow_run_id: ${{run.id}}
 
 on_complete:
@@ -342,7 +358,7 @@ on_complete:
 
 MODE_A_CHAT_INTENT = """workflow: {name}
 priority: 110
-description: 聊天触发防火墙变更 + LLM 结果分析（模式 A）
+description: 按工单的策略申请表生成防火墙策略和变更工单，再由模型分析变更风险
 
 match:
   require_any:
@@ -354,10 +370,9 @@ match:
     - 结果分析
     - LLM分析
 
-context_from_state:
-  ticket_title: ticket_title
-  policy_file_url: uploaded_file_path
-  analysis_prompt: analysis_prompt
+required_context:
+  - ticket_id
+  - policy_file_url
 
 context_defaults:
   ticket_title: 防火墙策略变更
@@ -380,10 +395,10 @@ def list_collab_templates() -> list[dict[str, Any]]:
         {
             "id": "mode-a-firewall-llm",
             "title": "模式 A：长时任务 → 依赖上步 → LLM 分析",
-            "description": "Step1 生成策略 ZIP → Step2 编写变更工单 → Step3 llm-result-analyzer 生成分析报告",
+            "description": "Step1 防火墙策略应用生成策略 → Step2 编写变更工单 → Step3 llm-result-analyzer 生成分析报告",
             "steps": [
-                {"name": "policy_generation", "label": "生成配置 ZIP", "skill": "firewall-policy-generator"},
-                {"name": "change_ticket", "label": "编写变更工单", "skill": "itsm-change-ticket-writer"},
+                {"name": "policy_generation", "label": "生成防火墙策略", "skill": FIREWALL_POLICY},
+                {"name": "change_ticket", "label": "编写变更工单", "skill": FIREWALL_TICKET},
                 {"name": "llm_analysis", "label": "LLM 结果分析", "skill": "llm-result-analyzer"},
             ],
             "default_plugin_name": "itsm-firewall-llm-analysis",
@@ -408,8 +423,8 @@ def generate_from_collab_template(
     template_id: str,
     *,
     plugin_name: str | None = None,
-    step1_skill: str = "firewall-policy-generator",
-    step2_skill: str = "itsm-change-ticket-writer",
+    step1_skill: str = FIREWALL_POLICY,
+    step2_skill: str = FIREWALL_TICKET,
     description: str | None = None,
 ) -> dict[str, str] | None:
     """根据协同模板生成插件 YAML 文件内容。"""
@@ -420,10 +435,10 @@ def generate_from_collab_template(
             name=name,
             description=desc,
             step1_name="policy_generation",
-            step1_label="生成配置 ZIP",
+            step1_label="生成防火墙策略",
             step1_skill=step1_skill,
             step2_name="change_ticket",
-            step2_label="编写变更工单 Excel",
+            step2_label="编写变更工单",
             step2_skill=step2_skill,
         )
         chat = MODE_A_CHAT_INTENT.format(name=name)

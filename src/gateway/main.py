@@ -470,11 +470,14 @@ async def itsm_callback_endpoint(request: dict):
 @app.post(
     "/api/v1/itsm/webhook/firewall-policy", tags=["ITSM"], response_model=ITSMWorkflowStartResponse
 )
-async def itsm_firewall_policy_webhook(request: ITSMFirewallPolicyRequest):
+async def itsm_firewall_policy_webhook(request: ITSMFirewallPolicyRequest, raw: Request):
     """ITSM Webhook 兼容入口（转发至插件 route_key=firewall-policy）。"""
+    from src.auth.security import resolve_current_user
     from src.gateway.itsm_webhook_handler import handle_itsm_webhook
 
-    return await handle_itsm_webhook("firewall-policy", request.model_dump())
+    return await handle_itsm_webhook(
+        "firewall-policy", request.model_dump(), resolve_current_user(raw.headers)
+    )
 
 
 @app.post(
@@ -486,10 +489,12 @@ async def itsm_webhook_by_route(route_key: str, request: Request):
         raise HTTPException(
             status_code=404, detail=f"请使用专用端点: /api/v1/itsm/webhook/{route_key}"
         )
-    body = await request.json()
+    from src.auth.security import resolve_current_user
     from src.gateway.itsm_webhook_handler import handle_itsm_webhook
 
-    return await handle_itsm_webhook(route_key, body)
+    user = resolve_current_user(request.headers)
+    body = await request.json() if user is not None else {}
+    return await handle_itsm_webhook(route_key, body, user)
 
 
 @app.get("/api/v1/tasks/{task_id}", tags=["Tasks"], response_model=TaskResponse)

@@ -26,6 +26,7 @@ from src.core.workflows.repository import (
     mark_step_failed,
     mark_step_running,
 )
+from src.platform.tools.actions import is_action as is_app_action
 
 logger = logging.getLogger(__name__)
 
@@ -212,6 +213,10 @@ def _run_workflow_step(run_id: str, step_index: int) -> dict:
         return _run_subworkflow_step(run_id, step_index, step_tpl)
 
     params = WorkflowEngine.build_step_params(run_id, step_index)
+    if is_app_action(step_tpl.skill_name):
+        from src.core.workflows.app_steps import run_app_step
+
+        return run_app_step(run, step_index, step_tpl.name, step_tpl.skill_name, params)
     try:
         result = execute_skill_task.run(skill_name=step_tpl.skill_name, **params)
         return {**(result or {}), "step_index": step_index}

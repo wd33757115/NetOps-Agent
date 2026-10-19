@@ -3,7 +3,7 @@
 
 workflow: itsm-firewall-change
 priority: 100
-description: 聊天触发 ITSM 防火墙变更全流程
+description: 按工单的策略申请表（policy_file_url，http 地址）生成防火墙策略和变更工单；给了 callback_url 时回调 ITSM
 
 match:
   require_any:
@@ -20,15 +20,10 @@ match:
 
 required_context:
   - ticket_id
+  - policy_file_url
 
 auto_if_source:
   - itsm_webhook
-
-context_from_state:
-  ticket_title: ticket_title
-  policy_file_url: uploaded_file_path
-  callback_url: callback_url
-  callback_headers: callback_headers
 
 context_defaults:
   ticket_title: 防火墙策略变更

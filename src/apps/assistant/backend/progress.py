@@ -9,6 +9,7 @@ LABELS = {
     "glob": "查找资料文件",
     "grep": "搜索资料内容",
     "read": "阅读原文",
+    "skill": "加载技能说明",
     "mcp__netops__submit_answer": "核对答案引用",
     "mcp__netops__inspection__read_batch": "查询巡检记录",
     "mcp__netops__inspection__search_devices": "查找设备资产",
@@ -22,6 +23,9 @@ LABELS = {
     "mcp__netops__topology__locate": "定位网络终端",
     "mcp__netops__topology__trace_path": "计算网络路径",
     "mcp__netops__device_access__run": "执行设备诊断命令",
+    "mcp__netops__assistant__run_skill": "执行 Skill",
+    "mcp__netops__assistant__start_workflow": "启动 Workflow",
+    "mcp__netops__assistant__read_workflow_run": "查询 Workflow 运行",
 }
 STATUS = {
     "running": "正在准备资料与工具",

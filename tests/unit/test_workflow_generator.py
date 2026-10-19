@@ -36,12 +36,15 @@ def test_dsl_from_collab_template_structure():
 
 
 def test_infer_firewall_to_change_ticket_mapping():
+    # The retired firewall Skills now name the firewall-policy App's actions.
     dsl = _firewall_llm_dsl()
     mapped = apply_auto_mapping(dsl.steps)
-    change_step = mapped[1]
-    assert change_step.skill == "itsm-change-ticket-writer"
-    assert "${steps.policy_generation.result.manifest}" in change_step.inputs["manifest"]
-    assert "config_zip.file_key" in change_step.inputs["config_file_key"]
+    policy_step, change_step = mapped[0], mapped[1]
+    assert policy_step.skill == "app:firewall-policy/generate_policy"
+    assert policy_step.inputs["policy_file_url"] == "${context.policy_file_url}"
+    assert change_step.skill == "app:firewall-policy/write_change_ticket"
+    assert change_step.inputs["policy_run_id"] == "${steps.policy_generation.result.policy_run_id}"
+    assert change_step.inputs["ticket_title"] == "${context.ticket_title}"
 
 
 def test_infer_llm_analyzer_prev_result():
@@ -63,7 +66,7 @@ def test_generate_plugin_files_contains_all_artifacts():
     chat = yaml.safe_load(files["CHAT.intent.yaml"])
     assert chat["workflow"] == "test-firewall-llm"
     assert "防火墙" in chat["match"]["require_any"]
-    assert chat["required_context"] == ["ticket_id"]
+    assert chat["required_context"] == ["ticket_id", "policy_file_url"]
 
 
 def test_preview_workflow_validates():

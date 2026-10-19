@@ -129,6 +129,8 @@ def discover(root: Path = APPS_ROOT, *, app_id: str | None = None) -> dict[str, 
             symbols.append(database["bootstrap"])
         if data.get("agent", {}).get("tools"):
             symbols.append(data["agent"]["tools"])
+        if data.get("workflow", {}).get("actions"):
+            symbols.append(data["workflow"]["actions"])
         lifecycle = data.get("lifecycle", {})
         for hook in ("drain", "pending"):
             if lifecycle.get(hook):
