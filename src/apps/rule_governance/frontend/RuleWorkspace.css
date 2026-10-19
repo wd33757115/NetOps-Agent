@@ -120,6 +120,7 @@
 .rules-transfer-options, .rules-transfer-actions { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin: 18px 0; }
 .rules-transfer-actions { justify-content: space-between; border-top: 1px solid #e4eaf2; padding-top: 18px; }
 .rules-transfer-note { color: #53657d; margin: 14px 0; }
+.rules-transfer-check-notes { margin: 6px 0 0; padding-left: 20px; color: #3d4b5f; }
 .rules-transfer .ant-steps { margin: 12px 0 24px; }
 .rules-transfer .ant-upload-wrapper { display: block; margin-bottom: 16px; }
 .rules-transfer .ant-alert { margin: 12px 0; }

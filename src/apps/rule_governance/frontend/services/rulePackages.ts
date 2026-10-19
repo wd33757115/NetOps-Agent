@@ -8,7 +8,7 @@ export const packageKinds: Record<string, string> = {
 export interface PackageAsset { ref: string; kind: string; name: string; version: string | number; status: string; scope: string }
 export interface PlanItem {
   name?: string;
-  ref: string; kind: string; action: 'create' | 'reuse' | 'new_version'; local_id: string; version?: string | number;
+  ref: string; kind: string; action: 'create' | 'reuse' | 'new_version' | 'derived'; local_id: string | null; version?: string | number;
   same_version_conflict: boolean; metadata_preserved?: boolean; before: Record<string, unknown> | null; after: Record<string, unknown>
 }
 export interface PackagePreview {
@@ -30,7 +30,7 @@ export const packageApi = {
     (await api.post<ImportResult>(`${root}/import`, { content_base64, revision, confirm_conflicts }, { timeout: 120000 })).data,
   history: async (page: number) => (await api.get<{ items: { id: string; action: string; actor: string; created_at: string; sha256: string; counts?: Record<string, number>; asset_count?: number }[]; total: number }>(`${root}/history`, { params: { offset: (page - 1) * 20, limit: 20 } })).data,
   detail: async (id: string) => (await api.get<ImportResult>(`${root}/history/${id}`)).data,
-  validate: async (id: string) => (await api.post<{ checks: { name: string; status: string; blockers: string[] }[] }>(`${root}/history/${id}/validate`, {}, { timeout: 120000 })).data,
+  validate: async (id: string) => (await api.post<{ checks: { name: string; status: string; blockers: string[]; warnings?: string[] }[] }>(`${root}/history/${id}/validate`, {}, { timeout: 120000 })).data,
 }
 export function packageError(error: unknown) {
   const err = error as { response?: { data?: { detail?: unknown; error?: unknown } }; message?: string }

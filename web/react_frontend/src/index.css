@@ -1028,6 +1028,22 @@ button.relation-count:focus-visible {
   padding-right: 4px;
 }
 
+/* Adapters a rule package brought, going into force with the check item they came with. */
+.release-imported ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.release-imported li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 6px;
+}
+
+.release-imported-unused {
+  flex-basis: 100%;
+}
+
 /* The last patrol judged again under the version about to be published. */
 .release-trial {
   display: flex;

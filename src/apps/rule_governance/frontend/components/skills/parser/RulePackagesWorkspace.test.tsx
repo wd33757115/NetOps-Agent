@@ -37,7 +37,7 @@ it('requires explicit conflict confirmation and submits the preview revision', a
   await userEvent.click(screen.getByRole('checkbox', { name: /已核对冲突/ }))
   await userEvent.click(screen.getByRole('button', { name: '确认导入' }))
   await waitFor(() => expect(save).toHaveBeenCalledWith('package-content', preview.revision, true))
-  expect(await screen.findByText('导入完成，新增资产等待本地验证与发布')).toBeVisible()
+  expect(await screen.findByText('导入完成：导入的内容都是草稿，发布后生效')).toBeVisible()
 })
 it('keeps the file and offers a fresh preview after a concurrent modification', async () => {
   vi.spyOn(packages.packageApi, 'preview').mockResolvedValue({ ...preview, requires_confirmation: false })

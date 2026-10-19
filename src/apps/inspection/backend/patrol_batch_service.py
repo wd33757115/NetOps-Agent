@@ -106,6 +106,16 @@ def report_domain(entity_type: Any = None, command: Any = None) -> str | None:
     return None
 
 
+def _missing_reference_text(coverage: dict[str, Any]) -> str:
+    """The missing reference fields, with those the device is known not to print marked as such."""
+
+    absent = set(coverage.get("device_absent_reference_fields") or [])
+    return ", ".join(
+        f"{item}（设备不输出）" if str(item) in absent else str(item)
+        for item in coverage.get("missing_threshold_reference_fields") or []
+    )
+
+
 class PatrolBatchService:
     """Apply deterministic quality and domain policies to batch facts."""
 
@@ -271,20 +281,14 @@ class PatrolBatchService:
                     reason = "未形成可用于非结构化对比的输出指纹"
             elif threshold_unknown_current:
                 status = "数据不完整"
-                missing_fields = ", ".join(
-                    str(item)
-                    for item in domain_rule_coverage.get("missing_threshold_reference_fields") or []
-                )
+                missing_fields = _missing_reference_text(domain_rule_coverage)
                 reason = (
                     f"{threshold_unknown_current} 条当前观测缺少适用的设备阈值，"
                     "不能据此判定健康" + (f"；缺失字段：{missing_fields}" if missing_fields else "")
                 )
             elif partial_threshold_current:
                 status = "需复核"
-                missing_fields = ", ".join(
-                    str(item)
-                    for item in domain_rule_coverage.get("missing_threshold_reference_fields") or []
-                )
+                missing_fields = _missing_reference_text(domain_rule_coverage)
                 reason = (
                     f"{partial_threshold_current} 条当前观测已按可用设备阈值完成部分判定，"
                     "但预警/告警层级不完整"
@@ -466,6 +470,8 @@ def evaluate_current_state(
     policy_conflict_keys: set[tuple[str, str, str, str, str]] = set()
     expected_state_unknown_keys: set[tuple[str, str, str, str, str]] = set()
     policy_blocker_codes: set[str] = set()
+    # Per domain and field: the check item and adapter of each observation that lacked a reference field.
+    missing_reference_sources: dict[str, dict[str, set[tuple[str, str]]]] = {}
     assessment_basis_entries: list[dict[str, Any]] = []
     by_domain: dict[str, dict[str, Any]] = {}
     fault_rules = [
@@ -584,6 +590,13 @@ def evaluate_current_state(
                     *missing_reference_fields,
                 }
             )
+            metadata = dict(observation.get("metadata") or {})
+            source = (
+                str(observation.get("check_item_id") or metadata.get("check_item_id") or ""),
+                str(metadata.get("command_adapter_id") or ""),
+            )
+            for field in missing_reference_fields:
+                missing_reference_sources.setdefault(domain_key, {}).setdefault(field, set()).add(source)
         if observation_resolved:
             evaluated_keys.add(observation_key)
             domain_row["evaluated_observation_count"] += 1
@@ -706,7 +719,34 @@ def evaluate_current_state(
         "severity_counts": dict(severity_counts),
         "by_domain": by_domain,
         "findings": findings,
+        "missing_threshold_reference_sources": {
+            domain_key: {field: sorted(sources) for field, sources in fields.items()}
+            for domain_key, fields in missing_reference_sources.items()
+        },
     }
+
+
+def mark_device_absent_reference_fields(db: Any, assessment: dict[str, Any]) -> None:
+    """Note, per domain, the missing reference fields every adapter involved is known not to print.
+
+    Adding fields to an adapter records the fields its outputs never contain. Where
+    a threshold is missing because the device does not print it, the report says
+    so; the judgement it reached does not change.
+    """
+
+    from src.core.check_items.field_absence import device_absent
+
+    sources = dict(assessment.get("missing_threshold_reference_sources") or {})
+    for domain_key, fields in sources.items():
+        row = dict(assessment.get("by_domain") or {}).get(domain_key)
+        if row is None:
+            continue
+        try:
+            row["device_absent_reference_fields"] = device_absent(
+                db, {field: [tuple(pair) for pair in pairs] for field, pairs in fields.items()}
+            )
+        except Exception:  # noqa: BLE001 - a note in the report must never stop the report
+            row["device_absent_reference_fields"] = []
 
 
 def _iso(value: Any) -> str:
@@ -1495,6 +1535,7 @@ def build_patrol_batch_summary(
                     rule_source=str(effective_rule_bundle.get("source") or "unknown"),
                     rule_bundle_digest=effective_rule_bundle.get("digest"),
                 )
+                mark_device_absent_reference_fields(db, current_assessment)
             else:
                 current_assessment = {
                     "available": False,

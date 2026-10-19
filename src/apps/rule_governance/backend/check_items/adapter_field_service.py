@@ -31,6 +31,8 @@ from src.apps.rule_governance.backend.parser.parser_bundle import build_parser_b
 from src.apps.rule_governance.backend.parser.repository import contract_digest
 from src.apps.rule_governance.backend.parser_generation import TextFSMValidationBackend
 from src.core.check_items.command_adapter import validate_adapter_spec
+# The patrol reads the fields found absent from the same rows, so the key has one definition.
+from src.core.check_items.field_absence import PREFIX, task_key
 from src.infrastructure.db.models import (
     AuditLogRecord,
     CheckItemImplementationLinkRecord,
@@ -43,16 +45,10 @@ from src.infrastructure.db.models import (
 )
 from src.infrastructure.db.postgres import get_db_session
 
-PREFIX = "adapter-fields:"
 ACTIVE = {"queued", "running"}
 # A worker that died leaves its row active; past this the trial is taken as lost.
 STALE_AFTER = timedelta(minutes=15)
 _FINISHED = {"ready", "no_data", "regressed", "failed", "unsupported"}
-
-
-def task_key(implementation_id: str, check_item_id: str) -> str:
-    digest = hashlib.sha1(f"{implementation_id}|{check_item_id}".encode("utf-8")).hexdigest()
-    return PREFIX + digest
 
 
 def _now() -> datetime:

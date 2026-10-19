@@ -72,6 +72,26 @@ class PolicyDecision:
     comparison_profile_version: int | None = None
 
 
+def approved_template_may_serve(policy: Any, decision: PolicyDecision, command: str) -> bool:
+    """Whether an approved template gets to parse this command's output.
+
+    Commands the policy enables are parsed. A disabled command kept only as raw
+    text, or one the policy says nothing about, is parsed once a template is
+    approved for it. A command the policy explicitly sends to text comparison
+    (a log window, a hash diff) never is, whatever templates exist.
+    """
+
+    return (
+        decision.enabled
+        or decision.handling == "raw_only"
+        or (
+            decision.handling == "raw_hash_diff"
+            and isinstance(policy, ParserPolicy)
+            and not policy.has_explicit_policy(command)
+        )
+    )
+
+
 def load_yaml(path: str | Path) -> dict[str, Any]:
     with Path(path).open(encoding="utf-8") as handle:
         value = yaml.safe_load(handle) or {}

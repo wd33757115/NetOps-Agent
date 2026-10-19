@@ -23,7 +23,11 @@ def environment(tmp_path):
         engine = create_engine(f'sqlite:///{tmp_path / (name + ".db")}')
         event.listen(engine, 'connect', lambda con, _: con.execute('PRAGMA foreign_keys=ON'))
         tables = {s.model.__table__ for s in SPECS.values()} | {m.AuditLogRecord.__table__, m.CheckItemCatalogChangeRecord.__table__,
-            m.CheckItemRuntimeBundleRecord.__table__, m.CheckItemRuntimeBundleVersionRecord.__table__, m.RuntimeBundleAssetRecord.__table__}
+            m.CheckItemRuntimeBundleRecord.__table__, m.CheckItemRuntimeBundleVersionRecord.__table__, m.RuntimeBundleAssetRecord.__table__,
+            # Where exported samples come from: parser job samples, else patrol output.
+            m.CommandSnapshot.__table__, m.ParserJobSample.__table__, m.ParserCandidateSampleEvidence.__table__}
+        while missing := {key.column.table for table in tables for key in table.foreign_keys} - tables:
+            tables |= missing
         # Mirror production partial indexes: several legacy models only declare PostgreSQL predicates.
         for table in tables:
             for idx in table.indexes:
@@ -85,6 +89,74 @@ def test_identical_repacked_package_reuses_assets(environment):
     service.execute(raw, service.preview(raw)['revision'], actor='tester')
     with scope() as db:
         assert db.query(m.ParserTemplate).count() == 1
+
+
+def test_a_withdrawn_copy_is_not_reused_when_the_same_package_comes_again(environment):
+    service, scope = environment('withdrawn')
+    p = parser_package()
+    raw = encode(p)
+    first = service.execute(raw, service.preview(raw)['revision'], actor='tester')
+    with scope() as db:
+        # Its import was cancelled: the draft stood down.
+        db.get(m.ParserTemplate, first['items'][0]['local_id']).status = 'deprecated'
+    p['assets'][0]['ref'] = p['roots'][0] = 'parser:exported-again'
+    raw = encode(p)
+    again = service.preview(raw)
+    assert again['items'][0]['action'] == 'new_version' and again['requires_confirmation']
+    second = service.execute(raw, again['revision'], actor='tester', confirm_conflicts=True)
+    with scope() as db:
+        row = db.get(m.ParserTemplate, second['items'][0]['local_id'])
+        assert row.id != first['items'][0]['local_id'] and row.status == 'draft'
+
+
+def test_a_template_no_parser_job_made_exports_its_latest_patrol_output_sanitized(environment):
+    from datetime import datetime, timezone
+
+    service, scope = environment('evidence')
+    data = parser_package()['assets'][0]['data']
+    with scope() as db:
+        db.add(m.ParserTemplate(id='manual', **data, asset_path='unused', sha256=hashlib.sha256(TEMPLATE.encode()).hexdigest(), status='active'))
+        db.add(m.PatrolRun(id='run-1', mode='production', source='test', logical_run_id='run-1'))
+        db.flush()
+        for observed, text in ((1, 'Version 8.1\n'), (2, 'Version 8.2 from 10.20.30.40\n')):
+            db.add(m.CommandSnapshot(
+                id=f'snapshot-{observed}', run_id='run-1', device_id='d', execution_item_id='e', device_name='d',
+                command='show version', canonical_command='show version', parser_template_id='manual',
+                observed_at=datetime(2026, 10, observed, tzinfo=timezone.utc), raw_text=text, raw_text_hash=str(observed),
+                parse_status='parsed'))
+
+    exported = service.export(['parser:manual'], include_samples=True, actor='tester')
+
+    samples = unpack(base64.b64decode(exported['content_base64']))['samples']
+    assert exported['sample_count'] == len(samples) == 1
+    # The newest output, with its address replaced by one of the same shape, parsed as the template parses it.
+    assert '10.20.30.40' not in samples[0]['text'] and samples[0]['text'].startswith('Version 8.2 from ')
+    assert samples[0]['expected'] == parse_sample(TEMPLATE, samples[0]['text'])
+    assert service.export(['parser:manual'], actor='tester')['sample_count'] == 0
+
+
+def test_topology_system_items_stay_out_of_exports_and_an_old_package_with_them_still_imports(environment):
+    service, scope = environment('system')
+    contract = {'entity_type': 'security_zone_member', 'identity_dimensions': ['ZONE', 'INTERFACE'], 'observations': []}
+    with scope() as db:
+        db.add(m.CheckItemRecord(id='topology.security_zones', name='安全域成员', category='topology', status='active', current_version=1))
+        db.flush()
+        # Every field is a key: the membership is the fact, so there is nothing to observe. Seeded, never validated.
+        db.add(m.CheckItemVersionRecord(id='zones-v1', check_item_id='topology.security_zones', version=1, result_mode='structured',
+                                        assessment_mode='evidence', canonical_contract_json=contract, report_projection='auto@1',
+                                        status='active', digest='z' * 64))
+        db.add(m.ParserTemplate(id='user-parser', **parser_package()['assets'][0]['data'], asset_path='unused',
+                                sha256=hashlib.sha256(TEMPLATE.encode()).hexdigest(), status='active'))
+
+    exported = unpack(base64.b64decode(service.export([], all_active=True, actor='tester')['content_base64']))
+    assert {a['kind'] for a in exported['assets']} == {'parser'}
+    assert service.catalog('check_version')['items'] == [] and len(service.catalog('parser')['items']) == 1
+    with pytest.raises(ValueError, match='平台自带'):
+        service.export(['check_version:zones-v1'], actor='tester')
+    # A package exported before this, carrying the system item as this environment has it.
+    with scope() as db:
+        g = Graph(db); root = g.add('check_version', 'zones-v1')['$ref']; old = pack(g.close(), [root])
+    assert set(service.preview(old)['counts']) == {'reuse'}
 
 
 def test_same_version_conflict_requires_confirmation_and_preserves_active(environment):
@@ -210,12 +282,35 @@ def test_full_check_dependency_roundtrip(environment):
     p = target.preview(raw)
     r = target.execute(raw, p['revision'], actor='tester')
     mapping = {i['ref']: i['local_id'] for i in r['items']}
+    actions = {i['ref']: i['action'] for i in r['items']}
     with target_scope() as db:
         imported_impl = db.get(m.CollectionImplementationVersionRecord, mapping['implementation_version:' + impl.version_id])
         assert imported_impl.adapter_spec_json['parser']['template_id'] == mapping['parser:source-parser']
-        assert db.get(m.EventRuleVersionRecord, mapping['event_version:event-version']).check_item_version_id == mapping['check_version:' + check.version_id]
-        assert db.query(m.CheckItemCatalogChangeRecord).count() == 2
-    assert all(i['action'] == 'reuse' for i in target.preview(raw)['items'])
+        # Rules are compiled from the check item when it is released; the package's copies are not imported.
+        assert actions['event_version:event-version'] == actions['policy_version:policy-version'] == 'derived'
+        assert db.query(m.EventRuleVersionRecord).count() == 0 and db.query(m.ChangePolicyVersionRecord).count() == 0
+        # The adapter goes into force with the imported check item, so it has no draft of its own.
+        changes = db.query(m.CheckItemCatalogChangeRecord).all()
+        assert [(c.asset_kind, c.asset_id) for c in changes] == [('check_item', check.id)]
+    assert {i['action'] for i in target.preview(raw)['items']} == {'reuse', 'derived'}
+    assert 'recipes' in r and all(a['role'] not in {'change_policy', 'event_rule', 'current_state_rule'}
+                                  for recipe in r['recipes'] for a in recipe['assets'])
+    # Bringing the same file again only replays the import while what it created is still a draft or in force.
+    assert target.execute(raw, p['revision'], actor='tester')['replayed']
+    with target_scope() as db:
+        # Released, then the check item was deleted: the release stays on record, its versions stood down.
+        db.query(m.CheckItemCatalogChangeRecord).one().status = 'approved'
+        for ref, model in (('check_version:' + check.version_id, m.CheckItemVersionRecord),
+                           ('implementation_version:' + impl.version_id, m.CollectionImplementationVersionRecord),
+                           ('parser:source-parser', m.ParserTemplate)):
+            db.get(model, mapping[ref]).status = 'deprecated'
+    again = target.preview(raw)
+    assert {i['ref']: i['action'] for i in again['items']}['check_version:' + check.version_id] == 'new_version'
+    second = target.execute(raw, again['revision'], actor='tester', confirm_conflicts=True)
+    assert not second.get('replayed') and second['record_id'] != r['record_id']
+    with target_scope() as db:
+        assert db.query(m.CheckItemCatalogChangeRecord).filter_by(status='draft').count() == 1
+        assert db.query(m.CheckItemVersionRecord).filter_by(status='draft').count() == 1
 
 
 def test_package_api_requires_app_permission():

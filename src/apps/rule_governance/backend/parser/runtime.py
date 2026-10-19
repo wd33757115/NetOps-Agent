@@ -14,7 +14,7 @@ from .identity import DeviceIdentity
 from .key_contract import validate_entity_keys
 from .output_classifier import OutputClassifier
 from .parser_bundle import parse_parser_bundle
-from .policy import CategorySpec, ParserPolicy
+from .policy import CategorySpec, ParserPolicy, approved_template_may_serve
 from .record_shape import RecordShapeError, expand_list_primary_records
 from .textfsm_input import prepare_textfsm_input
 from .value_types import is_unavailable_value, is_valid_ip_value
@@ -219,14 +219,7 @@ class ParserRuntime:
         template = None
         if (
             not decision.enabled
-            and (
-                decision.handling == "raw_only"
-                or (
-                    decision.handling == "raw_hash_diff"
-                    and isinstance(self.policy, ParserPolicy)
-                    and not self.policy.has_explicit_policy(command)
-                )
-            )
+            and approved_template_may_serve(self.policy, decision, command)
             and identity.status == "known"
         ):
             template = self._resolve_template(

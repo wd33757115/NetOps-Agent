@@ -4,10 +4,9 @@ import { DownloadOutlined, InboxOutlined, ReloadOutlined, SwapOutlined } from '@
 import { useQuery, useQueryClient } from 'react-query'
 import { Link, useSearchParams } from 'react-router-dom'
 import { packageApi, packageKinds, packageError, downloadPackage, fileBase64, type ImportResult, type PackagePreview, type PlanItem } from '../../../services/rulePackages'
-import { parserApi } from '../../../services/api'
-import ParserTemplateApprovalDrawer from './ParserTemplateApprovalDrawer'
 
-const actions = { create: '新增', reuse: '复用', new_version: '创建新版本' }
+// Rules are compiled from the check item when it is released, so a package's copies are not imported.
+const actions = { create: '新增', reuse: '复用', new_version: '创建新版本', derived: '发布时编译' }
 const assetLabels: Record<string, string> = { ...packageKinds, check: '检查项信息', implementation: '采集实现信息', policy: '变化策略信息', event: '事件规则信息', identity: '实体标识信息', comparison: '比较策略信息', assessment: '评估策略信息', link: '检查项与采集关联', parser_binding: 'Parser 命令绑定' }
 const summary = (counts: Record<string, number>) => Object.entries(counts).map(([key, n]) => `${actions[key as keyof typeof actions] || key} ${n} 项`).join(' · ')
 const json = (value: unknown) => JSON.stringify(value, null, 2)
@@ -33,9 +32,7 @@ export default function RulePackagesWorkspace() {
   const [result, setResult] = useState<ImportResult>()
   const [detail, setDetail] = useState<PlanItem>()
   const [historyDetail, setHistoryDetail] = useState<ImportResult>()
-  const [validation, setValidation] = useState<{ name: string; status: string; blockers: string[] }[]>()
-  const [parserId, setParserId] = useState('')
-  const comparison = useQuery(['rule-package-parser', parserId], () => parserApi.comparison(parserId), { enabled: !!parserId })
+  const [validation, setValidation] = useState<{ name: string; status: string; blockers: string[]; warnings?: string[] }[]>()
   const query = useQuery(['rule-package-assets', kind, status, search, page], () => packageApi.assets({ kind, status, search, offset: (page - 1) * 30, limit: 30 }))
   const history = useQuery(['rule-package-history', historyPage], () => packageApi.history(historyPage), { enabled: tab === 'history' })
   const act = async (name: string, fn: () => Promise<void>) => {
@@ -67,19 +64,17 @@ export default function RulePackagesWorkspace() {
   })
   const validate = (id: string) => act('validate', async () => setValidation((await packageApi.validate(id)).checks))
   const resultBody = (data: ImportResult) => <>
-    <Alert type="success" showIcon message={data.replayed ? '此规则包已导入，已返回原记录' : '导入完成，新增资产等待本地验证与发布'} description={summary(data.counts)} />
+    <Alert type="success" showIcon message={data.replayed ? '此规则包已导入，已返回原记录' : '导入完成：导入的内容都是草稿，发布后生效'} description={summary(data.counts)} />
     <p className="rules-transfer-note">{data.notice}</p>
-    <Space wrap><Button loading={busy === 'validate'} disabled={!!busy} onClick={() => validate(data.record_id)}>检查本地发布条件</Button>
-      <Link to="/apps/rule-governance?workspace=production&subtab=catalog-management&view=changes">前往目录治理</Link>
-      <Link to="/apps/rule-governance?workspace=runtime">运行包装配与发布</Link></Space>
-    {validation && <List dataSource={validation} renderItem={item => <List.Item><div><Tag color={item.blockers.length ? 'orange' : 'green'}>{item.blockers.length ? '待处理' : '通过'}</Tag>{item.name}
-      {item.blockers.length > 0 && <ul>{item.blockers.map((b, i) => <li key={i}>{b}</li>)}</ul>}</div></List.Item>} />}
-    {data.changes.length > 0 && <List header="已创建的目录草稿" dataSource={data.changes} pagination={{ pageSize: 8 }} renderItem={item => <List.Item>
+    <Space wrap><Button loading={busy === 'validate'} disabled={!!busy} onClick={() => validate(data.record_id)}>试算能否发布</Button>
+      <Link to="/apps/rule-governance?workspace=production&subtab=catalog-management&view=changes">前往变更与审批</Link></Space>
+    {validation && <List dataSource={validation} renderItem={item => <List.Item><div><Tag color={item.blockers.length ? 'orange' : item.warnings?.length ? 'gold' : 'green'}>{item.blockers.length ? '待处理' : item.warnings?.length ? '可发布，但需注意' : '通过'}</Tag>{item.name}
+      {(item.blockers.length > 0 || !!item.warnings?.length) && <ul className="rules-transfer-check-notes">{[...item.blockers, ...(item.warnings || [])].map((b, i) => <li key={i}>{b}</li>)}</ul>}</div></List.Item>} />}
+    {data.changes.length > 0 && <List header="要发布的草稿" dataSource={data.changes} pagination={{ pageSize: 8 }} renderItem={item => <List.Item>
       <Link to={`/apps/rule-governance?workspace=production&subtab=catalog-management&change_id=${encodeURIComponent(item.change_id)}`}>{item.asset_id} · 查看与发布</Link></List.Item>} />}
     <Table size="small" rowKey="ref" dataSource={data.items} pagination={{ pageSize: 10 }} scroll={{ x: 600 }} columns={[
       { title: '资产', dataIndex: 'ref', render: (ref, row) => <div>{row.name || ref}<div className="rules-transfer-id">{assetLabels[row.kind] || row.kind}</div></div> }, { title: '处理', dataIndex: 'action', render: a => actions[a as keyof typeof actions] },
-      { title: '本地版本', dataIndex: 'version' }, { title: '本地 ID', dataIndex: 'local_id', ellipsis: true },
-      { title: '验证', render: (_, row) => row.kind === 'parser' && <Button type="link" onClick={() => setParserId(row.local_id)}>Parser 复核</Button> },
+      { title: '本地版本', dataIndex: 'version' }, { title: '本地 ID', dataIndex: 'local_id', ellipsis: true, render: v => v || '—' },
     ]} />
   </>
   return <section className="rules-transfer">
@@ -109,14 +104,14 @@ export default function RulePackagesWorkspace() {
             <Button type="primary" icon={<DownloadOutlined />} loading={busy === 'export'} disabled={!selected.length || !!busy} onClick={() => exportFile(false)}>导出选中与依赖</Button></Space></div>
       </> },
       { key: 'import', label: '导入规则包', children: <>
-        <Steps size="small" current={result ? 2 : preview ? 1 : 0} items={[{ title: '上传与预检' }, { title: '核对与导入' }, { title: '验证与发布' }]} />
+        <Steps size="small" current={result ? 2 : preview ? 1 : 0} items={[{ title: '上传与预检' }, { title: '核对与导入' }, { title: '到变更与审批发布' }]} />
         {!result && <Upload.Dragger showUploadList={false} accept=".zip,.netops-rules.zip" disabled={!!busy} beforeUpload={loadFile}>
           <p className="ant-upload-drag-icon"><InboxOutlined /></p><p className="ant-upload-text">{busy === 'preview' ? '正在校验格式、依赖和规则内容…' : file?.name || '选择或拖入规则包'}</p>
           <p className="ant-upload-hint">.netops-rules.zip · 最大 12 MB · 预检不写入业务资产</p></Upload.Dragger>}
         {file && !result && <Button disabled={!!busy} loading={busy === 'preview'} onClick={refreshPreview}>重新预检</Button>}
         {preview && <>
           <Alert type={preview.requires_confirmation ? 'warning' : 'info'} showIcon message={summary(preview.counts)}
-            description={`${preview.recipe_count} 套运行包依赖，${preview.sample_count} 份样本；共完成 ${preview.reports.length} 项结构与回放检查。`} />
+            description={`${preview.sample_count} 份样本；共完成 ${preview.reports.length} 项结构与回放检查。规则不随包导入，发布检查项时编译；适配器的解析模板在发布前用样本和本地巡检输出回放，通过后随检查项一起生效。`} />
           <Table rowKey="ref" size="small" dataSource={preview.items} pagination={{ pageSize: 12 }} scroll={{ x: 660 }} columns={[
             { title: '资产', dataIndex: 'ref', render: (ref, row) => <div>{row.name || ref}<div className="rules-transfer-id">{assetLabels[row.kind] || row.kind}</div></div> }, { title: '处理方式', dataIndex: 'action', render: (a, row) => <><Tag color={a === 'new_version' ? 'orange' : 'default'}>{actions[a as keyof typeof actions]}</Tag>{row.same_version_conflict && <span>同版本内容不同</span>}</> },
             { title: '目标版本', dataIndex: 'version' }, { title: '详情', render: (_, row) => <Button type="link" onClick={() => setDetail(row)}>查看差异</Button> },
@@ -145,10 +140,5 @@ export default function RulePackagesWorkspace() {
           <section><h3>包内内容 / 目标版本</h3><pre className="rules-transfer-json">{json(detail.after)}</pre></section></div></>}
     </Drawer>
     <Drawer title="规则包导入记录" width={screens.md ? 980 : '100%'} open={!!historyDetail} onClose={() => setHistoryDetail(undefined)}>{historyDetail && resultBody(historyDetail)}</Drawer>
-    {comparison.isError && <Alert type="error" message="Parser 验证证据加载失败" description={packageError(comparison.error)} />}
-    <ParserTemplateApprovalDrawer open={!!parserId} onClose={() => setParserId('')} isMobile={!screens.md}
-      loading={comparison.isLoading} comparison={comparison.data} reviewing={busy === 'review'} approving={busy === 'approve'}
-      onReview={reason => act('review', async () => { await parserApi.semanticReview(parserId, { reason, result_confirmed: true, primary_key_confirmed: true }); await comparison.refetch() })}
-      onApprove={reason => act('approve', async () => { await parserApi.activate(parserId, reason); await comparison.refetch(); client.invalidateQueries('rule-package-assets') })} />
   </section>
 }

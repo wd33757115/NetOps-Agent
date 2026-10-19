@@ -34,6 +34,11 @@ def decode(body):
         raise HTTPException(400, '文件编码无效') from exc
 
 
+def actor(user):
+    """Who acted, by the name the rest of the catalog records: drafts and history show it as the initiator."""
+    return str(user.username or user.user_id).strip()
+
+
 def call(fn):
     try:
         return fn()
@@ -54,7 +59,7 @@ def assets(kind: str = 'check_version', status: str = 'active', search: str = Qu
 @router.post('/export')
 def export(body: ExportRequest, user=Depends(app_user)):
     with execution_lock():
-        return call(lambda: TransferService().export(**body.model_dump(), actor=str(user.user_id)))
+        return call(lambda: TransferService().export(**body.model_dump(), actor=actor(user)))
 
 
 @router.post('/preview')
@@ -66,7 +71,7 @@ def preview(body: PackageRequest):
 def execute(body: ImportRequest, user=Depends(app_user)):
     with execution_lock():
         return call(lambda: TransferService().execute(decode(body), body.revision,
-                    confirm_conflicts=body.confirm_conflicts, actor=str(user.user_id)))
+                    confirm_conflicts=body.confirm_conflicts, actor=actor(user)))
 
 
 @router.get('/history')
@@ -82,4 +87,4 @@ def detail(record_id: str):
 @router.post('/history/{record_id}/validate')
 def validate(record_id: str, user=Depends(app_user)):
     with execution_lock():
-        return call(lambda: TransferService().validate_import(record_id, str(user.user_id)))
+        return call(lambda: TransferService().validate_import(record_id, actor(user)))

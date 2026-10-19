@@ -14,6 +14,7 @@ from typing import Any
 
 from sqlalchemy import func
 
+from src.apps.rule_governance.backend.check_items.import_release import withdraw_draft_templates, withdraw_incoming
 from src.core.patrol.change_event_repository import ACTIVE_EVENT_STATUSES, close_events_in_session
 from src.infrastructure.db.models import (
     ChangePolicyRecord,
@@ -29,6 +30,7 @@ from src.infrastructure.db.models import (
     EventRuleRecord,
     EventRuleVersionRecord,
     NetworkEventRecord,
+    RuleGenerationJobRecord,
 )
 
 
@@ -73,6 +75,64 @@ def retire_rules(db: Any, check_item_version_ids: Iterable[str], *, now: datetim
         retired.append({"kind": "event_rule", "name": str(rule_version.event_type)})
     db.flush()
     return retired
+
+
+def _withdraw_rule_drafts(
+    db: Any, check_item_version_ids: list[str], *, actor: str, reason: str, now: datetime
+) -> int:
+    """What was compiled for these versions and never ran: its drafts and the rule bundles awaiting approval.
+
+    Opening a release preview compiles the rules into drafts and a bundle that
+    waits for approval. Once the check item is deleted nothing will approve
+    them, and the bundles that did run govern rules no longer in force: all of
+    them stand down, the way a bundle replaced by a newer one does.
+    """
+
+    withdrawn = 0
+    for model, root_model, root_key in (
+        (ChangePolicyVersionRecord, ChangePolicyRecord, "policy_id"),
+        (EventRuleVersionRecord, EventRuleRecord, "rule_id"),
+    ):
+        for draft in (
+            db.query(model)
+            .filter(model.status == "draft", model.check_item_version_id.in_(check_item_version_ids or [""]))
+            .with_for_update()
+        ):
+            draft.status, draft.deprecated_at = "deprecated", now
+            root = db.get(root_model, getattr(draft, root_key))
+            if root is not None and str(root.status) == "draft":
+                root.status, root.updated_at = "deprecated", now
+            withdrawn += 1
+    bundles = (
+        db.query(RuleGenerationJobRecord)
+        .filter(
+            RuleGenerationJobRecord.job_type == "RULE_ASSET_BUNDLE",
+            RuleGenerationJobRecord.asset_ref.in_([f"check_item_version:{item}" for item in check_item_version_ids] or [""]),
+        )
+        .with_for_update()
+        .all()
+    )
+    child_ids = [str(item) for bundle in bundles for item in dict(bundle.payload_json or {}).get("child_job_ids") or []]
+    children = (
+        db.query(RuleGenerationJobRecord).filter(RuleGenerationJobRecord.id.in_(child_ids)).with_for_update().all()
+        if child_ids
+        else []
+    )
+    for job in [*children, *bundles]:
+        if str(job.status) not in {"draft", "validating", "pending_approval", "rejected", "active"}:
+            continue
+        report = dict(job.validation_report_json or {})
+        report["governance"] = {
+            **dict(report.get("governance") or {}),
+            "status_before": str(job.status),
+            "withdrawn_with_check_item": True,
+            "withdrawn_by": actor,
+            "withdrawn_at": now.isoformat(),
+            "reason": reason,
+        }
+        job.status, job.validation_report_json, job.updated_at, job.completed_at = "deprecated", report, now, now
+    db.flush()
+    return withdrawn
 
 
 def owned_event_types(db: Any, check_item_id: str) -> dict[str, dict[str, Any]]:
@@ -208,6 +268,8 @@ def _withdraw_adapter(db: Any, adapter: CollectionImplementationRecord, *, actor
             version.deprecated_at = now
     adapter.status = "deprecated"
     adapter.updated_at = now
+    # Templates in force stay; a draft one only this adapter read would never be approved now.
+    withdraw_draft_templates(db, versions, now=now)
 
 
 def retire_check_item(db: Any, root: CheckItemRecord, *, actor: str, reason: str, now: datetime) -> dict[str, Any]:
@@ -296,6 +358,7 @@ def retire_check_item(db: Any, root: CheckItemRecord, *, actor: str, reason: str
         withdrawn.append(entry)
 
     rules = retire_rules(db, version_ids, now=now)
+    withdrawn_drafts = _withdraw_rule_drafts(db, version_ids, actor=actor, reason=reason, now=now)
 
     pending = (
         db.query(CheckItemCatalogChangeRecord)
@@ -314,6 +377,9 @@ def retire_check_item(db: Any, root: CheckItemRecord, *, actor: str, reason: str
         change.decided_at = now
         change.updated_at = now
     for version in versions:
+        if str(version.status) == "draft":
+            # Adapters imported with an unreleased version go with it.
+            withdraw_incoming(db, str(version.id), now=now)
         if str(version.status) in {"draft", "active"}:
             version.status = "deprecated"
             version.deprecated_at = now
@@ -332,6 +398,7 @@ def retire_check_item(db: Any, root: CheckItemRecord, *, actor: str, reason: str
         "version_count": len(versions),
         "cancelled_change_count": len(pending),
         "rules": rules,
+        "rule_drafts_withdrawn": withdrawn_drafts,
         "runtime_bundle_version_ids": sorted(str(item.id) for item in bundles),
         "adapters_withdrawn": withdrawn,
         "adapters_kept": kept,

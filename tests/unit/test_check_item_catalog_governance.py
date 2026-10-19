@@ -24,12 +24,14 @@ from src.infrastructure.db.models import (
     CheckItemRuntimeBundleVersionRecord,
     CheckItemRuntimeBundleRecord,
     CheckItemVersionRecord,
+    CollectionImplementationParserBindingRecord,
     CollectionImplementationRecord,
     CollectionImplementationVersionRecord,
     EventRuleRecord,
     EventRuleVersionRecord,
     NetworkEventRecord,
     ParserTemplate,
+    RuleGenerationJobRecord,
 )
 
 
@@ -67,6 +69,9 @@ def _environment(tmp_path, *, devices=None):
             EventRuleRecord.__table__,
             EventRuleVersionRecord.__table__,
             NetworkEventRecord.__table__,
+            # ...and withdraws the rule bundles compiled for it, and the draft templates its adapters read.
+            RuleGenerationJobRecord.__table__,
+            CollectionImplementationParserBindingRecord.__table__,
         ],
     )
     session_factory = sessionmaker(bind=engine)

@@ -92,4 +92,46 @@ describe('CheckItemReleasePreview events', () => {
       '发布时关闭 12 条事件，因为产生它们的规则停用了（interface.optical_power.vendor_note.changed 12 条）。',
     )).toBeVisible()
   })
+
+  it('names the adapters a rule package brought and what their templates were replayed on', () => {
+    render(<CheckItemReleasePreview preview={preview({
+      release: {
+        rules_activated: 0, rules_retired_without_successor: 0, adapters_repinned: 0, adapters_brought_in: 2,
+        runtime_bundle_version_ids: ['bundle-1', 'bundle-2'],
+        adapters: [
+          { implementation_id: 'msr', name: 'MSR5620 · display startup', repinned: false, in_force: true, brought_in: true,
+            templates: [{ template_id: 't1', replay: { passed: true, samples: 0, outputs: 3, outputs_parsed: 3, records_differing: 1 } }] },
+          { implementation_id: 's6850', name: 'S6850-56HF · display startup', repinned: false, in_force: true, brought_in: true,
+            templates: [{ template_id: 't2', replay: { passed: true, samples: 2, samples_passed: 2, outputs: 0 } }] },
+          { implementation_id: 'n9k', name: 'N9K-C9364C', repinned: true, in_force: true },
+        ],
+      },
+    })} />)
+
+    expect(screen.getByText('随新版本一起生效的导入适配器（解析模板已回放通过）：')).toBeVisible()
+    expect(screen.getByText('：本地 3 份巡检输出都能解析；与现用模板相比有 1 条记录的值不同')).toBeVisible()
+    expect(screen.getByText('：包内 2 份样本与导出时一致')).toBeVisible()
+    // An adapter already in force is still reported the usual way, and not as imported.
+    expect(screen.getByText('随新版本切换：N9K-C9364C。')).toBeVisible()
+  })
+
+  it('counts imported adapters in the summary, and says when the platform will never read their template', () => {
+    render(<CheckItemReleasePreview preview={preview({
+      release: {
+        rules_activated: 2, rules_retired_without_successor: 0, adapters_repinned: 0, adapters_brought_in: 1,
+        runtime_bundle_version_ids: ['bundle-1'],
+        adapters: [
+          { implementation_id: 'log', name: 'S6520XP · display logbuffer level 1', repinned: false, brought_in: true,
+            text_only_commands: ['display logbuffer level 1'],
+            text_only_warning: '命令 display logbuffer level 1 在本平台只比较原文、不做解析，导入的解析模板不会被巡检使用',
+            templates: [{ template_id: 't1', replay: { passed: true, samples: 1, samples_passed: 1, outputs: 0 } }] },
+        ],
+      },
+    })} />)
+
+    expect(screen.getByText(/1 个导入的适配器随之生效；发布前不影响正在运行的巡检。$/)).toBeVisible()
+    expect(screen.queryByText(/没有正在使用的适配器需要切换/)).not.toBeInTheDocument()
+    // The wording is the server's, shown as given.
+    expect(screen.getByText('命令 display logbuffer level 1 在本平台只比较原文、不做解析，导入的解析模板不会被巡检使用。')).toBeVisible()
+  })
 })

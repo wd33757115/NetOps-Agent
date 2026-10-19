@@ -2592,6 +2592,8 @@ export interface CheckItemReleasePreview {
     rules_activated: number
     rules_retired_without_successor: number
     adapters_repinned: number
+    /** Adapters a rule package brought with this version, going into force with it. */
+    adapters_brought_in?: number
     runtime_bundle_version_ids: string[]
     adapters: Array<{
       implementation_id: string
@@ -2599,8 +2601,25 @@ export interface CheckItemReleasePreview {
       repinned: boolean
       in_force?: boolean
       dropped_fields?: string[]
+      brought_in?: boolean
+      templates?: Array<{ template_id: string; replay: ImportedTemplateReplay | null }>
+      /** Commands this platform only compares as text: the imported template is never read for them. */
+      text_only_commands?: string[]
+      /** What that means and what can be done about it, worded once by the server. */
+      text_only_warning?: string | null
     }>
   } | null
+}
+
+/** How an imported parser template fared when replayed before it goes into force. */
+export interface ImportedTemplateReplay {
+  passed: boolean
+  reason?: string | null
+  samples?: number
+  samples_passed?: number
+  outputs?: number
+  outputs_parsed?: number
+  records_differing?: number
 }
 
 export interface CheckItemOverview {

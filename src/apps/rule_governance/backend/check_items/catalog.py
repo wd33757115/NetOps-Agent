@@ -1063,9 +1063,23 @@ class CheckItemCatalogRepository:
                 .order_by(CheckItemImplementationLinkRecord.priority.desc())
                 .all()
             )
+            # A draft of a check item links the adapters in force so it can be
+            # tried, and a cancelled draft keeps those links. The adapter's
+            # output still reads into the version it pins: only that one is
+            # its context, or every version of the item would compete for it.
+            pinned = {
+                str(output.get("check_item_id") or ""): str(output.get("check_item_version_id") or "")
+                for output in dict(version.adapter_spec_json or {}).get("outputs") or []
+                if isinstance(output, dict) and output.get("check_item_version_id")
+            }
             item_versions = [
-                db.get(CheckItemVersionRecord, str(link.check_item_version_id))
-                for link in links
+                item_version
+                for item_version in (
+                    db.get(CheckItemVersionRecord, str(link.check_item_version_id))
+                    for link in links
+                )
+                if item_version is None
+                or pinned.get(str(item_version.check_item_id)) in (None, str(item_version.id))
             ]
             check_items: list[CheckItemDefinition] = []
             for item_version in item_versions:

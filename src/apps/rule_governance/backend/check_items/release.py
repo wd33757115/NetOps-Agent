@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import Any
 
 from src.apps.rule_governance.backend.check_items.catalog import build_collection_implementation
+from src.apps.rule_governance.backend.check_items.import_release import bring_in, incoming_adapters
 from src.apps.rule_governance.backend.check_items.retirement import close_orphaned_events, retire_rules
 from src.apps.rule_governance.backend.check_items.system_items import system_check_item_ids
 from src.core.check_items.command_adapter import validate_adapter_spec
@@ -147,8 +148,12 @@ def _repin_adapters(
     *,
     actor: str,
     now: datetime,
+    replaced: frozenset[str] = frozenset(),
 ) -> list[dict[str, Any]]:
     """Move every active adapter of the previous version onto the new one.
+
+    An adapter in ``replaced`` arrives in a newer version with the release itself
+    (from a rule package) and is left to that version.
 
     A projection adapter names the check item version it writes for. It gets a
     new version of its own, pinned to the new check item version and validated
@@ -177,6 +182,8 @@ def _repin_adapters(
     misfits: dict[str, list[str]] = {}
     adapters: list[dict[str, Any]] = []
     for adapter, adapter_version, link in rows:
+        if str(adapter.id) in replaced:
+            continue
         spec = deepcopy(dict(adapter_version.adapter_spec_json or {}))
         pinned = [output for output in spec.get("outputs") or [] if output.get("check_item_id") == root.id]
         moved = {
@@ -352,7 +359,7 @@ def _switch_bundles(
     db: Any,
     root: CheckItemRecord,
     version: CheckItemVersionRecord,
-    previous: CheckItemVersionRecord,
+    previous: CheckItemVersionRecord | None,
     adapters: list[dict[str, Any]],
     *,
     session_scope: Any,
@@ -360,7 +367,10 @@ def _switch_bundles(
     reason: str,
     now: datetime,
 ) -> list[str]:
-    """Rebuild, for the new version, the runtime bundle of every adapter that was in force."""
+    """Rebuild, for the new version, the runtime bundle of every adapter that was in force.
+
+    An adapter brought in with the release gets one for every version in force it serves.
+    """
 
     from src.apps.rule_governance.backend.check_items.runtime_bundle import (
         CheckItemRuntimeBundleService,
@@ -373,15 +383,33 @@ def _switch_bundles(
             CheckItemRuntimeBundleVersionRecord.status == "active",
             CheckItemRuntimeBundleVersionRecord.check_item_version_id == str(previous.id),
         )
-    }
+    } if previous is not None else set()
     service = CheckItemRuntimeBundleService(session_scope)
     blockers: list[str] = []
     switched: list[str] = []
+    selections = []
     for adapter in adapters:
-        adapter["in_force"] = adapter["previous_version_id"] in in_force
-        if not adapter["in_force"]:
+        if adapter.get("brought_in"):
+            # An adapter that came with the release runs wherever it is linked to a version in force.
+            adapter["in_force"] = True
+            selections += [
+                (adapter, str(row.check_item_version_id))
+                for row in db.query(CheckItemImplementationLinkRecord)
+                .join(
+                    CheckItemVersionRecord,
+                    CheckItemVersionRecord.id == CheckItemImplementationLinkRecord.check_item_version_id,
+                )
+                .filter(
+                    CheckItemImplementationLinkRecord.implementation_version_id == adapter["version_id"],
+                    CheckItemVersionRecord.status == "active",
+                )
+            ]
             continue
-        selection = {"check_item_version_id": str(version.id), "implementation_version_id": adapter["version_id"]}
+        adapter["in_force"] = adapter["previous_version_id"] in in_force
+        if adapter["in_force"]:
+            selections.append((adapter, str(version.id)))
+    for adapter, check_item_version_id in selections:
+        selection = {"check_item_version_id": check_item_version_id, "implementation_version_id": adapter["version_id"]}
         try:
             preview = service.preview_assembly(**selection)
             if preview.get("blockers"):
@@ -434,12 +462,23 @@ def release_in_session(
             CheckItemVersionRecord.id != version.id,
         )
     ]
-    adapters = _repin_adapters(db, root, version, previous, actor=actor, now=now) if previous is not None else []
+    # Adapters a rule package brought with this version go into force with it.
+    incoming = incoming_adapters(db, str(version.id))
+    replaced = frozenset(str(item.implementation_id) for item in incoming)
+    adapters = (
+        _repin_adapters(db, root, version, previous, actor=actor, now=now, replaced=replaced)
+        if previous is not None
+        else []
+    )
+    brought, blockers = bring_in(db, incoming, actor=actor, now=now)
+    if blockers:
+        raise CheckItemReleaseBlocked(blockers)
+    adapters += brought
     rules = _activate_rules(
         db, version, earlier, bundle_id=bundle_id, change_id=change_id, actor=actor, reason=reason, now=now
     )
     bundles: list[str] = []
-    if previous is not None and root.id not in system_check_item_ids():
+    if (previous is not None or brought) and root.id not in system_check_item_ids():
         bundles = _switch_bundles(
             db, root, version, previous, adapters, session_scope=session_scope, actor=actor, reason=reason, now=now
         )
@@ -461,6 +500,7 @@ def release_in_session(
         "rules_retired_without_successor": rules["retired_without_successor"],
         "adapters": adapters,
         "adapters_repinned": sum(1 for adapter in adapters if adapter["repinned"]),
+        "adapters_brought_in": sum(1 for adapter in adapters if adapter.get("brought_in")),
         "runtime_bundle_version_ids": bundles,
         "events_closed": events,
     }

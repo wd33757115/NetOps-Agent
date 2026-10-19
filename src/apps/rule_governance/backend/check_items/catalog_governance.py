@@ -25,6 +25,11 @@ from src.apps.rule_governance.backend.check_items.catalog import (
     primary_collection_commands,
     validate_check_item_definition,
 )
+from src.apps.rule_governance.backend.check_items.import_release import (
+    incoming_adapters,
+    withdraw_draft_templates,
+    withdraw_incoming,
+)
 from src.apps.rule_governance.backend.check_items.release import (
     CheckItemReleaseBlocked,
     prepare_rules,
@@ -863,6 +868,10 @@ class CheckItemCatalogGovernanceService:
                         model.status == "draft",
                     ):
                         row.status = "rejected"
+                # Adapters imported with it would only ever have gone into force with it.
+                withdraw_incoming(db, str(change.version_id), now=now)
+            elif version is not None:
+                withdraw_draft_templates(db, [version], now=now)
             root = db.get(
                 CheckItemRecord if is_check_item else CollectionImplementationRecord,
                 str(change.asset_id),
@@ -1147,6 +1156,18 @@ class CheckItemCatalogGovernanceService:
             active_bundle_version_ids = sorted(
                 str(item.id) for item in active_bundle_rows
             )
+            # Adapters imported with this version are still drafts, outside the
+            # active catalog, but they go into force with its release.
+            incoming_implementation_ids = (
+                sorted(
+                    {
+                        str(item.implementation_id)
+                        for item in incoming_adapters(db, str(change.version_id))
+                    }
+                )
+                if str(change.asset_kind) == "check_item"
+                else []
+            )
         current = self._catalog.load_active()
         proposed = self._proposed_catalog(current, candidate)
         if isinstance(candidate, CheckItemDefinition):
@@ -1156,6 +1177,7 @@ class CheckItemCatalogGovernanceService:
                 candidate=candidate,
                 baseline_version_id=baseline_version_id or None,
                 active_bundle_version_ids=active_bundle_version_ids,
+                incoming_implementation_ids=incoming_implementation_ids,
                 current=current,
                 proposed=proposed,
                 devices=list(self._inventory_loader()),
@@ -1333,6 +1355,7 @@ class CheckItemCatalogGovernanceService:
         current: CheckItemCatalog,
         proposed: CheckItemCatalog,
         devices: list[dict[str, Any]],
+        incoming_implementation_ids: list[str],
     ) -> dict[str, Any]:
         baseline = current.check_item(candidate.id)
         field_names = (
@@ -1366,9 +1389,12 @@ class CheckItemCatalogGovernanceService:
         before_observations = observation_types(baseline)
         after_observations = observation_types(candidate)
         implementation_ids = sorted(
-            implementation.id
-            for implementation in proposed.implementations
-            if candidate.id in implementation.check_item_ids
+            {
+                implementation.id
+                for implementation in proposed.implementations
+                if candidate.id in implementation.check_item_ids
+            }
+            | set(incoming_implementation_ids)
         )
         blockers: list[dict[str, Any]] = []
         warnings: list[dict[str, Any]] = []
@@ -1931,6 +1957,32 @@ class CheckItemCatalogGovernanceService:
                         raise CatalogGovernanceConflictError(f"检查项无法发布：{exc}") from exc
                     change.cutover_bundle_version_ids_json = release["runtime_bundle_version_ids"]
                     change.cutover_evidence_json = release
+                elif self._release and not requires_rollout:
+                    # An adapter goes into force whole: the templates it reads and a runtime bundle
+                    # for every check item version in force it serves, or not at all.
+                    from src.apps.rule_governance.backend.check_items.import_release import (
+                        activate_templates,
+                        assemble_bundles,
+                    )
+
+                    db.flush()
+                    templates, problems = activate_templates(
+                        db, version, replaced=active, implementation_id=str(root.id), actor=actor, now=now
+                    )
+                    if problems:
+                        raise CatalogGovernanceConflictError(
+                            "适配器无法发布：" + "；".join(f"“{root.name}”{problem}" for problem in problems)
+                        )
+                    try:
+                        bundles = assemble_bundles(
+                            db, str(version.id), session_scope=lambda: _joined(db), actor=actor,
+                            reason=reason or f"发布适配器 {root.name}", now=now,
+                        )
+                    except ValueError as exc:
+                        raise CatalogGovernanceConflictError(f"适配器无法发布：{exc}") from exc
+                    change.cutover_bundle_version_ids_json = bundles
+                    change.cutover_evidence_json = {"kind": "adapter_release", "templates": templates,
+                                                    "runtime_bundle_version_ids": bundles}
             else:
                 version.status = "deprecated"
                 version.deprecated_at = now

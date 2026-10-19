@@ -1,7 +1,7 @@
 import React from 'react'
 import { Alert, Space, Table, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import type { CheckItemReleasePreview as ReleasePreview } from '@netops/services/api'
+import type { CheckItemReleasePreview as ReleasePreview, ImportedTemplateReplay } from '@netops/services/api'
 import CheckItemRelationGraph from './CheckItemRelationGraph'
 import CheckItemReleaseTrial from './CheckItemReleaseTrial'
 
@@ -28,6 +28,18 @@ interface CheckItemReleasePreviewProps {
   error?: string
 }
 
+/** What the replay of an imported adapter's templates rested on, in a few words. */
+const replayed = (templates?: Array<{ replay: ImportedTemplateReplay | null }>) => {
+  const runs = (templates || []).map((template) => template.replay).filter(Boolean) as ImportedTemplateReplay[]
+  if (!runs.length) return '：沿用本地已生效的解析模板'
+  const samples = runs.reduce((sum, run) => sum + (run.samples || 0), 0)
+  const outputs = runs.reduce((sum, run) => sum + (run.outputs || 0), 0)
+  const differing = runs.reduce((sum, run) => sum + (run.records_differing || 0), 0)
+  const parts = [samples && `包内 ${samples} 份样本与导出时一致`, outputs && `本地 ${outputs} 份巡检输出都能解析`]
+    .filter(Boolean)
+  return `：${parts.join('，')}${differing ? `；与现用模板相比有 ${differing} 条记录的值不同` : ''}`
+}
+
 /** What publishing this check item version changes in the patrol, and whether it can switch as a whole. */
 const CheckItemReleasePreview: React.FC<CheckItemReleasePreviewProps> = ({ preview, loading, error }) => {
   if (loading) return <Typography.Text type="secondary">正在试算发布后的规则和适配器…</Typography.Text>
@@ -37,8 +49,9 @@ const CheckItemReleasePreview: React.FC<CheckItemReleasePreviewProps> = ({ previ
   const changed = preview.fields.filter((field) => field.change !== 'unchanged')
   const unchanged = preview.fields.length - changed.length
   const release = preview.release
-  const switched = release?.adapters.filter((adapter) => adapter.in_force) || []
-  const idle = (release?.adapters.length || 0) - switched.length
+  const brought = release?.adapters.filter((adapter) => adapter.brought_in) || []
+  const switched = release?.adapters.filter((adapter) => adapter.in_force && !adapter.brought_in) || []
+  const idle = (release?.adapters.length || 0) - switched.length - brought.length
   const dropped = [...new Set((release?.adapters || []).flatMap((adapter) => adapter.dropped_fields || []))]
   const closing = release?.events_closed || []
   const closingCount = closing.reduce((sum, event) => sum + (event.count || 0), 0)
@@ -79,9 +92,10 @@ const CheckItemReleasePreview: React.FC<CheckItemReleasePreviewProps> = ({ previ
               : changed.length
                 ? `${release.rules_activated} 条规则随新版本生效`
                 : `${release.rules_activated} 条规则内容不变，随新版本重新生效`,
-            switched.length ? `${switched.length} 个适配器和运行包一起切换` : '没有正在使用的适配器需要切换',
+            switched.length ? `${switched.length} 个适配器和运行包一起切换` : !brought.length && '没有正在使用的适配器需要切换',
+            brought.length > 0 && `${brought.length} 个导入的适配器随之生效`,
             '发布前不影响正在运行的巡检',
-          ].join('；') + '。'}
+          ].filter(Boolean).join('；') + '。'}
         />
       ) : (
         <Alert
@@ -129,7 +143,23 @@ const CheckItemReleasePreview: React.FC<CheckItemReleasePreviewProps> = ({ previ
       {dropped.length > 0 && (
         <Typography.Text>已删除的字段 {dropped.join('、')} 会自动从适配器的输出中去掉，不需要改适配器。</Typography.Text>
       )}
-      {release && release.adapters.length > 0 && (
+      {brought.length > 0 && (
+        <div className="release-imported">
+          <Typography.Text>随新版本一起生效的导入适配器（解析模板已回放通过）：</Typography.Text>
+          <ul>
+            {brought.map((adapter) => (
+              <li key={adapter.implementation_id}>
+                <Typography.Text strong>{adapter.name}</Typography.Text>
+                <Typography.Text type="secondary">{replayed(adapter.templates)}</Typography.Text>
+                {adapter.text_only_warning && (
+                  <Typography.Text type="warning" className="release-imported-unused">{adapter.text_only_warning}。</Typography.Text>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {release && release.adapters.length > brought.length && (
         <Typography.Text type="secondary">
           {switched.length > 0 && `随新版本切换：${switched.map((adapter) => adapter.name).join('、')}。`}
           {idle > 0 && `另有 ${idle} 个适配器原本就未生效，保持不变。`}

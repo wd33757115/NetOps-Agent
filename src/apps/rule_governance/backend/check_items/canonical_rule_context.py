@@ -30,6 +30,7 @@ from src.core.patrol.change_policy_repository import (
     ChangePolicyRepository,
     change_policy_digest,
 )
+from src.core.patrol.event_constraint_governance import scope_event_constraints_to_policy
 from src.core.patrol.event_rule_compiler import compile_event_rule_intents
 from src.core.patrol.event_rules import EventRuleRepository
 from src.infrastructure.db.models import (
@@ -333,6 +334,15 @@ def generate_canonical_rule_candidates(
         dict(requirements.get("required_event_types_by_observation") or {})
     )
     wanted = change_targets | current_targets | event_targets
+    evidence_bound = set(
+        dict(
+            dict(
+                dict(context.get("asset_requirement_profile") or {}).get("requirements") or {}
+            ).get("event_rule")
+            or {}
+        ).get("evidence_bound_event_constraints_by_observation")
+        or {}
+    )
     policies: list[dict[str, Any]] = []
     rules: list[dict[str, Any]] = []
     blockers: list[dict[str, str]] = []
@@ -372,15 +382,37 @@ def generate_canonical_rule_candidates(
                 }
             )
             continue
-        if target.get('change_tracking', True) and observation_type in change_targets:
+        tracked = bool(target.get('change_tracking', True)) and observation_type in change_targets
+        if tracked:
             policies.append(candidate)
-        if observation_type not in current_targets | event_targets:
+        event_constraints = dict(target.get("event_constraints") or {})
+        # Threshold events the device's own thresholds back become required once the
+        # value is tracked: the runtime bundle asks for exactly the roles this policy
+        # proves, so the same roles are compiled here.
+        bound = (
+            tracked
+            and observation_type in evidence_bound
+            and observation_type not in current_targets | event_targets
+        )
+        if bound:
+            scoped = scope_event_constraints_to_policy(event_constraints, candidate)
+            if scoped.get("success") is not True:
+                blockers.append(
+                    {
+                        "code": "evidence_bound_event_roles_unresolved",
+                        "observation_type": observation_type,
+                        "message": "; ".join(scoped.get("errors") or []),
+                    }
+                )
+                continue
+            event_constraints = dict(scoped.get("constraints") or {})
+        elif observation_type not in current_targets | event_targets:
             continue
         compiled = compile_event_rule_intents(
             candidate_rules=[],
             contract=contract,
             change_policy=candidate,
-            event_constraints=dict(target.get("event_constraints") or {}),
+            event_constraints=event_constraints,
             rule_asset_requirements=requirements,
         )
         if compiled.get("success") is not True:
@@ -398,7 +430,7 @@ def generate_canonical_rule_candidates(
             if isinstance(rule, Mapping)
         ]
         if (
-            observation_type in current_targets | event_targets
+            (bound or observation_type in current_targets | event_targets)
             and (
                 compiled.get("compiled") is not True
                 or not compiled_rules

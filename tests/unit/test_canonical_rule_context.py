@@ -249,3 +249,32 @@ def test_optical_candidate_declares_linear_baseline_and_module_identity():
         'kind': 'linear_power_drop', 'threshold_ratio': 0.1,
         'identity_fields': ['part_number', 'serial_number'], 'require_identity': False,
     }
+
+
+def test_tracking_a_value_compiles_the_threshold_events_its_device_thresholds_back():
+    from copy import deepcopy
+
+    from src.core.patrol.event_constraint_governance import scope_event_constraints_to_policy
+
+    item = _catalog_item("interface.optical_power")
+    contract = deepcopy(item.canonical_contract)
+    rx = next(row for row in contract['observations'] if row['observation_type'] == 'interface.optical.rx_power')
+    assert rx['event_constraints']['evidence_bound_roles'] is True
+    rx.update(assessment_roles=['change'], change_tracking=True)
+    context = build_canonical_rule_context(
+        check_item_id=item.id, check_item_version_id=item.version_id, result_mode=item.result_mode,
+        assessment_mode=item.assessment_mode, canonical_contract=contract,
+    )
+
+    result = generate_canonical_rule_candidates(context)
+
+    assert result['success'] is True, result['blockers']
+    policy = next(row for row in result['change_policies'] if row['observation_type'] == 'interface.optical.rx_power')
+    compiled = {row['event_type']: row['severity'] for row in result['event_rules']
+                if row['observation_type'] == 'interface.optical.rx_power'}
+    # Exactly what the runtime bundle will ask for once this policy is selected.
+    bound = context['asset_requirement_profile']['requirements']['event_rule'][
+        'evidence_bound_event_constraints_by_observation']['interface.optical.rx_power']['constraints']
+    required = scope_event_constraints_to_policy(bound, policy)['active_event_types']
+    assert set(compiled) == set(required)
+    assert compiled['OpticalRxPowerCritical'] == 'critical' and compiled['OpticalRxPowerRecovered'] == 'info'
