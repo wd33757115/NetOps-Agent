@@ -20,6 +20,7 @@ Windows 安装、依赖、容器与升级统一见 [Windows 安装部署](window
 
 ## 开发与部署
 
+- [平台开发手册：整体架构、应用开发指南与演示应用的完整生命周期](developer-handbook/README.md)、[Skill 开发手册](developer-handbook/skills.md)、[Workflow 开发手册](developer-handbook/workflows.md)（工作台“Skills 和连接器 → 开发指南”中同样可读）
 - [当前架构](01_系统架构设计.md)
 - [能力包安装/升级/启用](capability-packages-guide.md)、[平台数据库 bootstrap 与迁移](database-bootstrap.md)
 - [开发构建](06_环境%20&%20编译构建说明.md)、[部署](10_部署安装手册.md)、[配置](07_系统配置说明.md)
@@ -37,7 +38,7 @@ Windows 安装、依赖、容器与升级统一见 [Windows 安装部署](window
 - [检查项字段语义编辑与实施计划](check-item-semantic-editor.md)
 - [变化和事件](patrol-change-event-pipeline.md)、[报告证据](patrol-report-guide.md)
 - [样本与生产边界](patrol-parser-dual-mode-guide.md)、[文本比较](patrol-text-comparison-guide.md)
-- [Skill 开发](SKILL_CREATION_GUIDE.md)、[过程与观测](observability-guide.md)
+- [Skill 开发](developer-handbook/skills.md)、[Workflow 开发](developer-handbook/workflows.md)、[过程与观测](observability-guide.md)
 
 ## 仓库交付范围
 
