@@ -1,6 +1,7 @@
 """Create a Windows .env once. Never rotate credentials on an existing install."""
 from pathlib import Path
 import argparse
+import base64
 import re
 import secrets
 
@@ -18,6 +19,8 @@ def prepare(root: Path) -> bool:
         'POSTGRES_PASSWORD': secrets.token_hex(24),
         'MINIO_ACCESS_KEY': 'netops',
         'MINIO_SECRET_KEY': secrets.token_hex(24),
+        # A Fernet key: SSH session passwords and temporary device credentials are encrypted with it.
+        'DEVICE_ACCESS_CREDENTIAL_KEY': base64.urlsafe_b64encode(secrets.token_bytes(32)).decode(),
         'POSTGRES_HOST': '127.0.0.1',
         'REDIS_HOST': '127.0.0.1',
         'MINIO_ENDPOINT': '127.0.0.1:9000',

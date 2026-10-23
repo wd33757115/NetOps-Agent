@@ -54,6 +54,10 @@ if [[ "${#app_secret}" -lt 32 ]]; then
     fail "NETOPS_APP_INTERNAL_SECRET must contain at least 32 characters for App authorization"
 fi
 
+if [[ -z "$(get_env DEVICE_ACCESS_CREDENTIAL_KEY)" ]]; then
+    warn "DEVICE_ACCESS_CREDENTIAL_KEY 未设置；SSH 会话密码和临时设备凭据无法加密保存。生成：python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
+fi
+
 for key in SECRET_KEY JWT_SECRET_KEY POSTGRES_PASSWORD MINIO_ACCESS_KEY MINIO_SECRET_KEY ITSM_WEBHOOK_SECRET; do
     val="$(get_env "$key")"
     if [[ -z "$val" ]]; then

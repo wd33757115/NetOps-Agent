@@ -64,7 +64,7 @@ if [[ "$SKIP_MINIO" != "1" ]]; then
         docker run --rm \
             --network "$NETWORK" \
             -v "${MINIO_OUT}:/backup" \
-            minio/mc:latest \
+            pgsty/mc@sha256:6ecdaec70bc5e8cf9d0e9a70c190f3beb1c83f11617ff4333f1fcd71ab1daf18 \
             /bin/sh -c "mc alias set local http://minio:9000 '${MINIO_USER}' '${MINIO_PASS}' && mc mirror --overwrite local/${MINIO_BUCKET} /backup/"
         echo "  [OK] minio -> $MINIO_OUT"
     fi

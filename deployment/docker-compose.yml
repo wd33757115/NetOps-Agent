@@ -72,7 +72,9 @@ services:
       - netops-network
 
   minio:
-    image: minio/minio:latest
+    # MinIO no longer publishes community images to Docker Hub or Quay; pgsty builds the same
+    # AGPLv3 server from source (RELEASE.2026-08-04T00-00-00Z), same entrypoint and health check.
+    image: pgsty/minio@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
     container_name: netops-minio
     ports:
       - "9000:9000"

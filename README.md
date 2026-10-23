@@ -3,49 +3,48 @@
 
 # NetOps Agent
 
-面向数据中心网络的 AIOps 工作台。巡检、规则治理、防火墙策略、公文写作和资料管理以独立业务包交付；开放式问答由 DeepSeek Harness SDK（DSH）执行。
+面向网络运维团队的 AIOps 工作台。设备巡检、规则治理、拓扑发现、防火墙策略、资源台账、公文写作和知识问答在同一个工作台里完成；每项业务是一个独立的应用包，按用户授权使用。开放式问答由 DeepSeek Harness SDK（DSH）执行。
 
-## 应用入口
+## 应用
 
-| 应用 | 路径 | 用途 |
-|---|---|---|
-| 工作台 | `/workbench` | 个人应用布局、文件夹、Dock、桌面壁纸及会话入口 |
-| 网络巡检 | `/apps/inspection` | 在线/离线巡检、证据、风险整改及报告 |
-| 规则治理 | `/apps/rule-governance` | 检查项、解析适配器、规则制作与发布 |
-| 设备管理 | `/apps/device-management` | 设备、凭据与巡检命令集 |
-| 防火墙策略 | `/apps/firewall-policy` | 申请导入、策略核对、配置及工单导出 |
-| 公文写作 | `/apps/official-documents` | 起草、修订和 Word 导出 |
-| 资料管理 | `/apps/materials` | 整份资料导入发布、修订比较、停用/恢复/删除 |
-| 知识问答 | `/chat` | 按需搜索、阅读资料，查询巡检业务证据；旧 `/apps/assistant` 地址跳转到聊天页 |
+| 应用 | ID | 用途 |
+| --- | --- | --- |
+| 网络巡检 | `inspection` | 在线与离线巡检、采集证据、变化与事件、风险整改、巡检报告 |
+| 规则治理 | `rule-governance` | 检查项、解析适配器（TextFSM）、规则制作、发布与回退 |
+| 设备管理 | `device-management` | 设备资产、分组、连接检测、身份发现、巡检命令集 |
+| SSH 终端 | `device-access` | 网页 SSH 终端、会话与主机密钥 |
+| 网络拓扑 | `topology` | 基于 LLDP 的拓扑发现、RFC 8345 标准模型、路径查询 |
+| NETCONF 接口 | `netconf-api` | 把设备的 NETCONF 表映射成检查项的值 |
+| 防火墙策略生成 | `firewall-policy` | 申请表导入、策略计算、配置生成与校验、变更工单 |
+| 资源台账 | `resource-ledger` | IP 地址规划、业务系统与主机、运营商专线 |
+| 公文写作 | `official-documents` | 公文起草、修订和 Word 导出 |
+| 资料管理 | `materials` | 资料导入、修订比较、停用与恢复 |
+| 知识问答 | `assistant` | 基于资料和业务证据的问答，入口 `/chat` |
+| 能力包接入验证 | `delivery-probe` | 应用包开发的完整示例，默认不启用 |
+| 演示应用 | `hello-demo` | 最小的应用包示例，默认不启用 |
 
-业务 App 通过 `app.yaml` 自注册前端、API、工具与任务，按用户/用户组授予 App 使用权。巡检和规则治理使用固定业务流程与 Celery，新任务不依赖 Workflow。DSH 是问答的唯一 Agent 执行器；原 LangGraph/Supervisor 和 RAG 知识库入口已退出。
+应用位于 `src/apps/<目录>/`，由各自的 `app.yaml` 声明前端、API、后台任务和数据库；目录里的 README 说明功能和边界。工作台里的“Skills 和连接器 → 开发指南”介绍如何开发自己的应用、Skill 和 Workflow。
 
-## 本地启动
+## 架构
 
-Windows 使用 Python 3.13 x64、Node.js 22 及以上、Docker Desktop（Linux containers）。完整步骤见[Windows 安装部署](docs/windows-deployment.md)。安装会生成缺少的 `.env`，已有配置不覆盖。
+浏览器 → React 前端（3000）→ Django BFF（8001，登录与授权）→ FastAPI 网关（8000）→ Celery Worker。PostgreSQL 保存业务数据，Redis 与 RabbitMQ 承担缓存和任务队列，MinIO 保存文件与采集证据；Langfuse 为可选的模型调用追踪。
+
+## 部署
+
+- [Windows 部署](docs/deployment-windows.md)：应用进程运行在本机，中间件运行在 Docker Desktop。
+- [Linux 部署](docs/deployment-linux.md)：全部服务运行在 Docker Compose 中。
+
+Windows 上的最短路径（在仓库根目录的 PowerShell 中执行）：
 
 ```powershell
 .\scripts\windows\install.ps1
 .\scripts\windows\bootstrap.ps1 -Action apply
-.\scripts\windows\start.ps1 -SkipLangfuse -EnableApps device-management, official-documents,firewall-policy,rule-governance,inspection,materials,assistant
+.\scripts\windows\start.ps1 -SkipLangfuse -EnableApps device-management,inspection,rule-governance,device-access,netconf-api,topology,firewall-policy,resource-ledger,official-documents,materials,assistant
+.\venv\Scripts\python.exe web\django_backend\manage.py createsuperuser
 ```
 
-后续直接运行 `scripts/windows/start.ps1` 保留启用状态与授权。默认构建预览前端，热更新使用 `-DevMode`；只做启动预检使用 `-CheckOnly`。应用源码升级必须先完成停用排空，见[能力包部署](docs/capability-packages-guide.md)。
-
-React 默认端口 3000，Django BFF 8001，FastAPI 8000。日志在 `.runtime/test/logs/`；停止使用 `scripts/windows/stop.ps1`。浏览器经 BFF 访问业务 API，PostgreSQL、Redis、RabbitMQ、MinIO 提供持久化与任务基础设施，Langfuse 为可选观测服务。
-
-## 文档
-
-[文档中心](docs/README.md) · [系统架构](docs/01_系统架构设计.md) · [工作台](docs/workbench-apps-guide-2026-09-05.md) · [开发与构建](docs/06_环境%20&%20编译构建说明.md) · [仓库内容范围](docs/repository-distribution.md)
-
-代码测试和本地部署通过不等于真实设备、专家问答或生产服务器验收完成。当前验收边界见对应文档。
+然后打开 `http://localhost:3000`，用刚创建的管理员登录。AI 功能（规则自动制作、公文、问答）需要在 `.env` 中填写 `DEEPSEEK_API_KEY`。
 
 ## 许可
 
 [Apache-2.0](LICENSE)
-
-系统管理：管理员从工作台顶部进入 `/system/users`，统一维护用户、业务用户组与应用授权。参见[操作说明](docs/system-management-guide.md)。
-
-规则包迁移：规则治理内支持检查项、TextFSM、Change 和状态/事件规则的依赖导出、差异预检、草稿导入与记录追溯。参见[使用说明](docs/rule-package-transfer-guide.md)。
-
-规则治理 1.4.0 已删除独立数据契约和旧生成链，当前入口及迁移边界见[规则资产治理](docs/rule-asset-control-plane-guide.md)。
