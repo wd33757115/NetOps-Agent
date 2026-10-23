@@ -53,4 +53,3 @@
 
 `/api/apps/resource-ledger/`：`overview`、`regions`、`sites`、`spaces`、`zones`、`levels`、`resources`、`prefixes`、`prefixes/{id}`、`prefixes/{id}/tree`、`prefixes/{id}/carve`、`prefixes/{id}/addresses`、`prefixes/{id}/reservations`、`addresses/{id}`、`reservations/{id}`、`systems`、`subsystems`、`hosts`、`hosts/suggest-ip`、`hosts/{id}`、`circuit-options`、`circuits`、`circuits/{id}`、`providers`、`provider-networks`、`pops`、`circuit-types`、`risks`、`resilience`、`impact`、`search`、`changes`、`import/template`、`import/preview`、`import/commit`、`export`。
 
-测试：`tests/unit/test_resource_ledger.py`、`tests/unit/test_resource_ledger_circuits.py`；申请表草稿见 `tests/unit/test_firewall_request_draft.py`。

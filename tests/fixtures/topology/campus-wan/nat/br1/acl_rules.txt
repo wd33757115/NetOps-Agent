@@ -1,7 +1,0 @@
-Basic IPv4 ACL 2998, 1 rule,
-ACL's step is 5
- rule 5 permit source 192.0.2.0 0.0.0.255
-
-Basic IPv4 ACL 2999, 1 rule,
-ACL's step is 5
- rule 5 permit source 172.16.10.0 0.0.0.255 (3 times matched)

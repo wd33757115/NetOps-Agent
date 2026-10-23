@@ -1,5 +1,0 @@
-  Total VPN-Instances configured : 1
-  License limit : Y
-  Max VPN instances permitted by license : 8191
-  VPN-Instance Name               RD                     Create time
-  BLUE                            10.255.10.13:2         2026/10/04 13:35:51

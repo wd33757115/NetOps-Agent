@@ -30,17 +30,6 @@ P2 启用会验证代码摘要、前端实际文件、队列消费者、任务�
 `sync_apps --enable` 已转到同一检查，不能跳过部署验证。
 公文继续使用原有业务表及历史 Alembic 链（`database.mode: legacy`），不重复建表。
 
-## 验证
-
-```text
-python -m pytest src/apps/official_documents/tests tests/unit/test_app_package_kernel.py
-python web/django_backend/manage.py test bff.test_app_packages bff.test_app_package_roundtrip
-```
-
-Django 测试使用专用测试库，建议设置 `DJANGO_DATABASE_ENGINE=sqlite`、
-`DJANGO_SQLITE_PATH=:memory:`。前端测试配置自动发现本包 frontend 下的测试。
-业务长任务仍由 Celery 运行；端到端测试直接调用任务入口，模型与对象存储使用替身。
-
 ## 回退
 
 停用入口：`app_packages disable official-documents`，使用 `app_packages drain official-documents`

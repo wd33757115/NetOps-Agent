@@ -1,2 +1,0 @@
-show ip arp
-ACC2#

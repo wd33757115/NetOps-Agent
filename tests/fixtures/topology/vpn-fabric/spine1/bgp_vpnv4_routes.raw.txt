@@ -1,3 +1,0 @@
-show bgp vpnv4 unicast all
-
-SPINE1#

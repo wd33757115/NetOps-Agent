@@ -1,6 +1,0 @@
-show vrf
-  Name                             Default RD            Protocols   Interfaces
-  BLUE                             10.255.10.12:2        ipv4        Vl20
-                                                                     Vl920
-  MGMT                             <not set>             ipv4        Et0/0
-LEAF2#

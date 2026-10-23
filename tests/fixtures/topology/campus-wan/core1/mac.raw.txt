@@ -1,5 +1,0 @@
-show mac address-table
-              ^
-% Invalid input detected at '^' marker.
-
-CORE1#

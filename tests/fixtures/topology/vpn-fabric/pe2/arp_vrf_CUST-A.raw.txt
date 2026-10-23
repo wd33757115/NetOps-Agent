@@ -1,5 +1,0 @@
-display arp vpn-instance CUST-A
-  Type: S-Static   D-Dynamic   O-Openflow   R-Rule   M-Multiport  I-Invalid
-IP address      MAC address    VLAN/VSI name Interface/Link ID        Aging Type
-10.2.1.10       0050-7966-680d --            GE3/0                    19    D   
-<PE2>

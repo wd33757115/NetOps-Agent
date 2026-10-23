@@ -1,7 +1,0 @@
-show nve peers
-'M' - MAC entry download flag  'A' - Adjacency download flag
-'4' - IPv4 flag  '6' - IPv6 flag
-
-Interface  VNI      Type Peer-IP          RMAC/Num_RTs   eVNI     state flags UP time
-nve1       10010    L2CP 10.255.10.13     2              10010      UP   N/A  02:02:47
-LEAF1#

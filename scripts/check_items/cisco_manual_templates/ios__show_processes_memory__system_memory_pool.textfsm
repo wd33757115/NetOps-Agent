@@ -1,7 +1,0 @@
-Value POOL (.+?)
-Value TOTAL (\d+)
-Value USED (\d+)
-Value FREE (\d+)
-
-Start
-  ^\s*${POOL}\s+Pool Total:\s+${TOTAL}\s+Used:\s+${USED}\s+Free:\s+${FREE}\s*$$ -> Record

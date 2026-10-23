@@ -2,7 +2,7 @@
 param()
 $ErrorActionPreference = 'Stop'
 if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-    throw 'Install Microsoft App Installer (winget), then retry. See docs/windows-deployment.md.'
+    throw 'Install Microsoft App Installer (winget), then retry. See docs/deployment-windows.md.'
 }
 $packages = @(
     @{ Command = 'python'; Id = 'Python.Python.3.13' },

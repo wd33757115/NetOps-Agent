@@ -1,7 +1,0 @@
-Interface: GigabitEthernet5/0
- Inbound policy:
-  IPv4 ACL 3990
-  IPv4 default action: Permit
- Outbound policy:
-  IPv4 ACL T-NAMED
-  IPv4 default action: Permit

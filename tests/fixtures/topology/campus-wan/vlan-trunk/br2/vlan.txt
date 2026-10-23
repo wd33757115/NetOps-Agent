@@ -1,6 +1,0 @@
-Brief information about all VLANs:
-Supported Minimum VLAN ID: 1
-Supported Maximum VLAN ID: 4094
-Default VLAN ID: 1
-VLAN ID   Name                             Port
-1         VLAN 0001                        

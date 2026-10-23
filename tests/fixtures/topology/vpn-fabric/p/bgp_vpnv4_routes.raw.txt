@@ -1,4 +1,0 @@
-show bgp vpnv4 unicast all
-% BGP not active
-
-P#

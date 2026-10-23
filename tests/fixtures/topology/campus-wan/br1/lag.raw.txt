@@ -1,3 +1,0 @@
-display link-aggregation verbose
-No link aggregation group exists.
-<BR1>

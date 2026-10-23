@@ -1,6 +1,0 @@
-Policy name: TEST-PBR
-  node 10 permit:
-    if-match acl 3992
-    apply next-hop 10.0.13.2
-  node 20 deny:
-    if-match acl 3993

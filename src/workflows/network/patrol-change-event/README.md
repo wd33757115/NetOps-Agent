@@ -1,6 +1,6 @@
 # 在线巡检变化与事件工作流
 
-本目录是仍在注册的编排插件；用户入口与任务生命周期见[网络巡检指南](../../../../docs/patrol-workflow-refactor-guide-2026-09-05.md)。参数和步骤以同目录 `WORKFLOW.yaml` 为准。
+本目录是仍在注册的编排插件；用户入口在网络巡检工作区。参数和步骤以同目录 `WORKFLOW.yaml` 为准。
 
 ```text
 device-patrol → state-normalizer → change-detector → event-builder

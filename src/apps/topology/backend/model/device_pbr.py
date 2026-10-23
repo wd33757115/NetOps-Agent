@@ -1,7 +1,7 @@
 """The collected IPv4 policy routes as an OpenConfig policy-forwarding tree.
 
 Neither IETF nor IEEE has a policy-routing model, so the owner chose the public
-openconfig-policy-forwarding (models/network-twin/openconfig, pinned with its whole
+openconfig-policy-forwarding (the pinned OpenConfig release, with its whole
 dependency closure). It lives only under openconfig-network-instance, and an interface
 binding is a leafref to /oc-if:interfaces/interface/name, so the tree is the minimal host
 tree that carries it: each network instance a bound interface is in (its name and type),

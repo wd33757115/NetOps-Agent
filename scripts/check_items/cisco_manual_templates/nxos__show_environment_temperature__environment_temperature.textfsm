@@ -1,9 +1,0 @@
-Value slot (\d+)
-Value sensor (\S+)
-Value temperature_high_alarm_celsius ([-+]?\d+(?:\.\d+)?)
-Value temperature_high_warning_celsius ([-+]?\d+(?:\.\d+)?)
-Value temperature_celsius ([-+]?\d+(?:\.\d+)?)
-Value sensor_status (\S+)
-
-Start
-  ^${slot}\s+${sensor}\s+${temperature_high_alarm_celsius}\s+${temperature_high_warning_celsius}\s+${temperature_celsius}\s+${sensor_status}\s*$$ -> Record

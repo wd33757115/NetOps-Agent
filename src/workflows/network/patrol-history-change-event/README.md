@@ -1,6 +1,6 @@
 # 历史巡检变化与事件工作流
 
-本插件对比两个周期的 CLI 数据。普通用户从[网络巡检工作区](../../../../docs/patrol-workflow-refactor-guide-2026-09-05.md)上传并核对数据；同目录的聊天 Intent 仍支持提取两个服务器可访问目录作为兼容入口。
+本插件对比两个周期的 CLI 数据。普通用户从网络巡检工作区上传并核对数据；同目录的聊天 Intent 仍支持提取两个服务器可访问目录作为兼容入口。
 
 ## 实际步骤
 
@@ -21,4 +21,4 @@
 
 `CHAT.intent.yaml` 声明 `baseline_path` 和 `current_path` 为必需上下文，由当前消息中的两个路径提取；不要求所有工作流都有工单号。路径是执行服务可访问的路径，浏览器客户端路径不会自动变成服务器文件。
 
-该流程会写入导入、观察、变化、事件和报告记录。`update_current_state: false` 只是不刷新当前状态表；`publish_events: false` 只是不发布事件。完整质量检查、来源证据和报告边界见[变化与事件指南](../../../../docs/patrol-change-event-pipeline.md)。
+该流程会写入导入、观察、变化、事件和报告记录。`update_current_state: false` 只是不刷新当前状态表；`publish_events: false` 只是不发布事件。

@@ -1,3 +1,0 @@
-display ip policy-based-route setup
-Policy name              Type     Interface 
-<BR1>

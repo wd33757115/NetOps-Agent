@@ -50,7 +50,7 @@ capabilities:
 verified:
   - model: VSR1000
     version: 7.1.064 Release 1362P12
-    source: tests/fixtures/topology/h3c/vsr1000-7.1.064
+    source: lab capture
     collected: [version, lldp_local, lldp, interfaces, ip, arp, mac, vlan, lag, routes, vrfs]
     unsupported: [inventory, irf]
     parsed: [version, lldp_local, lldp, interfaces, ip, arp, mac, vlan, routes, lag, vrfs]

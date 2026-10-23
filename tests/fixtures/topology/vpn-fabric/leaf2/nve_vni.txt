@@ -1,3 +1,0 @@
-Interface  VNI        Multicast-group  VNI state  Mode  VLAN  cfg vrf                      
-nve1       50020      N/A              Up         L3CP  920   CLI BLUE                     
-nve1       10020      N/A              Up         L2CP  20    CLI BLUE                     

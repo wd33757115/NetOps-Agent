@@ -96,5 +96,3 @@ stdout 返回 JSON，包含 success、mode、job_id、生成统计和逐候选�
 当前 Provider 适配不限定为 DeepSeek；其专属 thinking 参数由适配层处理。历史协议标签保持稳定以支持已有任务。
 
 没有正样本记录、输入变化、标准输出不完整或发布范围不兼容时不能自动发布。需要证明跨设备泛化时，在制作结束后另取未参与修复的样本回放。
-
-详情与代码入口见 [TextFSM 生成指南](../../../docs/parser-generation-guide.md)。

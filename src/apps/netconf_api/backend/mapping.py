@@ -1,6 +1,6 @@
 """A NETCONF definition maps device tables to check-item Value rows.
 
-A definition is data (docs/netconf-api-handoff.md §5.2): where its tables are
+A definition is data: where its tables are
 (namespace, path to each row element, state or running configuration), which check item
 the rows serve, the leaves identifying a row, and for each Value the leaf it is read from
 and how it is written the way the CLI prints it. One check item may be spread over

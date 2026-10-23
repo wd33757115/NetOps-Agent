@@ -1,7 +1,7 @@
 PROJECT_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
 COMPOSE := docker compose --env-file "$(PROJECT_ROOT)/.env" -f "$(PROJECT_ROOT)/deployment/docker-compose.yml" --profile core
 
-.PHONY: help install up down down-v logs logs-app ps init-db django-migrate django-shell test celery fastapi build build-only django react up-all
+.PHONY: help install up down down-v logs logs-app ps init-db django-migrate django-shell celery fastapi build build-only django react up-all
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
@@ -58,5 +58,3 @@ django: ## 本地启动 Django（开发）
 react: ## 本地启动 React（开发）
 	cd "$(PROJECT_ROOT)/web/react_frontend" && npm run dev
 
-test: ## 运行测试
-	cd "$(PROJECT_ROOT)" && pytest tests/ -v

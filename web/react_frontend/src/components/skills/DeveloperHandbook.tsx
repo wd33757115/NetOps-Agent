@@ -1,14 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-// The handbooks are written once, in the repository, and read here as they are there.
-import platformHandbook from '../../../../../docs/developer-handbook/README.md?raw'
-import skillHandbook from '../../../../../docs/developer-handbook/skills.md?raw'
-import workflowHandbook from '../../../../../docs/developer-handbook/workflows.md?raw'
+// The handbooks live next to this page as Markdown and are read here as written.
+import platformHandbook from './handbook/platform.md?raw'
+import skillHandbook from './handbook/skills.md?raw'
+import workflowHandbook from './handbook/workflows.md?raw'
 import { ArchitectureDiagram, LifecycleDiagram } from './HandbookDiagrams'
 import './DeveloperHandbook.css'
 
-const images = import.meta.glob('../../../../../docs/developer-handbook/images/*', {
+const images = import.meta.glob('./handbook/images/*', {
   eager: true, query: '?url', import: 'default',
 }) as Record<string, string>
 const imageUrl = (src = '') => {

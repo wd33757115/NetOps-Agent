@@ -1,7 +1,6 @@
 # H3C Comware 7 NETCONF → standard tables (backend/standard.py). Codes are those seen on
-# BR1/BR2 (VSR1000, 7.1.064 R1362P12; replies in tests/fixtures/netconf/h3c-comware7)
-# next to the CLI or the lab configuration (scripts/topology/campus_wan/configs); any
-# other code is reported with the device's text, not guessed.
+# lab routers BR1/BR2 (VSR1000, 7.1.064 R1362P12) next to the CLI or the lab
+# configuration; any other code is reported with the device's text, not guessed.
 vendor: H3C
 platforms: [comware]
 namespace: http://www.h3c.com/netconf/data:1.0
@@ -151,8 +150,7 @@ tables:
       if-subtype: {leaf: InterfaceType, codes: {"2": port-ref}}
       if-id: {leaf: InterfaceID, convert: integer}
 
-  # --- NAT (ietf-nat, RFC 8512), measured on BR1 against "display nat all"
-  # (tests/fixtures/netconf/h3c-comware7/br1-policy).
+  # --- NAT (ietf-nat, RFC 8512), measured on BR1 against "display nat all".
   nat-pool:  # an address group: policy/external-ip-address-pool
     path: top/NAT/AddrGroupMembers/GroupMember
     ignore: []
@@ -218,8 +216,8 @@ tables:
 
   # --- ACL (RFC 8519/9899) and policy-based routing (OpenConfig), measured on BR1
   # against "display acl all", "display packet-filter interface" and "display ip
-  # policy-based-route" (tests/fixtures/netconf/h3c-comware7/br1-policy; the VPN-instance
-  # condition on BR2, br2-acl-vrf). A leaf no field reads is reported as unread.
+  # policy-based-route" (the VPN-instance condition on BR2). A leaf no field reads is
+  # reported as unread.
   acl-group:
     path: top/ACL/NamedGroups/Group
     ignore: [GroupType, GroupCategory, Step, RuleNum, Name]

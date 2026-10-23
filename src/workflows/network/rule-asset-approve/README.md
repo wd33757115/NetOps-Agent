@@ -12,4 +12,4 @@
 
 管理员授权的自动制作有独立授权校验；本 Workflow 只传递 `job_id` 和 `actor`，不会凭一个来源字符串自动获得发布授权。权限须由受保护的上层入口落实。
 
-参数以同目录 `WORKFLOW.yaml` 为准。当前默认业务流程见[规则自动制作](../../../../docs/patrol-rule-autopilot-guide-2026-09-05.md)，详细门禁见[规则资产治理](../../../../docs/rule-asset-control-plane-guide.md)。
+参数以同目录 `WORKFLOW.yaml` 为准。

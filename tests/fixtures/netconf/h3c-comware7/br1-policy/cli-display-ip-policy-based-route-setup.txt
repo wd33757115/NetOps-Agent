@@ -1,3 +1,0 @@
-Policy name              Type     Interface 
-TEST-PBR                 Forward  GigabitEthernet5/0
-TEST-PBR                 Local    N/A

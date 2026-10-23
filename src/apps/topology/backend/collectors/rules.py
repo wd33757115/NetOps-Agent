@@ -3,8 +3,8 @@
 Rule governance publishes the system base check items topology needs, their same-name
 Values, one collection implementation per device family (command) and its TextFSM
 template. Topology consumes them only through the public contract
-``src.apps.rule_governance.runtime`` and projects the Values into its own fact records
-(docs/topology-rule-consumption.md). The projections only normalize by Value meaning
+``src.apps.rule_governance.runtime`` and projects the Values into its own fact records.
+The projections only normalize by Value meaning
 (interface names, addresses, address families); nothing here reads vendor CLI text.
 
 A capability listed in CHECK_ITEMS is served by rules for every device family rule

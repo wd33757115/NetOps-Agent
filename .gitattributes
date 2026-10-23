@@ -29,21 +29,6 @@
 *.db binary
 *.sqlite binary
 
-# CLI fixtures preserve captured CR CR LF and exact byte hashes on every OS.
-tests/fixtures/topology/**/*.txt -text whitespace=-blank-at-eol
-
-# Keep generated mount inputs byte-identical to their locked hashes on Windows.
-models/network-twin/mount/cases/*.xml text eol=lf
-models/network-twin/mount/operational/*.xml text eol=lf
-models/network-twin/mount/Dockerfile* text eol=lf
-
-# Device evidence keeps trailing spaces as printed and LF bytes matching its manifest digests.
-models/network-twin/evidence/**/*.txt text eol=lf whitespace=-blank-at-eol
-
 # Frozen YANG resources are checked against SHA-256 digests of their LF bytes;
 # upstream modules keep their original trailing spaces.
 src/apps/topology/resources/yang/*.yang text eol=lf whitespace=-blank-at-eol
-
-# Pinned OpenConfig modules (models/network-twin/openconfig/sources.lock.json) are
-# checked against SHA-256 digests of their upstream LF bytes; their own whitespace stays.
-models/network-twin/openconfig/modules/*.yang text eol=lf whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab,-indent-with-non-tab,-tab-in-indent

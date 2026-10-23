@@ -1,6 +1,0 @@
-show mpls forwarding-table
-Local      Outgoing   Prefix           Bytes Label   Outgoing   Next Hop    
-Label      Label      or Tunnel Id     Switched      interface              
-16         Pop Label  10.255.20.1/32   951249        Et0/1      10.20.12.1  
-17         Pop Label  10.255.20.3/32   950178        Et0/2      10.20.23.2  
-P#

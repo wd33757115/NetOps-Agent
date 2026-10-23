@@ -1,9 +1,0 @@
-Value member_id (\d+)
-Value role (\S+)
-Value mac_address (\S+)
-Value priority (\d+)
-Value hardware_version (\S+)
-Value member_status (\S+)
-
-Start
-  ^\s*\*?${member_id}\s+${role}\s+${mac_address}\s+${priority}\s+${hardware_version}\s+${member_status}\s*$$ -> Record

@@ -1,2 +1,0 @@
-display vxlan tunnel
-<PE2>

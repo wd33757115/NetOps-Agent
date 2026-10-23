@@ -1,8 +1,6 @@
 # 公共 SSH 设备访问
 
 独立的新模块，提供 Paramiko 与独立 Netmiko 适配器；原巡检及其 Netmiko 路径保持原状，今后也不迁移。
-完整边界与进度见 [数字孪生路线图](../../../docs/network-digital-twin-roadmap.md)。
-
 新增受控会话使用 `DeviceAccessService.open_session()` 与 `SessionBudget`，要求显式
 `device.session` grant、已识别的平台和持久化审计回调。L1/L2 在预算内执行，L3 等待审批，
 L4 拒绝；用上下文管理器或 `close()` 结束。原固定包 `execute_batch()` 接口仍保留。
@@ -67,14 +65,6 @@ result = service.execute_batch(
 Redis 不可用时拒绝连接；Redis 关闭时仅提供新模块的进程内配额，不能承诺跨进程或与巡检合并计数。
 
 依赖清单为本目录 `requirements.txt`；Redis 模式还需要现有平台的 Redis 依赖和配置。
-公共终端与诊断 HTTP/WS 由独立 `device-access` App 注册，拓扑由 `topology` App 注册。两者有独立迁移和依赖锁文件；未迁移旧巡检调用方。已在两台实验 H3C 验证，部署状态与授权格式见路线图及首版实施记录。
+公共终端与诊断 HTTP/WS 由独立 `device-access` App 注册，拓扑由 `topology` App 注册。两者有独立迁移和依赖锁文件；未迁移旧巡检调用方。已在两台实验 H3C 验证。
 
 device-access 0.7.0 / topology 0.4.0 按 D-5 简化：不再有管理域、访问范围、凭据集和连接授权。两个 App 调用本模块时管理域固定传 `default`；本模块的 `management_domain` 参数与文件授权函数保持不变。SSH 终端用已保存会话或默认用户名密码登录，拓扑用默认或本次临时用户名密码登录；主机密钥由 SSH 终端 App 保存（终端首次连接需用户确认，拓扑首次连接自动记录，变化时都停下等待确认）。升级执行包内迁移 device_access_0006 / topology_0003，迁移会删除旧授权与凭据表，升级前先备份数据库。
-
-## 验证
-
-```text
-python -m pytest tests/unit/test_device_access.py tests/unit/test_device_access_ssh.py tests/unit/test_device_access_admission.py
-```
-
-测试使用驱动/Redis 替身及本机 SSH 服务端。硬件适配与真实 Redis 多进程验收仍待后续执行。

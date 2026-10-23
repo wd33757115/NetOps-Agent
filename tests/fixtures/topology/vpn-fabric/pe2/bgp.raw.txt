@@ -1,2 +1,0 @@
-display bgp peer ipv4
-<PE2>

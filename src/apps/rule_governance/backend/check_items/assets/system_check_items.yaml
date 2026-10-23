@@ -1,5 +1,5 @@
-# System base check items that topology discovery consumes (owner decision 2026-10-04,
-# docs/topology-rule-consumption.md). system_items.py expands them into same-name/v1
+# System base check items that topology discovery consumes (owner decision 2026-10-04).
+# system_items.py expands them into same-name/v1
 # check items and collection implementations. They cannot be deleted; a later version
 # may only add optional Values.
 #

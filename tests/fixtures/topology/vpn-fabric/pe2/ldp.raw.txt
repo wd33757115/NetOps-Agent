@@ -1,6 +1,0 @@
-display mpls ldp peer
-VPN instance: public instance
-Total number of peers: 1
-Peer LDP ID             State         Role     GR   MD5  KA Sent/Rcvd
-10.255.20.2:0           Operational   Active   Off  Off  491/562
-<PE2>

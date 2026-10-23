@@ -1,7 +1,0 @@
-          Mac Address Table
--------------------------------------------
-
-Vlan    Mac Address       Type        Ports
-----    -----------       --------    -----
-  10    0050.7966.680c    DYNAMIC     Et1/0
-Total Mac Addresses for this criterion: 1

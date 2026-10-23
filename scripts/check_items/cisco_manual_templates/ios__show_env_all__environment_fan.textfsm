@@ -1,8 +1,0 @@
-Value slot (\S+)
-Value fan (.+?)
-Value fan_status (.+?)
-Value speed_rpm (\d+)
-
-Start
-  ^FAN\s+${fan}\s+is\s+${fan_status}\s*$$ -> Record
-  ^\s*RPM:\s+${fan}\s+${slot}\s+${fan_status}\s+${speed_rpm}\s+RPM\s*$$ -> Record

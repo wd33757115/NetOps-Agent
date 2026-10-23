@@ -1,2 +1,0 @@
-                 ^
- % Incomplete command found at '^' position.

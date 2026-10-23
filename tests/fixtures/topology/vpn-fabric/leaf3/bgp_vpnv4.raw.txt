@@ -1,2 +1,0 @@
-display bgp peer vpnv4
-<LEAF3>

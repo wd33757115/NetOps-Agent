@@ -64,4 +64,3 @@ Agent 工具与 HTTP API 调用同一业务服务，身份由平台提供。文�
 
 旧 `src/skills` 脚本路径是到本包的兼容导入/CLI 入口，不再维护第二份实现。旧 Skill/test-run 和旧工作流中的对应 Skill 调用返回应用入口提示，避免绕过 App 授权。历史 Skill 产物保留原路径，未自动转换为新任务；ITSM 自动流程已改为调用本包的 Workflow 动作。宿主页面及服务文件仅保留兼容导出。
 
-验证见 `tests/unit/test_firewall_package.py`、原策略算法回归、`web/django_backend/bff/test_firewall_deployment.py` 和 `web/react_frontend/e2e/firewall-policy.spec.ts`。真实交付测试要求显式设置独立的 `TEST_PACKAGE_BROKER_URL`，会在本地 MinIO 创建随机对象并清理，不使用生产队列。

@@ -1,2 +1,0 @@
-show ip bgp summary
-PE1#

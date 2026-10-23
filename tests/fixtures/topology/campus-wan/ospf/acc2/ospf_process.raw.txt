@@ -1,2 +1,0 @@
-show ip ospf
-ACC2#

@@ -1,4 +1,0 @@
-display irf
-                 ^
- % Incomplete command found at '^' position.
-<H3C>

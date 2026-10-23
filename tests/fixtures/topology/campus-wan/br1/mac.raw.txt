@@ -1,3 +1,0 @@
-display mac-address
-MAC Address      VLAN ID    State            Port/Nickname            Aging
-<BR1>

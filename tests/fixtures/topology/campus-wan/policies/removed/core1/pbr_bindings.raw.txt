@@ -1,3 +1,0 @@
-show ip policy
-Interface      Route map
-CORE1#

@@ -128,7 +128,7 @@ fallback_to_rag: true
 
 此 Skill 需要调用后端 Celery 任务 `execute_config_backup_task` 执行实际的备份操作。
 
-**运行时位置**：`src/core/device_ops/tools.py`；`init_test_db.py` 仅向 PostgreSQL 写入非生产示例资产。
+**运行时位置**：`src/core/device_ops/tools.py`。
 
 执行步骤：
 1. 接收用户参数

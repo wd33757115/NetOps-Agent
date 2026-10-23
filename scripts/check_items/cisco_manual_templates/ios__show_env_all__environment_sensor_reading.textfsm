@@ -1,8 +1,0 @@
-Value SENSOR (.+?)
-Value LOCATION (\S+)
-Value STATE (\S+)
-Value READING ([-+]?\d+(?:\.\d+)?)
-Value UNIT (\S+)
-
-Start
-  ^\s*${SENSOR}\s{2,}${LOCATION}\s+${STATE}\s+${READING}\s+${UNIT}\s*$$ -> Record

@@ -1,9 +1,0 @@
-Value slot (\S+)
-Value cpu (\S+)
-Value cpu_5s_percent ([-+]?\d+(?:\.\d+)?)
-Value cpu_interrupt_5s_percent ([-+]?\d+(?:\.\d+)?)
-Value cpu_1m_percent ([-+]?\d+(?:\.\d+)?)
-Value cpu_usage_percent ([-+]?\d+(?:\.\d+)?)
-
-Start
-  ^CPU utilization for five seconds:\s+${cpu_5s_percent}%/${cpu_interrupt_5s_percent}%; one minute:\s+${cpu_1m_percent}%; five minutes:\s+${cpu_usage_percent}% -> Record

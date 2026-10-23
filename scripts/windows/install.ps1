@@ -39,7 +39,7 @@ if ($WithLangfuse) { $pipArgs += @('-r', 'deployment/requirements/observability.
 & $venvPython @pipArgs
 if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed' }
 & $venvPython -m pip check
-if ($LASTEXITCODE -ne 0) { throw 'Dependency conflicts remain in venv. See docs/windows-deployment.md (clean environment migration).' }
+if ($LASTEXITCODE -ne 0) { throw 'Dependency conflicts remain in venv. See docs/deployment-windows.md (rebuilding a clean venv).' }
 & $venvPython -m src.platform.kernel.cli check-dependencies
 if ($LASTEXITCODE -ne 0) { throw 'App dependency validation failed' }
 if (-not $SkipNpm) {

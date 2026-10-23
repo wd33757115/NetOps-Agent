@@ -33,8 +33,6 @@
 旧任务的重复结果可使用 `python -m scripts.maintenance.compact_offline_job_results` 预览。
 停用并排空巡检应用后，以 `--apply --backup-dir <目录>` 执行；每份原结果先备份为 gzip，再保留阶段摘要。
 该操作不修改原始 CLI、解析快照、观测、变化、事件和历史采集时间，也不会把数据质量缺口改为成功。
-验收记录、部署与回退说明见 [P5 实施记录](../../../docs/netops-capability-packages-p5.md)。
-
 1.1.0：`backend/diagnostics.py` 提供有界、只读、无 Workflow 关联查询的诊断契约。
 HTTP 位于 `/api/apps/inspection/diagnosis/{search_devices,list_runs,list_events,list_snapshots,read_snapshot}`，
 全部使用 POST JSON 查询参数并继承 inspection App 准入；Agent 工具调用相同函数。
@@ -46,7 +44,7 @@ HTTP 位于 `/api/apps/inspection/diagnosis/{search_devices,list_runs,list_event
 
 设备管理已拆为独立 App `/apps/device-management`。巡检通过自身只读资产 API 选择设备；仅设备维护入口检查 `device-management` App 授权。
 
-1.2.4：离线详细 Excel 按检查项分表，直接导出数据库保存的 TextFSM Value 和完整记录；非结构化原文并列显示基线与当前数据。复用采集时记录集关联，不重跑字段映射。详细数据导出独立于 Word 结论组装，保留任务权限和周期校验。见 [巡检报告与证据](../../../docs/patrol-report-guide.md)。
+1.2.4：离线详细 Excel 按检查项分表，直接导出数据库保存的 TextFSM Value 和完整记录；非结构化原文并列显示基线与当前数据。复用采集时记录集关联，不重跑字段映射。详细数据导出独立于 Word 结论组装，保留任务权限和周期校验。
 
 
 ## 巡检详情页面（1.2.6）
@@ -86,4 +84,4 @@ HTTP 位于 `/api/apps/inspection/diagnosis/{search_devices,list_runs,list_event
 
 Windows 默认使用 6 个独立 solo 巡检 Worker，控制/心跳及 AI 队列独立。
 检查域汇总按域预先分组；设备预检仅在新建巡检时请求，任务中心空闲时每分钟刷新。
-部署参数、连接预算、压测范围见 `docs/team-capacity-plan.md`。真实在线 SSH 采集仍需在目标网络验收。
+真实在线 SSH 采集仍需在目标网络验收。

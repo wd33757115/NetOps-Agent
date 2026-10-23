@@ -1,7 +1,0 @@
-Value vlan_id (\S+)
-Value mac_address ([0-9a-fA-F]{4}(?:\.[0-9a-fA-F]{4}){2})
-Value entry_type (\S+)
-Value interface (.+?)
-
-Start
-  ^\s*${vlan_id}\s+${mac_address}\s+${entry_type}\s+${interface}\s*$$ -> Record

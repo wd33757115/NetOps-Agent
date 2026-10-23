@@ -145,7 +145,7 @@ class PatrolProductionReadinessService:
             check_id="database_schema",
             name="数据库版本",
             scope="persistence",
-            remediation="执行 python scripts/migrate_db.py，再重新检查。",
+            remediation="执行 python -m src.platform.database.bootstrap apply（Windows 为 scripts\\windows\\bootstrap.ps1 -Action apply），再重新检查。",
             probe=probe,
         )
 

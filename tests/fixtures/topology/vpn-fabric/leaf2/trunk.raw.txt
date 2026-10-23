@@ -1,2 +1,0 @@
-show interfaces trunk
-LEAF2#

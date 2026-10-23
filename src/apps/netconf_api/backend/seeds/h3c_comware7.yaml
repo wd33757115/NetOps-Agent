@@ -1,7 +1,7 @@
-# H3C Comware 7 NETCONF definitions, the first ones (docs/netconf-api-handoff.md §4.3).
-# Measured on BR1 and BR2 (VSR1000, 7.1.064 R1362P12) against the CLI on 2026-10-05; the
-# replies are tests/fixtures/netconf/h3c-comware7/br1 and br2. A code listed here was seen on a device
-# next to the CLI's text for it; any other code is reported as unmapped, not guessed.
+# H3C Comware 7 NETCONF definitions, the first ones.
+# Measured on lab routers BR1 and BR2 (VSR1000, 7.1.064 R1362P12) against the CLI on 2026-10-05.
+# A code listed here was seen on a device next to the CLI's text for it; any other code is
+# reported as unmapped, not guessed.
 definitions:
   - id: h3c-comware7.interfaces
     description: 接口表，供其他定义把 IfIndex 翻译成接口名
@@ -65,10 +65,9 @@ definitions:
       NEXTHOP_IF: IfName  # the full name (GigabitEthernet2/0); topology normalizes it
       VRF: VRF  # empty for the public table
 
-  # --- ACL, NAT and policy-based routing (measured on BR1 against the CLI, 2026-10-05:
-  # tests/fixtures/netconf/h3c-comware7/br1-policy; the VPN-instance condition on BR2,
-  # br2-acl-vrf). Conditions a definition does not read go into OTHER (rest), so a rule
-  # with one is never computed as if it were absent.
+  # --- ACL, NAT and policy-based routing (measured on BR1 against the CLI, 2026-10-05;
+  # the VPN-instance condition on BR2). Conditions a definition does not read go into
+  # OTHER (rest), so a rule with one is never computed as if it were absent.
   - id: h3c-comware7.acl-groups
     description: ACL 组表，供规则取匹配顺序
     vendor: H3C
@@ -318,7 +317,7 @@ definitions:
     # The form BR1 showed for "apply next-hop 10.0.13.2"; a next hop in a VPN instance,
     # a directly connected one or another mode is not read as this one. H3C's PBR YANG
     # (PBR@2022-08-18) is not on GitHub; these codes are BR1's until it is read with
-    # get-schema (models/network-twin/m5/README.md).
+    # get-schema.
     expect: {Mode: "0", VrfIndex: "0", NexthopDirect: "false"}
 
   - id: h3c-comware7.pbr-rules

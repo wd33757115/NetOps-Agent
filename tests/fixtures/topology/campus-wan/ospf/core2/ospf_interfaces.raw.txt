@@ -1,9 +1,0 @@
-show ip ospf interface brief
-Interface    PID   Area            IP Address/Mask    Cost  State Nbrs F/C
-Lo0          1     0               10.255.0.4/32      1     LOOP  0/0
-Et1/1        1     0               10.0.45.1/30       10    BDR   1/1
-Et1/0        1     0               10.0.46.1/30       10    BDR   1/1
-Et0/3        1     0               10.0.34.1/31       10    P2P   1/1
-Et0/2        1     0               10.0.14.2/30       10    DR    1/1
-Et0/1        1     0               10.0.24.2/30       10    DR    1/1
-CORE2#

@@ -25,10 +25,5 @@ module.exports = {
       files: ['*.config.ts', 'vite.config.ts'],
       env: { node: true },
     },
-    {
-      files: ['src/**/*.test.{ts,tsx}', 'src/test/**/*.{ts,tsx}'],
-      env: { jest: true },
-      globals: { vi: 'readonly' },
-    },
   ],
 }

@@ -1,2 +1,0 @@
-display bgp l2vpn evpn
-<PE2>

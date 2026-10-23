@@ -66,10 +66,3 @@ materials_0001 创建 app_materials_documents / app_materials_revisions。
 按依赖顺序先安装/启用 materials，再升级/启用 Assistant 0.6.0；依赖只表示包就绪，不自动授予用户权限。
 启动脚本提示已更新为 -EnableApps materials,assistant，既有用户授权不变。
 不可仅恢复旧 Assistant 二进制回滚，新写入资料不在旧表；回滚须恢复整套已核验备份。
-
-## 验证
-
-后端：tests/unit/test_materials.py。
-前端：frontend/Page.test.tsx、WordImport.test.tsx；共享引用组件增加 Word 来源测试。
-浏览器：node scripts/materials/verify_ui.mjs，使用合成数据与临时 Vite，关闭后不保留服务。
-此浏览器测试不依赖真实 Gateway，不代表生产 MinIO、权限服务和部署验收。

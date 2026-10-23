@@ -1,2 +1,0 @@
-show bgp vpnv4 unicast all summary
-LEAF2#

@@ -1,2 +1,0 @@
-show l2vpn evpn evi detail
-P#

@@ -3,7 +3,7 @@
 
 # Web 应用与 BFF
 
-React 负责工作台、巡检、规则、公文和通用管理页面；Django BFF 负责认证、用户设置和业务 API 代理。业务处理位于 FastAPI。系统架构见 [架构说明](../docs/01_系统架构设计.md)。
+React 负责工作台、巡检、规则、公文和通用管理页面；Django BFF 负责认证、用户设置和业务 API 代理。业务处理位于 FastAPI。
 
 ## 开发入口
 
@@ -13,7 +13,7 @@ React 负责工作台、巡检、规则、公文和通用管理页面；Django B
 - BFF：`django_backend/bff/`；Django 默认连接 PostgreSQL 的 `django` schema，SQLite 仅为显式兼容配置。
 - 权限：页面守卫和应用图标过滤改善体验，BFF/FastAPI 负责实际授权。业务包按 App 使用权授权；个人桌面布局与壁纸按账号保存。
 
-完整启动和迁移步骤使用 [开发与构建](../docs/06_环境%20&%20编译构建说明.md)。只启动前端可在仓库根目录执行：
+完整部署见仓库根目录的 README 和 `docs/` 下的部署文档。只启动前端可在仓库根目录执行：
 
 ```powershell
 npm --prefix web/react_frontend ci
@@ -32,4 +32,4 @@ npm --prefix web/react_frontend run test:visual
 
 `check` 包含 UTF-8、ESLint、单元测试与生产构建。浏览器用例覆盖桌面和手机；视觉基线与 CI 使用 Windows Chrome。结果不能替代真实设备与模型服务的验收。
 
-公文模板从服务端配置读取，桌面应用权限来自注册表；扩展方式见 [公文指南](../docs/official-document-workspace-guide-2026-09-05.md)和[工作台指南](../docs/workbench-apps-guide-2026-09-05.md)。
+公文模板从服务端配置读取，桌面应用权限来自注册表；

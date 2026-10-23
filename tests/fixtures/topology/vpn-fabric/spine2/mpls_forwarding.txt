@@ -1,1 +1,0 @@
-no MPLS apps enabled or MPLS not enabled on any interfaces

@@ -2,8 +2,7 @@
 
 默认入口 `collectors.parse.parse(...)` 先看设备系统家族：
 
-- **IOS/IOS-XE 与 Comware 7**：所有采集能力都经规则治理的系统基础检查项解析（`collectors/rules.py`，
-  清单见 `docs/topology-rule-consumption.md`）。命令、按 VRF 的命令形式和 TextFSM 模板都由已发布的
+- **IOS/IOS-XE 与 Comware 7**：所有采集能力都经规则治理的系统基础检查项解析（`collectors/rules.py`）。命令、按 VRF 的命令形式和 TextFSM 模板都由已发布的
   采集实现给出，按型号优先、系统家族兜底选择。拓扑只把同名 Value 投影成事实；带否决语义的整表
   （Trunk、二层口、OSPF）由 `collectors/rules_tables.py` 组装。
 - **其余家族**（NX-OS 等）：仍走本目录的通用解析层，直到规则治理有经过实机验证的实现。
@@ -28,8 +27,7 @@ ARP `Aging` 未标单位时只留在 raw，不猜秒；接口 IP 无掩码不能
 bridge 表的 trunk/hybrid PVID 不冒充 access VLAN；oper down 不推断 admin down。
 LLDP 完整键同义词在 `lldp_aliases.yaml`，管理地址的 type/interface ID/OID 不属于地址。
 
-`tests/fixtures/topology/synthetic/generic-styles.json` 中五种 CLI 风格均为明确的合成样本，
-用于检查通用层的形状规则；NX-OS 等其他型号或厂商未进行实机兼容性验收。
+通用层的形状规则只用五种合成的 CLI 风格检查过；NX-OS 等其他型号或厂商未进行实机兼容性验收。
 
 原先固定 NTC 模板的"模板层"已移除：它的结果必须与通用层完全一致，按型号选模板现由规则
 治理负责。

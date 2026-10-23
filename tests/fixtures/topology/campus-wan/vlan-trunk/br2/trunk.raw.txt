@@ -1,2 +1,0 @@
-display port trunk
-<BR2>

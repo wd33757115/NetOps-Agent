@@ -1,4 +1,0 @@
-show ip bgp summary
-% BGP not active
-
-ACC1#

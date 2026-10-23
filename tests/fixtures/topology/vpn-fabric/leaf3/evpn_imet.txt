@@ -1,5 +1,0 @@
-Total number of automatically discovered peers: 1
-
-VSI name: RED
-RD                    PE_address      Tunnel_address  Tunnel mode VXLAN ID
-10.255.10.11:10       10.255.10.11    10.255.10.11    VXLAN       10010

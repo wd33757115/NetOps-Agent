@@ -1,2 +1,0 @@
-display mpls ldp peer
-<LEAF3>

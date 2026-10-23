@@ -121,12 +121,12 @@
   "ietf-network-inventory-sw-ext@2026-07-06.yang": {
     "sha256": "8a99c41a760c4b4c9364f743a689005aa53dc82a28daa11da41561454ceb1cdd",
     "source": "https://www.ietf.org/archive/id/draft-ietf-ivy-network-inventory-software-04.txt",
-    "extracted_from": "draft-ietf-ivy-network-inventory-software-04 CODE BEGINS block (models/network-twin/m1/sources.lock.json)"
+    "extracted_from": "draft-ietf-ivy-network-inventory-software-04 CODE BEGINS block"
   },
   "ietf-network-inventory@2026-09-29.yang": {
     "sha256": "f132e67d3287d381b8ff83a1e41589a1a0fa86f77877ab8133a00ac0b9151d00",
     "source": "https://www.ietf.org/archive/id/draft-ietf-ivy-network-inventory-yang-20.txt",
-    "extracted_from": "draft-ietf-ivy-network-inventory-yang-20 CODE BEGINS block (models/network-twin/m1/sources.lock.json)"
+    "extracted_from": "draft-ietf-ivy-network-inventory-yang-20 CODE BEGINS block"
   },
   "ietf-network-topology@2018-02-26.yang": {
     "sha256": "dacf41a3ed966d3afa76cb540a1c2866f26b4137d27ae4b317fec0b70568e0c3",
@@ -154,7 +154,7 @@
     "source": "https://raw.githubusercontent.com/YangModels/yang/0e28ed86b0a9070b7f15fd06ba4fa501723fac84/standard/ietf/RFC/ietf-routing@2018-03-13.yang"
   },
   "ietf-simap-topology@2025-01-01.yang": {
-    "note": "Local syntax compatibility copy of draft-havel-nmop-simap-yang-03 section 9; see models/network-twin/patches/simap-03-syntax.patch (upstream sha256 82b7e6c2adf8d5208e1cbc60555071bcb3d246426898b7e73d048728a5631df8)",
+    "note": "Local syntax compatibility copy of draft-havel-nmop-simap-yang-03 section 9 with local syntax fixes (upstream sha256 82b7e6c2adf8d5208e1cbc60555071bcb3d246426898b7e73d048728a5631df8)",
     "sha256": "8e740ecdb5fef737f93bbbb5708462dd8dab3ab2a9a2e011ed743214a9214bb3",
     "source": "https://www.ietf.org/archive/id/draft-havel-nmop-simap-yang-03.txt"
   },

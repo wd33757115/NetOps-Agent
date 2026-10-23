@@ -46,18 +46,6 @@ quote-style = "double"
 indent-style = "space"
 line-ending = "lf"
 
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-python_files = ["test_*.py"]
-python_functions = ["test_*"]
-python_classes = ["Test*"]
-addopts = "-v --tb=short"
-markers = [
-    "integration: 集成测试（可能依赖外部服务）",
-    "postgres: 需要 PostgreSQL 数据库",
-    "celery: 需要 Celery Worker 或 eager 模式",
-]
-
 [tool.poetry]
 name = "netops-agent"
 version = "0.1.0"

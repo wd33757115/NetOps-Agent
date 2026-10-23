@@ -1,7 +1,7 @@
 # 演示应用 hello-demo
 
 平台上最小的能力包：一个清单、一个后端接口、一个前端页面，没有任务、数据库和 Agent 工具。
-开发手册（`docs/developer-handbook/README.md`，也在工作台“Skills 和连接器 → 开发指南”里）
+开发手册（工作台“Skills 和连接器 → 开发指南”）
 用它演示应用从开发、上线、升级到下线的全过程。
 
 默认未启用。自己试一下（`-ApplyDatabase` 先登记当前代码，`-EnableApps` 再启用）：

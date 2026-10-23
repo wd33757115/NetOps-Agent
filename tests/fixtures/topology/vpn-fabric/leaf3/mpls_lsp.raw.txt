@@ -1,2 +1,0 @@
-display mpls lsp
-<LEAF3>

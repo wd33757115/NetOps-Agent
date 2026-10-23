@@ -1,4 +1,0 @@
-Local      Outgoing   Prefix           Bytes Label   Outgoing   Next Hop    
-Label      Label      or Tunnel Id     Switched      interface              
-16         No Label   192.168.10.0/24[V]   \
-                                       0             aggregate/BLUE 
