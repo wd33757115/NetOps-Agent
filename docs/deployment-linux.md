@@ -72,6 +72,10 @@ $DC exec django python manage.py app_packages status --compact
 
 对外 HTTPS 反向代理可参考 `deployment/nginx.production.conf.example`。反向代理在其他容器里时，通过明确的 Docker 网络连接，不要依赖宿主机的 loopback 绑定。
 
+## 已知限制：从其他电脑上传文件
+
+上传文件（离线巡检数据、网盘、资料导入的原文件等）时，浏览器拿到的是 MinIO 的预签名地址，直接把文件传给 MinIO。这个地址取自 `.env` 的 `MINIO_ENDPOINT`，在容器里是 `minio:9000`，所以只有在服务器本机打开的浏览器能上传；从其他电脑访问工作台时，上传这一步会失败，其余功能不受影响。
+
 ## 备份与升级
 
 - `scripts/prod/backup.sh` 导出 PostgreSQL 和 MinIO，并生成清单。数据库和对象存储必须一起备份、一起恢复。
