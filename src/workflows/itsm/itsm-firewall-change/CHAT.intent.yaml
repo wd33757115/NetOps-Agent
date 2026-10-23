@@ -3,7 +3,7 @@
 
 workflow: itsm-firewall-change
 priority: 100
-description: 按工单的策略申请表（policy_file_url，http 地址）生成防火墙策略和变更工单；给了 callback_url 时回调 ITSM
+description: 按工单的策略申请表（xlsx，可在聊天里上传）生成防火墙策略和变更工单；给了 callback_url 时回调 ITSM
 
 match:
   require_any:
@@ -21,6 +21,11 @@ match:
 required_context:
   - ticket_id
   - policy_file_url
+
+# 聊天附件按扩展名自动填写这些字段（存在网盘里，流程以发起人身份读取）。
+files:
+  policy_file_url: [.xlsx]
+  topology_file_url: [.json]
 
 auto_if_source:
   - itsm_webhook

@@ -59,7 +59,6 @@ def test_subworkflow_dsl_yaml_roundtrip():
         description="父流程含子流程",
         step1_skill="firewall-policy-generator",
         step2_skill=None,
-        include_llm=False,
         category="custom",
     )
     dsl.steps = [

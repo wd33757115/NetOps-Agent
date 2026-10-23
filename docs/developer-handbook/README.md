@@ -45,7 +45,7 @@ FastAPI Gateway :8000 ── 平台内核 + 已装配的能力包
 - **任务与定时**：`task_configuration()` 汇总各包的 `task_modules`、`task_names` 和队列，Worker 只消费声明过的队列；`schedules` 由 Beat 注册。
 - **Agent 工具**：`agent.tools` 导出的工具以 `<应用 id 的下划线形式>__<工具名>` 注册（`src/platform/tools/registry.py`），调用前同样校验该用户的应用使用权。
 
-当前仓库有 12 个能力包：
+当前仓库有 13 个能力包：
 
 | 包 ID | 名称 | 说明 |
 | --- | --- | --- |
@@ -58,6 +58,7 @@ FastAPI Gateway :8000 ── 平台内核 + 已装配的能力包
 | `device-access` | SSH 终端 | 设备登录 |
 | `netconf-api` | NETCONF 接口 | NETCONF 采集 |
 | `firewall-policy` | 防火墙策略生成 | 策略生成任务 |
+| `resource-ledger` | 资源台账 | 按地域、机房、网络区域、业务系统逐级划分 IP；业务系统、主机与服务端口；运营商专线、站点韧性与故障影响；为防火墙申请表提供只读查询工具 |
 | `official-documents` | 公文写作 | 公文生成 |
 | `delivery-probe` | 能力包接入验证 | 功能完整的示例包：任务、数据库、Agent 工具、定时 |
 | `hello-demo` | 演示应用 | 本手册的最小示例，见第三章 |

@@ -43,7 +43,7 @@ def offered(monkeypatch):
 
 
 def test_skills_are_offered_unless_they_disable_model_invocation(monkeypatch):
-    # DSH skill standard: itsm-callback, llm-result-analyzer and device-backup say
+    # DSH skill standard: itsm-callback and device-backup say
     # disable-model-invocation: true; they only run as Workflow steps.
     monkeypatch.setattr("src.skill_system.governance.rollout.is_skill_executable",
                         lambda name, user_id=None: (True, ""))
@@ -54,7 +54,8 @@ def test_skills_are_offered_unless_they_disable_model_invocation(monkeypatch):
 def test_published_workflows_with_a_chat_entry_are_offered(monkeypatch):
     monkeypatch.setattr("src.core.workflows.metadata_repo.is_plugin_chat_active", lambda name: True)
     flows = {flow["name"]: flow for flow in automation.chat_workflows()}
-    assert {"demo-text-report", "itsm-firewall-change", "itsm-firewall-llm-analysis"} <= set(flows)
+    assert {"demo-text-report", "itsm-firewall-change"} <= set(flows)
+    assert "itsm-firewall-llm-analysis" not in flows
     # Retired patrol and rule workflows keep their chat files but are never offered.
     assert "patrol-change-event" not in flows
     assert flows["itsm-firewall-change"]["required"] == ["ticket_id", "policy_file_url"]
@@ -212,8 +213,9 @@ def test_official_dsh_loads_the_skill_then_starts_the_workflow(offered, monkeypa
 
     events = asyncio.run(start())
     assert events[-1].kind == "completed", [(e.kind, e.data) for e in events]
-    assert calls == [(automation.START_WORKFLOW, {"workflow": "demo-text-report", "context": {"text": "a b"}},
-                      {"actor_id": "7"})]
+    # The server adds the conversation's attachments (none here); the model never supplies them.
+    assert calls == [(automation.START_WORKFLOW, {"workflow": "demo-text-report", "context": {"text": "a b"},
+                                                  "attachments": []}, {"actor_id": "7"})]
     assert [e.data["tool"] for e in events if e.kind == "citation"] == [automation.START_WORKFLOW]
     loaded = [e.data for e in events if e.kind == "tool_started" and e.data["tool"] == "skill"]
     assert loaded and loaded[0]["operation"] == 'skill({"name": "demo-text-report"})'

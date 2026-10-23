@@ -29,7 +29,6 @@ export function buildExpressionPresets(upstreamStepName?: string | null): Array<
     { label: 'context.ticket_id', value: '${context.ticket_id}' },
     { label: 'context.ticket_title', value: '${context.ticket_title}' },
     { label: 'context.policy_file_url', value: '${context.policy_file_url}' },
-    { label: 'context.analysis_prompt', value: '${context.analysis_prompt}' },
     { label: 'run.id', value: '${run.id}' },
   ]
   if (upstreamStepName) {

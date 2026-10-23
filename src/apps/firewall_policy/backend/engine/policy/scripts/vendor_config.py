@@ -7,8 +7,17 @@ import os
 from hashlib import sha256
 
 from policy_sets import address_text, addresses, cidrs
+from policy_window import h3c_range, huawei_range
 
 logger = logging.getLogger(__name__)
+
+
+def ticket_window(rules: list[dict]):
+    """The one window of a ticket on this device; its time range is named after the ticket."""
+    windows = {rule["window"] for rule in rules if rule.get("window")}
+    if len(windows) > 1:
+        raise ValueError("同一工单只能有一个有效期")
+    return next(iter(windows), None)
 
 
 class HuaweiConfigGenerator:
@@ -113,6 +122,13 @@ class HuaweiConfigGenerator:
         ports = rule_data.get("ports", set())
         config.extend(HuaweiConfigGenerator._format_ports(ports, proto))
 
+        # 有效期与长连接（长连接只对 TCP 生效）
+        if rule_data.get("window"):
+            config.append(f" time-range {ticket_id}")
+        if rule_data.get("long_link") is not None:
+            config.append(" long-link enable")
+            config.append(f" long-link aging-time {rule_data['long_link']}")
+
         # 配置动作
         action = "permit" if rule_data.get("action", "").lower() == "permit" else "deny"
         config.append(f" action {action}\n")
@@ -122,10 +138,10 @@ class HuaweiConfigGenerator:
     @staticmethod
     def generate(output_dir: str, fw_name: str, rules: list[dict]):
         """生成华为 USG6000F 系列防火墙的配置"""
-        config = [
-            "system-view",
-            "security-policy",
-        ]
+        config = ["system-view"]
+        if window := ticket_window(rules):
+            config += [f"time-range {rules[0]['ticket_id']}", f" {huawei_range(window)}", "quit"]
+        config.append("security-policy")
         rule_index = 1
         for rule_data in rules:
             config.extend(HuaweiConfigGenerator._generate_rule(rule_data, rule_index))
@@ -217,6 +233,12 @@ class H3CConfigGenerator:
         else:
             config.append(f"service {proto}")
 
+        # 有效期与长连接（长连接只对 TCP ESTABLISHED 会话生效）
+        if rule_data.get("window"):
+            config.append(f"time-range {ticket_id}")
+        if rule_data.get("long_link") is not None:
+            config.append(f"session persistent aging-time {rule_data['long_link']}")
+
         # 配置动作
         action = "pass" if rule_data.get("action", "").lower() == "permit" else "deny"
         config.append(f"action {action}\n")
@@ -226,7 +248,10 @@ class H3CConfigGenerator:
     @staticmethod
     def generate(output_dir: str, fw_name: str, rules: list[dict]):
         """生成 H3C F50X0 系列防火墙的配置"""
-        config = ["system-view\nsecurity-policy ip"]
+        config = ["system-view"]
+        if window := ticket_window(rules):
+            config.append(h3c_range(rules[0]["ticket_id"], window))
+        config.append("security-policy ip")
         rule_index = 1
         for rule_data in rules:
             config.extend(H3CConfigGenerator._generate_rule(rule_data, rule_index))

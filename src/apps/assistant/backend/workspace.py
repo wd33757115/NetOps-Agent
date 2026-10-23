@@ -12,6 +12,27 @@ from src.platform.tools import registry
 
 from . import answer_gate, evidence, tool_trace
 
+# Text attachments sit beside the document sections; both are cited as [file:Lx-Ly].
+ATTACHMENT_PATH = "attachments/{}.txt"
+CITATION = (
+    r"\[((?:[a-f0-9]{20}/line-[1-9][0-9]*|attachments/[a-f0-9]{12})\.txt)"
+    r":L([1-9][0-9]*)(?:-L?([1-9][0-9]*))?\]"
+)
+
+
+def attachment_citation(item, filename, start, end, excerpt):
+    """A cited range of a user's attachment, kept with the answer like a document excerpt."""
+    return {
+        "kind": "attachment",
+        "id": "attachment-" + digest(f"{item['file_id']}:{start}:{end}:{excerpt}")[:24],
+        "file_id": item["file_id"],
+        "title_path": ["用户附件", item["name"]],
+        "revision": digest(excerpt),
+        "excerpt": excerpt,
+        "lines": [start, end],
+        "citation": f"[{filename}:L{start}-L{end}]",
+    }
+
 
 class DocumentWorkspace:
     def __init__(self, actor_id, *, reader=None, filters=None, check=None):
@@ -30,6 +51,9 @@ class DocumentWorkspace:
         self.root = None
         self.prepared_answer = None
         self.validation_issue = None
+        # Files attached in this conversation (attachments.load); text ones are readable here.
+        self.attachments = []
+        self.attachment_files = {}
 
     def prepare(self, root):
         self.check()
@@ -59,7 +83,29 @@ class DocumentWorkspace:
             "# 资料目录\n" + "\n".join(json.dumps(row, ensure_ascii=False) for row in catalog),
             encoding="utf-8",
         )
+        for relative, item in self.attachment_entries():
+            path = self.root / relative
+            path.parent.mkdir(exist_ok=True)
+            path.write_text(item["text"], encoding="utf-8", newline="\n")
+            self.attachment_files[relative] = item
         self.check()
+
+    def attachment_entries(self):
+        """(workspace path, attachment) for each text attachment, paths from file identity."""
+        return [
+            (ATTACHMENT_PATH.format(digest(item["file_id"])[:12]), item)
+            for item in self.attachments if "text" in item
+        ]
+
+    def attachment_paths(self):
+        """Where each text attachment is readable in the turn's workspace, by file id."""
+        return {item["file_id"]: relative for relative, item in self.attachment_entries()}
+
+    def source_lines(self, relative, keepends=False):
+        """Lines of a workspace file the model may cite: a document section or an attachment."""
+        attached = self.attachment_files.get(relative)
+        text = attached["text"] if attached is not None else self.files[relative][2].text
+        return text.splitlines(keepends=keepends)
 
     def definitions(self):
         self.check()
@@ -80,6 +126,8 @@ class DocumentWorkspace:
             relative = path.relative_to(self.root).as_posix()
             if relative == "CATALOG.md":
                 return "资料目录"
+            if relative in self.attachment_files:
+                return "用户附件 / " + self.attachment_files[relative]["name"]
             section = self.files[relative][2]
             return " / ".join(section.title_path)[:200]
         except (KeyError, ValueError, TypeError, OSError):
@@ -115,8 +163,7 @@ class DocumentWorkspace:
         relative = path.relative_to(self.root).as_posix()
         if relative == "CATALOG.md":
             return
-        _, _, section = self.files[relative]
-        source = section.text.splitlines()
+        source = self.source_lines(relative)
         lines = self.observed.setdefault(relative, set())
         for row in value["lines"]:
             number = row["number"]
@@ -131,7 +178,7 @@ class DocumentWorkspace:
             ordered = sorted(numbers)
             if not ordered:
                 continue
-            source = self.files[filename][2].text.splitlines(keepends=True)
+            source = self.source_lines(filename, keepends=True)
             start = end = ordered[0]
             size = len(source[start - 1])
             for number in ordered[1:]:
@@ -167,7 +214,7 @@ class DocumentWorkspace:
     def references(self, answer):
         self.check()
         citations = []
-        pattern = r"\[([a-f0-9]{20}/line-[1-9][0-9]*\.txt):L([1-9][0-9]*)(?:-L?([1-9][0-9]*))?\]"
+        pattern = CITATION
         # Reject malformed file references too, including invented/unread filenames.
         for candidate in re.findall(r"\[[^\]\n]*:L[^\]\n]*\]", answer):
             if not re.fullmatch(pattern, candidate):
@@ -179,12 +226,20 @@ class DocumentWorkspace:
                 raise ValueError("Invalid source line range")
             if not set(range(start, end + 1)) <= self.observed.get(filename, set()):
                 raise ValueError("Answer cites unread lines")
-            doc, revision, section = self.files[filename]
-            lines = section.text.splitlines(keepends=True)
+            lines = self.source_lines(filename, keepends=True)
             offset = sum(map(len, lines[: start - 1]))
             length = sum(map(len, lines[start - 1 : end]))
             if not 0 < length <= 8000:
                 raise ValueError("Citation exceeds read budget")
+            if filename in self.attachment_files:
+                citation = attachment_citation(
+                    self.attachment_files[filename], filename, start, end,
+                    "".join(lines[start - 1 : end]),
+                )
+                if citation not in citations:
+                    citations.append(citation)
+                continue
+            doc, revision, section = self.files[filename]
             citation = self.reader.read_section(
                 doc, revision, section.id, offset=offset, limit=length
             )["citation"]

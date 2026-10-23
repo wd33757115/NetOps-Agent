@@ -14,7 +14,6 @@ from src.core.skills.resolver import get_skill_dir
 OUTPUT_ARTIFACT_ALIASES: dict[str, str] = {
     "config_files": "config_zip",
     "change_excel": "change_excel",
-    "analysis_report": "analysis_report",
 }
 
 

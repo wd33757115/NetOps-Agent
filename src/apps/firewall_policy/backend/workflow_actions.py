@@ -7,17 +7,15 @@ run) starts a new one.
 """
 
 import time
-from pathlib import PurePosixPath
-from urllib.parse import unquote, urlsplit
 
-import httpx
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 
+from src.platform import files
 from src.platform.tools.actions import Action
 
-from . import service, storage
-from .schemas import PolicyRequest, TicketFields, TicketRequest
+from . import request_draft, service, storage
+from .schemas import LedgerDraft, PolicyRequest, TicketFields, TicketRequest
 
 DONE = {"completed", "failed", "cancelled"}
 POLICY_SECONDS = 360  # computation is capped at 300 s, plus queueing
@@ -40,6 +38,11 @@ class GeneratePolicy(BaseModel):
         return value or None
 
 
+class DraftRequest(LedgerDraft):
+    model_config = ConfigDict(extra="ignore")
+    ticket_id: str = Field(min_length=1, max_length=80)
+
+
 class WriteTicket(BaseModel):
     model_config = ConfigDict(extra="ignore")
     policy_run_id: str = Field(pattern=r"^[a-f0-9]{32}$")
@@ -54,22 +57,11 @@ class WriteTicket(BaseModel):
     reviewer: str | None = None
 
 
-def fetch(url, kind, fallback_name):
-    """Download a file the ITSM ticket points at: http(s) only, at most the upload limit."""
-    parts = urlsplit(url)
-    if parts.scheme not in {"http", "https"} or not parts.netloc:
-        raise ValueError(f"只支持 http(s) 文件地址：{url[:200]}")
-    data = bytearray()
-    with httpx.stream("GET", url, timeout=60, follow_redirects=True) as response:
-        if response.status_code != 200:
-            raise ValueError(f"下载文件失败（HTTP {response.status_code}）：{url[:200]}")
-        for chunk in response.iter_bytes():
-            data.extend(chunk)
-            if len(data) > storage.MAX_UPLOAD:
-                raise ValueError("文件超过 10 MB")
+def fetch(value, kind, fallback_name, user):
+    """The file a step names: a netdisk file read as the Workflow's user, or an http(s) URL."""
+    name, data = files.fetch(value, user, limit=storage.MAX_UPLOAD)
     suffix = ".xlsx" if kind == "policy" else ".json"
-    name = PurePosixPath(unquote(parts.path)).name
-    return (name if name.lower().endswith(suffix) else fallback_name), bytes(data)
+    return (name if name and name.lower().endswith(suffix) else fallback_name), data
 
 
 def wait(owner, run_id, seconds):
@@ -94,10 +86,10 @@ def outcome(owner, run, seconds, label):
     raise RuntimeError(f"{label}未在 {seconds} 秒内完成，可在防火墙策略应用中查看任务 {run['id']}")
 
 
-def upload(owner, url, kind, fallback_name, request_id):
+def upload(user, value, kind, fallback_name, request_id):
     try:
-        filename, data = fetch(url, kind, fallback_name)
-        return service.save_upload(owner, filename, kind, data, request_id)["id"]
+        filename, data = fetch(value, kind, fallback_name, user)
+        return service.save_upload(user.user_id, filename, kind, data, request_id)["id"]
     except HTTPException as exc:
         raise ValueError(f"{'策略申请表' if kind == 'policy' else '拓扑文件'}无效：{exc.detail}") from None
 
@@ -105,10 +97,10 @@ def upload(owner, url, kind, fallback_name, request_id):
 def generate_policy(user, body, *, run_id):
     owner = user.user_id
     request_id = f"wf-{run_id}-policy"
-    policy = upload(owner, body.policy_file_url, "policy", f"{body.ticket_id}-策略申请表.xlsx",
+    policy = upload(user, body.policy_file_url, "policy", f"{body.ticket_id}-策略申请表.xlsx",
                     f"{request_id}-file")
     topology = (
-        upload(owner, body.topology_file_url, "topology", f"{body.ticket_id}-拓扑.json",
+        upload(user, body.topology_file_url, "topology", f"{body.ticket_id}-拓扑.json",
                f"wf-{run_id}-topology-file")
         if body.topology_file_url else None
     )
@@ -137,6 +129,22 @@ def generate_policy(user, body, *, run_id):
     }
 
 
+def draft_request(user, body, *, run_id):
+    rows, notes, data = request_draft.build(user, body)
+    filename = f"{body.ticket_id}-策略申请表.xlsx"
+    # Kept in the user's netdisk, so the next step and the user read the same file.
+    saved = files.save(user, filename, data, request_draft.XLSX, folder="防火墙申请表")
+    return {
+        "success": True,
+        "message": f"按资源台账生成了 {len(rows)} 条策略申请",
+        "policy_file_url": files.reference(saved["file_id"]),
+        "ticket_id": body.ticket_id,
+        "rows": rows,
+        "notes": notes,
+        "files": {"policy_request_draft": (filename, request_draft.XLSX, data)},
+    }
+
+
 def write_change_ticket(user, body, *, run_id):
     owner = user.user_id
     fields = TicketFields.model_validate(
@@ -157,8 +165,19 @@ def write_change_ticket(user, body, *, run_id):
 
 ACTIONS = [
     Action(
+        "draft_request",
+        "按资源台账生成策略申请表：source/destination 填 IP、网段、范围或业务系统名称，"
+        "业务系统取其在用主机的 IP，端口取目的主机登记的服务端口（或 ports 指定）；"
+        "可带 start_time/end_time 有效期和 long_link 长连接小时数；"
+        "申请表存入发起人网盘“防火墙申请表”文件夹，结果 policy_file_url 可直接交给 generate_policy；"
+        "产物 policy_request_draft",
+        DraftRequest,
+        draft_request,
+    ),
+    Action(
         "generate_policy",
-        "下载工单中的策略申请表（及可选拓扑），在防火墙策略应用中生成策略配置；"
+        "取得策略申请表（及可选拓扑）：网盘文件 netdisk:<文件ID> 或 http(s) 地址，"
+        "在防火墙策略应用中生成策略配置；"
         "产物 config_zip、policy_preview、policy_request，结果含 policy_run_id",
         GeneratePolicy,
         generate_policy,

@@ -32,6 +32,8 @@ def _default_mock_result(step: WorkflowStepDSL) -> dict[str, Any]:
     }
     if step.skill == "app:firewall-policy/generate_policy":
         result["policy_run_id"] = "0" * 32
+    if step.skill == "app:firewall-policy/draft_request":
+        result["policy_file_url"] = "netdisk:mock"
     return result
 
 
@@ -48,13 +50,6 @@ def _default_mock_artifacts(step: WorkflowStepDSL) -> dict[str, Any]:
             "change_excel": {
                 "file_key": f"mock/{step.name}/change.xlsx",
                 "download_url": f"https://mock.local/{step.name}/change.xlsx",
-            }
-        }
-    if step.skill == "llm-result-analyzer":
-        return {
-            "analysis_report": {
-                "file_key": f"mock/{step.name}/analysis.md",
-                "download_url": f"https://mock.local/{step.name}/analysis.md",
             }
         }
     return {}

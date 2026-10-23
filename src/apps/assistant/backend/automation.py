@@ -35,10 +35,19 @@ class RunSkill(BaseModel):
     params: dict = Field(default_factory=dict)
 
 
+class Attachment(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    file_id: str
+    name: str
+    current: bool = False
+
+
 class StartWorkflow(BaseModel):
     model_config = ConfigDict(extra="forbid")
     workflow: str = Field(min_length=1, max_length=64)
     context: dict = Field(default_factory=dict)
+    # Filled by the server from the conversation's attachments; never shown to the model.
+    attachments: list[Attachment] = Field(default_factory=list)
 
 
 class ReadRun(BaseModel):
@@ -100,8 +109,41 @@ def chat_workflows():
             "required": required,
             "optional": optional,
             "defaults": dict(intent.context_defaults),
+            "files": dict(intent.files),
         })
     return found
+
+
+def fill_files(workflow, context, attachments, user):
+    """File fields as netdisk references: named, or chosen from the attachments by type.
+
+    A value naming an attachment (its file name) becomes that file. An empty field takes
+    the one attachment of a fitting type, preferring the current message's; with two or
+    more candidates nothing is guessed. Every netdisk file must be the user's to read.
+    Returns the fields that stay ambiguous, with their candidates.
+    """
+    from src.platform import files
+
+    ambiguous = {}
+    for field, endings in workflow.get("files", {}).items():
+        fitting = [item for item in attachments if item.name.lower().endswith(tuple(endings))]
+        value = context.get(field)
+        if value not in (None, ""):
+            named = [item for item in attachments if item.name == str(value).strip()]
+            if named:
+                context[field] = files.reference(named[-1].file_id)
+            continue
+        current = [item for item in fitting if item.current]
+        candidates = current or fitting
+        if len(candidates) == 1:
+            context[field] = files.reference(candidates[0].file_id)
+        elif candidates:
+            ambiguous[field] = [item.name for item in candidates]
+    for field, value in context.items():
+        file_id = files.file_id_of(value)
+        if file_id:
+            files.describe(user, file_id)  # 404 or 403 when not the user's to read
+    return ambiguous
 
 
 def can_execute(user):
@@ -156,6 +198,11 @@ def _workflow_body(flow):
         "`context` 填：",
         _parameters(context),
         *([f"未给出时使用默认值：{defaults}。"] if defaults else []),
+        *([
+            "需要的文件（" + "、".join(f"`{key}`：{'/'.join(endings)}" for key, endings in flow["files"].items())
+            + "）请用户在聊天里上传附件；平台按类型自动使用，不用填写这些字段。"
+            "有多个同类附件时工具返回 ambiguous，向用户确认后把选定的文件名填进对应字段。"
+        ] if flow.get("files") else []),
         "参数只取用户给出的内容，不编造工单号或文件地址；工具返回 `missing` 时向用户询问。"
         "同一请求只启动一次。",
         "Workflow 在后台运行：告诉用户运行编号，完成后用户会收到站内通知；"
@@ -248,6 +295,11 @@ def start_workflow(user, body):
     }
     ignored = sorted(set(body.context) - accepted)
     context = {**workflow["defaults"], **supplied}
+    ambiguous = fill_files(workflow, context, body.attachments, user)
+    if ambiguous:
+        return {"workflow": body.workflow, "started": False, "ambiguous": ambiguous,
+                "message": "有多个可用的文件，请用户确认每一项用哪一个：" + "；".join(
+                    f"{field}：{'、'.join(names)}" for field, names in ambiguous.items())}
     missing = [key for key in workflow["required"] if context.get(key) in (None, "", [], {})]
     if missing:
         return {"workflow": body.workflow, "started": False, "missing": missing,

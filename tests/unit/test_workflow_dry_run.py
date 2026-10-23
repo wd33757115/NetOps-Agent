@@ -14,7 +14,6 @@ def _sample_dsl(name: str = "dry-run-test"):
         description="Dry-run 测试",
         step1_skill="firewall-policy-generator",
         step2_skill="itsm-change-ticket-writer",
-        include_llm=False,
         category="custom",
         chat_match_any=["防火墙"],
     )
@@ -24,7 +23,7 @@ def test_dry_run_resolves_steps_and_inputs():
     dsl = _sample_dsl()
     result = dry_run_workflow(
         dsl,
-        {"ticket_id": "REQ2025099", "analysis_prompt": "测试"},
+        {"ticket_id": "REQ2025099"},
     )
     assert result["success"] is True
     assert result["active_step_count"] == 2

@@ -47,15 +47,6 @@ def test_find_matching_intents_sorted():
     assert ranked[0].workflow == "workflow-b"
 
 
-def test_llm_workflow_wins_over_firewall_change_for_llm_query():
-    intent = match_chat_workflow(
-        "根据工单 REQ2025001 生成防火墙策略并进行 LLM 结果分析",
-        "chat",
-    )
-    assert intent is not None
-    assert intent.workflow == "itsm-firewall-llm-analysis"
-
-
 def test_firewall_change_without_llm_keywords():
     intent = match_chat_workflow(
         "根据工单 REQ2025001 用策略文件生成防火墙策略并编写变更工单",

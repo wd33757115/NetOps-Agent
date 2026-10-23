@@ -581,6 +581,8 @@ AUTOMATION = """## 执行 Skill 与启动 Workflow
 mcp__netops__assistant__start_workflow；只是提问或咨询时不要执行。
 上文“不生成规则、不修改配置”指你自己不做；这些工具按用户要求执行，生成的是文件和记录，不下发设备配置。
 参数只取用户给出的内容，不编造工单号、文件地址；工具返回 missing 时向用户询问缺少的项。同一请求只执行一次。
+用户上传的附件列在消息末尾：文本附件已放进资料目录，可阅读并按资料格式引用；Workflow 需要的文件由平台按类型自动使用，
+缺少时请用户在聊天里上传，工具返回 ambiguous 时请用户确认用哪一个。
 回答引用工具返回的证据编号；下载链接按工具返回的 download_url 原样写成链接。
 """
 
@@ -621,8 +623,25 @@ def skill_rows(skills_dir):
     ]
 
 
+def prompt_images(catalog):
+    """Images attached to this question, for a model that takes them (attachments.load)."""
+    return [item for item in getattr(catalog, "attachments", None) or [] if item.get("image")]
+
+
+def prompt_content(text, images):
+    """The SDK prompt: text alone, or text and DSH image blocks the runtime stores as attachments."""
+    if not images:
+        return text
+    import base64
+
+    return [{"type": "text", "text": text}, *(
+        {"type": "image", "data": base64.b64encode(item["image"]).decode(), "mimeType": item["media_type"]}
+        for item in images
+    )]
+
+
 def patch_file(home, port, *, active_diagnostics=False, durable=False, thinking=False,
-               skills_dir=None):
+               skills_dir=None, images=False):
     import yaml
 
     rows = [
@@ -672,6 +691,8 @@ def patch_file(home, port, *, active_diagnostics=False, durable=False, thinking=
                     },
                 },
                 *(skill_rows(skills_dir) if skills_dir else []),
+                # DSH keeps attached images in its own store below the session's DSH home.
+                *([{"id": "attachments", "name": "@deepseek-ai/dsh-attachment-local"}] if images else []),
                 {"id": "netops-boundary", "name": str(Path(__file__).with_name("dsh_guard.cjs"))},
                 {
                     "id": "netops-mcp",
@@ -821,6 +842,7 @@ class DshRuntime:
                 durable=durable,
                 thinking=context.reasoning_effort != "off",
                 skills_dir=getattr(bridge.catalog, "skills_dir", None),
+                images=bool(prompt_images(bridge.catalog)),
             )
             env = {
                 k: v
@@ -862,7 +884,10 @@ class DshRuntime:
                 "timeout": context.timeout_seconds,
                 "trace_path": str(trace_path) if trace_path else None,
                 "session_id": session_id,
-                "prompt": messages[-1]["content"] if continued else json.dumps(messages, ensure_ascii=False),
+                "prompt": prompt_content(
+                    messages[-1]["content"] if continued else json.dumps(messages, ensure_ascii=False),
+                    prompt_images(bridge.catalog),
+                ),
             }
             proc = await asyncio.create_subprocess_exec(
                 sys.executable,

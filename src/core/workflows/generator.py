@@ -122,6 +122,8 @@ def build_chat_intent_dict(dsl: WorkflowDSL) -> dict[str, Any] | None:
         data["context_from_query"] = chat.context_from_query
     if chat.context_defaults:
         data["context_defaults"] = chat.context_defaults
+    if chat.files:
+        data["files"] = chat.files
     if chat.response_template:
         data["response_template"] = chat.response_template
     return data
@@ -290,7 +292,6 @@ def dsl_from_collab_template(
     description: str,
     step1_skill: str,
     step2_skill: str | None,
-    include_llm: bool,
     category: str = "itsm",
     chat_match_any: list[str] | None = None,
     chat_match_secondary: list[str] | None = None,
@@ -333,28 +334,16 @@ def dsl_from_collab_template(
                 skill=step2_skill,
             )
         )
-    if include_llm:
-        prev_name = step2_name if step2_skill else step1_name
-        steps.append(
-            WorkflowStepDSL(
-                id="s3",
-                name="llm_analysis",
-                label="LLM 结果分析",
-                skill="llm-result-analyzer",
-                inputs={"source_step": prev_name},
-            )
-        )
 
     chat = ChatIntentDSL(
         enabled=True,
-        priority=110 if include_llm else 50,
+        priority=50,
         description=description,
         match=ChatIntentMatchDSL(
             require_any=chat_match_any or ["关键词"],
-            require_any_secondary=chat_match_secondary or (["LLM", "分析"] if include_llm else []),
+            require_any_secondary=chat_match_secondary or [],
         ),
         required_context=["ticket_id", "policy_file_url"] if is_firewall_chain else [],
-        context_defaults={"analysis_focus": "summary"},
         response_template=(
             "[OK] 已启动 Workflow\n\n"
             "- **流程 ID**: `{run_id}`\n"
@@ -367,8 +356,6 @@ def dsl_from_collab_template(
         ),
     )
 
-    on_complete_msg = "防火墙变更与 LLM 分析已完成" if include_llm and is_firewall_chain else "Workflow 已完成"
-
     from src.core.workflows.dsl import NotificationDSL, OnCompleteDSL
 
     return WorkflowDSL(
@@ -380,11 +367,10 @@ def dsl_from_collab_template(
         steps=steps,
         triggers=WorkflowTriggersDSL(chat=chat),
         on_complete=OnCompleteDSL(
-            message=on_complete_msg,
-            notify_each_step=include_llm,
+            message="Workflow 已完成",
             notification=NotificationDSL(
                 title='流程已完成 (${context.ticket_id})',
-                body="所有步骤已执行。" if not include_llm else "策略、变更工单与 LLM 分析报告已生成。",
+                body="所有步骤已执行。",
             ),
         ),
     )
@@ -449,6 +435,7 @@ def dsl_from_plugin_files(
             context_from_state=dict(chat_raw.get("context_from_state") or {}),
             context_from_query=dict(chat_raw.get("context_from_query") or {}),
             context_defaults=dict(chat_raw.get("context_defaults") or {}),
+            files={str(k): list(v or []) for k, v in (chat_raw.get("files") or {}).items()},
             response_template=str(
                 chat_raw.get("response_template")
                 or "[OK] 已启动 Workflow\n\n"

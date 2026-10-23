@@ -29,8 +29,6 @@ _DEFAULT_CONTEXT_FIELDS = [
     "change_purpose",
     "requester_dept",
     "due_date",
-    "analysis_prompt",
-    "analysis_focus",
     "callback_url",
 ]
 

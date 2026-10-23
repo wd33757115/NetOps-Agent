@@ -96,7 +96,8 @@ def submit(workspace, arguments):
             "message": message,
             "read_locations": workspace.citation_guidance(),
             "submitted_locations": re.findall(
-                r"\[[a-f0-9]{20}/line-\d+\.txt:L\d+(?:-L?\d+)?\]", arguments["answer"]
+                r"\[(?:[a-f0-9]{20}/line-\d+|attachments/[a-f0-9]{12})\.txt:L\d+(?:-L?\d+)?\]",
+                arguments["answer"],
             )[:12],
             "next_step": "补读所缺正文、修正引用后重新提交；资料不足时用 insufficient_evidence。",
         }

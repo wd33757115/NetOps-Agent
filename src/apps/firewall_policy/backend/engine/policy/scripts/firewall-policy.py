@@ -10,6 +10,7 @@ from pathlib import Path
 from plan_preview import render
 from policy_input import read_policy_workbook
 from policy_plan import build_plan, digest, vendor_rules
+from policy_window import NAME
 from vendor_config import (
     H3CConfigGenerator,
     H3CF1000ConfigGenerator,
@@ -28,6 +29,8 @@ GENERATORS = {
     "天融信": TopSecConfigGenerator,
     "山石": HillstoneConfigGenerator,
 }
+# Device types that render validity windows and long links (USG6000, F5000).
+TIMED = {"华为", "H3C"}
 
 
 def safe_name(value):
@@ -58,11 +61,23 @@ def main():
     grouped = vendor_rules(rules, args.ticket_id)
     if not grouped:
         raise ValueError("没有可生成的设备规则")
+    timed = any(row["window"] for rows in grouped.values() for row in rows)
+    if timed and (not NAME.fullmatch(args.ticket_id) or args.ticket_id.lower() == "all"):
+        raise ValueError(
+            "有效期在设备上建以工单号命名的时间段，工单号需以英文字母开头，"
+            "只含字母、数字、下划线或短横线，最多 32 个字符"
+        )
     for name, rows in grouped.items():
         safe_name(name)
         fw_type = topology.firewalls[name].type
         if fw_type not in GENERATORS:
             raise ValueError(f"不支持的防火墙类型：{name} ({fw_type})")
+        if fw_type not in TIMED and any(
+            row["window"] or row["long_link"] is not None for row in rows
+        ):
+            raise ValueError(
+                f"{name}（{fw_type}）暂不支持有效期和长连接；目前支持华为 USG6000 和 H3C F5000"
+            )
         for row in rows:
             for zone in row["rule_key"]:
                 safe_name(zone)
@@ -103,9 +118,20 @@ def main():
     )
     (output / "策略计划预览.html").write_text(render(plan), encoding="utf-8")
     # Editable validated request, for human intervention through the existing upload flow.
+    # Window and long link as the requester wrote them, so a re-upload reads them the same.
     columns = [
         key
-        for key in ["source_system", "src_ip", "destination_system", "dst_ip", "port", "proto"]
+        for key in [
+            "source_system",
+            "src_ip",
+            "destination_system",
+            "dst_ip",
+            "port",
+            "proto",
+            "start_time",
+            "end_time",
+            "long_link",
+        ]
         if key in df
     ]
     df[columns].rename(

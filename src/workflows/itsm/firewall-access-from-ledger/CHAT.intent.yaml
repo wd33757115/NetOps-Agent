@@ -1,0 +1,37 @@
+# SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
+# SPDX-License-Identifier: Apache-2.0
+
+workflow: firewall-access-from-ledger
+priority: 90
+description: >-
+  按资源台账开通防火墙策略，不需要上传申请表。用户说出源和目的时使用，例如“开通北京 10.248.255.11 到西安风险评估系统的防火墙策略”：
+  source、destination 填 IP、网段（10.1.1.0/24）、范围（10.1.1.3-10.1.1.6）或业务系统名称，地名不要填进去；
+  只要某个子系统时填 source_subsystem / destination_subsystem；目的是业务系统时端口取台账里主机登记的服务端口，
+  用户指定端口或目的是 IP 时填 ports（如 tcp/443,udp/53）；有效期填 start_time、end_time（2026-11-01 20:00），
+  用户只说了日期时只填日期（结束日期表示当天结束），不要自己补时刻；
+  长连接填 long_link（小时，0 表示永不老化）。不确定系统名时可先用资源台账的 find_systems 或 plan_access 核对。
+
+match:
+  require_any:
+    - 防火墙
+    - 策略
+  require_any_secondary:
+    - 开通
+    - 放通
+    - 台账
+
+required_context:
+  - ticket_id
+  - source
+  - destination
+
+context_defaults:
+  ticket_title: 按台账开通防火墙策略
+  change_purpose: 按资源台账开通业务访问所需的防火墙策略
+
+response_template: |
+  [OK] 已启动按台账开通防火墙策略流程
+
+  - **流程 ID**: `{run_id}`
+  - **工单**: {ticket_id}
+  - **步骤**: {workflow_description}

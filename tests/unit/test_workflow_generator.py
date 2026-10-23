@@ -15,29 +15,27 @@ from src.core.workflows.generator import (
 from src.core.workflows.mapping import apply_auto_mapping, infer_step_inputs
 
 
-def _firewall_llm_dsl() -> WorkflowDSL:
+def _firewall_dsl() -> WorkflowDSL:
     return dsl_from_collab_template(
-        plugin_name="test-firewall-llm",
-        description="测试防火墙 LLM 链",
+        plugin_name="test-firewall",
+        description="测试防火墙变更链",
         step1_skill="firewall-policy-generator",
         step2_skill="itsm-change-ticket-writer",
-        include_llm=True,
         category="itsm",
         chat_match_any=["防火墙", "策略"],
-        chat_match_secondary=["LLM", "分析"],
+        chat_match_secondary=["变更工单"],
     )
 
 
 def test_dsl_from_collab_template_structure():
-    dsl = _firewall_llm_dsl()
-    assert dsl.meta.name == "test-firewall-llm"
-    assert len(dsl.steps) == 3
-    assert dsl.steps[-1].skill == "llm-result-analyzer"
+    dsl = _firewall_dsl()
+    assert dsl.meta.name == "test-firewall"
+    assert [s.name for s in dsl.steps] == ["policy_generation", "change_ticket"]
 
 
 def test_infer_firewall_to_change_ticket_mapping():
     # The retired firewall Skills now name the firewall-policy App's actions.
-    dsl = _firewall_llm_dsl()
+    dsl = _firewall_dsl()
     mapped = apply_auto_mapping(dsl.steps)
     policy_step, change_step = mapped[0], mapped[1]
     assert policy_step.skill == "app:firewall-policy/generate_policy"
@@ -47,30 +45,22 @@ def test_infer_firewall_to_change_ticket_mapping():
     assert change_step.inputs["ticket_title"] == "${context.ticket_title}"
 
 
-def test_infer_llm_analyzer_prev_result():
-    dsl = _firewall_llm_dsl()
-    mapped = apply_auto_mapping(dsl.steps)
-    llm_step = mapped[2]
-    assert llm_step.inputs["prev_result"] == "${steps.change_ticket.result}"
-    assert llm_step.inputs["source_step"] == "change_ticket"
-
-
 def test_generate_plugin_files_contains_all_artifacts():
-    dsl = _firewall_llm_dsl()
+    dsl = _firewall_dsl()
     files = generate_plugin_files(dsl)
     assert "WORKFLOW.yaml" in files
     assert "CHAT.intent.yaml" in files
     wf = yaml.safe_load(files["WORKFLOW.yaml"])
-    assert wf["name"] == "test-firewall-llm"
-    assert len(wf["steps"]) == 3
+    assert wf["name"] == "test-firewall"
+    assert len(wf["steps"]) == 2
     chat = yaml.safe_load(files["CHAT.intent.yaml"])
-    assert chat["workflow"] == "test-firewall-llm"
+    assert chat["workflow"] == "test-firewall"
     assert "防火墙" in chat["match"]["require_any"]
     assert chat["required_context"] == ["ticket_id", "policy_file_url"]
 
 
 def test_preview_workflow_validates():
-    dsl = _firewall_llm_dsl()
+    dsl = _firewall_dsl()
     result = preview_workflow(dsl)
     assert result["success"] is True
     assert result["persisted"] is False
@@ -78,7 +68,7 @@ def test_preview_workflow_validates():
 
 
 def test_generate_and_persist_without_save():
-    dsl = _firewall_llm_dsl()
+    dsl = _firewall_dsl()
     from src.core.workflows.dsl import GenerateOptions
 
     result = generate_and_persist(dsl, options=GenerateOptions(persist=False))
@@ -86,11 +76,14 @@ def test_generate_and_persist_without_save():
     assert result["persisted"] is False
 
 
-def test_infer_step_inputs_generic_prev_result():
+def test_infer_step_inputs_generic_prev_result(monkeypatch):
     from src.core.workflows.dsl import WorkflowStepDSL
 
+    # A Skill that declares prev_result gets the previous step's whole result.
+    monkeypatch.setattr("src.core.workflows.mapping.get_skill_input_names",
+                        lambda name: {"prev_result"} if name == "some-skill-b" else set())
     prev = WorkflowStepDSL(id="a", name="step_one", label="一", skill="some-skill-a")
-    curr = WorkflowStepDSL(id="b", name="step_two", label="二", skill="llm-result-analyzer")
+    curr = WorkflowStepDSL(id="b", name="step_two", label="二", skill="some-skill-b")
     inferred = infer_step_inputs(curr, prev_step=prev, step_index=1)
     assert inferred["prev_result"] == "${steps.step_one.result}"
 
@@ -111,7 +104,6 @@ def test_save_generated_plugin():
         description="生成器落盘测试",
         step1_skill="firewall-policy-generator",
         step2_skill=None,
-        include_llm=False,
         category="custom",
     )
 

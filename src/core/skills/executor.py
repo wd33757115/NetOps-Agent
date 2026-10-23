@@ -305,18 +305,14 @@ def _upload_file_output(
     minio = get_minio_storage()
     object_name = None
     download_url = None
+    content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     if minio and minio.is_ready():
-        if skill_name == "llm-result-analyzer":
-            object_name = f"analysis_reports/{ticket_id}/{filename}"
-            content_type = "text/markdown; charset=utf-8"
-        else:
-            object_name = f"change_tickets/{ticket_id}/{filename}"
-            content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            if skill_name == "itsm-change-ticket-writer":
-                # Editing a ticket must not replace an earlier download's contents.
-                digest = sha256(Path(file_path).read_bytes()).hexdigest()[:24]
-                filename = "变更工单.xlsx"
-                object_name = f"change_tickets/{ticket_id}/{digest}/{filename}"
+        object_name = f"change_tickets/{ticket_id}/{filename}"
+        if skill_name == "itsm-change-ticket-writer":
+            # Editing a ticket must not replace an earlier download's contents.
+            digest = sha256(Path(file_path).read_bytes()).hexdigest()[:24]
+            filename = "变更工单.xlsx"
+            object_name = f"change_tickets/{ticket_id}/{digest}/{filename}"
         with open(file_path, "rb") as f:
             if minio.upload_file(object_name, f.read(), content_type=content_type):
                 download_url = minio.get_presigned_url(object_name, expires=3600 * 24 * 7)
@@ -326,10 +322,8 @@ def _upload_file_output(
         filename=filename,
         content_type=content_type if minio and minio.is_ready() else "application/octet-stream",
     )
-    artifact_key = "analysis_report" if skill_name == "llm-result-analyzer" else "change_excel"
-    skill_result.setdefault("artifacts", {})[artifact_key] = art
-    if artifact_key == "change_excel":
-        skill_result.setdefault("change_excel_url", download_url)
+    skill_result.setdefault("artifacts", {})["change_excel"] = art
+    skill_result.setdefault("change_excel_url", download_url)
     skill_result.setdefault("download_url", download_url)
     return skill_result
 

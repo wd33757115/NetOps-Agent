@@ -71,7 +71,6 @@ function deriveStepName(skill: string, index: number): string {
   const known: Record<string, string> = {
     'firewall-policy-generator': 'policy_generation',
     'itsm-change-ticket-writer': 'change_ticket',
-    'llm-result-analyzer': 'llm_analysis',
   }
   if (known[skill]) return known[skill]
   return `step_${index + 1}`

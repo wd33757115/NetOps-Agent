@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import pandas as pd
 from policy_sets import address_text, addresses, port_text, ports
+from policy_window import display, long_link, window
 
 ALIASES = {
     "src_ip": {"src_ip", "源ip", "源地址", "源ip地址"},
@@ -13,6 +16,9 @@ ALIASES = {
     "action": {"action", "动作", "策略动作"},
     "source_system": {"source_system", "src_system", "源业务系统"},
     "destination_system": {"destination_system", "dst_system", "目的业务系统", "目标业务系统"},
+    "start_time": {"start_time", "开始时间", "生效时间"},
+    "end_time": {"end_time", "结束时间", "失效时间"},
+    "long_link": {"long_link", "长连接"},
 }
 
 
@@ -24,7 +30,8 @@ def _addresses(value: str) -> str:
     return ",".join(address_text(addresses(value)))
 
 
-def read_policy_workbook(path: str) -> pd.DataFrame:
+def read_policy_workbook(path: str, now: datetime | None = None) -> pd.DataFrame:
+    now = now or datetime.now()
     sheet = pd.read_excel(path, header=None, engine="openpyxl", dtype=str)
     header = None
     columns = {}
@@ -56,16 +63,8 @@ def read_policy_workbook(path: str) -> pd.DataFrame:
             continue
         try:
             for column, name in enumerate(sheet.loc[header]):
-                if _text(name).lower() in {
-                    "start_time",
-                    "end_time",
-                    "long_link",
-                    "开始时间",
-                    "结束时间",
-                    "有效期",
-                    "长连接",
-                } and _text(row.iloc[column]):
-                    raise ValueError(f"暂不支持 {_text(name)}，请移除该设置后重新申请")
+                if _text(name) == "有效期" and _text(row.iloc[column]):
+                    raise ValueError("有效期请分别填写 start_time 和 end_time")
             for key in ("src_ip", "dst_ip", "proto"):
                 if not values[key]:
                     raise ValueError(f"{key} 不能为空")
@@ -84,6 +83,12 @@ def read_policy_workbook(path: str) -> pd.DataFrame:
             if values["proto"] == "icmp" and values["port"]:
                 raise ValueError("ICMP 不支持端口条件，请留空端口")
             values["port"] = ",".join(port_text(ports(values["port"])))
+            values["window"] = window(values.get("start_time", ""), values.get("end_time", ""), now)
+            hours = long_link(values.get("long_link", ""))
+            if hours is not None and "tcp" not in values["proto"].split("/"):
+                raise ValueError("长连接只适用于 TCP")
+            # Text, so a column of hours never turns into floats with NaN.
+            values["long_link_hours"] = "" if hours is None else str(hours)
         except ValueError as exc:
             raise ValueError(f"策略申请表第 {index + 1} 行无效：{exc}") from exc
         values["_row"] = index + 1
@@ -91,4 +96,13 @@ def read_policy_workbook(path: str) -> pd.DataFrame:
         rows.append(values)
     if not rows:
         raise ValueError("策略申请表没有有效策略行，请填写源地址、目的地址、端口、协议和动作。")
+    windows = {}
+    for row in rows:
+        if row["window"]:
+            windows.setdefault(row["window"], []).append(str(row["_row"]))
+    if len(windows) > 1:
+        raise ValueError(
+            "同一张申请表只能有一个有效期（设备上的时间段以工单号命名）："
+            + "；".join(f"第 {'、'.join(lines)} 行为 {display(w)}" for w, lines in windows.items())
+        )
     return pd.DataFrame(rows)

@@ -1,13 +1,15 @@
 import asyncio
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
+from starlette.concurrency import run_in_threadpool
 
 from src.apps.materials.backend import import_service, library
+from src.platform import files
 from src.platform.authorization.client import authorize_worker, require_app
 
-from . import evidence, history, model_settings, tool_outputs, turns
+from . import attachments, evidence, history, model_settings, tool_outputs, turns
 
 router = APIRouter()
 user = require_app("assistant")
@@ -110,6 +112,18 @@ def choose_model(conversation_id: str, body: model_settings.Choice, actor=Depend
         raise HTTPException(422, "不支持的模型或思考强度") from exc
 
 
+@router.post("/attachments", status_code=201)
+async def attach(request: Request, filename: str = Query(min_length=1, max_length=255),
+                 actor=Depends(user)):
+    """Store one file for a question in the user's netdisk (问答附件); returns its file id."""
+    data = bytearray()
+    async for chunk in request.stream():
+        data.extend(chunk)
+        if len(data) > attachments.MAX_BYTES:
+            raise HTTPException(413, "文件不可超过 10 MB")
+    return await run_in_threadpool(attachments.upload, actor, filename, bytes(data))
+
+
 @router.post("/conversations/{conversation_id}/questions")
 async def question(conversation_id: str, body: turns.Question, actor=Depends(user)):
     run, created = await asyncio.to_thread(turns.begin, actor.user_id, conversation_id, body)
@@ -143,6 +157,10 @@ def citation(conversation_id: str, citation_id: str, actor=Depends(user)):
                         for app_id in evidence.source_apps(reference):
                             authorize_worker(actor.user_id, app_id)
                         return evidence.validate(reference)
+                    if reference.get("kind") == "attachment":
+                        # The excerpt was kept with the answer; the file must still be readable.
+                        files.describe(actor, reference["file_id"])
+                        return reference
                     library.LibraryReader().validate_citation(reference)
                 except ValueError as exc:
                     raise HTTPException(409, "引用原始修订不可用") from exc

@@ -289,10 +289,10 @@ def preview_chat_intent(
 
 
 # ---------------------------------------------------------------------------
-# 协同模板（模式 A 等）
+# 内置模板（模板市场）
 # ---------------------------------------------------------------------------
 
-MODE_A_WORKFLOW = """name: {name}
+FIREWALL_CHANGE_WORKFLOW = """name: {name}
 description: {description}
 version: "1.0"
 
@@ -308,26 +308,24 @@ test:
     requester_dept:
     assignee:
     due_date:
-    analysis_prompt:
-    analysis_focus: summary
   required_context:
     - ticket_id
     - policy_file_url
 
 steps:
-  - name: {step1_name}
-    label: {step1_label}
-    skill: {step1_skill}
+  - name: policy_generation
+    label: 生成防火墙策略
+    skill: {policy_skill}
     inputs:
       ticket_id: ${{context.ticket_id}}
       policy_file_url: ${{context.policy_file_url}}
       topology_file_url: ${{context.topology_file_url}}
 
-  - name: {step2_name}
-    label: {step2_label}
-    skill: {step2_skill}
+  - name: change_ticket
+    label: 编写变更工单
+    skill: {ticket_skill}
     inputs:
-      policy_run_id: ${{steps.{step1_name}.result.policy_run_id}}
+      policy_run_id: ${{steps.policy_generation.result.policy_run_id}}
       ticket_title: ${{context.ticket_title}}
       change_background: ${{context.change_background}}
       change_purpose: ${{context.change_purpose}}
@@ -336,51 +334,42 @@ steps:
       assignee: ${{context.assignee}}
       due_date: ${{context.due_date}}
 
-  - name: llm_analysis
-    label: LLM 结果分析
-    skill: llm-result-analyzer
-    inputs:
-      ticket_id: ${{context.ticket_id}}
-      prev_result: ${{steps.{step1_name}.result}}
-      analysis_prompt: ${{context.analysis_prompt}}
-      analysis_focus: ${{context.analysis_focus}}
-      source_step: {step1_name}
-      workflow_run_id: ${{run.id}}
-
 on_complete:
-  message: 防火墙变更与 LLM 分析已完成
-  notify_each_step: true
+  message: 防火墙变更流程已完成
   notification:
-    title: "LLM 分析已完成 (${{context.ticket_id}})"
-    body: "策略、变更工单与 LLM 分析报告已生成。"
+    title: "变更工单已完成 (${{context.ticket_id}})"
+    body: "${{steps.policy_generation.result.message}}，变更工单已生成。"
     level: success
 """
 
-MODE_A_CHAT_INTENT = """workflow: {name}
-priority: 110
-description: 按工单的策略申请表生成防火墙策略和变更工单，再由模型分析变更风险
+FIREWALL_CHANGE_CHAT_INTENT = """workflow: {name}
+priority: 100
+description: 按工单的策略申请表（xlsx，可在聊天里上传）生成防火墙策略和变更工单
 
 match:
   require_any:
     - 防火墙
     - 策略
   require_any_secondary:
-    - LLM
-    - llm
-    - 结果分析
-    - LLM分析
+    - 变更工单
+    - 编写变更
+    - 开通
 
 required_context:
   - ticket_id
   - policy_file_url
 
+# 聊天附件按扩展名自动填写这些字段（存在网盘里，流程以发起人身份读取）。
+files:
+  policy_file_url: [.xlsx]
+  topology_file_url: [.json]
+
 context_defaults:
   ticket_title: 防火墙策略变更
-  change_purpose: 根据用户请求生成防火墙策略、编写变更工单并进行 LLM 分析
-  analysis_focus: summary
+  change_purpose: 根据用户请求生成防火墙策略并编写变更工单
 
 response_template: |
-  [OK] 已启动防火墙变更 + LLM 分析流程
+  [OK] 已启动防火墙变更流程
 
   - **流程 ID**: `{{run_id}}`
   - **工单**: {{ticket_id}}
@@ -393,28 +382,15 @@ response_template: |
 def list_collab_templates() -> list[dict[str, Any]]:
     return [
         {
-            "id": "mode-a-firewall-llm",
-            "title": "模式 A：长时任务 → 依赖上步 → LLM 分析",
-            "description": "Step1 防火墙策略应用生成策略 → Step2 编写变更工单 → Step3 llm-result-analyzer 生成分析报告",
+            "id": "firewall-change",
+            "title": "防火墙变更：生成策略 → 编写变更工单",
+            "description": "Step1 防火墙策略应用生成策略 → Step2 编写变更工单",
             "steps": [
                 {"name": "policy_generation", "label": "生成防火墙策略", "skill": FIREWALL_POLICY},
                 {"name": "change_ticket", "label": "编写变更工单", "skill": FIREWALL_TICKET},
-                {"name": "llm_analysis", "label": "LLM 结果分析", "skill": "llm-result-analyzer"},
             ],
-            "default_plugin_name": "itsm-firewall-llm-analysis",
+            "default_plugin_name": "firewall-change",
             "category": "itsm",
-        },
-        {
-            "id": "mode-a-generic",
-            "title": "模式 A：通用三步骤链",
-            "description": "自定义 Step1/Step2 Skill，第三步固定为 llm-result-analyzer",
-            "steps": [
-                {"name": "step_one", "label": "第一步", "skill": "(自定义)"},
-                {"name": "step_two", "label": "第二步", "skill": "(自定义)"},
-                {"name": "llm_analysis", "label": "LLM 结果分析", "skill": "llm-result-analyzer"},
-            ],
-            "default_plugin_name": "custom-llm-analysis",
-            "category": "custom",
         },
     ]
 
@@ -423,70 +399,16 @@ def generate_from_collab_template(
     template_id: str,
     *,
     plugin_name: str | None = None,
-    step1_skill: str = FIREWALL_POLICY,
-    step2_skill: str = FIREWALL_TICKET,
     description: str | None = None,
 ) -> dict[str, str] | None:
-    """根据协同模板生成插件 YAML 文件内容。"""
-    if template_id == "mode-a-firewall-llm":
-        name = plugin_name or "itsm-firewall-llm-analysis"
-        desc = description or "ITSM 防火墙变更 + LLM 结果分析（模式 A）"
-        workflow = MODE_A_WORKFLOW.format(
-            name=name,
-            description=desc,
-            step1_name="policy_generation",
-            step1_label="生成防火墙策略",
-            step1_skill=step1_skill,
-            step2_name="change_ticket",
-            step2_label="编写变更工单",
-            step2_skill=step2_skill,
-        )
-        chat = MODE_A_CHAT_INTENT.format(name=name)
-        return {"WORKFLOW.yaml": workflow, "CHAT.intent.yaml": chat}
-
-    if template_id == "mode-a-generic":
-        name = plugin_name or "custom-llm-analysis"
-        desc = description or "自定义 Skill 链 + LLM 分析（模式 A）"
-        workflow = f"""name: {name}
-description: {desc}
-version: "1.0"
-
-steps:
-  - name: step_one
-    label: 第一步
-    skill: {step1_skill}
-    inputs:
-      ticket_id: ${{context.ticket_id}}
-      workflow_run_id: ${{run.id}}
-
-  - name: step_two
-    label: 第二步
-    skill: {step2_skill}
-    inputs:
-      ticket_id: ${{context.ticket_id}}
-      prev_result: ${{steps.step_one.result}}
-      workflow_run_id: ${{run.id}}
-
-  - name: llm_analysis
-    label: LLM 结果分析
-    skill: llm-result-analyzer
-    inputs:
-      ticket_id: ${{context.ticket_id}}
-      prev_result: ${{steps.step_two.result}}
-      analysis_prompt: ${{context.analysis_prompt}}
-      analysis_focus: summary
-      source_step: step_two
-      workflow_run_id: ${{run.id}}
-
-on_complete:
-  message: Workflow 与 LLM 分析已完成
-  notify_each_step: true
-  notification:
-    title: "分析完成 (${{context.ticket_id}})"
-    body: "所有步骤已执行，LLM 分析报告已生成。"
-    level: success
-"""
-        chat = MODE_A_CHAT_INTENT.format(name=name)
-        return {"WORKFLOW.yaml": workflow, "CHAT.intent.yaml": chat}
-
-    return None
+    """根据内置模板生成插件 YAML 文件内容。"""
+    if template_id != "firewall-change":
+        return None
+    name = plugin_name or "firewall-change"
+    workflow = FIREWALL_CHANGE_WORKFLOW.format(
+        name=name,
+        description=description or "防火墙变更：防火墙策略应用生成策略与变更工单",
+        policy_skill=FIREWALL_POLICY,
+        ticket_skill=FIREWALL_TICKET,
+    )
+    return {"WORKFLOW.yaml": workflow, "CHAT.intent.yaml": FIREWALL_CHANGE_CHAT_INTENT.format(name=name)}

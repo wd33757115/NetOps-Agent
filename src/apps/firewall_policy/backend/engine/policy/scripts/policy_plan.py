@@ -6,6 +6,15 @@ from hashlib import sha256
 
 from policy_optimizer import Rule, optimize
 from policy_sets import address_text, addresses, port_text, ports, union
+from policy_window import display, extend, settings
+
+
+def _setting(row, key):
+    """A window or long-link cell of the request frame; absent in older frames."""
+    value = row.get(key)
+    if value is None or isinstance(value, float) or value == "":
+        return None
+    return int(value) if key == "long_link_hours" else tuple(value)
 
 
 def digest(value):
@@ -15,6 +24,7 @@ def digest(value):
 
 
 def rule_view(rule):
+    window, hours = settings(rule.context)
     return {
         "id": digest(rule.key)[:16],
         "device": rule.context[0],
@@ -26,6 +36,10 @@ def rule_view(rule):
         "destinations": address_text(rule.destinations),
         "ports": port_text(rule.ports) if rule.context[4] != "icmp" else [],
         "action": "permit",
+        "valid_from": window[0] if window else None,
+        "valid_until": window[1] if window else None,
+        "validity": display(window),
+        "long_link_hours": hours,
         "evidence_ids": list(rule.refs),
     }
 
@@ -37,6 +51,9 @@ def build_plan(df, topology, ticket_id, merge=True):
         request = {key: str(row[key]) for key in ("src_ip", "dst_ip", "port", "proto", "action")}
         request.update(row.get("_original", {}))
         request["row"] = row_number
+        window, hours = _setting(row, "window"), _setting(row, "long_link_hours")
+        request["validity"] = display(window)
+        request["long_link_hours"] = hours
         requests.append(request)
         try:
             source_parts = topology.split_ownership(addresses(row["src_ip"]))
@@ -80,7 +97,12 @@ def build_plan(df, topology, ticket_id, merge=True):
                         for a, b in hops:
                             original.append(
                                 Rule(
-                                    (a[0], topology.network_context, a[1], b[1], proto),
+                                    # Long link is TCP only; the UDP half of tcp/udp keeps none.
+                                    extend(
+                                        (a[0], topology.network_context, a[1], b[1], proto),
+                                        window,
+                                        hours if proto == "tcp" else None,
+                                    ),
                                     union(p["interval"] for p in src),
                                     union(p["interval"] for p in dst),
                                     port_set,
@@ -109,6 +131,7 @@ def build_plan(df, topology, ticket_id, merge=True):
 def vendor_rules(rules, ticket_id):
     result = defaultdict(list)
     for rule in rules:
+        window, hours = settings(rule.context)
         result[rule.context[0]].append(
             {
                 "rule_key": (rule.context[2], rule.context[3]),
@@ -118,6 +141,8 @@ def vendor_rules(rules, ticket_id):
                 "proto": rule.context[4],
                 "action": "permit",
                 "ticket_id": ticket_id,
+                "window": window,
+                "long_link": hours,
             }
         )
     return result

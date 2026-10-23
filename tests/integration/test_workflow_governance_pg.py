@@ -45,7 +45,6 @@ def _build_test_dsl(plugin_name: str, *, keyword: str):
         description="PG 治理集成测试插件",
         step1_skill="firewall-policy-generator",
         step2_skill=None,
-        include_llm=False,
         category="custom",
         chat_match_any=[keyword],
         chat_match_secondary=[],

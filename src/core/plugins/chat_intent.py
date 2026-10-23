@@ -39,6 +39,8 @@ class ChatIntentPlugin:
     context_from_query: dict[str, str] = field(default_factory=dict)
     context_defaults: dict[str, Any] = field(default_factory=dict)
     response_template: str = ""
+    # Context fields a chat attachment fills, with the file endings each accepts.
+    files: dict[str, list[str]] = field(default_factory=dict)
 
 
 class ChatIntentRegistry:
@@ -82,6 +84,10 @@ class ChatIntentRegistry:
             context_from_query=dict(raw.get("context_from_query") or {}),
             context_defaults=dict(raw.get("context_defaults") or {}),
             response_template=str(raw.get("response_template") or ""),
+            files={
+                str(key): [str(ending).lower() for ending in (endings or [])]
+                for key, endings in (raw.get("files") or {}).items()
+            },
         )
 
     def all_intents(self) -> list[ChatIntentPlugin]:

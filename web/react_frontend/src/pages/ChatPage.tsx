@@ -3,7 +3,7 @@ import { Alert, message } from 'antd'
 import GrokShellLayout from '../components/Layout/GrokShellLayout'
 import ChatMessage from '../components/ChatMessage'
 import EvidenceLinks from '../components/EvidenceLinks'
-import InputArea from '../components/InputArea'
+import InputArea, { type ChatAttachment } from '../components/InputArea'
 import TraceProgress, { isRunning, pendingProgress, type AgentProgress } from '../components/TraceProgress'
 import { useChatStore, type Message } from '../store/useChatStore'
 import { streamChatMessage } from '../services/chatStream'
@@ -78,7 +78,7 @@ export default function ChatPage() {
     }
   }, [currentMessages, progress?.steps.length, progress?.message])
 
-  async function handleSend(query: string) {
+  async function handleSend(query: string, attachments: ChatAttachment[] = []) {
     if (busy || !query.trim()) return
     if (!selected) { message.error('请先选择或创建一个对话'); return }
     const id = selected
@@ -88,10 +88,11 @@ export default function ChatPage() {
     setSending(id)
     setErrors(prev => ({ ...prev, [id]: '' }))
     updateProgress(id, pendingProgress())
-    addMessage({ id: `user-${Date.now()}`, role: 'user', content: query })
+    addMessage({ id: `user-${Date.now()}`, role: 'user', content: query,
+      references: attachments.map(file => ({ kind: 'attachment', ...file })) })
     let terminalStatus = 'running'
     try {
-      const result = await streamChatMessage({ query, thread_id: id }, {
+      const result = await streamChatMessage({ query, thread_id: id, attachments: attachments.map(file => file.file_id) }, {
         signal: controller.signal, onProgress: value => { terminalStatus = value.status; updateProgress(id, value) },
       })
       // Keep the answer even if a subsequent history refresh fails; bind to its original conversation.
@@ -124,14 +125,15 @@ export default function ChatPage() {
   }
 
   return <GrokShellLayout mode="chat" scrollRef={messagesScrollRef}
-    footer={<InputArea onSend={text => void handleSend(text)} loading={busy} allowUpload={false} />}>
+    footer={<InputArea onSend={(text, attachments) => void handleSend(text, attachments)} loading={busy} />}>
     {currentMessages.length === 0 && !busy && <div className="grok-welcome">
       <h1 className="grok-welcome-title">今天有什么可以帮你？</h1>
       <div className="grok-suggestions">{SUGGESTIONS.map(text => <button key={text} type="button" className="grok-suggestion" onClick={() => void handleSend(text)}>{text}</button>)}</div>
     </div>}
     {currentMessages.map(msg => <React.Fragment key={msg.id}>
       {msg.progress && <TraceProgress progress={msg.progress} />}
-      <ChatMessage role={msg.role} content={msg.content} agentType={msg.agentType} downloadUrl={msg.downloadUrl} />
+      <ChatMessage role={msg.role} content={msg.content} agentType={msg.agentType} downloadUrl={msg.downloadUrl}
+        attachments={msg.role === 'user' ? msg.references?.filter(item => item?.kind === 'attachment') : undefined} />
       {msg.role === 'assistant' && <EvidenceLinks conversationId={selected} references={msg.references} />}
     </React.Fragment>)}
     {progress && <TraceProgress progress={progress} onCancel={() => void stop()} />}

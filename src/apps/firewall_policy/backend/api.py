@@ -8,8 +8,8 @@ from starlette.concurrency import run_in_threadpool
 from src.auth.models import CurrentUser
 from src.platform.authorization.client import require_app
 
-from . import service, storage
-from .schemas import PolicyRequest, TicketRequest
+from . import request_draft, service, storage
+from .schemas import LedgerDraft, LedgerUpload, PolicyRequest, TicketRequest
 from .schemas import Request as RetryRequest
 
 router = APIRouter(tags=["Firewall policy"])
@@ -37,6 +37,39 @@ def template(user: CurrentUser = Depends(actor)):
         "policies.xlsx",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+
+
+def drafted(user, body):
+    """The ledger's rows for one access; a missing ledger, grant or match is a plain 422."""
+    try:
+        return request_draft.build(user, body)
+    except RuntimeError as exc:
+        raise HTTPException(422, str(exc)) from None
+
+
+@router.get("/ledger")
+def ledger(user: CurrentUser = Depends(actor)):
+    return {"available": request_draft.available(user)}
+
+
+@router.post("/ledger/preview")
+def ledger_preview(body: LedgerDraft, user: CurrentUser = Depends(actor)):
+    rows, notes, _ = drafted(user, body)
+    return {"rows": rows, "notes": notes}
+
+
+@router.post("/ledger/file")
+def ledger_file(body: LedgerDraft, user: CurrentUser = Depends(actor)):
+    _, _, data = drafted(user, body)
+    return attachment(data, "策略申请表.xlsx", request_draft.XLSX)
+
+
+@router.post("/ledger/uploads", status_code=201)
+def ledger_upload(body: LedgerUpload, user: CurrentUser = Depends(actor)):
+    """The drafted sheet saved as this user's upload, ready for an ordinary policy run."""
+    rows, notes, data = drafted(user, body)
+    saved = service.save_upload(user.user_id, f"{body.ticket_id}-策略申请表.xlsx", "policy", data, body.request_id)
+    return {**saved, "rows": rows, "notes": notes}
 
 
 @router.post("/uploads", status_code=201)

@@ -26,11 +26,15 @@ _COMMON_CONTEXT_FIELDS = (
     "due_date",
 )
 
+FIREWALL_DRAFT = "app:firewall-policy/draft_request"
 FIREWALL_POLICY = "app:firewall-policy/generate_policy"
 FIREWALL_TICKET = "app:firewall-policy/write_change_ticket"
 
 # Skill 对之间的已知映射规则：(prev_skill, skill) -> {input: expression}
 _KNOWN_PAIR_MAPPINGS: dict[tuple[str, str], dict[str, str]] = {
+    (FIREWALL_DRAFT, FIREWALL_POLICY): {
+        "policy_file_url": "${steps.{prev}.result.policy_file_url}",
+    },
     (FIREWALL_POLICY, FIREWALL_TICKET): {
         "policy_run_id": "${steps.{prev}.result.policy_run_id}",
     },
@@ -46,12 +50,6 @@ _KNOWN_PAIR_MAPPINGS: dict[tuple[str, str], dict[str, str]] = {
 
 # 按 Skill 名称的固定映射补充
 _SKILL_SPECIFIC: dict[str, dict[str, str]] = {
-    "llm-result-analyzer": {
-        "prev_result": "${steps.{prev}.result}",
-        "analysis_prompt": "${context.analysis_prompt}",
-        "analysis_focus": "${context.analysis_focus}",
-        "source_step": "{prev_name}",
-    },
     "itsm-change-ticket-writer": {
         "change_background": "${context.change_background}",
         "change_purpose": "${context.change_purpose}",
@@ -93,8 +91,8 @@ def get_skill_input_names(skill_name: str) -> set[str]:
 
 
 def _apply_template(template: str, prev_step_name: str) -> str:
-    """将模板中的 {prev}/{prev_name} 替换为实际步骤名（避免 str.format 与 ${} 冲突）。"""
-    return template.replace("{prev}", prev_step_name).replace("{prev_name}", prev_step_name)
+    """将模板中的 {prev} 替换为实际步骤名（避免 str.format 与 ${} 冲突）。"""
+    return template.replace("{prev}", prev_step_name)
 
 
 def infer_step_inputs(
@@ -169,7 +167,6 @@ def _available_expressions_for_step(prev: WorkflowStepDSL | None) -> list[dict[s
         {"label": "context.ticket_id", "expr": "${context.ticket_id}"},
         {"label": "context.ticket_title", "expr": "${context.ticket_title}"},
         {"label": "context.policy_file_url", "expr": "${context.policy_file_url}"},
-        {"label": "context.analysis_prompt", "expr": "${context.analysis_prompt}"},
         {"label": "run.id", "expr": "${run.id}"},
     ]
     if prev:

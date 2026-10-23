@@ -33,11 +33,7 @@ const WorkflowDryRunPanel: React.FC<WorkflowDryRunPanelProps> = ({
     try {
       const res = await workflowApi.dryRun({
         dsl,
-        context: {
-          ticket_id: ticketId,
-          analysis_prompt: '请分析变更风险',
-          analysis_focus: 'summary',
-        },
+        context: { ticket_id: ticketId },
       })
       setResult(res)
       if (!res.validation?.valid) {

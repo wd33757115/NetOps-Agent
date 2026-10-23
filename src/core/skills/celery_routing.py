@@ -26,7 +26,6 @@ ROLE_QUEUE_MAP: dict[str, str] = {
     "textfsm-generator": "netops.ai",
     "change-policy-generator": "netops.ai",
     "event-rule-generator": "netops.ai",
-    "llm-result-analyzer": "netops.ai",
     "official-document-writing": "netops.ai",
     "official_document": "netops.ai",
 }

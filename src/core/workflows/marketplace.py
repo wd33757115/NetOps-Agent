@@ -24,10 +24,16 @@ def _now() -> datetime:
 
 
 def ensure_builtin_market_templates() -> int:
-    """将内置协同模板写入市场（幂等）。"""
+    """将内置模板写入市场（幂等）。"""
     created = 0
+    builtin = list_collab_templates()
     with get_db_session() as db:
-        for tpl in list_collab_templates():
+        # Built-in templates follow the code: one the code no longer ships leaves the market.
+        db.query(WorkflowMarketTemplate).filter(
+            WorkflowMarketTemplate.created_by == "system",
+            WorkflowMarketTemplate.id.notin_([tpl["id"] for tpl in builtin]),
+        ).delete(synchronize_session=False)
+        for tpl in builtin:
             existing = (
                 db.query(WorkflowMarketTemplate)
                 .filter(WorkflowMarketTemplate.id == tpl["id"])
@@ -43,7 +49,7 @@ def ensure_builtin_market_templates() -> int:
                 title=tpl["title"],
                 description=tpl["description"],
                 category=tpl.get("category") or "itsm",
-                tags=["模式A", "builtin"],
+                tags=["builtin"],
                 files=files,
                 featured=True,
                 is_public=True,

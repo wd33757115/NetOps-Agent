@@ -14,42 +14,41 @@ from src.core.workflows.manager import (
 from src.core.workflows.registry import get_template, load_workflows
 
 
-def test_list_collab_templates_has_mode_a():
-    templates = list_collab_templates()
-    ids = {t["id"] for t in templates}
-    assert "mode-a-firewall-llm" in ids
+def test_builtin_template_is_the_firewall_change_chain():
+    assert [t["id"] for t in list_collab_templates()] == ["firewall-change"]
+    assert generate_from_collab_template("mode-a-firewall-llm") is None
 
 
-def test_generate_mode_a_template():
-    files = generate_from_collab_template("mode-a-firewall-llm", plugin_name="test-llm-wf")
+def test_generate_firewall_change_template():
+    files = generate_from_collab_template("firewall-change", plugin_name="test-fw-wf")
     assert files is not None
-    assert "WORKFLOW.yaml" in files
-    assert "llm-result-analyzer" in files["WORKFLOW.yaml"]
-    assert "CHAT.intent.yaml" in files
     raw = yaml.safe_load(files["WORKFLOW.yaml"])
-    assert raw["name"] == "test-llm-wf"
-    assert len(raw["steps"]) == 3
-    assert raw["steps"][-1]["skill"] == "llm-result-analyzer"
+    assert raw["name"] == "test-fw-wf"
+    assert [s["skill"] for s in raw["steps"]] == [
+        "app:firewall-policy/generate_policy",
+        "app:firewall-policy/write_change_ticket",
+    ]
+    chat = yaml.safe_load(files["CHAT.intent.yaml"])
+    assert chat["workflow"] == "test-fw-wf"
+    assert chat["files"] == {"policy_file_url": [".xlsx"], "topology_file_url": [".json"]}
 
 
-def test_load_firewall_llm_analysis_plugin():
+def test_retired_llm_analysis_workflow_is_gone():
     load_workflows(force=True)
-    tpl = get_template("itsm-firewall-llm-analysis")
-    assert tpl is not None
-    assert len(tpl.steps) == 3
-    assert tpl.steps[-1].skill_name == "llm-result-analyzer"
+    assert get_template("itsm-firewall-llm-analysis") is None
+    assert get_template("itsm-firewall-change") is not None
 
 
 def test_validate_workflow_yaml_ok():
-    files = generate_from_collab_template("mode-a-firewall-llm")
+    files = generate_from_collab_template("firewall-change")
     result = validate_workflow_yaml(files["WORKFLOW.yaml"])
     assert result["valid"] is True
     assert not result["errors"]
 
 
 def test_preview_chat_intent_matched():
-    files = generate_from_collab_template("mode-a-firewall-llm", plugin_name="itsm-firewall-llm-analysis")
-    query = "根据工单 REQ2025001 生成防火墙策略并进行 LLM 分析"
+    files = generate_from_collab_template("firewall-change", plugin_name="fw-preview-test")
+    query = "根据工单 REQ2025001 生成防火墙策略并编写变更工单"
     result = preview_chat_intent(query, chat_intent_yaml=files["CHAT.intent.yaml"])
     assert result["matched"] is True
     assert result.get("ticket_id")
@@ -62,9 +61,7 @@ def test_save_plugin_syncs_workflow_name():
     from src.core.plugins.chat_intent import get_chat_intent_registry
     from src.core.workflows.manager import save_plugin
 
-    files = generate_from_collab_template("mode-a-generic", plugin_name="sync-test-wf")
-    files["WORKFLOW.yaml"] = files["WORKFLOW.yaml"].replace("name: custom-llm-analysis", "name: wrong-name")
-    files["CHAT.intent.yaml"] = files["CHAT.intent.yaml"].replace("workflow: custom-llm-analysis", "workflow: wrong-name")
+    files = generate_from_collab_template("firewall-change", plugin_name="wrong-name")
     result = save_plugin("sync-test-wf", category="custom", files=files)
     assert result["success"] is True
     plugin_dir = Path(result["path"])
@@ -77,20 +74,10 @@ def test_save_plugin_syncs_workflow_name():
 
 
 def test_preview_chat_intent_missing_ticket():
-    files = generate_from_collab_template("mode-a-firewall-llm")
-    result = preview_chat_intent("生成防火墙策略并进行 LLM 分析", chat_intent_yaml=files["CHAT.intent.yaml"])
+    files = generate_from_collab_template("firewall-change")
+    result = preview_chat_intent("生成防火墙策略并编写变更工单", chat_intent_yaml=files["CHAT.intent.yaml"])
     assert result["matched"] is False
     assert "工单" in (result.get("reason") or "")
-
-
-def test_chat_intent_llm_workflow_wins_when_llm_in_query():
-    from src.core.plugins.chat_intent import get_chat_intent_registry, match_chat_workflow
-
-    get_chat_intent_registry().load(force=True)
-    query = "根据工单 REQ2025001 生成防火墙策略并进行 LLM 结果分析"
-    intent = match_chat_workflow(query, "chat")
-    assert intent is not None
-    assert intent.workflow == "itsm-firewall-llm-analysis"
 
 
 def test_normalize_step_result_preserves_raw_fields():

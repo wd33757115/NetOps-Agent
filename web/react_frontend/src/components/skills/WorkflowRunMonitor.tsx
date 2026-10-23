@@ -356,28 +356,6 @@ const WorkflowRunMonitor: React.FC<WorkflowRunMonitorProps> = ({
             />
           )}
 
-          {run.steps.some((s) => s.skill_name === 'llm-result-analyzer' && hasArtifacts(s.output_artifacts)) && (
-            <Alert
-              type="success"
-              style={{ marginTop: 12 }}
-              message="LLM 分析报告已生成"
-              description={
-                run.steps
-                  .filter((s) => s.skill_name === 'llm-result-analyzer')
-                  .map((s) => {
-                    const art = s.output_artifacts as Record<string, { download_url?: string }> | null
-                    const url = art?.analysis_report?.download_url
-                    return url ? (
-                      <a key={s.step_name} href={url} target="_blank" rel="noreferrer">
-                        下载分析报告
-                      </a>
-                    ) : (
-                      '见步骤产物'
-                    )
-                  })
-              }
-            />
-          )}
         </>
       ) : null}
     </>

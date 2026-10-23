@@ -39,6 +39,8 @@ export interface ChatIntentDSL {
   required_context?: string[]
   context_from_state?: Record<string, string>
   context_defaults?: Record<string, unknown>
+  /** Context fields a chat attachment fills, with the file endings each accepts. */
+  files?: Record<string, string[]>
   response_template?: string
 }
 
@@ -138,7 +140,6 @@ export interface WizardFormValues {
   description?: string
   step1_skill: string
   step2_skill?: string
-  include_llm?: boolean
   chat_require_any?: string[]
   chat_require_secondary?: string[]
 }
@@ -157,7 +158,6 @@ export function buildDslFromWizard(values: WizardFormValues): WorkflowDSL {
     plugin_name,
     category = 'itsm',
     description = '自定义 Workflow',
-    include_llm = true,
     chat_require_any,
     chat_require_secondary,
   } = values
@@ -193,17 +193,6 @@ export function buildDslFromWizard(values: WizardFormValues): WorkflowDSL {
     })
   }
 
-  if (include_llm !== false) {
-    const prevName = step2_skill ? step2Name : step1Name
-    steps.push({
-      id: 's3',
-      name: 'llm_analysis',
-      label: 'LLM 结果分析',
-      skill: 'llm-result-analyzer',
-      inputs: { source_step: prevName },
-    })
-  }
-
   return {
     meta: {
       name: plugin_name,
@@ -215,36 +204,23 @@ export function buildDslFromWizard(values: WizardFormValues): WorkflowDSL {
     triggers: {
       chat: {
         enabled: true,
-        priority: include_llm !== false ? 110 : 50,
+        priority: 50,
         description,
         match: {
           require_any: chat_require_any?.length ? chat_require_any : ['关键词'],
-          require_any_secondary:
-            chat_require_secondary?.length
-              ? chat_require_secondary
-              : include_llm !== false
-                ? ['LLM', '分析']
-                : [],
+          require_any_secondary: chat_require_secondary?.length ? chat_require_secondary : [],
         },
         required_context: isFirewallChain ? ['ticket_id', 'policy_file_url'] : [],
-        context_defaults: { analysis_focus: 'summary' },
         response_template: isFirewallChain
           ? '[OK] 已启动 Workflow\n\n- **流程 ID**: `{run_id}`\n- **工单**: {ticket_id}\n- **步骤**: {workflow_description}\n'
           : '[OK] 已启动 Workflow\n\n- **流程 ID**: `{run_id}`\n- **步骤**: {workflow_description}\n',
       },
     },
     on_complete: {
-      message:
-        include_llm !== false && isFirewallChain
-          ? '防火墙变更与 LLM 分析已完成'
-          : 'Workflow 已完成',
-      notify_each_step: include_llm !== false,
+      message: 'Workflow 已完成',
       notification: {
         title: '流程已完成 (${context.ticket_id})',
-        body:
-          include_llm !== false
-            ? '策略、变更工单与 LLM 分析报告已生成。'
-            : '所有步骤已执行。',
+        body: '所有步骤已执行。',
         level: 'success',
       },
     },
@@ -298,7 +274,8 @@ export function mergeChatYamlIntoDsl(dsl: WorkflowDSL, chatYaml: string): Workfl
         },
         required_context:
           requiredContext.length ? requiredContext : dsl.triggers?.chat?.required_context,
-        context_defaults: dsl.triggers?.chat?.context_defaults ?? { analysis_focus: 'summary' },
+        context_defaults: dsl.triggers?.chat?.context_defaults,
+        files: dsl.triggers?.chat?.files,
         response_template: dsl.triggers?.chat?.response_template,
       },
     },

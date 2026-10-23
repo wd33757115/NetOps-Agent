@@ -73,6 +73,10 @@ class ChatIntentDSL(BaseModel):
         description="将通用查询提取结果映射到 Workflow 上下文，如 baseline_path: path_0",
     )
     context_defaults: dict[str, Any] = Field(default_factory=dict)
+    files: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description="聊天附件自动填写的文件字段及接受的扩展名，如 policy_file_url: [.xlsx]",
+    )
     response_template: str = Field(
         default="[OK] 已启动 Workflow\n\n- **流程 ID**: `{run_id}`\n- **步骤**: {workflow_description}\n"
     )

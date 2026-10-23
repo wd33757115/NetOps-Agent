@@ -1,12 +1,17 @@
 # 防火墙策略业务能力包
 
-`firewall-policy` 1.1.0 包含策略计算、拓扑证据、配置校验、预览、申请表导出、变更工单、前端、API、任务、独立迁移和 Agent 工具。`app.yaml` 是唯一平台注册入口。复制本目录并按平台安装流程构建、安装、校验和启用即可接入；不在运行时安装依赖。
+`firewall-policy` 1.5.2 包含策略计算、拓扑证据、配置校验、预览、申请表导出、变更工单、前端、API、任务、独立迁移和 Agent 工具。`app.yaml` 是唯一平台注册入口。复制本目录并按平台安装流程构建、安装、校验和启用即可接入；不在运行时安装依赖。
 
 ## 使用
 
 - 页面：`/apps/firewall-policy`。上传 XLSX，可选 JSON 拓扑，填写工单号并生成。
+- 按资源台账生成：账号有资源台账应用的授权时，申请表区域多出“按资源台账生成”。填写源、目的（IP、网段、范围或业务系统，可限定子系统）、可选端口、有效期和长连接，先预览台账拼出的访问关系，再生成策略；申请表由服务端按台账生成，作为该账号的上传保存，之后与上传的申请表走同一条流程。下发到哪台防火墙、哪个安全域仍按拓扑计算。
 - 任务提交后地址携带 `?run=...`，可关闭页面并从历史记录恢复。取消关闭任务，重试创建新任务并保留原记录。
 - 配置包、预览和申请表来自同一份已校验计划；工单引用服务端的完成计划，客户端只可填写工单头。只生成文件，不下发设备、不提交 ITSM 审批。
+- 有效期与长连接（华为 USG6000、H3C F5000）：
+  - `start_time`、`end_time` 两列须同时填写或同时留空，精确到分钟；`end_time` 只写日期（或写 0 点）表示当天结束。一张申请表只能有一个有效期，设备上建以工单号命名的时间段（华为 `time-range` 视图的 `absolute-range`，H3C 系统视图 `time-range … from … to …`），规则里引用它。工单号须以英文字母开头，只含字母、数字、下划线或短横线，最多 32 个字符。
+  - `long_link` 填老化小时数（0–24000，0 表示永不老化）或“是”（168 小时），只对 TCP 生效；华为生成 `long-link enable` 与 `long-link aging-time`，H3C 生成规则内的 `session persistent aging-time`。tcp/udp 申请只在 TCP 规则上开启。
+  - 有效期或长连接不同的申请不会合并到同一条策略；CLI 回读同时核对时间段和长连接。H3C F1000、天融信、山石暂不支持，申请行填写了这些列且路径经过这些设备时拒绝生成。
 - 默认拓扑使用包内 `backend/engine/policy/scripts/topology.json`，提交时保存快照。生产使用前应核对该拓扑或上传自己的拓扑。
 
 ## API 与权限
@@ -16,6 +21,10 @@
 | 接口 | 用途 |
 |---|---|
 | `GET /template` | 下载空白申请模板 |
+| `GET /ledger` | 当前账号能否按资源台账生成（资源台账已安装且已授权） |
+| `POST /ledger/preview` | 按台账拼出的申请行和说明，不保存 |
+| `POST /ledger/file` | 按台账生成的申请表文件 |
+| `POST /ledger/uploads` | 按台账生成申请表并保存为该账号的上传，返回上传 ID；request_id 幂等 |
 | `POST /uploads?filename=...&kind=policy或topology&request_id=...` | 原始二进制上传，最大 10 MiB |
 | `POST /runs` | 上传 ID、工单号、合并和业务路径选项；request_id 幂等 |
 | `GET /runs?offset=0&limit=20` | 当前账号策略任务历史 |
@@ -29,12 +38,15 @@ Agent 工具与 HTTP API 调用同一业务服务，身份由平台提供。文�
 
 ## Workflow 动作
 
-`app.yaml` 的 `workflow.actions` 导出两个动作，供 Workflow 步骤以 `skill: app:firewall-policy/<动作>` 调用（`src/workflows/itsm/` 下的两个 ITSM 流程即如此）：
+`app.yaml` 的 `workflow.actions` 导出三个动作，供 Workflow 步骤以 `skill: app:firewall-policy/<动作>` 调用（`src/workflows/itsm/` 下的流程即如此）：
 
 | 动作 | 做什么 | 结果与产物 |
 |---|---|---|
-| `generate_policy` | 下载 `policy_file_url`（及可选 `topology_file_url`，只接受 http(s)，不超过 10 MB），作为运行所属用户的上传保存，提交策略任务并等待完成（最长 360 秒） | `policy_run_id`、`devices`、`risk_level`；产物 `config_zip`、`policy_preview`、`policy_request` |
+| `draft_request` | 按资源台账生成策略申请表：`source`、`destination` 填 IP、网段、范围或业务系统名称，业务系统取其未下线主机的 IP，端口取目的主机登记的服务端口（或 `ports` 指定，如 `tcp/443,udp/53`）；可带 `start_time`、`end_time`、`long_link`。经平台工具 `resource_ledger__plan_access` 以发起人身份读取台账（需要资源台账应用及其授权），申请表存入发起人网盘“防火墙申请表”文件夹 | `policy_file_url`（`netdisk:<文件ID>`，交给 `generate_policy`）、`rows`、`notes`；产物 `policy_request_draft`。台账只提供地址和端口，下发到哪台防火墙、哪个安全域由 `generate_policy` 按拓扑计算 |
+| `generate_policy` | 取得 `policy_file_url`（及可选 `topology_file_url`）：`netdisk:<文件ID>` 以运行所属用户的身份从网盘读取（聊天附件就是这种），其他只接受 http(s) 下载，均不超过 10 MB；作为该用户的上传保存，提交策略任务并等待完成（最长 360 秒） | `policy_run_id`、`devices`、`risk_level`；产物 `config_zip`、`policy_preview`、`policy_request` |
 | `write_change_ticket` | 按 `policy_run_id` 生成变更工单，只接受工单头字段 | `ticket_run_id`；产物 `change_excel` |
+
+`firewall-access-from-ledger` 流程把三个动作串起来，并开放聊天启动：用户说“开通北京 10.248.255.11 到西安风险评估系统的防火墙策略”并给出工单号即可，不用上传申请表。台账里查不到的地址照常放行，在结果的 `notes` 里说明。
 
 动作以 Workflow 运行所属的用户执行，受该用户的应用授权约束；没有用户的运行（未认证的 Webhook）直接失败。任务和上传与页面提交的一样出现在该用户的历史记录里。请求标识由 Workflow 运行编号生成，同一运行重投递不会重复提交，重试 Workflow 会提交新任务。产物由平台保存为步骤产物，下载链接由平台签名，本包仍不发布 MinIO 签名地址。
 

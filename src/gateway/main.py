@@ -81,7 +81,6 @@ from src.gateway.patrol_api import router as patrol_router
 from src.gateway.patrol_reports_api import router as patrol_reports_router
 from src.gateway.schemas import (
     AddMessageRequest,
-    ChatFileUploadRequest,
     ChatRequest,
     ChatResponse,
     ConversationDetailResponse,
@@ -541,40 +540,6 @@ async def get_task_status(task_id: str):
             )
     except Exception as e:
         return TaskResponse(task_id=task_id, status="failed", error_message=str(e))
-
-
-@app.post("/api/v1/chat/upload", tags=["Chat"])
-async def chat_upload_file(request: ChatFileUploadRequest):
-    """
-    聊天文件上传接口
-
-    - 用户上传策略 Excel 文件用于生成防火墙策略
-    - 返回临时文件路径供后续处理
-    """
-    import base64
-    import tempfile
-
-    temp_dir = tempfile.mkdtemp(prefix="chat_upload_")
-    file_path = os.path.join(temp_dir, request.filename)
-
-    try:
-        file_content = base64.b64decode(request.file_content)
-        with open(file_path, "wb") as f:
-            f.write(file_content)
-
-        response = {
-            "thread_id": request.thread_id,
-            "filename": request.filename,
-            "file_path": file_path,
-            "status": "uploaded",
-            "message": f"文件 {request.filename} 上传成功",
-            "next_steps": "请继续输入命令执行策略生成，如：生成防火墙策略",
-        }
-        return JSONResponse(status_code=status.HTTP_200_OK, content=response)
-    except Exception as e:
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content={"error": str(e)}
-        )
 
 
 # =============================================================================

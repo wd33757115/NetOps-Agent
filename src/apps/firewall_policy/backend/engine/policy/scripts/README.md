@@ -4,9 +4,9 @@
 统一入口：`run.py --params params.json --output-dir output`。
 
 `params.json` 必须提供 `policy_file_url`，可选 `ticket_id`、`topology_file_url`、`merge_policies`（布尔值，默认 true）。
-没有上传文件时明确报错，不使用默认测试申请。策略表支持 src_ip、dst_ip、port、proto，旧 action 列只接受空值或 permit。
+没有上传文件时明确报错，不使用默认测试申请。策略表支持 src_ip、dst_ip、port、proto，旧 action 列只接受空值或 permit；start_time/end_time（有效期，须同时填写）和 long_link（长连接小时数，仅 TCP）目前只为华为（USG6000）和 H3C（F5000）生成，规则见 `policy_window.py`。
 
-处理链路：policy_input → policy_sets/core → policy_plan → policy_optimizer → vendor_config → vendor_validation → plan_preview。
+处理链路：policy_input（policy_window）→ policy_sets/core → policy_plan → policy_optimizer → vendor_config → vendor_validation → plan_preview。
 
 - 地址与端口采用半开区间集合，不逐个展开。
 - 逐维等价合并，独立三维区间差集校验。预算不足保留原始有效计划。

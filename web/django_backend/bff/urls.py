@@ -24,7 +24,6 @@ from .views import (
     storage,
     system,
     tasks,
-    upload,
     workflows,
 )
 
@@ -60,7 +59,6 @@ urlpatterns = [
     ),
     path("chat/", chat.proxy_chat, name="bff_chat"),
     path("chat/stream/", chat.proxy_chat_stream, name="bff_chat_stream"),
-    path("chat/upload/", upload.proxy_chat_upload, name="bff_chat_upload"),
     path("health/", health.proxy_health, name="bff_health"),
     path("health/diagnostics/", health.proxy_health_diagnostics, name="bff_health_diagnostics"),
     path("gateway/", system.proxy_gateway_info, name="bff_gateway_info"),

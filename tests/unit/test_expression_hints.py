@@ -14,7 +14,6 @@ def _firewall_dsl() -> WorkflowDSL:
         description="test",
         step1_skill="firewall-policy-generator",
         step2_skill="itsm-change-ticket-writer",
-        include_llm=True,
     )
 
 
@@ -34,9 +33,9 @@ def test_expression_hints_suggestions_for_change_ticket():
 
 
 def test_expression_hints_available_expressions():
-    hints = build_expression_hints(_firewall_dsl(), step_name="llm_analysis")
+    hints = build_expression_hints(_firewall_dsl(), step_name="change_ticket")
     exprs = hints["available_expressions"]
-    assert any("change_ticket" in e["expr"] for e in exprs)
+    assert any("policy_generation" in e["expr"] for e in exprs)
 
 
 def test_expression_hints_minimal_dsl():

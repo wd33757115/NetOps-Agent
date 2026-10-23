@@ -1,0 +1,6 @@
+{
+  "name": "@netops/resource-ledger",
+  "private": true,
+  "version": "0.3.3",
+  "dependencies": { "react": "18.3.1", "antd": "5.29.3" }
+}

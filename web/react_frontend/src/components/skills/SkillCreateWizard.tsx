@@ -211,16 +211,9 @@ const SkillCreateWizard: React.FC<SkillCreateWizardProps> = ({ open, onClose, on
             <Form.Item name="template_type" label="脚手架模板">
               <Select options={[
                 { value: 'generic', label: '通用 Skill' },
-                { value: 'analysis', label: 'LLM 分析类（模式 A 第三步）' },
-                { value: 'llm-result-analyzer', label: '引用已有 llm-result-analyzer（无需新建）' },
+                { value: 'analysis', label: 'LLM 分析类' },
               ]} />
             </Form.Item>
-            {templateType === 'llm-result-analyzer' && (
-              <Text type="secondary">
-                模式 A 第三步可直接使用内置 Skill <code>llm-result-analyzer</code>，无需重复创建。
-                请在 Workflow 向导中配置 <code>${'${steps.x.result}'}</code> 映射即可。
-              </Text>
-            )}
             {templateType === 'analysis' && (
               <TextArea value={ANALYSIS_TEMPLATE} readOnly rows={14} style={{ fontFamily: 'monospace', fontSize: 12 }} />
             )}
@@ -237,32 +230,23 @@ const SkillCreateWizard: React.FC<SkillCreateWizardProps> = ({ open, onClose, on
         {step === 2 && (
           <>
             <Text>确认创建 Skill 并生成目录脚手架。创建后可在编辑器中完善 SKILL.md 与 scripts。</Text>
-            {templateType !== 'llm-result-analyzer' && (
-              <Alert
-                type="warning"
-                showIcon
-                style={{ marginTop: 12 }}
-                message="Catalog 同步"
-                description="创建后会自动 reload 并写入 Catalog；默认 draft 状态不会参与聊天路由，请通过「灰度」调整为 canary 或 stable。"
-              />
-            )}
-            {templateType === 'llm-result-analyzer' ? (
-              <div style={{ marginTop: 16 }}>
-                <Text type="warning">已选择引用内置 Skill，无需创建。请关闭向导并在 Workflow 标签页继续配置。</Text>
-              </div>
-            ) : null}
+            <Alert
+              type="warning"
+              showIcon
+              style={{ marginTop: 12 }}
+              message="Catalog 同步"
+              description="创建后会自动 reload 并写入 Catalog；默认 draft 状态不会参与聊天路由，请通过「灰度」调整为 canary 或 stable。"
+            />
             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 24 }}>
               <button type="button" className="grok-tool-btn" onClick={() => setStep(1)}>上一步</button>
-              {templateType !== 'llm-result-analyzer' && (
-                <button
-                  type="button"
-                  className="grok-tool-btn is-primary"
-                  disabled={createMutation.isLoading}
-                  onClick={handleFinishBasic}
-                >
-                  {createMutation.isLoading ? '创建中…' : '创建 Skill'}
-                </button>
-              )}
+              <button
+                type="button"
+                className="grok-tool-btn is-primary"
+                disabled={createMutation.isLoading}
+                onClick={handleFinishBasic}
+              >
+                {createMutation.isLoading ? '创建中…' : '创建 Skill'}
+              </button>
             </div>
           </>
         )}

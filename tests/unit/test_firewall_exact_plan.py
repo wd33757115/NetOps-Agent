@@ -16,7 +16,7 @@ SCRIPTS = Path(__file__).resolve().parents[2] / 'src/skills/firewall-policy-gene
 
 @pytest.fixture(scope='module')
 def api():
-    names = ['core', 'policy_sets', 'policy_optimizer', 'policy_input', 'policy_plan', 'vendor_config', 'vendor_validation', 'plan_preview']
+    names = ['core', 'policy_sets', 'policy_window', 'policy_optimizer', 'policy_input', 'policy_plan', 'vendor_config', 'vendor_validation', 'plan_preview']
     previous = {name: sys.modules.pop(name, None) for name in names}
     sys.path.insert(0, str(SCRIPTS))
     modules = {name: importlib.import_module(name) for name in names}
@@ -176,3 +176,44 @@ def test_sparse_large_batch_does_not_enumerate_subsets(api):
     merged, _ = opt.optimize(rules)
     assert merged == rules
     assert perf_counter() - start < 12
+
+
+WINDOW = ('2030-01-02 08:00', '2030-02-01 00:00')
+
+
+@pytest.mark.parametrize('vendor,cls', [('华为', 'HuaweiConfigGenerator'), ('H3C', 'H3CConfigGenerator')])
+@pytest.mark.parametrize('window,hours', [(WINDOW, 168), (WINDOW, None), (None, 0)])
+def test_validity_and_long_link_round_trip(api, tmp_path, vendor, cls, window, hours):
+    sets, opt, extend = api['policy_sets'], api['policy_optimizer'], api['policy_window'].extend
+    rule = opt.Rule(extend(('FW', 'default', 'S', 'D', 'tcp'), window, hours),
+                    sets.addresses('10.0.0.1'), sets.addresses('10.1.0.1'), sets.ports('443'))
+    plain = opt.Rule(('FW', 'default', 'S', 'D', 'udp'), sets.addresses('10.0.0.1'),
+                     sets.addresses('10.1.0.1'), sets.ports('53'))
+    rows = api['policy_plan'].vendor_rules([rule, plain], 'REQ-1')['FW']
+    getattr(api['vendor_config'], cls).generate(str(tmp_path), 'FW', rows)
+    text = (tmp_path / 'FW.txt').read_text(encoding='utf-8')
+    api['vendor_validation'].validate_output(vendor, text, [rule, plain])
+    # Without the settings the CLI no longer matches the plan.
+    for marker in ('time-range REQ-1', 'aging-time'):
+        if marker in text:
+            stripped = '\n'.join(l for l in text.splitlines() if marker not in l)
+            with pytest.raises((ValueError, KeyError)):
+                api['vendor_validation'].validate_output(vendor, stripped, [rule, plain])
+
+
+@pytest.mark.parametrize('vendor,cls,old,new', [
+    ('华为', 'HuaweiConfigGenerator', 'to 23:59:59 2030/01/31', 'to 23:59:59 2030/02/28'),
+    ('华为', 'HuaweiConfigGenerator', ' long-link enable\n', ''),
+    ('H3C', 'H3CConfigGenerator', 'to 24:00 2030/01/31', 'to 18:00 2030/01/31'),
+    ('H3C', 'H3CConfigGenerator', 'aging-time 168', 'aging-time 24'),
+])
+def test_tampered_validity_or_long_link_is_detected(api, tmp_path, vendor, cls, old, new):
+    sets, opt, extend = api['policy_sets'], api['policy_optimizer'], api['policy_window'].extend
+    rule = opt.Rule(extend(('FW', 'default', 'S', 'D', 'tcp'), WINDOW, 168),
+                    sets.addresses('10.0.0.1'), sets.addresses('10.1.0.1'), sets.ports('443'))
+    rows = api['policy_plan'].vendor_rules([rule], 'REQ-1')['FW']
+    getattr(api['vendor_config'], cls).generate(str(tmp_path), 'FW', rows)
+    text = (tmp_path / 'FW.txt').read_text(encoding='utf-8')
+    assert old in text
+    with pytest.raises(ValueError):
+        api['vendor_validation'].validate_output(vendor, text.replace(old, new), [rule])

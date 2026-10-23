@@ -27,7 +27,6 @@ def _sample_dsl(name: str = "gov-test-export"):
         description="治理测试插件",
         step1_skill="firewall-policy-generator",
         step2_skill=None,
-        include_llm=False,
         category="custom",
     )
 

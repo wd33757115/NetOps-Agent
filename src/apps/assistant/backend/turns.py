@@ -5,6 +5,7 @@ import contextlib
 import json
 import logging
 from datetime import timedelta
+from typing import Annotated
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -17,7 +18,7 @@ from src.platform.agent_runtime import timeline
 from src.platform.agent_runtime.base import AgentEvent, RunContext
 from src.platform.authorization.client import authority_session, authorize_worker
 
-from . import evidence, history, model_settings, progress, tool_outputs
+from . import attachments, evidence, history, model_settings, progress, tool_outputs
 from .diagnostic_workspace import DiagnosticWorkspace
 from .models import Turn
 from .repository import now, sessions
@@ -36,6 +37,10 @@ class Question(BaseModel):
     request_id: str = Field(min_length=1, max_length=64)
     text: str = Field(min_length=1, max_length=4000)
     filters: dict[str, str] = Field(default_factory=dict)
+    # Netdisk files uploaded with the question (attachments.upload).
+    attachments: list[Annotated[str, Field(pattern=r"^file-[0-9a-f]{16}$")]] = Field(
+        default_factory=list, max_length=attachments.MAX_PER_MESSAGE
+    )
 
 
 def expire(session):
@@ -93,10 +98,16 @@ def begin(actor_id, conversation_id, body):
         raise HTTPException(422, "不支持的资料过滤条件")
     signature = digest(
         json.dumps(
-            {"conversation": conversation_id, "text": body.text, "filters": body.filters},
+            {"conversation": conversation_id, "text": body.text, "filters": body.filters,
+             "attachments": body.attachments},
             sort_keys=True,
             ensure_ascii=False,
         )
+    )
+    # Every file must be the asker's to read before the question is accepted.
+    files = (
+        attachments.resolve(authorize_worker(actor_id, "assistant"), body.attachments)
+        if body.attachments else []
     )
     with sessions() as session:
         expire(session)
@@ -126,7 +137,7 @@ def begin(actor_id, conversation_id, body):
                 session.flush()
         except IntegrityError as exc:
             raise HTTPException(409, "该会话已有正在运行的问题，请刷新后重试") from exc
-        history.add(session, conversation_id, "user", body.text)
+        history.add(session, conversation_id, "user", body.text, files or None)
         conversation.status = "assistant"
         if conversation.title in {"新问答", "新对话"}:
             conversation.title = body.text[:60]
@@ -332,6 +343,16 @@ async def _execute(actor_id, run, body, *, agent_runtime=None, on_event=None):
                 break
             remaining -= len(row["content"])
             messages.insert(0, {"role": row["role"], "content": row["content"]})
+        files = attachments.in_conversation(rows)
+        if files:
+            # Read again as the asker: a file deleted or unshared since is reported, not used.
+            asker = await asyncio.to_thread(authorize_worker, actor_id, "assistant")
+            vision = (model or model_settings._default_model()) in attachments.VISION_MODELS
+            tools.attachments = await asyncio.to_thread(attachments.load, asker, files, vision=vision)
+            if messages and messages[-1]["role"] == "user":
+                messages[-1]["content"] += attachments.note(
+                    tools.attachments, tools.attachment_paths(), vision=vision
+                )
         await asyncio.to_thread(authorize_worker, actor_id, "assistant")
         if (await asyncio.to_thread(read, actor_id, run["id"]))["status"] != "running":
             raise PermissionError("Turn no longer active")

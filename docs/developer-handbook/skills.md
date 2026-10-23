@@ -40,7 +40,6 @@ Skill 没有自己的页面和 API。它由三处调用：
 | `demo-text-stats` | 本手册的演示 Skill | `scripts/run.py`，产出报告文件 | 是 |
 | `device-backup` | 设备配置备份 | 没有入口脚本，当前不能执行 | 否 |
 | `itsm-callback` | 把结果回调给 ITSM 系统 | `scripts/itsm_callback.py`，异步任务 | 否，只作 Workflow 步骤 |
-| `llm-result-analyzer` | 用模型解读上一步结果 | `scripts/run.py`，产出报告 | 否，只作 Workflow 步骤 |
 
 ![Skill 管理页：开关、灰度、查看、编辑、重载](images/skill-manage.jpg)
 
@@ -165,6 +164,8 @@ print(json.dumps({"success": True, "summary": summary}, ensure_ascii=False))
 4. 用户也可以在消息里直接写 `/<名称>`（DSH 的显式调用），这一项的说明会直接注入当轮。
 
 执行仍在平台：同步运行入口脚本，平台把当前用户写进执行上下文做灰度判断，缺少必填参数时不执行、请模型向用户询问。问答里的一次调用最多等 75 秒，耗时更长的 Skill 应放进 Workflow，由聊天启动 Workflow。
+
+**聊天附件**：用户在聊天里上传的文件存进他网盘的“问答附件”文件夹。文本类附件（配置、日志、CSV 等）放进这一轮的资料目录 `attachments/`，模型用 DSH 的 `read`、`grep` 阅读，像资料一样按行引用（答案里显示为“附件”引用）；所以对比两份配置这类请求，可以直接上传两个配置文件，模型读出内容再交给 `config-diff-tool`。图片在对话选用的模型支持图片输入时，作为 DSH 图片附件交给模型；当前可选的 V4 Flash、V4 Pro 只读文本。表格、PDF 等模型不能直接读的文件，留给需要文件的 Workflow 使用。
 
 ## 三、演示：demo-text-stats
 

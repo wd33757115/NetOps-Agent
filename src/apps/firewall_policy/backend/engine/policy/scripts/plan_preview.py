@@ -19,6 +19,18 @@ def render(plan):
         )
 
     evidence = {item["id"]: item for item in plan["evidence"]}
+    # Older plans have neither field; tickets without them keep the plain tables.
+    timed = any(
+        r.get("validity") or r.get("long_link_hours") is not None for r in plan["requests"]
+    )
+
+    def settings(item):
+        hours = item.get("long_link_hours")
+        return (
+            item.get("validity") or "长期",
+            "不启用" if hours is None else ("永不老化" if hours == 0 else f"{hours} 小时"),
+        )
+
     opt = plan["optimization"]
     labels = {"verified": "等价校验通过", "disabled": "按原始规则生成", "unmerged": "保留原始规则"}
     body = f"<h1>防火墙策略计划</h1><p>工单 {text(plan['ticket_id'])} · 仅生成放行策略</p>"
@@ -40,7 +52,10 @@ def render(plan):
                     "\n".join(a for s in ref["source_segments"] for a in s["addresses"]),
                     request.get("destination_system") or "未填写",
                     "\n".join(a for s in ref["destination_segments"] for a in s["addresses"]),
-                    request["proto"].upper() + " " + (request["port"] or "无需端口"),
+                    request["proto"].upper()
+                    + " "
+                    + (request["port"] or "无需端口")
+                    + ("\n有效期 %s\n长连接 %s" % settings(request) if timed else ""),
                     ("指定路径" if ref["path_source"] == "explicit" else "拓扑推导路径")
                     + "："
                     + " → ".join(" / ".join(hop) for hop in ref["path"]),
@@ -82,7 +97,8 @@ def render(plan):
             refs = [evidence[ref] for ref in rule["evidence_ids"]]
             body += f"<article><h3>{text(rule['source_zone'])} → {text(rule['destination_zone'])} · {text(rule['protocol'].upper())}</h3>"
             body += table(
-                ["源地址", "目的地址", "目的端口", "申请表行号"],
+                ["源地址", "目的地址", "目的端口", "申请表行号"]
+                + (["有效期", "长连接"] if timed else []),
                 [
                     (
                         "\n".join(rule["sources"]),
@@ -90,6 +106,7 @@ def render(plan):
                         ", ".join(rule["ports"]) or "不适用",
                         ", ".join(str(n) for n in sorted({ref["row"] for ref in refs})),
                     )
+                    + (settings(rule) if timed else ())
                 ],
             )
             body += "<details><summary>归属依据与经过的设备</summary>"
@@ -126,8 +143,12 @@ def render(plan):
     body += (
         "<details><summary>原始申请</summary>"
         + table(
-            ["行号", "源地址", "目的地址", "端口", "协议"],
-            [(r["row"], r["src_ip"], r["dst_ip"], r["port"], r["proto"]) for r in plan["requests"]],
+            ["行号", "源地址", "目的地址", "端口", "协议"] + (["有效期", "长连接"] if timed else []),
+            [
+                (r["row"], r["src_ip"], r["dst_ip"], r["port"], r["proto"])
+                + (settings(r) if timed else ())
+                for r in plan["requests"]
+            ],
         )
         + "</details>"
     )

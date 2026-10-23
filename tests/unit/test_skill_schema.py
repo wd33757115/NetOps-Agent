@@ -21,14 +21,6 @@ def test_get_skill_schema_firewall():
     assert schema.get("entry_output") == "dir"
 
 
-def test_get_skill_schema_llm_analyzer():
-    schema = get_skill_manager().get_skill_schema("llm-result-analyzer")
-    assert schema is not None
-    input_names = {i["name"] for i in schema["inputs"]}
-    assert "prev_result" in input_names
-    assert "analysis_prompt" in input_names
-
-
 def test_get_skill_schema_rule_asset_submitter():
     schema = get_skill_manager().get_skill_schema("rule-asset-submitter")
     assert schema is not None

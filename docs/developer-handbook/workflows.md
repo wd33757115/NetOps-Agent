@@ -160,9 +160,22 @@ POST /api/workflows/runs/test/
 | `description` | 写进技能目录的描述，告诉模型什么时候用它。写清楚输入从哪来（例如“policy_file_url，http 地址”） |
 | `required_context` | 必填的 `context` 字段；和 `WORKFLOW.yaml` 里 `test.required_context` 合并 |
 | `context_defaults` | 用户没给时的默认值 |
+| `files` | 由聊天附件自动填写的文件字段及接受的扩展名，如 `policy_file_url: [.xlsx]`，见下文“附件” |
 | `match`、`priority`、`response_template` | 只用于编辑器里的“匹配预览”，聊天不使用 |
 
 可选的 `context` 字段取自 `WORKFLOW.yaml` 的 `test.context` 的键，所以要在聊天里启动的 Workflow 应写好 `test.context`。
+
+**附件**：用户在聊天输入框上传文件（最多 5 个，单个不超过 10 MB），文件存进他网盘的“问答附件”文件夹，消息记下网盘文件 ID。启动 Workflow 时：
+
+- `files` 里声明的字段，模型没填时由平台从本对话的附件里按扩展名挑：本条消息里只有一个合适的就用它，否则看整个对话；有两个以上候选时不猜，返回 `ambiguous` 让模型问用户，用户说出文件名后再按名字对应。
+- 填进字段的是 `netdisk:<文件ID>`。启动前确认发起人能读这个文件；执行时应用动作再以发起人身份从网盘读取（`src/platform/files.py` 的 `fetch`），同一字段也照旧接受 http(s) 地址。
+- 附件在网盘里可以查看和删除；删除后，后续轮次会告诉模型这个文件不能再用。
+
+```yaml
+files:
+  policy_file_url: [.xlsx]
+  topology_file_url: [.json]
+```
 
 ![问答中启动防火墙 ITSM 流程：先加载技能说明，再启动 Workflow](images/chat-start-workflow.jpg)
 
@@ -270,7 +283,7 @@ context: {"ticket_id": "DEMO-4", "text": "hostname R1"}
 
 ### 7.1 防火墙 ITSM 流程
 
-`src/workflows/itsm/itsm-firewall-change/` 三步：`app:firewall-policy/generate_policy` 生成策略，`app:firewall-policy/write_change_ticket` 编写变更工单，提供了 `callback_url` 时 `itsm-callback` 回调 ITSM。`itsm-firewall-llm-analysis` 把第三步换成 `llm-result-analyzer`，由模型解读策略结果。
+`src/workflows/itsm/itsm-firewall-change/` 三步：`app:firewall-policy/generate_policy` 生成策略，`app:firewall-policy/write_change_ticket` 编写变更工单，提供了 `callback_url` 时 `itsm-callback` 回调 ITSM。
 
 **Webhook 启动**（申请表和拓扑由本地 http 服务提供，回调地址是 Gateway 自带的模拟 ITSM 接收端）
 
@@ -294,6 +307,21 @@ POST /api/itsm/webhook/firewall-policy/   （HTTP Basic）
 策略任务和工单也出现在该账号的“防火墙策略生成”应用历史里，工单头（标题“开通 Web 访问”、申请人“张三”）来自 ITSM 请求。
 
 **聊天启动**：“按工单 REQ-2026-1019 生成防火墙策略和变更工单，申请表在 http://127.0.0.1:8765/REQ-2026-1018.xlsx ，拓扑用 http://127.0.0.1:8765/topology.json ，申请人李四” → 模型加载 `itsm-firewall-change` 的说明后启动流程（没有回调地址，回调步骤跳过）；两步完成，通知 “变更工单已完成 (REQ-2026-1019)” 附 4 个下载链接。截图见 4.2。
+
+**聊天附件启动**（2026-10-22）：在聊天输入框上传 `REQ-2026-1018.xlsx` 和 `topology.json`，说“按工单 REQ-2026-1021 用附件里的申请表和拓扑生成防火墙策略和变更工单，申请人王五”。平台把两个附件存进网盘“问答附件”（同名文件自动改名为 “REQ-2026-1018 (3).xlsx” 等），模型启动 `itsm-firewall-change`，两个文件字段自动填成 `policy_file_url: netdisk:file-59f6…`、`topology_file_url: netdisk:file-eb42…`；生成策略一步以发起人身份从网盘读到两份文件，生成了 1 台防火墙的配置，随后编写变更工单，通知 “变更工单已完成 (REQ-2026-1021)” 附 4 个下载链接。只上传申请表时使用应用自带的默认拓扑；样例申请表的地址不在默认拓扑的安全域里，策略生成按业务规则报“路径没有需要配置的域间策略”。
+
+### 7.2 按资源台账开通防火墙策略
+
+`src/workflows/itsm/firewall-access-from-ledger/` 三步：`app:firewall-policy/draft_request` 按资源台账生成策略申请表（经平台工具 `resource_ledger__plan_access` 以发起人身份读取台账，申请表存进发起人网盘“防火墙申请表”文件夹，结果 `policy_file_url` 是 `netdisk:<文件ID>`），接着 `generate_policy` 和 `write_change_ticket`。`context` 字段：`ticket_id`、`source`、`destination`（必填，IP、网段、范围或业务系统名称），`source_subsystem`、`destination_subsystem`、`ports`、`start_time`、`end_time`、`long_link` 和工单头字段（可选）。
+
+**聊天启动**（2026-10-23，台账里有风险评估系统的 3 个子系统、8 台主机）：
+
+1. “请开通北京10.248.255.11到西安风险评估系统的防火墙安全策略” → 模型用资源台账的 `find_systems`、`list_hosts`、`plan_access` 核对：目的 8 台主机在西安机房 region2；源不在台账，照常放行。没有工单号，模型没有启动，列出要确认的事项（工单号、是否只开部分子系统、端口、有效期、长连接）。
+2. “工单号 CHG-2026-1023，只开通 Web（风险评估子系统1）的端口，有效期 2026-11-01 20:00 到 2026-11-30，长连接 168 小时，申请人张三” → 模型启动流程，`destination_subsystem` 为“风险评估子系统1”，`ports` 为 `tcp/80,tcp/443`。三步 17 秒完成：申请表 2 行（10.248.255.11 → 10.1.1.11–10.1.1.14，TCP 80、443，说明行注明源不在台账）；华为配置 `time-range CHG-2026-1023`、`long-link aging-time 168`，华三配置 `time-range CHG-2026-1023 from … to …`、`session persistent aging-time 168`；变更工单随后生成。
+
+这次模型把只给了日期的结束时间补成了和开始相同的时刻并告诉了用户；`CHAT.intent.yaml` 的说明已改为“只说了日期时只填日期”。
+
+下发到哪台防火墙、哪个安全域以拓扑为准：上面这次按默认拓扑生成了 ICL-FW1 和 tra-FW1 两台的配置。资源台账网络区域上的“对应防火墙、安全域”只作登记参考，台账的聊天工具和 `draft_request` 都不返回防火墙，避免和策略生成的结果不一致。
 
 ## 八、发布检查清单
 
@@ -322,7 +350,28 @@ POST /api/itsm/webhook/firewall-policy/   （HTTP Basic）
 | 修改 | 位置 |
 | --- | --- |
 | 问答按 DSH 技能标准接入 Skill 和 Workflow：每轮生成技能目录，挂载 `dsh-skill`、`dsh-skill-filesystem`、`dsh-tool-skill` | `src/platform/agent_runtime/dsh.py`、`src/apps/assistant/backend/automation.py`、`diagnostic_workspace.py` |
-| SKILL.md 用 DSH 字段 `disable-model-invocation` 决定能否在问答中使用 | `src/skill_system/metadata.py`，`itsm-callback`、`llm-result-analyzer`、`device-backup` 写了 `true` |
+| SKILL.md 用 DSH 字段 `disable-model-invocation` 决定能否在问答中使用 | `src/skill_system/metadata.py`，`itsm-callback`、`device-backup` 写了 `true` |
 | Workflow 步骤可调用应用动作；防火墙策略应用导出两个动作，两个 ITSM 流程改用它们 | `src/platform/tools/actions.py`、`src/core/workflows/app_steps.py`、`src/apps/firewall_policy/backend/workflow_actions.py` |
 | Webhook 经 Django 转发并用 HTTP Basic 认证，Gateway 要求身份 | `web/django_backend/bff/views/itsm.py`、`src/gateway/itsm_webhook_handler.py` |
 | 编辑器的防火墙协同模板和参数映射改用应用动作 | `src/core/workflows/manager.py`、`generator.py`、`mapping.py`，前端 `types/workflowDsl.ts` |
+
+聊天附件（2026-10-20）：
+
+| 修改 | 位置 |
+| --- | --- |
+| 聊天输入框上传附件，存进用户网盘“问答附件”；提问带网盘文件 ID，开始前校验归属 | `src/apps/assistant/backend/attachments.py`、`api.py`、`turns.py`，前端 `InputArea.tsx`、`ChatPage.tsx` |
+| 文本附件放进资料目录由 DSH 的 read/grep 阅读并按行引用；图片在支持图片的模型下作为 DSH 图片附件 | `workspace.py`、`src/platform/agent_runtime/dsh.py` |
+| `CHAT.intent.yaml` 的 `files` 声明，启动 Workflow 时按类型自动用附件，多个候选时询问 | `automation.py`、`src/core/plugins/chat_intent.py` |
+| 网盘文件引用 `netdisk:<文件ID>`，应用动作以发起人身份读取 | `src/platform/files.py`、防火墙 `workflow_actions.py` |
+| 停用旧的 `/api/v1/chat/upload`（写 Gateway 本机临时目录、不校验身份） | `src/gateway/main.py`、`web/django_backend/bff/urls.py` |
+
+下线 LLM 结果分析（2026-10-22）：
+
+| 修改 | 位置 |
+| --- | --- |
+| 删除 `llm-result-analyzer` Skill 和 `itsm-firewall-llm-analysis` 流程；问答里可以直接让模型读附件、解释结果 | `src/skills/`、`src/workflows/itsm/` |
+| 编辑向导去掉“Step 3（LLM 分析）”选项；新建 Skill 不再提供“引用 llm-result-analyzer” | 前端 `WorkflowWizard.tsx`、`types/workflowDsl.ts`、`SkillCreateWizard.tsx`，后端 `generator.py` |
+| 模板市场的两个“模式 A”内置模板换成“防火墙变更：生成策略 → 编写变更工单”；代码里不再提供的内置模板自动从市场移除 | `src/core/workflows/manager.py`、`marketplace.py` |
+| 参数映射、表达式提示、Dry-run、执行器、队列路由里对该 Skill 的特殊处理一并删除 | `mapping.py`、`expression_hints.py`、`dry_run.py`、`src/core/skills/executor.py`、`celery_routing.py`、`contract.py` |
+
+以前跑过的分析流程保留在运行记录里（问答里按运行编号仍可查询），完成通知里的分析报告链接照常可以下载；“Workflow 插件”页不再列出这个流程，也就没有它的“最近运行”入口。Skill 目录（`netops_skill_catalog`）里的旧条目在下次 `bootstrap apply` 或 Skill 页“重建索引”时清除。

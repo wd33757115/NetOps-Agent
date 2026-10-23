@@ -32,14 +32,12 @@ interface ChatStore {
   reset: () => void
   currentConversationId: string | null
   conversations: Conversation[]
-  uploadedFile: { name: string; path: string } | null
   loading: boolean
   detailLoadingId: string | null
   error: string | null
   setCurrentConversation: (id: string) => void
   addMessage: (message: Message) => void
   createNewConversation: () => void
-  setUploadedFile: (file: { name: string; path: string } | null) => void
   loadConversations: () => Promise<void>
   refreshConversationMeta: () => Promise<void>
   loadConversationDetail: (id: string) => Promise<void>
@@ -54,11 +52,10 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   reset: () => {
     chatEpoch++
     detailInflight.clear()
-    set({ currentConversationId: null, conversations: [], uploadedFile: null, loading: false, detailLoadingId: null, error: null })
+    set({ currentConversationId: null, conversations: [], loading: false, detailLoadingId: null, error: null })
   },
   currentConversationId: null,
   conversations: [],
-  uploadedFile: null,
   loading: false,
   detailLoadingId: null,
   error: null,
@@ -114,7 +111,6 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       if (epoch === chatEpoch) set({ loading: false })
     }
   },
-  setUploadedFile: (file) => set({ uploadedFile: file }),
   loadConversations: async () => {
     const epoch = chatEpoch
     if (get().loading) return

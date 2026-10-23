@@ -5843,3 +5843,109 @@ body {
     font-size: 12px;
   }
 }
+
+/* Attachments: chips above the input pill, and above the user's bubble once sent. */
+.grok-input-files,
+.grok-message-files {
+  list-style: none;
+  margin: 0 auto 8px;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.grok-input-files {
+  max-width: 800px;
+}
+
+.grok-message-user {
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.grok-message-files {
+  justify-content: flex-end;
+  max-width: 85%;
+  margin: 0 0 6px;
+}
+
+.grok-file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 6px 6px 6px 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #fafafa;
+  font-size: 13px;
+  color: #1f2937;
+}
+
+.grok-file-chip.is-sent {
+  padding-right: 12px;
+  background: #fff;
+}
+
+.grok-file-chip.is-failed {
+  border-color: #f3c7c3;
+  background: #fff8f7;
+}
+
+.grok-file-chip-name {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.grok-file-chip-meta {
+  color: #6b7280;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.grok-file-chip.is-failed .grok-file-chip-meta {
+  color: #b42318;
+}
+
+.grok-file-chip-remove {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: #9ca3af;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.grok-file-chip-remove:hover {
+  background: #eceef1;
+  color: #4b5563;
+}
+
+.grok-file-chip-remove:focus-visible,
+.grok-input-plus:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.grok-file-icon {
+  display: inline-flex;
+  font-size: 16px;
+  color: #64748b;
+}
+
+.grok-file-icon.is-xlsx { color: #1f7a45; }
+.grok-file-icon.is-docx { color: #2459b8; }
+.grok-file-icon.is-pdf { color: #c2410c; }
+.grok-file-icon:is(.is-png, .is-jpg, .is-jpeg, .is-webp, .is-gif) { color: #7c3aed; }
+
+@media (max-width: 767px) {
+  .grok-file-chip-name { max-width: 150px; }
+  .grok-message-files { max-width: 100%; }
+}

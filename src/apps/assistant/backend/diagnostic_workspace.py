@@ -100,6 +100,9 @@ class DiagnosticWorkspace(DocumentWorkspace):
                 if not workflows:
                     continue
                 properties["workflow"]["enum"] = [flow["name"] for flow in workflows]
+                # Attachments come from the conversation, filled in by the server.
+                properties.pop("attachments", None)
+                tool["input_schema"].get("$defs", {}).pop("Attachment", None)
             elif not workflows:
                 continue
             tool["description"] += "；先用 skill 工具加载对应技能的说明，按说明填写参数"
@@ -166,6 +169,14 @@ class DiagnosticWorkspace(DocumentWorkspace):
         self.check()
         if name not in self.automation:
             raise PermissionError("Tool is outside this turn's contract")
+        if name == automation.START_WORKFLOW:
+            arguments = {
+                **{key: value for key, value in arguments.items() if key != "attachments"},
+                "attachments": [
+                    {"file_id": item["file_id"], "name": item["name"], "current": item.get("current", False)}
+                    for item in self.attachments if not item.get("unavailable")
+                ],
+            }
         result = in_beijing(registry.invoke(name, arguments, actor_id=self.actor_id))
         reference = evidence.capture(name, result)
         self.business_evidence[reference["id"]] = reference

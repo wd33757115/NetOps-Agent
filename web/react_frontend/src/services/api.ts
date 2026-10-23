@@ -7,23 +7,8 @@ import { api, getChatWebSocketUrl, type AuthSession, API_BASE_URL } from '../con
 export interface ChatRequest {
   query: string
   thread_id?: string
-  uploaded_file_path?: string
-}
-
-export interface ChatUploadRequest {
-  thread_id: string
-  filename: string
-  file_content: string
-  user_id?: string
-}
-
-export interface ChatUploadResponse {
-  thread_id: string
-  filename: string
-  file_path: string
-  status: string
-  message: string
-  next_steps?: string
+  /** Netdisk file ids from the assistant's attachment upload. */
+  attachments?: string[]
 }
 
 export interface ChatResponse {
@@ -3565,10 +3550,6 @@ export interface SkillStats {
 export const chatApi = {
   sendMessage: async (data: ChatRequest): Promise<ChatResponse> => {
     const response = await api.post<ChatResponse>('/chat/', data)
-    return response.data
-  },
-  uploadFile: async (data: ChatUploadRequest): Promise<ChatUploadResponse> => {
-    const response = await api.post<ChatUploadResponse>('/chat/upload/', data)
     return response.data
   },
   getHealth: async () => {

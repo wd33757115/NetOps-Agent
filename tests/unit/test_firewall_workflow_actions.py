@@ -7,6 +7,7 @@ import pytest
 from fastapi import HTTPException
 
 from src.apps.firewall_policy.backend import service, workflow_actions as wa
+from src.platform import files
 
 USER = SimpleNamespace(user_id="7")
 
@@ -17,7 +18,7 @@ class Runs:
     def __init__(self, monkeypatch, *, statuses=("queued", "completed"), error=None):
         self.uploads, self.submitted, self.reads = [], [], 0
         self.statuses = list(statuses)
-        monkeypatch.setattr(wa, "fetch", lambda url, kind, fallback: (
+        monkeypatch.setattr(wa, "fetch", lambda url, kind, fallback, user: (
             ("申请表.xlsx" if kind == "policy" else "topo.json"), b"data:" + url.encode()))
         monkeypatch.setattr(service, "save_upload", self.save_upload)
         monkeypatch.setattr(service, "submit_policy", self.submit("policy"))
@@ -108,20 +109,26 @@ def test_the_change_ticket_uses_only_the_fields_given(monkeypatch):
     assert result["ticket_run_id"] == "r" * 32 and "config_zip" in result["files"]
 
 
-def test_fetch_takes_http_only_and_at_most_the_upload_limit(monkeypatch):
-    with pytest.raises(ValueError, match="只支持 http"):
-        wa.fetch("file:///etc/passwd", "policy", "x.xlsx")
-    with pytest.raises(ValueError, match="只支持 http"):
-        wa.fetch(r"C:\secret.xlsx", "policy", "x.xlsx")
+def test_fetch_reads_netdisk_files_as_the_user_and_http_otherwise(monkeypatch):
+    read = []
+    monkeypatch.setattr(files, "read", lambda user, file_id: read.append((user.user_id, file_id)) or (
+        "申请表.xlsx", "application/octet-stream", b"sheet"))
+    assert wa.fetch("netdisk:file-0123456789abcdef", "policy", "f.xlsx", USER) == ("申请表.xlsx", b"sheet")
+    assert read == [("7", "file-0123456789abcdef")]
+
+    with pytest.raises(ValueError, match="只支持网盘文件或 http"):
+        wa.fetch("file:///etc/passwd", "policy", "x.xlsx", USER)
+    with pytest.raises(ValueError, match="只支持网盘文件或 http"):
+        wa.fetch(r"C:\secret.xlsx", "policy", "x.xlsx", USER)
 
     def serve(request):
         return httpx.Response(200, content=b"x" * 10)
 
     client = httpx.Client(transport=httpx.MockTransport(serve))
-    monkeypatch.setattr(wa.httpx, "stream", lambda method, url, **kwargs: client.stream(method, url))
-    assert wa.fetch("http://itsm/download?id=9", "policy", "REQ-1-策略申请表.xlsx") == (
+    monkeypatch.setattr(files.httpx, "stream", lambda method, url, **kwargs: client.stream(method, url))
+    assert wa.fetch("http://itsm/download?id=9", "policy", "REQ-1-策略申请表.xlsx", USER) == (
         "REQ-1-策略申请表.xlsx", b"x" * 10)
-    assert wa.fetch("http://itsm/files/%E7%94%B3%E8%AF%B7.xlsx", "policy", "f.xlsx")[0] == "申请.xlsx"
+    assert wa.fetch("http://itsm/files/%E7%94%B3%E8%AF%B7.xlsx", "policy", "f.xlsx", USER)[0] == "申请.xlsx"
     monkeypatch.setattr(wa.storage, "MAX_UPLOAD", 5)
-    with pytest.raises(ValueError, match="超过 10 MB"):
-        wa.fetch("http://itsm/p.xlsx", "policy", "f.xlsx")
+    with pytest.raises(ValueError, match="文件超过"):
+        wa.fetch("http://itsm/p.xlsx", "policy", "f.xlsx", USER)

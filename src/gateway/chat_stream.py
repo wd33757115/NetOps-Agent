@@ -13,9 +13,10 @@ from src.gateway.schemas import ChatResponse
 
 def prepare(request, user):
     if request.uploaded_file_path:
-        raise HTTPException(422, "请在对应业务应用中上传文件；资料可在知识问答的资料管理中导入")
+        raise HTTPException(422, "请用聊天输入框的附件按钮上传文件（存入网盘）")
     body = turns.Question(
-        request_id=uuid4().hex, text=request.query, filters=request.metadata_filters or {}
+        request_id=uuid4().hex, text=request.query, filters=request.metadata_filters or {},
+        attachments=request.attachments,
     )
     conversation_id = request.thread_id or history.create(user.user_id)["id"]
     run, _ = turns.begin(user.user_id, conversation_id, body)

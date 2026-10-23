@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import io
+import re
 from copy import copy
 from datetime import date, datetime
 from pathlib import Path
@@ -90,6 +91,9 @@ def _build_verification_steps(manifest: dict[str, Any]) -> list[dict[str, Any]]:
             method = "display current-configuration | include object-group"
         else:
             method = f"show running-config | include {device}"
+        # A validity window: the device's time range is named after the ticket.
+        if time_range := re.search(r"^\s*time-range (\S+)", str(script.get("commands") or ""), re.M):
+            method += f"；display time-range {time_range[1]}"
         steps.append(
             {
                 "step": seq,

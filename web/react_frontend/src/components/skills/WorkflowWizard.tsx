@@ -47,7 +47,6 @@ export interface WorkflowWizardInitial {
   /** 协同模板 / 预填 Skill 链 */
   step1_skill?: string
   step2_skill?: string
-  include_llm?: boolean
   /** 直接传入 DSL（协同模板 preview 后） */
   initialDsl?: WorkflowDSL
 }
@@ -104,9 +103,6 @@ match:
     - 关键词
   require_any_secondary:
     - 变更
-
-context_defaults:
-  analysis_focus: summary
 
 response_template: |
   [OK] 已启动 Workflow
@@ -188,7 +184,6 @@ const WorkflowWizard: React.FC<WorkflowWizardProps> = ({ open, onClose, initial,
         description: boot.initialDsl.meta.description || '自定义 Workflow',
         step1_skill: boot.initialDsl.steps[0]?.skill,
         step2_skill: boot.initialDsl.steps[1]?.skill,
-        include_llm: boot.initialDsl.steps.some((s) => s.skill === 'llm-result-analyzer'),
       })
       return
     }
@@ -203,7 +198,6 @@ const WorkflowWizard: React.FC<WorkflowWizardProps> = ({ open, onClose, initial,
         plugin_name: pluginName,
         category: boot.category || 'itsm',
         description: boot.description || '自定义 Workflow',
-        include_llm: true,
         step1_skill: boot.step1_skill,
         step2_skill: boot.step2_skill,
       })
@@ -216,7 +210,6 @@ const WorkflowWizard: React.FC<WorkflowWizardProps> = ({ open, onClose, initial,
       form.resetFields()
       form.setFieldsValue({
         category: boot?.category || 'itsm',
-        include_llm: boot?.include_llm ?? true,
         description: boot?.description || '自定义 Workflow',
         plugin_name: boot?.pluginName,
         step1_skill: boot?.step1_skill,
@@ -497,11 +490,7 @@ const WorkflowWizard: React.FC<WorkflowWizardProps> = ({ open, onClose, initial,
         throw new Error('请先「生成并保存」，或从已有模板复制后再试跑')
       }
       const values = form.getFieldsValue()
-      const ctx = {
-        ticket_id: values.test_ticket_id || 'REQ2025001',
-        analysis_prompt: values.test_analysis_prompt || '请总结变更风险',
-        analysis_focus: 'summary',
-      }
+      const ctx = { ticket_id: values.test_ticket_id || 'REQ2025001' }
       return workflowApi.testRun({ template_name: templateName, context: ctx })
     },
     {
@@ -582,7 +571,6 @@ const WorkflowWizard: React.FC<WorkflowWizardProps> = ({ open, onClose, initial,
       form.setFieldsValue({
         step1_skill: skills[0],
         step2_skill: skills[1],
-        include_llm: skills.includes('llm-result-analyzer'),
       })
     }
     setChainMode(mode)
@@ -724,14 +712,6 @@ const WorkflowWizard: React.FC<WorkflowWizardProps> = ({ open, onClose, initial,
                     options={skills.map((s) => ({ value: s.name, label: s.name }))}
                   />
                 </Form.Item>
-                <Form.Item name="include_llm" label="Step 3（LLM 分析）">
-                  <Select
-                    options={[
-                      { value: true, label: 'llm-result-analyzer（模式 A 推荐）' },
-                      { value: false, label: '不包含 LLM 分析步骤' },
-                    ]}
-                  />
-                </Form.Item>
               </>
             )}
             <Alert
@@ -871,9 +851,6 @@ const WorkflowWizard: React.FC<WorkflowWizardProps> = ({ open, onClose, initial,
             )}
             <Form.Item name="test_ticket_id" label="试跑工单号" initialValue="REQ2025001">
               <Input placeholder="REQ2025001" />
-            </Form.Item>
-            <Form.Item name="test_analysis_prompt" label="LLM 分析问题" initialValue="请分析变更风险与合规性">
-              <Input />
             </Form.Item>
             <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
               <GrokToolBtn primary disabled={saveMutation.isLoading} onClick={() => saveMutation.mutate()}>

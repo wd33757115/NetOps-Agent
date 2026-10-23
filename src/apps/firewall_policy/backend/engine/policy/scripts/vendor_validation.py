@@ -4,10 +4,11 @@ import re
 
 from policy_optimizer import BudgetExceeded, Rule, verify
 from policy_sets import addresses, ports, union
+from policy_window import extend, read_h3c, read_huawei
 
 
 def validate_output(vendor, text, expected):
-    address_objects, service_objects = {}, {}
+    address_objects, service_objects, time_ranges = {}, {}, {}
     object_kind = object_name = None
     current = None
     parsed = []
@@ -24,14 +25,20 @@ def validate_output(vendor, text, expected):
         ps = union(current["ports"]) if current["proto"] != "icmp" else ((0, 1),)
         if not ps:
             raise ValueError("CLI 回读发现端口条件缺失")
+        if current.get("long_link_enabled", False) != ("long_link" in current and vendor == "华为"):
+            raise ValueError("CLI 回读发现长连接命令不完整")
         parsed.append(
             Rule(
-                (
-                    expected[0].context[0],
-                    expected[0].context[1],
-                    current["src_zone"],
-                    current["dst_zone"],
-                    current["proto"],
+                extend(
+                    (
+                        expected[0].context[0],
+                        expected[0].context[1],
+                        current["src_zone"],
+                        current["dst_zone"],
+                        current["proto"],
+                    ),
+                    current.get("window"),
+                    current.get("long_link"),
                 ),
                 union(current["src"]),
                 union(current["dst"]),
@@ -47,6 +54,14 @@ def validate_output(vendor, text, expected):
 
     for raw in text.splitlines():
         line = raw.strip()
+        # Time ranges: H3C defines one per line, Huawei in a view closed by quit.
+        if line.startswith("time-range ") and " from " in line:
+            name, window = read_h3c(line)
+            time_ranges[name] = window
+            continue
+        if re.fullmatch(r"time-range \S+", line) and current is None and not object_kind:
+            object_kind, object_name = "time_range", line.split()[1]
+            continue
         if line.startswith("object-group ip address "):
             object_kind, object_name = "address", line.split()[-1]
             address_objects[object_name] = []
@@ -67,7 +82,9 @@ def validate_output(vendor, text, expected):
                 current = None
             continue
         if object_kind:
-            if object_kind == "address":
+            if object_kind == "time_range":
+                time_ranges[object_name] = read_huawei(line)
+            elif object_kind == "address":
                 match = re.fullmatch(r"\d+ network (host|range|subnet) (.+)", line)
                 if not match:
                     raise ValueError("无法回读地址对象命令")
@@ -93,6 +110,19 @@ def validate_output(vendor, text, expected):
             current = {"src": [], "dst": [], "ports": []}
             continue
         if current is None:
+            continue
+        match = re.fullmatch(r"time-range (\S+)", line)
+        if match:
+            if match[1] not in time_ranges:
+                raise ValueError("CLI 回读发现规则引用了未定义的时间段")
+            current["window"] = time_ranges[match[1]]
+            continue
+        if line == "long-link enable":
+            current["long_link_enabled"] = True
+            continue
+        match = re.fullmatch(r"(?:long-link|session persistent) aging-time (\d+)", line)
+        if match:
+            current["long_link"] = int(match[1])
             continue
         match = re.fullmatch(r"(source-zone|destination-zone|src-zone|dst-zone) (\S+)", line)
         if match:
