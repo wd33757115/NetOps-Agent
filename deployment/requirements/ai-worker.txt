@@ -8,6 +8,5 @@ langchain-deepseek
 openai>=1.109.0,<2.0.0
 
 # Document generation runs in the AI worker.
-python-docx>=1.1.0
 openpyxl>=3.1.0
 docxtpl>=0.16.7

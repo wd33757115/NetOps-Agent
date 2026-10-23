@@ -286,6 +286,10 @@ async def bff_origin_check(request: Request, call_next):
     if is_bff_bypass_path(request.url.path):
         return await call_next(request)
 
+    # The deployment probe is not a browser request: it carries its own deployment credential.
+    if request.url.path == "/_internal/app-packages":
+        return await call_next(request)
+
     if not is_trusted_bff_request(request.headers):
         request_id = (
             getattr(request.state, "request_id", None)
