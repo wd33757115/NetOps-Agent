@@ -1,0 +1,71 @@
+Value Required interface ([A-Za-z0-9][A-Za-z0-9-]*\d[\d/.]*)
+Value line_status (.+?)
+Value protocol_status (.+?)
+Value description (.*)
+Value hw_address (\S+)
+Value bandwidth_kbps (\d+)
+Value speed (.+?)
+Value duplex (.+?)
+Value port_link_type (.+?)
+Value vlan_native (\d+)
+Value mtu (\d+)
+Value l2mtu (\d+)
+Value input_packets (\d+)
+Value output_packets (\d+)
+Value input_bytes (\d+)
+Value output_bytes (\d+)
+Value input_errors (\d+)
+Value output_errors (\d+)
+Value input_crc_errors (\d+)
+Value last_physical_up_time (.+?)
+Value last_physical_down_time (.+?)
+Value negotiation (.+?)
+Value port_mode (.+?)
+Value loopback (.+?)
+
+Start
+  ^[A-Za-z0-9][A-Za-z0-9-]*\d[\d/.]*(?:\s+current state\s*:.*)?\s*$$ -> Continue.Record
+  ^${interface}\s+current state\s*:\s*${line_status}\s*$$
+  ^${interface}\s*$$
+  ^\s*Current state:\s*${line_status}\s*$$
+  ^\s*Line protocol (?:current )?state\s*:\s*${protocol_status}\s*$$
+  ^\s*Description:\s*${description}\s*$$
+  ^\s*Bandwidth:\s*${bandwidth_kbps}\s+kbps\s*$$
+  ^\s*Maximum transmission unit:\s*${mtu}\s*(?:bytes)?\s*$$
+  ^\s*Maximum frame length:\s*${l2mtu}\s*(?:bytes)?\s*$$
+  ^\s*IP packet frame type:.*hardware address:\s*${hw_address}\s*$$
+  ^\s*IP Sending Frames.*Hardware address is\s*${hw_address}\s*$$
+  ^\s*PVID:\s*${vlan_native}(?:,.*The Maximum Frame Length is\s+${l2mtu})?\s*$$
+  ^\s*Port link-type:\s*${port_link_type}\s*$$
+  ^\s*\S+ Port, Link-type\s*:\s*${port_link_type},\s*$$
+  ^\s*${speed}\s+mode,\s*${duplex}\s+mode\s*$$
+  ^\s*Speed\s*:\s*${speed},\s*Loopback:\s*${loopback}\s*$$
+  ^\s*Duplex:\s*${duplex},\s*Negotiation:\s*${negotiation}\s*$$
+  ^\s*Port Mode:\s*${port_mode}\s*$$
+  ^\s*Last physical up time\s*:\s*${last_physical_up_time}\s*$$
+  ^\s*Last physical down time\s*:\s*${last_physical_down_time}\s*$$
+  ^\s*Input \(total\):\s*${input_packets}\s+packets,\s*${input_bytes}\s+bytes.*$$
+  ^\s*Output \(total\):\s*${output_packets}\s+packets,\s*${output_bytes}\s+bytes.*$$
+  ^\s*Input:\s*${input_errors}\s+input errors.*$$
+  ^\s*Output:\s*${output_errors}\s+output errors.*$$ -> Record Tail
+  ^\s*${input_crc_errors}\s+CRC,.*$$
+  ^\s*Input:\s*${input_packets}\s+packets,\s*${input_bytes}\s+bytes(?:,\s*\d+\s+drops)?\s*$$ -> Input
+  ^\s*Output:\s*${output_packets}\s+packets,\s*${output_bytes}\s+bytes(?:,\s*\d+\s+drops)?\s*$$ -> Output
+
+Tail
+  ^${interface}\s+current state\s*:\s*${line_status}\s*$$ -> Start
+  ^${interface}\s*$$ -> Start
+
+Input
+  ^\s*Total Error:\s*${input_errors}\s*$$
+  ^\s*CRC:\s*${input_crc_errors},.*$$
+  ^\s*Output:\s*${output_packets}\s+packets,\s*${output_bytes}\s+bytes(?:,\s*\d+\s+drops)?\s*$$ -> Output
+  ^[A-Za-z0-9][A-Za-z0-9-]*\d[\d/.]*(?:\s+current state\s*:.*)?\s*$$ -> Continue.Record
+  ^${interface}\s+current state\s*:\s*${line_status}\s*$$ -> Start
+  ^${interface}\s*$$ -> Start
+
+Output
+  ^\s*Total Error:\s*${output_errors}\s*$$
+  ^[A-Za-z0-9][A-Za-z0-9-]*\d[\d/.]*(?:\s+current state\s*:.*)?\s*$$ -> Continue.Record
+  ^${interface}\s+current state\s*:\s*${line_status}\s*$$ -> Start
+  ^${interface}\s*$$ -> Start

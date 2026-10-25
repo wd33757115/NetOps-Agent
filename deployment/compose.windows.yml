@@ -1,0 +1,158 @@
+# Windows containers only. Applications run via scripts/windows/start.ps1.
+# Explicit volume names preserve existing installations. Never use down -v.
+networks:
+  netops-network:
+    driver: bridge
+volumes:
+  postgres-data:
+    name: deployment_postgres-data
+  redis-data:
+    name: deployment_redis-data
+  minio-data:
+    name: deployment_minio-data
+  rabbitmq-data:
+    name: deployment_rabbitmq-data
+  langfuse_pg_data:
+    name: langfuse_langfuse_pg_data
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: netops-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-netops_agent}
+      POSTGRES_USER: ${POSTGRES_USER:-netops}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      TZ: Asia/Shanghai
+    ports:
+    - 127.0.0.1:5432:5432
+    volumes:
+    - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+    - netops-network
+  redis:
+    image: redis:7-alpine
+    container_name: netops-redis
+    ports:
+    - 127.0.0.1:6379:6379
+    volumes:
+    - redis-data:/data
+    healthcheck:
+      test:
+      - CMD
+      - redis-cli
+      - ping
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+    - netops-network
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: netops-rabbitmq
+    ports:
+    - 127.0.0.1:5672:5672
+    - 127.0.0.1:15672:15672
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+      TZ: Asia/Shanghai
+    volumes:
+    - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test:
+      - CMD
+      - rabbitmq-diagnostics
+      - -q
+      - ping
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+    networks:
+    - netops-network
+  minio:
+    # MinIO no longer publishes community images to Docker Hub or Quay; pgsty builds the same
+    # AGPLv3 server from source (RELEASE.2026-08-04T00-00-00Z), same entrypoint and health check.
+    image: pgsty/minio@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
+    container_name: netops-minio
+    ports:
+    - 127.0.0.1:9000:9000
+    - 127.0.0.1:9001:9001
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:?Set MINIO_ACCESS_KEY in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?Set MINIO_SECRET_KEY in .env}
+      TZ: Asia/Shanghai
+    volumes:
+    - minio-data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:9000/minio/health/live
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+    networks:
+    - netops-network
+  langfuse-db:
+    image: postgres:16-alpine
+    container_name: netops-langfuse-db
+    environment:
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: langfuse
+      POSTGRES_DB: langfuse
+    volumes:
+    - langfuse_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - pg_isready -U langfuse -d langfuse
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    profiles:
+    - observability
+    networks:
+    - netops-network
+  langfuse:
+    image: docker.io/langfuse/langfuse:2
+    container_name: netops-langfuse-standalone
+    ports:
+    - 127.0.0.1:3001:3000
+    environment:
+      DATABASE_URL: postgresql://langfuse:langfuse@langfuse-db:5432/langfuse
+      NEXTAUTH_URL: http://localhost:3001
+      NEXTAUTH_SECRET: netops-langfuse-nextauth-secret-2026
+      SALT: netops-langfuse-salt-2026
+      TELEMETRY_ENABLED: 'false'
+      LANGFUSE_INIT_ORG_ID: netops-org
+      LANGFUSE_INIT_ORG_NAME: NetOps Agent
+      LANGFUSE_INIT_PROJECT_ID: netops-agent
+      LANGFUSE_INIT_PROJECT_NAME: NetOps Agent
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: pk-lf-netops-public-dev-2026
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: sk-lf-netops-secret-dev-2026
+      LANGFUSE_INIT_USER_EMAIL: admin@netops.local
+      LANGFUSE_INIT_USER_NAME: NetOps Admin
+      LANGFUSE_INIT_USER_PASSWORD: netops-langfuse-admin
+    depends_on:
+      langfuse-db:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles:
+    - observability
+    networks:
+    - netops-network
+name: deployment

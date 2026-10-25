@@ -1,0 +1,340 @@
+# H3C Comware 7 NETCONF → standard tables (backend/standard.py). Codes are those seen on
+# lab routers BR1/BR2 (VSR1000, 7.1.064 R1362P12) next to the CLI or the lab
+# configuration; any other code is reported with the device's text, not guessed.
+vendor: H3C
+platforms: [comware]
+namespace: http://www.h3c.com/netconf/data:1.0
+tables:
+  interface:  # ietf-interfaces (RFC 8343)
+    path: top/Ifmgr/Interfaces/Interface
+    fields:
+      name: Name
+      if-index: {leaf: IfIndex, convert: integer}
+      description: Description
+      enabled: {leaf: AdminStatus, codes: {"1": true}}
+      oper-status: {leaf: OperStatus, codes: {"1": up}}
+
+  ipv4-address:  # ietf-ip (RFC 8344) interface/ipv4/address
+    path: top/IPV4ADDRESS/Ipv4Addresses/Ipv4Address
+    fields:
+      interface: {leaf: IfIndex, convert: integer, lookup: {table: interface, match: if-index, take: name}}
+      ip: {leaf: Ipv4Address, convert: address}
+      prefix-length: {leaf: Ipv4Mask, convert: netmask}
+      # 1: every address BR1's configuration sets with "ip address"; 7: 10.10.1.10/32, the
+      # VRRP virtual address BR1 holds as master ("vrrp vrid 1 virtual-ip 10.10.1.10").
+      origin: {leaf: AddressOrigin, codes: {"1": static, "7": other}}
+
+  ipv4-neighbor:  # ietf-ip (RFC 8344) interface/ipv4/neighbor
+    path: top/ARP/ArpTable/ArpEntry
+    fields:
+      interface: {leaf: IfIndex, convert: integer, lookup: {table: interface, match: if-index, take: name}}
+      ip: {leaf: Ipv4Address, convert: address}
+      link-layer-address: {leaf: MacAddress, convert: mac}
+      origin: {leaf: ArpType, codes: {"0": dynamic}}  # CLI type D
+      # 0 is the public instance (CLI VPN "--"); a VPN instance's index is in L3vpn.
+      network-instance: {leaf: VrfIndex, codes: {"0": default}}
+
+  route:  # ietf-routing (RFC 8349) rib/routes/route, one row per next hop
+    path: [top/Route/Ipv4Routes/RouteEntry, top/Route/Ipv6Routes/RouteEntry]
+    fields:
+      network-instance: VRF  # empty: the public instance
+      destination-prefix:
+        - {format: "{Ipv4/Ipv4Address}/{Ipv4/Ipv4PrefixLength}", convert: prefix}
+        - {format: "{Ipv6Prefix/Ipv6Address}/{Ipv6Prefix/Ipv6PrefixLength}", convert: prefix}
+      # The CLI's protocol for each code; OSPF is "ospf 1" in the configuration (OSPFv2).
+      source-protocol:
+        leaf: [Protocol/ProtocolID, Protocol/SubProtocolID]
+        codes:
+          1/0: ietf-routing:direct
+          1/1: ietf-routing:direct
+          1/4: ietf-routing:direct
+          1/8: ietf-routing:direct  # a NAT global address (to NULL0)
+          1/9: ietf-routing:direct  # an interface address a NAT server maps
+          2/1: ietf-routing:static
+          4/1: ietf-ospf:ospfv2  # O_INTRA
+          4/2: ietf-ospf:ospfv2  # O_INTER
+          6/1: ietf-bgp:bgp  # IBGP
+          6/6: ietf-bgp:bgp  # EBGP
+      route-preference: {leaf: Preference, convert: integer}
+      next-hop-address: {leaf: Nexthop, convert: address}
+      outgoing-interface: IfName
+      # NULL0 discards (the CLI's aggregate and multicast routes); InLoopBack0 delivers to
+      # the device itself (its own addresses, next hop 127.0.0.1 or ::1).
+      special-next-hop:
+        leaf: IfName
+        when: {leaf: IfName, in: [NULL0, InLoopBack0]}
+        codes: {NULL0: blackhole, InLoopBack0: receive}
+      # RFC 9129 route data, for OSPF routes only.
+      ospf-route-type:
+        leaf: [Protocol/ProtocolID, Protocol/SubProtocolID]
+        when: {leaf: Protocol/ProtocolID, in: ["4"]}
+        codes: {4/1: intra-area, 4/2: inter-area}
+      ospf-metric: {leaf: Metric, convert: integer, when: {leaf: Protocol/ProtocolID, in: ["4"]}}
+      ospf-tag: {leaf: Tag, convert: integer, when: {leaf: Protocol/ProtocolID, in: ["4"]}}
+
+  ospf-instance:  # ietf-ospf (RFC 9129) control-plane-protocol
+    path: top/OSPF/Instances/Instance
+    fields:
+      name: Name
+      network-instance: VRF
+      router-id: {leaf: RouterId, convert: address}
+
+  ospf-area:
+    path: top/OSPF/Areas/Area
+    fields:
+      instance: Name
+      area-id: AreaId
+
+  ospf-interface:
+    path: top/OSPF/Interfaces/Interface
+    fields:
+      instance: IfEnable/Name
+      area-id: IfEnable/AreaId
+      name: IfName
+      cost: {leaf: Cost, convert: integer}
+      # 1: the Ethernet links, broadcast by default ("ospf 1 area" only) with a DR elected
+      # (CLI neighbours Full/DR).
+      interface-type: {leaf: NetworkType, codes: {"1": broadcast}}
+      priority: {leaf: DrPriority, convert: integer}
+      hello-interval: {leaf: HelloTimer, convert: integer}
+      dead-interval: {leaf: DeadTimer, convert: integer}
+      # 4: BR1 on each two-router link whose other end the CLI shows as DR; 6: LoopBack0.
+      state: {leaf: State, codes: {"4": bdr, "6": loopback}}
+
+  ospf-neighbor:
+    path: top/OSPF/Neighbours/Nbr
+    fields:
+      instance: Name
+      area-id: AreaId
+      interface: IfName
+      neighbor-router-id: {leaf: NbrRouterId, convert: address}
+      address: {leaf: NbrAddress, convert: address}
+      state: {leaf: State, codes: {"7": full}}  # CLI Full on all three, OSPF routes via them
+
+  lldp-neighbor:  # ieee802-dot1ab-lldp port/remote-systems-data
+    path: top/LLDP/NbBasicInfos/BasicInfo
+    fields:
+      interface: IfName
+      # Agent 1 is the CLI's "nearest-bridge" agent, whose address IEEE 802.1AB fixes.
+      dest-mac-address: {leaf: AgentID, codes: {"1": "01-80-C2-00-00-0E"}}
+      time-mark: {leaf: TimeMark, convert: integer}
+      remote-index: {leaf: NeighborIndex, convert: integer}
+      # The TLV subtype numbers (IEEE 802.1AB, the YANG enum values): BR1 shows 4 with a
+      # MAC and 5 with an interface name.
+      chassis-id-subtype:
+        leaf: ChassisID/SubType
+        codes: {"1": chassis-component, "2": interface-alias, "3": port-component, "4": mac-address, "5": network-address, "6": interface-name, "7": local}
+      chassis-id:
+        - {leaf: ChassisID/IDValue, convert: ieee-mac, when: {leaf: ChassisID/SubType, in: ["4"]}}
+        - {leaf: ChassisID/IDValue, when: {leaf: ChassisID/SubType, in: ["1", "2", "3", "6", "7"]}}
+      port-id-subtype:
+        leaf: PortID/SubType
+        codes: {"1": interface-alias, "2": port-component, "3": mac-address, "4": network-address, "5": interface-name, "6": agent-circuit-id, "7": local}
+      port-id:
+        - {leaf: PortID/IDValue, convert: ieee-mac, when: {leaf: PortID/SubType, in: ["3"]}}
+        - {leaf: PortID/IDValue, when: {leaf: PortID/SubType, in: ["1", "2", "5", "6", "7"]}}
+      port-desc: PortDesc
+      system-name: SystemName
+      system-description: SystemDesc
+
+  lldp-management-address:  # ieee802-dot1ab-lldp remote-systems-data/management-address
+    path: top/LLDP/NbManageAddresses/ManageAddress
+    fields:
+      interface: IfName
+      dest-mac-address: {leaf: AgentID, codes: {"1": "01-80-C2-00-00-0E"}}
+      time-mark: {leaf: TimeMark, convert: integer}
+      remote-index: {leaf: NeighborIndex, convert: integer}
+      # The CLI: "Management address type: IPv4", "interface type: IfIndex".
+      address-subtype: {leaf: SubType, codes: {"1": "ietf-routing:ipv4"}}
+      address: {leaf: Address, convert: base64-hex}
+      if-subtype: {leaf: InterfaceType, codes: {"2": port-ref}}
+      if-id: {leaf: InterfaceID, convert: integer}
+
+  # --- NAT (ietf-nat, RFC 8512), measured on BR1 against "display nat all".
+  nat-pool:  # an address group: policy/external-ip-address-pool
+    path: top/NAT/AddrGroupMembers/GroupMember
+    ignore: []
+    fields:
+      pool-id: {leaf: GroupNumber, convert: integer}
+      start-address: {leaf: StartIpv4Address, convert: address}
+      end-address: {leaf: EndIpv4Address, convert: address}
+
+  nat-outbound:  # outbound dynamic NAT: the sources an ACL selects, leaving an interface
+    path: top/NAT/OutboundDynamicRules/Interface
+    ignore: [MatchingCount, WhetherPersistConfig]
+    fields:
+      external-interface: {leaf: IfIndex, convert: integer, lookup: {table: interface, match: if-index, take: name}}
+      acl: ACLNumber
+      pool-id: {leaf: AddrGroupNumber, convert: integer}  # none: the interface's address
+      no-pat: {leaf: NoPAT, codes: {"true": true, "false": false}}  # CLI NO-PAT Y/N
+      reversible: {leaf: Reversible, codes: {"true": true, "false": false}}
+      port-preserved: {leaf: PortPreserved, codes: {"true": true, "false": false}}
+
+  nat-server:  # an internal server: a static destination mapping on an interface
+    path: top/NAT/ServerOnInterfaces/Interface
+    ignore: [MatchingCount, WhetherPersistConfig]
+    fields:
+      interface: {leaf: IfIndex, convert: integer, lookup: {table: interface, match: if-index, take: name}}
+      transport-protocol: {leaf: ProtocolType, convert: integer}  # 6(TCP), 17(UDP) in the CLI
+      external-dst-address: {leaf: GlobalInfo/GlobalStartIpv4Address, convert: address}
+      external-dst-end-address: {leaf: GlobalInfo/GlobalEndIpv4Address, convert: address}
+      external-dst-port: {leaf: GlobalInfo/GlobalStartPortNumber, convert: integer}
+      external-dst-end-port: {leaf: GlobalInfo/GlobalEndPortNumber, convert: integer}
+      external-interface: {leaf: GlobalInfo/GlobalIfIndex, convert: integer, lookup: {table: interface, match: if-index, take: name}}
+      network-instance: GlobalInfo/GlobalVRF
+      internal-dst-address: {leaf: LocalInfo/LocalStartIpv4Address, convert: address}
+      internal-dst-port: {leaf: LocalInfo/LocalStartPortNumber, convert: integer}
+      acl: ACLNumber
+      reversible: {leaf: Reversible, codes: {"true": true, "false": false}}
+
+  nat-static:  # an outbound one-to-one static mapping
+    path: top/NAT/OutboundStaticMappings/Mapping
+    ignore: [MatchingCount, Counting, Description]
+    fields:
+      internal-network-instance: LocalInfo/LocalVRF
+      internal-src-start: {leaf: LocalInfo/StartIpv4Address, convert: address}
+      internal-src-end: {leaf: LocalInfo/EndIpv4Address, convert: address}
+      external-network-instance: GlobalInfo/GlobalVRF
+      external-src-address: {format: "{GlobalInfo/Ipv4Address}/{GlobalInfo/Ipv4PrefixLength}", convert: prefix}
+      acl: ACLNumber
+      reversible: {leaf: Reversible, codes: {"true": true, "false": false}}
+      disabled: {leaf: Disable, codes: {"true": true, "false": false}}
+
+  acl-basic-rule:  # basic IPv4 ACL rules, which select the sources of an outbound NAT
+    path: top/ACL/IPv4NamedBasicRules/Rule
+    ignore: [SrcAny, Counting, Logging, Count, Status]
+    fields:
+      acl: GroupIndex
+      rule: {leaf: RuleID, convert: integer}
+      action: {leaf: Action, codes: {"1": deny, "2": permit}}
+      source-address: {leaf: SrcIPv4/SrcIPv4Addr, convert: address}
+      source-wildcard: {leaf: SrcIPv4/SrcIPv4Wildcard, convert: address}
+      any-source: {leaf: SrcAny, codes: {"true": true, "false": false}}
+      fragment: {leaf: Fragment, codes: {"true": true, "false": false}}
+      time-range: TimeRange
+      network-instance: VRF
+
+  # --- ACL (RFC 8519/9899) and policy-based routing (OpenConfig), measured on BR1
+  # against "display acl all", "display packet-filter interface" and "display ip
+  # policy-based-route" (the VPN-instance condition on BR2). A leaf no field reads is
+  # reported as unread.
+  acl-group:
+    path: top/ACL/NamedGroups/Group
+    ignore: [GroupType, GroupCategory, Step, RuleNum, Name]
+    fields:
+      acl: GroupIndex
+      match-order: {leaf: MatchOrder, codes: {"1": config, "2": auto}}  # auto: depth first
+
+  acl-entry:  # basic and advanced IPv4 rules, named and numbered alike
+    path: [top/ACL/IPv4NamedBasicRules/Rule, top/ACL/IPv4NamedAdvanceRules/Rule]
+    ignore: [SrcAny, DstAny, Counting, Logging]
+    fields:
+      acl: GroupIndex
+      sequence: {leaf: RuleID, convert: integer}
+      match-index: {leaf: MatchIndex, convert: integer}  # the match order of an auto group
+      action: {leaf: Action, codes: {"1": deny, "2": permit}}
+      protocol: {leaf: ProtocolType, convert: integer, none: ["256"]}  # 256: any IP packet
+      source-address: {leaf: SrcIPv4/SrcIPv4Addr, convert: address}
+      source-wildcard: {leaf: SrcIPv4/SrcIPv4Wildcard, convert: address}
+      source-object-group: SrcObjectGroup
+      destination-address: {leaf: DstIPv4/DstIPv4Addr, convert: address}
+      destination-wildcard: {leaf: DstIPv4/DstIPv4Wildcard, convert: address}
+      destination-object-group: DstObjectGroup
+      # Port operators: 1 lt, 2 eq, 3 gt, 4 neq, 5 range (Value2 65536: no upper port).
+      source-port-operator: {leaf: SrcPort/SrcPortOp, codes: {"1": lt, "2": eq, "3": gt, "4": neq, "5": range}}
+      source-port: {leaf: SrcPort/SrcPortValue1, convert: integer}
+      source-upper-port: {leaf: SrcPort/SrcPortValue2, convert: integer, none: ["65536"]}
+      destination-port-operator: {leaf: DstPort/DstPortOp, codes: {"1": lt, "2": eq, "3": gt, "4": neq, "5": range}}
+      destination-port: {leaf: DstPort/DstPortValue1, convert: integer}
+      destination-upper-port: {leaf: DstPort/DstPortValue2, convert: integer, none: ["65536"]}
+      icmp-type: {leaf: ICMP/ICMPType, convert: integer}
+      icmp-code: {leaf: ICMP/ICMPCode, convert: integer}
+      established: {leaf: Established, codes: {"true": true, "false": false}}
+      fragment: {leaf: Fragment, codes: {"true": true, "false": false}}
+      time-range: TimeRange
+      time-range-active: {leaf: Status, codes: {"1": true, "2": false}}  # CLI Active/Inactive
+      network-instance: {leaf: VRF, default: default}  # no instance: public packets only
+      matched-packets: {leaf: Count, convert: integer, none: ["0"]}  # the CLI prints no 0
+
+  acl-attachment:  # packet filters on interfaces
+    path: top/ACL/PfilterApply/Pfilter
+    ignore: [HardCount, AppSequence]
+    where: {leaf: AppAclType, in: ["1"]}  # IPv4 ACLs (5: a direction's default action)
+    fields:
+      object-type: {leaf: AppObjType, codes: {"1": interface}}
+      interface: {leaf: AppObjIndex, convert: integer, lookup: {table: interface, match: if-index, take: name}}
+      if-index: {leaf: AppObjIndex, convert: integer}
+      direction: {leaf: AppDirection, codes: {"1": in, "2": out}}
+      acl: AppAclGroup
+
+  acl-default-attachment:  # a direction of an interface with the default action set
+    path: top/ACL/PfilterApply/Pfilter
+    ignore: [HardCount, AppSequence, AppAclGroup]
+    where: {leaf: AppAclType, in: ["5"]}
+    fields:
+      object-type: {leaf: AppObjType, codes: {"1": interface}}
+      interface: {leaf: AppObjIndex, convert: integer, lookup: {table: interface, match: if-index, take: name}}
+      direction: {leaf: AppDirection, codes: {"1": in, "2": out}}
+
+  acl-default-action:  # the device's action for packets no entry matches
+    path: top/ACL/PfilterDefAction
+    fields:
+      default-action: {leaf: DefaultAction, codes: {"1": permit}}
+
+  acl-run:  # whether an attached ACL is in effect
+    path: top/ACL/PfilterGroupRunInfo/GroupRunInfo
+    where: {leaf: AppAclType, in: ["1"]}
+    ignore: [AppObjType, AclGroupCountStatus, AclGroupPermitPkts, AclGroupPermitBytes, AclGroupDenyPkts, AclGroupDenyBytes]
+    fields:
+      if-index: {leaf: AppObjIndex, convert: integer}
+      direction: {leaf: AppDirection, codes: {"1": in, "2": out}}
+      acl: AppAclGroup
+      in-effect: {leaf: AclGroupStatus, codes: {"1": true}}
+
+  pbr-node:
+    path: top/PBR/PBRPolicyNode/PolicyNode
+    where: {leaf: AddressType, in: ["0"]}  # IPv4
+    fields:
+      policy: PolicyName
+      node: {leaf: NodeID, convert: integer}
+      mode: {leaf: Mode, codes: {"1": permit, "2": deny}}
+      acl: ACLNumber
+      # Clauses BR1's nodes do not have (the CLI shows none): any other value is a clause
+      # this mapping does not read, and the node is not evaluated as if it were absent.
+      apply-ip-df: {leaf: ApplyIPDF, codes: {"2": false}}
+      apply-remark-vpn: {leaf: ApplyRemarkVPN, codes: {"false": false}}
+      apply-continue: {leaf: ApplyContinue, codes: {"false": false}}
+      apply-load-share-next-hop: {leaf: ApplyLoadShareNexthop, codes: {"false": false}}
+      apply-load-share-default-next-hop: {leaf: ApplyLoadShareDefNexthop, codes: {"false": false}}
+      apply-load-share-interface: {leaf: ApplyLoadShareInterface, codes: {"false": false}}
+      apply-load-share-default-interface: {leaf: ApplyLoadShareDefInterface, codes: {"false": false}}
+      apply-load-share-srv6-policy: {leaf: ApplyLoadShareSRv6Policy, codes: {"false": false}}
+      apply-load-share-default-srv6-policy: {leaf: ApplyLoadShareDefSRv6Policy, codes: {"false": false}}
+    ignore: []
+
+  pbr-next-hop:
+    path: top/PBR/PBRApplyNexthop/ApplyNexthop
+    where: {leaf: AddressType, in: ["0"]}
+    ignore: [Priority]
+    fields:
+      policy: PolicyName
+      node: {leaf: NodeID, convert: integer}
+      address: {leaf: IpAddress, convert: address}
+      # The form BR1 showed for "apply next-hop 10.0.13.2": in the public instance, not
+      # directly connected. Another form is reported, and its node is not evaluated.
+      mode: {leaf: Mode, codes: {"0": next-hop}}
+      network-instance: {leaf: VrfIndex, codes: {"0": default}}
+      direct: {leaf: NexthopDirect, codes: {"false": false}}
+
+  pbr-interface:  # a policy applied to packets arriving on an interface
+    path: top/PBR/PBRIfPolicy/IfPolicy
+    where: {leaf: AddressType, in: ["0"]}
+    ignore: []
+    fields:
+      interface: {leaf: IfIndex, convert: integer, lookup: {table: interface, match: if-index, take: name}}
+      policy: PolicyName
+
+  pbr-local:  # the policy applied to packets the device itself sends
+    path: top/PBR/PBRLocalPolicy
+    fields:
+      policy: Ipv4PolicyName

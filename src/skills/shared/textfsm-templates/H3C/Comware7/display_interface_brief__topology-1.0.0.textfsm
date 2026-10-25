@@ -1,0 +1,33 @@
+Value Filldown MODE (route|bridge)
+Value Required INTERFACE (\S+)
+Value LINK (UP|DOWN|ADM|\*DOWN|Stby)
+Value PROTOCOL (\S+)
+Value PRIMARY_IP (\S+)
+Value SPEED (\S+)
+Value DUPLEX (\S+)
+Value TYPE (A|T|H)
+Value PVID (\d+)
+Value DESCRIPTION (.*?)
+
+# One record per interface (campus-wan, vpn-fabric and VSR labs, Comware 7.1): a route-
+# mode table, then a bridge-mode table with speed, duplex, link type and PVID. The
+# Link column reports an administrative shutdown itself (ADM).
+Start
+  ^Brief information on interfaces in ${MODE} mode:\s*$$
+  ^(Link|Protocol|Speed|Duplex|Type):\s.*$$
+  ^Interface\s+Link\s+Protocol\s+Primary IP\s+Description\s*$$ -> Route
+  ^Interface\s+Link\s+Speed\s+Duplex\s+Type\s+PVID\s+Description\s*$$ -> Bridge
+  ^\s*$$
+  ^. -> Error "unrecognized display interface brief line"
+
+Route
+  ^${INTERFACE}\s+${LINK}\s+${PROTOCOL}\s+${PRIMARY_IP}(?:\s+${DESCRIPTION})?\s*$$ -> Record
+  ^Brief information on interfaces in ${MODE} mode:\s*$$ -> Start
+  ^\s*$$ -> Start
+  ^. -> Error "unrecognized route-mode interface row"
+
+Bridge
+  ^${INTERFACE}\s+${LINK}\s+${SPEED}\s+${DUPLEX}\s+${TYPE}\s+${PVID}(?:\s+${DESCRIPTION})?\s*$$ -> Record
+  ^Brief information on interfaces in ${MODE} mode:\s*$$ -> Start
+  ^\s*$$ -> Start
+  ^. -> Error "unrecognized bridge-mode interface row"

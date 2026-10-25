@@ -1,0 +1,27 @@
+# SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
+# SPDX-License-Identifier: Apache-2.0
+
+route_key: firewall-policy
+workflow: itsm-firewall-change
+description: ITSM 防火墙策略开通 Webhook
+
+legacy_paths:
+  - /api/v1/itsm/webhook/firewall-policy
+
+accepted_message: ITSM 防火墙变更流程已启动（策略生成 → 变更工单 → 回调）
+
+context_mapping:
+  ticket_id: ticket_id
+  ticket_title: ticket_title
+  change_background: ticket_title
+  change_purpose: service_catalog
+  requester: requester
+  requester_dept: requester_dept
+  assignee: assignee
+  priority: priority
+  due_date: due_date
+  policy_file_url: policy_file.url
+  topology_file_url: topology_file.url
+  parameters: parameters
+  callback_url: callback_url
+  callback_headers: callback_headers

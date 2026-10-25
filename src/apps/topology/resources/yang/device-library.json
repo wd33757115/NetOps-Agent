@@ -1,0 +1,201 @@
+{
+  "ietf-yang-library:modules-state": {
+    "module-set-id": "netops-rfc8343-8344-8347-8349-lldp-partial",
+    "module": [
+      {
+        "name": "iana-bfd-types",
+        "revision": "2021-10-21",
+        "namespace": "urn:ietf:params:xml:ns:yang:iana-bfd-types",
+        "conformance-type": "import"
+      },
+      {
+        "name": "iana-icmpv4-types",
+        "revision": "2025-12-22",
+        "namespace": "urn:ietf:params:xml:ns:yang:iana-icmpv4-types",
+        "conformance-type": "import"
+      },
+      {
+        "name": "iana-icmpv6-types",
+        "revision": "2025-12-22",
+        "namespace": "urn:ietf:params:xml:ns:yang:iana-icmpv6-types",
+        "conformance-type": "import"
+      },
+      {
+        "name": "iana-if-type",
+        "revision": "2014-05-08",
+        "namespace": "urn:ietf:params:xml:ns:yang:iana-if-type",
+        "conformance-type": "implement"
+      },
+      {
+        "name": "iana-ipv6-ext-types",
+        "revision": "2025-12-22",
+        "namespace": "urn:ietf:params:xml:ns:yang:iana-ipv6-ext-types",
+        "conformance-type": "import"
+      },
+      {
+        "name": "iana-routing-types",
+        "revision": "2017-12-04",
+        "namespace": "urn:ietf:params:xml:ns:yang:iana-routing-types",
+        "conformance-type": "import"
+      },
+      {
+        "name": "ieee802-dot1ab-lldp",
+        "revision": "2022-03-15",
+        "namespace": "urn:ieee:std:802.1AB:yang:ieee802-dot1ab-lldp",
+        "conformance-type": "implement"
+      },
+      {
+        "name": "ieee802-dot1ab-types",
+        "revision": "2022-03-15",
+        "namespace": "urn:ieee:std:802.1Q:yang:ieee802-dot1ab-types",
+        "conformance-type": "import"
+      },
+      {
+        "name": "ieee802-types",
+        "revision": "2023-10-22",
+        "namespace": "urn:ieee:std:802.1Q:yang:ieee802-types",
+        "conformance-type": "import"
+      },
+      {
+        "name": "ietf-access-control-list",
+        "revision": "2019-03-04",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-access-control-list",
+        "conformance-type": "implement",
+        "feature": [
+          "match-on-ipv4",
+          "match-on-tcp",
+          "match-on-udp",
+          "match-on-icmp",
+          "ipv4",
+          "interface-attachment",
+          "acl-aggregate-stats"
+        ]
+      },
+      {
+        "name": "ietf-acl-enh",
+        "revision": "2025-12-22",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-acl-enh",
+        "conformance-type": "implement"
+      },
+      {
+        "name": "ietf-bfd-types",
+        "revision": "2022-09-22",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-bfd-types",
+        "conformance-type": "import"
+      },
+      {
+        "name": "ietf-ethertypes",
+        "revision": "2019-03-04",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-ethertypes",
+        "conformance-type": "import"
+      },
+      {
+        "name": "ietf-inet-types",
+        "revision": "2025-12-22",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-inet-types",
+        "conformance-type": "import"
+      },
+      {
+        "name": "ietf-interfaces",
+        "revision": "2018-02-20",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-interfaces",
+        "conformance-type": "implement"
+      },
+      {
+        "name": "ietf-ip",
+        "revision": "2018-02-22",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-ip",
+        "conformance-type": "implement"
+      },
+      {
+        "name": "ietf-ipv4-unicast-routing",
+        "revision": "2018-03-13",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-ipv4-unicast-routing",
+        "conformance-type": "implement"
+      },
+      {
+        "name": "ietf-ipv6-unicast-routing",
+        "revision": "2018-03-13",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-ipv6-unicast-routing",
+        "conformance-type": "implement",
+        "submodule": [
+          {
+            "name": "ietf-ipv6-router-advertisements",
+            "revision": "2018-03-13"
+          }
+        ]
+      },
+      {
+        "name": "ietf-key-chain",
+        "revision": "2017-06-15",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-key-chain",
+        "conformance-type": "import"
+      },
+      {
+        "name": "ietf-nat",
+        "revision": "2019-01-10",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-nat",
+        "feature": [
+          "basic-nat44",
+          "napt44",
+          "dst-nat"
+        ],
+        "conformance-type": "implement"
+      },
+      {
+        "name": "ietf-netconf-acm",
+        "revision": "2018-02-14",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-netconf-acm",
+        "conformance-type": "import"
+      },
+      {
+        "name": "ietf-network-instance",
+        "revision": "2019-01-21",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-network-instance",
+        "conformance-type": "implement"
+      },
+      {
+        "name": "ietf-ospf",
+        "revision": "2022-10-19",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-ospf",
+        "conformance-type": "implement"
+      },
+      {
+        "name": "ietf-packet-fields",
+        "revision": "2019-03-04",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-packet-fields",
+        "conformance-type": "import"
+      },
+      {
+        "name": "ietf-routing",
+        "revision": "2018-03-13",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-routing",
+        "conformance-type": "implement"
+      },
+      {
+        "name": "ietf-routing-types",
+        "revision": "2017-12-04",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-routing-types",
+        "conformance-type": "import"
+      },
+      {
+        "name": "ietf-vrrp",
+        "revision": "2018-03-13",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-vrrp",
+        "conformance-type": "implement"
+      },
+      {
+        "name": "ietf-yang-schema-mount",
+        "revision": "2019-01-14",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-yang-schema-mount",
+        "conformance-type": "import"
+      },
+      {
+        "name": "ietf-yang-types",
+        "revision": "2025-12-22",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-yang-types",
+        "conformance-type": "import"
+      }
+    ]
+  }
+}

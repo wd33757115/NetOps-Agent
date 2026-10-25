@@ -1,0 +1,54 @@
+Value Filldown INSTANCE (\d+)
+Value Filldown SERVICE (VLAN Based|VLAN Aware|Port Based)
+Value Filldown RD (\S+)
+Value Filldown,List IMPORT_RT (\S+)
+Value Filldown,List EXPORT_RT (\S+)
+Value Filldown INSTANCE_STATE (\S+)
+Value Filldown ENCAPSULATION (\S+)
+Value Required VLAN_ID (\d+)
+Value STATE (\S+)
+Value VNI (\d+)
+Value L3_VNI (\d+)
+Value VTEP_IP (\S+)
+Value VRF (\S+)
+Value GATEWAY_INTERFACE (\S+)
+Value CORE_INTERFACE (\S+)
+Value List ACCESS_INTERFACE (\S+)
+Value List SERVICE_INSTANCE (\d+)
+Value List PEER (\d+\.\d+\.\d+\.\d+)
+
+# One record per EVPN instance and VLAN (vpn-fabric lab, IOS-XE 17). Instance fields are
+# indented two spaces, VLAN fields four, list items six. Route targets share a line (up
+# to four). Other "key: value" fields are known and not modeled.
+Start
+  ^EVPN instance: -> Continue.Record
+  ^EVPN instance: -> Continue.Clearall
+  ^EVPN instance:\s+${INSTANCE}\s+\(${SERVICE}\)\s*$$
+  ^\s{2}RD:\s+${RD}(?:\s+\(auto\))?\s*$$
+  ^\s{2}Import-RTs:\s+${IMPORT_RT}(\s|$$) -> Continue
+  ^\s{2}Import-RTs:\s+\S+\s+${IMPORT_RT}(\s|$$) -> Continue
+  ^\s{2}Import-RTs:\s+\S+\s+\S+\s+${IMPORT_RT}(\s|$$) -> Continue
+  ^\s{2}Import-RTs:\s+\S+\s+\S+\s+\S+\s+${IMPORT_RT}(\s|$$) -> Continue
+  ^\s{2}Import-RTs:(\s+\S+){1,4}\s*$$
+  ^\s{2}Export-RTs:\s+${EXPORT_RT}(\s|$$) -> Continue
+  ^\s{2}Export-RTs:\s+\S+\s+${EXPORT_RT}(\s|$$) -> Continue
+  ^\s{2}Export-RTs:\s+\S+\s+\S+\s+${EXPORT_RT}(\s|$$) -> Continue
+  ^\s{2}Export-RTs:\s+\S+\s+\S+\s+\S+\s+${EXPORT_RT}(\s|$$) -> Continue
+  ^\s{2}Export-RTs:(\s+\S+){1,4}\s*$$
+  ^\s{2}State:\s+${INSTANCE_STATE}\s*$$
+  ^\s{2}Encapsulation:\s+${ENCAPSULATION}\s*$$
+  ^\s{2}Vlan: -> Continue.Record
+  ^\s{2}Vlan:\s+${VLAN_ID}\s*$$
+  ^\s{4}State:\s+${STATE}\s*$$
+  ^\s{4}L2 VNI:\s+${VNI}\s*$$
+  ^\s{4}L3 VNI:\s+${L3_VNI}\s*$$
+  ^\s{4}VTEP IP:\s+${VTEP_IP}\s*$$
+  ^\s{4}VRF:\s+${VRF}\s*$$
+  ^\s{4}Access If:\s+${GATEWAY_INTERFACE}\s*$$
+  ^\s{4}Core If:\s+${CORE_INTERFACE}\s*$$
+  ^\s{6}${ACCESS_INTERFACE} service instance ${SERVICE_INSTANCE}\s*$$
+  ^\s{6}${PEER}\s*$$
+  ^\s{8}Routes:\s.*$$
+  ^\s{2,4}[A-Za-z][\w ./()-]*:(\s.*)?$$
+  ^\s*$$
+  ^. -> Error "unrecognized show l2vpn evpn evi detail line"

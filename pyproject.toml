@@ -1,0 +1,112 @@
+[project]
+name = "netops-agent"
+description = "AI 驱动的网络运维系统"
+requires-python = ">=3.10"
+dynamic = ["version"]
+
+[tool.setuptools]
+packages = ["src"]
+
+[tool.black]
+line-length = 100
+target-version = ['py310', 'py311']
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+)/
+'''
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = [
+    "*.ipynb",
+    ".venv",
+    "venv",
+    "node_modules",
+    "web/react_frontend",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP"]
+ignore = ["E402"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+[tool.poetry]
+name = "netops-agent"
+version = "0.1.0"
+description = "AI 驱动的网络运维系统"
+authors = ["wangdong <wangdong5919@163.com>"]
+license = "Apache-2.0"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+fastapi = "0.115.*"
+uvicorn = {extras = ["standard"], version = "0.32.*"}
+websockets = ">=12.0"
+celery = {extras = ["redis"], version = "5.4.*"}
+redis = "5.*"
+kombu = "5.4.*"
+psycopg2-binary = "2.9.*"
+asyncpg = ">=0.30.0"
+sqlalchemy = ">=2.0.25"
+minio = ">=7.2.0"
+python-multipart = ">=0.0.12"
+python-dotenv = "1.0.*"
+pydantic = "2.*"
+pydantic-settings = ">=2.3.*"
+httpx = "*"
+tenacity = ">=8.3.*"
+structlog = ">=24.0.*"
+prometheus-client = ">=0.20.*"
+alembic = ">=1.13.*"
+textfsm = "2.1.0"
+
+[tool.poetry.group.ai]
+optional = true
+
+[tool.poetry.group.ai.dependencies]
+langchain-core = ">=1.4.0,<2.0.0"
+deepseek-harness-sdk = "==0.1.5rc1"
+mcp = "==1.26.0"
+sse-starlette = "==2.4.1"
+langchain-deepseek = "*"
+openai = ">=1.109.0,<2.0.0"
+
+[tool.poetry.group.documents]
+optional = true
+
+[tool.poetry.group.documents.dependencies]
+python-docx = ">=1.1.0"
+openpyxl = ">=3.1.0"
+
+[tool.poetry.group.observability]
+optional = true
+
+[tool.poetry.group.observability.dependencies]
+langfuse = ">=2.0.*"
+
+[tool.poetry.group.dev.dependencies]
+black = ">=24.0.*"
+ruff = ">=0.4.*"
+pytest = ">=8.0.*"
+pytest-asyncio = ">=0.23.*"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"

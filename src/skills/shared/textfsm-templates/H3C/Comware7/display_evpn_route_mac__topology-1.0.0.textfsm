@@ -1,0 +1,26 @@
+Value Filldown INSTANCE (\S+)
+Value Required MAC_ADDRESS (\S+)
+Value FLAGS ([A-Z]+)
+Value LOCAL_FLAG (L)
+Value NEXTHOP_VTEP (\d+\.\d+\.\d+\.\d+)
+Value LINK (\S+)
+Value ENCAPSULATION (\S+)
+
+# One record per EVPN MAC route (vpn-fabric lab, Comware 7.1), grouped by VSI. Flag L
+# (local active) marks a MAC learned on a local access circuit (LOCAL_FLAG).
+Start
+  ^Flags:\s+\S+ - .*$$
+  ^\s+[A-Z] - .*$$
+  ^VSI name: -> Continue.Record
+  ^VSI name:\s*${INSTANCE}\s*$$
+  ^\s*MAC address\s*: -> Continue.Record
+  ^\s*MAC address\s*:\s*${MAC_ADDRESS}\s*$$
+  ^\s*Flags\s*:\s*[A-Z]*${LOCAL_FLAG}[A-Z]*\s*$$ -> Continue
+  ^\s*Flags\s*:\s*${FLAGS}\s*$$
+  ^\s*Next hop\s*:\s*-\s*$$
+  ^\s*Next hop\s*:\s*${NEXTHOP_VTEP}\s*$$
+  ^\s*Link ID/Name\s*:\s*${LINK}\s*$$
+  ^\s*Encap\s*:\s*${ENCAPSULATION}\s*$$
+  ^\s+[A-Za-z][\w ./()-]*?\s*:(\s.*)?$$
+  ^\s*$$
+  ^. -> Error "unrecognized display evpn route mac line"

@@ -1,0 +1,70 @@
+# SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
+# SPDX-License-Identifier: Apache-2.0
+
+name: patrol-offline-current
+description: 导入单周期离线巡检原始输出，使用已激活规则完成状态、变化、事件和报告分析
+version: "1.0"
+
+test:
+  context:
+    offline_job_id: ""
+    period_role: current
+    current_run_id: offline-current-test
+    current_observed_at: "2026-04-01T00:00:00+00:00"
+    publish_events: false
+  required_context:
+    - offline_job_id
+
+steps:
+  - name: quality_gate
+    label: 执行前质量门禁
+    skill: offline-patrol-quality-gate
+    inputs:
+      offline_job_id: ${context.offline_job_id}
+
+  - name: current_ingest
+    label: 导入离线巡检数据
+    skill: patrol-raw-ingestor
+    inputs:
+      offline_job_id: ${context.offline_job_id}
+      period_role: ${context.period_role}
+      run_id: ${context.current_run_id}
+      observed_at: ${context.current_observed_at}
+      mode: production
+
+  - name: current_normalization
+    label: 生成状态观测
+    skill: state-normalizer
+    inputs:
+      run_id: ${steps.current_ingest.result.run_id}
+      update_current_state: false
+
+  - name: change_detection
+    label: 检测网络变化
+    skill: change-detector
+    inputs:
+      current_run_id: ${steps.current_ingest.result.run_id}
+      use_state_observations: true
+      persist: true
+
+  - name: event_building
+    label: 构建运维事件
+    skill: event-builder
+    inputs:
+      run_id: ${steps.current_ingest.result.run_id}
+      persist: true
+      publish: ${context.publish_events}
+
+  - name: report_generation
+    label: 生成离线巡检报告
+    skill: report-generator
+    inputs:
+      run_id: ${steps.current_ingest.result.run_id}
+      output_format: markdown
+
+on_complete:
+  message: 单周期离线巡检分析已完成
+  notification:
+    title: 离线巡检已完成
+    body: 状态、变化、事件和报告已生成。
+    level: success

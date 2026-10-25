@@ -1,0 +1,1032 @@
+# System base check items that topology discovery consumes (owner decision 2026-10-04).
+# system_items.py expands them into same-name/v1
+# check items and collection implementations. They cannot be deleted; a later version
+# may only add optional Values.
+#
+# values: NAME: [value_type, required, description]. Keys are the entry identity and are
+# TextFSM Values as well. value_type is one the check-item semantics accept.
+# implementations: one default per platform family; a model exception adds a match on
+# model_patterns (regular expressions) and a variant name, and wins on specificity.
+# template is a path in the shared library src/skills/shared/textfsm-templates, pinned by
+# the sha256 of its text: a changed template is refused until its pin (and the
+# implementation version) is updated in review. scoped_command is the per-VRF form ({vrf} is a
+# device-local instance name the consumer fills in); a command that itself needs an
+# instance name carries {vrf} directly. scope_header is the line (first group: the name) by
+# which a per-VRF output names its instance; without it the consumer checks the output
+# against the device's interface bindings instead. units names the unit of a Value the
+# device prints as a bare number ({AGE: min}). defaults gives a Value the device never
+# prints because it is fixed for the platform (the action for packets no IOS ACL entry
+# matches); a row that has the Value keeps its own. valid_empty lists outputs that mean "none
+# configured" (BLANK: an empty output). required lists lines every data output has (a
+# table header); counts are totals the device prints ({pattern, of}: the pattern's first
+# group counts the rows read, or the distinct keys). An output missing a required line
+# or with a different count is never complete.
+catalog: topology-system
+version: 1
+
+check_items:
+  topology.arp:
+    # v2 (2026-10-04): the instance and VSI of each entry, as Comware's verbose table
+    # shows them; a device that lists one instance per command leaves VRF empty.
+    version: 2
+    name: 拓扑发现：ARP 表项
+    entity_type: arp_entry
+    keys: [IP_ADDRESS]
+    values:
+      IP_ADDRESS: [ip_or_unassigned, true, 邻居的 IPv4 地址]
+      MAC_ADDRESS: [text, true, 邻居 MAC 地址原文]
+      INTERFACE: [text, false, 学到表项的接口；VSI 表项可能是链路 ID]
+      VLAN_ID: [text, false, VLAN 或 VSI 名原文；长 VSI 名折行时按段给出，由使用方拼接]
+      AGE: [text, false, 老化时间原文，单位以设备为准]
+      TYPE: [text, false, 表项类型原文]
+      VRF: [text, false, 表项所属的 VPN 实例；"--" 为公网；按实例分命令采集的设备不填]
+      VSI: [text, false, 学到表项的 VSI 名；"--" 为无]
+      VSI_INTERFACE: [text, false, VSI 表项所属的三层接口（VSI 网关接口）；"--" 为无]
+
+  topology.routes:
+    name: 拓扑发现：路由表（每个下一跳一行）
+    entity_type: route_next_hop
+    keys: [NETWORK, PREFIX_LENGTH]
+    values:
+      NETWORK: [ip_or_unassigned, true, 目的网络地址]
+      PREFIX_LENGTH: [integer, true, 掩码长度]
+      PROTOCOL: [text, true, 路由来源代码或名称原文]
+      TYPE: [text, false, IOS 路由子类型（如 IA、E2）]
+      DISTANCE: [integer, false, 管理距离或优先级]
+      METRIC: [integer, false, 度量值]
+      NEXTHOP_IP: [ip_or_unassigned, false, 下一跳地址]
+      NEXTHOP_IF: [text, false, 出接口原文]
+      NEXTHOP_VRF: [text, false, 下一跳所在实例（IOS 显示时）]
+      VRF: [text, false, 输出自己标明的路由表名]
+      UPTIME: [text, false, 路由存在时间原文]
+      FLAG: [text, false, IOS 路由标志]
+
+  topology.vrf_detail:
+    name: 拓扑发现：VRF/VPN 实例详情（每地址族一行）
+    entity_type: vrf_address_family
+    keys: [VRF, ADDRESS_FAMILY]
+    values:
+      VRF: [text, true, 设备本地实例名]
+      ADDRESS_FAMILY: [text, true, 地址族原文；IOS-XE 的 stitching 即该实例的 EVPN 路由目标]
+      RD: [text, false, 路由区分符；未设置为空或 <not set>]
+      INTERFACES: [text, false, 绑定到该实例的接口]
+      IMPORT_RT: [text, false, 导入的路由目标]
+      EXPORT_RT: [text, false, 导出的路由目标]
+
+  topology.evpn_peers:
+    name: 拓扑发现：EVPN/VXLAN 每 VNI 的远端 VTEP
+    entity_type: vxlan_peer
+    keys: [VNI, PEER]
+    values:
+      VNI: [integer, true, VXLAN 网络标识]
+      PEER: [ip_or_unassigned, true, 远端 VTEP 地址]
+      TYPE: [text, false, IOS 的 L2CP/L3CP 等]
+      STATE: [text, false, 对端状态原文]
+      INSTANCE: [text, false, Comware 的 VSI 名]
+      RD: [text, false, 远端路由区分符]
+      INTERFACE: [text, false, IOS 的 NVE 接口]
+      ROUTER_MAC: [text, false, L3 VNI 对端的路由器 MAC]
+      EVNI: [integer, false, IOS 的出口 VNI]
+      FLAGS: [text, false, IOS 标志]
+      UPTIME: [text, false, 建立时长原文]
+      TUNNEL_ADDRESS: [ip_or_unassigned, false, Comware 的隧道地址]
+      ENCAPSULATION: [text, false, 封装方式原文]
+
+  topology.ldp_peers:
+    name: 拓扑发现：LDP 会话
+    entity_type: ldp_peer
+    keys: [PEER_LSR_ID]
+    values:
+      PEER_LSR_ID: [ip_or_unassigned, true, 对端 LSR ID]
+      LABEL_SPACE: [integer, false, 对端标签空间]
+      STATE: [text, false, 会话状态原文]
+      ROLE: [text, false, 会话角色（Active/Passive）]
+      LOCAL_LSR_ID: [ip_or_unassigned, false, 本端 LSR ID]
+      LOCAL_LABEL_SPACE: [integer, false, 本端标签空间]
+      DISCOVERY_INTERFACE: [text, false, 发现该对端的接口（与 DISCOVERY_ADDRESS 一一对应）]
+      DISCOVERY_ADDRESS: [text, false, 发现报文的源地址]
+      ADDRESSES: [text, false, 对端绑定的地址]
+
+  topology.mpls_lfib:
+    name: 拓扑发现：MPLS 标签转发表
+    entity_type: lfib_entry
+    keys: [FEC, LOCAL_LABEL, OUT_LABEL]
+    values:
+      FEC: [text, true, 转发等价类（前缀或地址）]
+      LOCAL_LABEL: [text, true, 入标签原文（None 或 - 表示无）]
+      OUT_LABEL: [text, true, 出标签原文（Pop Label、No Label、- 等）]
+      INTERFACE: [text, false, 出接口原文]
+      NEXTHOP: [text, false, 下一跳原文]
+      VRF: [text, false, VPN 聚合标签所属的实例]
+      PROTOCOL: [text, false, 标签来源协议原文]
+      BYTES: [integer, false, 已交换字节数]
+  topology.evpn_instances:
+    name: 拓扑发现：EVPN 实例（IOS 每实例每 VLAN 一行）
+    entity_type: evpn_instance
+    keys: [INSTANCE]
+    values:
+      INSTANCE: [text, true, EVI 编号或 VSI 名]
+      SERVICE: [text, false, IOS 的服务类型（VLAN Based 等）]
+      RD: [text, false, 路由区分符]
+      IMPORT_RT: [text, false, 导入的路由目标]
+      EXPORT_RT: [text, false, 导出的路由目标]
+      INSTANCE_STATE: [text, false, 实例状态原文]
+      ENCAPSULATION: [text, false, 封装方式原文]
+      VLAN_ID: [text, false, IOS 的 VLAN]
+      STATE: [text, false, VLAN 段状态原文]
+      VNI: [text, false, 二层 VNI（0 表示无）]
+      L3_VNI: [text, false, 三层 VNI（0 表示无）]
+      VTEP_IP: [ip_or_unassigned, false, 本端 VTEP 地址]
+      VRF: [text, false, 三层 VNI 所属的 VRF]
+      GATEWAY_INTERFACE: [text, false, 网关（Access If）接口]
+      CORE_INTERFACE: [text, false, Core If 接口]
+      ACCESS_INTERFACE: [text, false, 接入口（与 SERVICE_INSTANCE 一一对应）]
+      SERVICE_INSTANCE: [text, false, 接入口的服务实例]
+      PEER: [text, false, 远端 VTEP]
+
+  topology.vxlan_vnis:
+    name: 拓扑发现：VXLAN VNI 与 VSI
+    entity_type: vxlan_vni
+    keys: [VNI]
+    values:
+      VNI: [text, true, VXLAN 网络标识]
+      INSTANCE: [text, false, Comware 的 VSI 名]
+      L3_VNI: [text, false, 设备为三层 VNI 自建的 VSI 名中的 VNI]
+      INTERFACE: [text, false, IOS 的 NVE 接口]
+      MULTICAST_GROUP: [text, false, 组播组]
+      STATE: [text, false, 状态原文]
+      MODE: [text, false, IOS 的 L2CP/L3CP 等]
+      SEGMENT_TYPE: [text, false, IOS 表头里的段类型（VLAN 或 BD）]
+      SEGMENT: [text, false, VLAN 或桥域编号]
+      CONFIG: [text, false, 配置来源]
+      VRF: [text, false, 所属 VRF（N/A 表示无）]
+      GATEWAY_INTERFACE: [text, false, Comware 的网关接口原文]
+      TUNNEL: [text, false, VXLAN 隧道接口（与 TUNNEL_STATE 一一对应）]
+      TUNNEL_STATE: [text, false, 隧道状态]
+      ACCESS_INTERFACE: [text, false, 接入电路接口（与 ACCESS_STATE 一一对应）]
+      ACCESS_STATE: [text, false, 接入电路状态]
+
+  topology.tunnel_interfaces:
+    name: 拓扑发现：隧道接口
+    entity_type: tunnel_interface
+    keys: [INTERFACE]
+    values:
+      INTERFACE: [text, true, 隧道接口名]
+      STATE: [text, false, 接口状态原文]
+      PROTOCOL_STATE: [text, false, 协议状态原文]
+      SOURCE: [ip_or_unassigned, false, 隧道源地址]
+      DESTINATION: [ip_or_unassigned, false, 隧道目的地址]
+      MODE: [text, false, 隧道协议/传输原文]
+
+  topology.evpn_mac:
+    name: 拓扑发现：EVPN MAC 路由
+    entity_type: evpn_mac_route
+    keys: [MAC_ADDRESS, INSTANCE]
+    values:
+      MAC_ADDRESS: [text, true, MAC 地址原文]
+      INSTANCE: [text, true, EVI 编号或 VSI 名]
+      VLAN_ID: [text, false, IOS 的 VLAN]
+      ESI: [text, false, 以太网段标识]
+      ETHER_TAG: [text, false, 以太标签]
+      NEXTHOP_VTEP: [ip_or_unassigned, false, 远端 VTEP]
+      NEXTHOP_INTERFACE: [text, false, 本地接入口]
+      SERVICE_INSTANCE: [text, false, 本地接入口的服务实例]
+      FLAGS: [text, false, 标志原文]
+      LOCAL_FLAG: [text, false, 本地学到（Comware 标志 L）]
+      LINK: [text, false, 链路 ID 或名称]
+      ENCAPSULATION: [text, false, 封装方式原文]
+  topology.vrfs:
+    name: 拓扑发现：VRF/VPN 实例列表
+    entity_type: vrf
+    keys: [NAME]
+    values:
+      NAME: [text, true, 设备本地实例名]
+      RD: [text, false, 路由区分符]
+      PROTOCOLS: [text, false, IOS 已启用的地址族（逗号分隔）]
+      INTERFACES: [text, false, IOS 绑定的接口]
+      CREATED: [text, false, Comware 的创建时间]
+  topology.bgp_ipv4_peers:
+    name: 拓扑发现：BGP IPv4 单播邻居
+    entity_type: bgp_neighbor
+    keys: [PEER]
+    values:
+      PEER: [ip_or_unassigned, true, 邻居地址]
+      PEER_AS: [integer, true, 邻居 AS]
+      STATE: [text, false, 会话状态原文（IOS 已建立时显示收到的前缀数而不显示状态）]
+      PREFIXES_RECEIVED: [integer, false, 收到的前缀数]
+      UP_DOWN: [text, false, 会话建立或断开时长原文]
+      ROUTER_ID: [ip_or_unassigned, false, 本端 BGP 标识（表头）]
+      LOCAL_AS: [integer, false, 本端 AS（表头）]
+
+  topology.bgp_vpnv4_peers:
+    name: 拓扑发现：BGP VPNv4 邻居
+    entity_type: bgp_neighbor
+    keys: [PEER]
+    values:
+      PEER: [ip_or_unassigned, true, 邻居地址]
+      PEER_AS: [integer, true, 邻居 AS]
+      STATE: [text, false, 会话状态原文（IOS 已建立时显示收到的前缀数而不显示状态）]
+      PREFIXES_RECEIVED: [integer, false, 收到的前缀数]
+      UP_DOWN: [text, false, 会话建立或断开时长原文]
+      ROUTER_ID: [ip_or_unassigned, false, 本端 BGP 标识（表头）]
+      LOCAL_AS: [integer, false, 本端 AS（表头）]
+
+  topology.bgp_evpn_peers:
+    name: 拓扑发现：BGP L2VPN EVPN 邻居
+    entity_type: bgp_neighbor
+    keys: [PEER]
+    values:
+      PEER: [ip_or_unassigned, true, 邻居地址]
+      PEER_AS: [integer, true, 邻居 AS]
+      STATE: [text, false, 会话状态原文（IOS 已建立时显示收到的前缀数而不显示状态）]
+      PREFIXES_RECEIVED: [integer, false, 收到的前缀数]
+      UP_DOWN: [text, false, 会话建立或断开时长原文]
+      ROUTER_ID: [ip_or_unassigned, false, 本端 BGP 标识（表头）]
+      LOCAL_AS: [integer, false, 本端 AS（表头）]
+  topology.ospf_neighbors:
+    name: 拓扑发现：OSPF 邻居
+    entity_type: ospf_neighbor
+    keys: [NEIGHBOR_ID, INTERFACE]
+    values:
+      NEIGHBOR_ID: [ip_or_unassigned, true, 邻居路由器 ID]
+      INTERFACE: [text, true, 本端接口原文]
+      ADDRESS: [ip_or_unassigned, false, 邻居接口地址]
+      PRIORITY: [integer, false, 邻居优先级]
+      STATE: [text, false, 邻居状态原文]
+      ROLE: [text, false, DR/BDR 角色原文（- 表示无）]
+      DEAD_TIME: [text, false, 失效时间原文]
+      PROCESS: [text, false, 进程号（Comware 表头）]
+      ROUTER_ID: [ip_or_unassigned, false, 本端路由器 ID（Comware 表头）]
+      AREA: [text, false, 区域（Comware 表头）]
+  topology.vrrp:
+    name: 拓扑发现：VRRP 组
+    entity_type: vrrp_group
+    keys: [INTERFACE, VRID]
+    values:
+      INTERFACE: [text, true, 接口原文]
+      VRID: [integer, true, 虚拟路由器编号]
+      STATE: [text, false, 状态原文]
+      PRIORITY: [integer, false, 运行优先级]
+      VIRTUAL_IP: [text, false, 虚拟地址]
+      MASTER_IP: [text, false, 主设备地址]
+  topology.lag:
+    name: 拓扑发现：链路聚合组与成员
+    entity_type: lag
+    keys: [INTERFACE]
+    values:
+      INTERFACE: [text, true, 聚合接口原文]
+      GROUP: [integer, false, 聚合组号]
+      BUNDLE_FLAGS: [text, false, 聚合接口标志原文]
+      PROTOCOL: [text, false, 聚合协议原文]
+      MEMBERS: [text, false, 成员端口（与 MEMBER_FLAGS 一一对应）]
+      MEMBER_FLAGS: [text, false, 成员端口标志原文]
+      BUNDLED: [text, false, 已捆绑进聚合的成员]
+  topology.stp_ports:
+    name: 拓扑发现：生成树端口角色与状态
+    entity_type: stp_port
+    keys: [INSTANCE, INTERFACE]
+    values:
+      INSTANCE: [text, true, 生成树实例原文（VLAN0010、MST0）]
+      INTERFACE: [text, true, 端口原文]
+      VLAN_ID: [text, false, PVST 实例的 VLAN]
+      MSTI: [text, false, MSTP 实例号]
+      PROTOCOL: [text, false, 生成树协议原文]
+      ROLE: [text, false, 端口角色原文]
+      STATE: [text, false, 端口状态原文]
+      COST: [integer, false, 端口开销]
+      PORT_ID: [text, false, 端口优先级与编号]
+      TYPE: [text, false, 链路类型与边缘端口标记原文]
+      ROOT_PRIORITY: [integer, false, 根桥优先级（实例头）]
+      ROOT_ADDRESS: [text, false, 根桥 MAC（实例头）]
+      ROOT_PORT: [text, false, 根端口（实例头）]
+      IS_ROOT: [text, false, 本桥即根桥（实例头）]
+      BRIDGE_PRIORITY: [integer, false, 本桥优先级（实例头）]
+      BRIDGE_ADDRESS: [text, false, 本桥 MAC（实例头）]
+  topology.interfaces:
+    name: 拓扑发现：接口状态
+    entity_type: interface
+    keys: [INTERFACE]
+    values:
+      INTERFACE: [text, true, 接口原文]
+      LINK: [text, true, 链路状态原文（含管理关闭）]
+      PROTOCOL: [text, false, 协议状态原文]
+      DESCRIPTION: [text, false, 接口描述]
+      MODE: [text, false, Comware 表的模式（route/bridge）]
+      PRIMARY_IP: [text, false, Comware 路由模式表的主地址]
+      SPEED: [text, false, Comware 桥模式表的速率原文]
+      DUPLEX: [text, false, Comware 桥模式表的双工原文]
+      TYPE: [text, false, Comware 桥模式表的链路类型（A/T/H）]
+      PVID: [text, false, Comware 桥模式表的 PVID]
+  topology.ip_interfaces:
+    name: 拓扑发现：接口地址
+    entity_type: interface_address
+    keys: [INTERFACE]
+    values:
+      INTERFACE: [text, true, 接口原文]
+      ADDRESS: [text, false, Comware 的地址/掩码长度（-- 为无）]
+      ADDRESSES: [text, false, IOS 的主地址与从地址（地址/掩码长度）]
+      VRF: [text, false, 所属 VRF（-- 为公网）]
+      STATUS: [text, false, IOS 的接口状态原文]
+      PHYSICAL: [text, false, Comware 的物理状态原文]
+      PROTOCOL: [text, false, 协议状态原文]
+      DESCRIPTION: [text, false, Comware 的接口描述（可能截断）]
+  topology.mac:
+    name: 拓扑发现：MAC 地址表项
+    entity_type: mac_entry
+    keys: [MAC_ADDRESS, VLAN_ID]
+    values:
+      MAC_ADDRESS: [text, true, MAC 地址原文]
+      VLAN_ID: [text, true, VLAN 原文]
+      PORT: [text, false, 出端口原文]
+      TYPE: [text, false, IOS 的表项类型原文]
+      STATE: [text, false, Comware 的表项状态原文]
+      AGING: [text, false, Comware 是否老化]
+  topology.vlans:
+    name: 拓扑发现：VLAN 与端口列
+    entity_type: vlan
+    keys: [VLAN_ID]
+    values:
+      VLAN_ID: [integer, true, VLAN 编号]
+      NAME: [text, false, VLAN 名称]
+      STATUS: [text, false, IOS 的 VLAN 状态原文]
+      PORTS: [text, false, 端口列每行的原文（逗号或空格分隔）]
+  topology.lldp_neighbors:
+    name: 拓扑发现：LLDP 邻居
+    entity_type: lldp_neighbor
+    keys: [LOCAL_INTERFACE, CHASSIS_ID, PORT_ID]
+    values:
+      LOCAL_INTERFACE: [text, true, 本端端口原文]
+      CHASSIS_ID: [text, true, 邻居机箱 ID 原文]
+      PORT_ID: [text, true, 邻居端口 ID 原文]
+      CHASSIS_ID_TYPE: [text, false, 机箱 ID 子类型原文]
+      PORT_ID_TYPE: [text, false, 端口 ID 子类型原文]
+      NEIGHBOR_NAME: [text, false, 邻居系统名]
+      SYSTEM_DESCRIPTION: [text, false, 邻居系统描述（按行）]
+      MGMT_ADDRESS: [text, false, 邻居管理地址]
+  topology.device_version:
+    name: 拓扑发现：设备版本与身份
+    entity_type: device
+    keys: [OS_VERSION]
+    values:
+      OS_VERSION: [text, true, 软件版本原文]
+      MODEL: [text, false, 型号]
+      SERIAL: [text, false, 序列号]
+      HOSTNAME: [text, false, 主机名（IOS）]
+      IMAGE_NAME: [text, false, IOS 镜像名]
+      IMAGE_VERSION: [text, false, IOS 镜像版本]
+      UNIX_PROCESSOR: [text, false, IOS 以 Linux 进程运行时的处理器]
+      BOOT_IMAGE: [text, false, Comware 启动镜像文件]
+      BOOT_IMAGE_VERSION: [text, false, Comware 启动镜像版本]
+      SYSTEM_IMAGE: [text, false, Comware 系统镜像文件]
+      SYSTEM_IMAGE_VERSION: [text, false, Comware 系统镜像版本]
+      VIRTUAL_CPUS: [text, false, 虚拟化平台的 vCPU 数]
+      VIRTIO_NIC: [text, false, virtio 网卡证据]
+
+  topology.lldp_local:
+    name: 拓扑发现：本机 LLDP 身份与端口管理地址
+    entity_type: lldp_local
+    keys: [CHASSIS_ID]
+    values:
+      CHASSIS_ID: [text, true, 本机机箱 ID 原文]
+      SYSTEM_NAME: [text, false, 本机系统名]
+      SYSTEM_DESCRIPTION: [text, false, 本机系统描述（按行）]
+      SERIAL: [text, false, MED 序列号]
+      MANUFACTURER: [text, false, MED 厂商名]
+      MODEL: [text, false, MED 型号]
+      LOCAL_INTERFACE: [text, false, 通告管理地址的端口]
+      MGMT_ADDRESS: [text, false, 端口通告的管理地址]
+  topology.trunks:
+    name: 拓扑发现：Trunk 端口的四张 VLAN 表
+    entity_type: trunk_port
+    keys: [PORT]
+    values:
+      PORT: [text, true, 端口原文]
+      MODE: [text, false, 基本表的模式原文]
+      ENCAPSULATION: [text, false, 基本表的封装原文]
+      STATUS: [text, false, 基本表的状态原文]
+      NATIVE_VLAN: [text, false, 基本表的 Native VLAN]
+      ALLOWED_VLANS: [text, false, 允许的 VLAN 集合原文]
+      ACTIVE_VLANS: [text, false, 允许且活动的 VLAN 集合原文]
+      FORWARDING_VLANS: [text, false, 转发中的 VLAN 集合原文]
+      BAD_ROW: [text, false, 该端口无法识别的行]
+
+  topology.switchports:
+    name: 拓扑发现：二层端口模式与 VLAN
+    entity_type: switchport
+    keys: [NAME]
+    values:
+      NAME: [text, true, 端口原文]
+      SWITCHPORT: [text, false, 二层端口开关]
+      ADMIN_MODE: [text, false, 管理模式]
+      OPER_MODE: [text, false, 运行模式]
+      ADMIN_ENCAPSULATION: [text, false, 管理封装]
+      OPER_ENCAPSULATION: [text, false, 运行封装]
+      ACCESS_VLAN: [text, false, Access VLAN 原文]
+      NATIVE_VLAN: [text, false, Native VLAN 原文]
+      ADMIN_NATIVE_TAGGING: [text, false, 管理上的 Native VLAN 打标]
+      OPER_NATIVE_TAGGING: [text, false, 运行中的 Native VLAN 打标]
+      TRUNK_VLANS: [text, false, Trunk 允许的 VLAN 原文]
+      BAD_FIELD: [text, false, 该端口无法识别的字段或取值]
+  topology.ospf_interfaces:
+    name: 拓扑发现：OSPF 接口开销（简表，按行）
+    entity_type: ospf_interface_line
+    keys: [ADDRESS]
+    values:
+      ADDRESS: [text, true, 接口地址（IOS 带掩码）]
+      TABLE: [text, false, 表头行]
+      INTERFACE: [text, false, IOS 的接口原文]
+      PROCESS_ID: [text, false, 进程号]
+      ROUTER_ID: [text, false, Comware 进程头的路由器 ID]
+      LABEL: [text, false, Comware 的 Interfaces 标签行]
+      AREA: [text, false, 区域]
+      TYPE: [text, false, Comware 的网络类型]
+      STATE: [text, false, 接口状态原文]
+      COST: [text, false, 开销原文]
+      PRIORITY: [text, false, Comware 的优先级]
+      DR: [text, false, Comware 的 DR]
+      BDR: [text, false, Comware 的 BDR]
+      NEIGHBORS: [text, false, IOS 的邻居数（全毗邻/总数）]
+      BAD_ROW: [text, false, 无法识别的行余下部分]
+
+  topology.ospf_process:
+    name: 拓扑发现：OSPF 进程与接口映射（按行）
+    entity_type: ospf_process_line
+    keys: [PROCESS_ID]
+    values:
+      PROCESS_ID: [text, true, 进程号]
+      ROUTER_ID: [text, false, 进程头的路由器 ID]
+      AREA: [text, false, 区域]
+      VRF_EVIDENCE: [text, false, Comware 未启用多 VPN 实例的输出证据]
+      CONFIRMED_ROUTER_ID: [text, false, Comware 再次给出的路由器 ID]
+      ADDRESS: [text, false, Comware 的接口地址]
+      INTERFACE: [text, false, Comware 的接口名]
+      COST: [text, false, Comware 的接口开销原文]
+      STATE: [text, false, Comware 的接口状态原文]
+
+  topology.pbr_bindings:
+    # 2026-10-05: a path hop entering on such an interface may not follow the route table.
+    name: 拓扑发现：策略路由的接口绑定
+    entity_type: pbr_binding
+    keys: [INTERFACE, POLICY]
+    values:
+      INTERFACE: [text, true, 应用策略路由的接口；local 或 N/A 表示本机发出的报文]
+      POLICY: [text, true, 策略名（route-map 或 policy-based-route 名）]
+      TYPE: [text, false, 策略类型原文（如 Forward、Local）]
+
+  topology.nat_bindings:
+    # 2026-10-05: a path hop through such an interface may have its addresses translated.
+    name: 拓扑发现：NAT 的接口绑定
+    entity_type: nat_binding
+    keys: [INTERFACE, KIND]
+    values:
+      INTERFACE: [text, true, 绑定 NAT 的接口；IOS 一行可列多个，以逗号分隔]
+      KIND: [text, true, 绑定方式原文（Inside、Outside、outbound、internal server、static、inbound）]
+      RULE: [text, false, 规则引用原文（如 ACL 编号）]
+
+  topology.acl_rules:
+    # 2026-10-05: the IPv4 ACL entries a path is checked against, in match order.
+    name: 拓扑发现：IPv4 ACL 规则
+    entity_type: acl_rule
+    keys: [ACL_NAME, LINE_NUM]
+    values:
+      ACL_TYPE: [text, false, ACL 类型原文（Standard、Extended、Basic、Advanced）]
+      ADDRESS_FAMILY: [text, false, 地址族原文（IP、IPv4）]
+      ACL_NAME: [text, true, ACL 名或编号]
+      MATCH_ORDER: [text, false, 匹配顺序（auto 表示按深度优先排列，设备已按匹配顺序列出）]
+      LINE_NUM: [integer, true, 规则序号（IOS 序号、Comware rule 编号）]
+      ACTION: [text, false, 动作（permit、deny）；无法识别的规则没有]
+      PROTOCOL: [text, false, 协议名或号码；没有表示任意 IP 报文]
+      SRC_HOST: [ip_or_unassigned, false, 源主机地址]
+      SRC_ANY: [text, false, 源为任意（any）]
+      SRC_NETWORK: [ip_or_unassigned, false, 源地址]
+      SRC_WILDCARD: [text, false, 源通配符（Comware 主机为 0）]
+      SRC_NETWORK_OBJECT_GROUP_NAME: [text, false, 源地址对象组名]
+      SRC_PORT_MATCH: [text, false, 源端口比较（eq、neq、lt、gt）]
+      SRC_PORT: [text, false, 源端口：名称（www、domain、dns 等）或号码，eq 后可有多个，以空格分隔]
+      SRC_PORT_RANGE_START: [text, false, 源端口范围起点]
+      SRC_PORT_RANGE_END: [text, false, 源端口范围终点]
+      DST_HOST: [ip_or_unassigned, false, 目的主机地址]
+      DST_ANY: [text, false, 目的为任意（any）]
+      DST_NETWORK: [ip_or_unassigned, false, 目的地址]
+      DST_WILDCARD: [text, false, 目的通配符（Comware 主机为 0）]
+      DST_NETWORK_OBJECT_GROUP_NAME: [text, false, 目的地址对象组名]
+      DST_PORT_MATCH: [text, false, 目的端口比较（eq、neq、lt、gt）]
+      DST_PORT: [text, false, 目的端口：名称（www、domain、dns 等）或号码，eq 后可有多个，以空格分隔]
+      DST_PORT_RANGE_START: [text, false, 目的端口范围起点]
+      DST_PORT_RANGE_END: [text, false, 目的端口范围终点]
+      ICMP_TYPE: [text, false, ICMP 类型名或号码（名称可同时代表代码）]
+      ICMP_CODE: [text, false, ICMP 代码号]
+      TCP_FLAG: [text, false, TCP 标志条件（established：带 ACK 或 RST 的报文）]
+      FRAGMENTS: [text, false, 只匹配非首片分片]
+      TIME: [text, false, 时间段名]
+      STATE: [text, false, 采集时时间段是否生效（active、inactive）]
+      VRF: [text, false, 规则限定的 VPN 实例；没有时的含义由实现声明]
+      OTHER: [text, false, 模板不认识的条件原文；有它的规则不按缺省条件计算]
+      MATCHES: [integer, false, 命中次数]
+
+  topology.acl_bindings:
+    # 2026-10-05: which ACL filters which direction of an interface, and what it does with
+    # packets no entry matches.
+    name: 拓扑发现：ACL 的接口绑定
+    entity_type: acl_binding
+    keys: [INTERFACE, DIRECTION]
+    values:
+      INTERFACE: [text, true, 接口]
+      DIRECTION: [text, true, 方向原文（Inbound、Outgoing、Outbound）]
+      ADDRESS_FAMILY: [text, false, 地址族原文（IPv4、IPv6、MAC）]
+      ACL_NAME: [text, false, 绑定的 ACL 名或编号]
+      SCOPE: [text, false, ACL 的作用范围（Common：与接口自己的 ACL 一起生效）]
+      STATUS: [text, false, 绑定状态原文（如 Failed：未生效）]
+      DEFAULT_ACTION: [text, false, 没有规则命中时的动作（Permit、Deny）]
+
+  topology.security_zones:
+    # 2026-10-05: between security zones traffic is denied unless a security policy
+    # permits it, which a path does not evaluate.
+    name: 拓扑发现：安全域成员
+    entity_type: security_zone_member
+    keys: [ZONE, INTERFACE]
+    values:
+      ZONE: [text, true, 安全域名]
+      INTERFACE: [text, true, 成员接口]
+
+  topology.nat_rules:
+    # 2026-10-05: the NAT rules a path applies (source NAT by ACL, static mappings, port
+    # mappings) and the address pools they translate to.
+    name: 拓扑发现：NAT 规则
+    entity_type: nat_rule
+    keys: [KIND]
+    values:
+      KIND: [text, true, 规则种类原文（pool、inside source list、inside source static、address group、outbound、internal server、Static 等）]
+      POOL: [text, false, 地址池名或地址组号（--- 表示不用地址池）]
+      POOL_START: [ip_or_unassigned, false, 地址池起始地址]
+      POOL_END: [ip_or_unassigned, false, 地址池结束地址]
+      INTERFACE: [text, false, 规则绑定的接口（Comware）]
+      ACL_NAME: [text, false, 决定哪些报文转换的 ACL（--- 表示全部）]
+      TO_INTERFACE: [text, false, 转换成该接口的地址（IOS interface）]
+      OVERLOAD: [text, false, 端口复用（IOS overload）]
+      NO_PAT: [text, false, 不做端口转换（Comware NO-PAT：Y、N）]
+      PROTOCOL: [text, false, 端口映射的协议名或号码]
+      LOCAL_ADDRESS: [ip_or_unassigned, false, 内部地址]
+      LOCAL_PORT: [text, false, 内部端口]
+      GLOBAL_ADDRESS: [ip_or_unassigned, false, 外部地址]
+      GLOBAL_INTERFACE: [text, false, 以该接口的地址为外部地址（IOS interface）]
+      GLOBAL_PORT: [text, false, 外部端口]
+      VRF: [text, false, 规则所在的 VPN 实例]
+      STATUS: [text, false, 规则状态原文（如 Active）]
+      OTHER: [text, false, 模板不认识的规则内容；有它的规则不计算]
+
+  topology.pbr_rules:
+    # 2026-10-06: the content of an IPv4 policy route, which a path evaluates at the hops
+    # its bindings name (topology.pbr_bindings). One row per node.
+    name: 拓扑发现：策略路由的节点
+    entity_type: pbr_rule
+    keys: [POLICY, NODE]
+    values:
+      POLICY: [text, true, 策略名]
+      NODE: [integer, true, 节点号（按从小到大的顺序匹配）]
+      MODE: [text, true, 节点模式（permit、deny）]
+      MATCH_ACL: [text, false, 节点匹配的 ACL（if-match acl）]
+      NEXT_HOP: [ip_or_unassigned, false, 节点设置的唯一下一跳（apply next-hop）]
+      OTHER: [text, false, 模板不认识的条件或动作原文；有它的节点不计算]
+
+implementations:
+  - check_item: topology.arp
+    platform: ios
+    command: show ip arp
+    scoped_command: show ip arp vrf {vrf}
+    units: {AGE: min}  # the "Age (min)" column prints bare numbers
+    template: Cisco/IOS/show_ip_arp__topology-1.0.0.textfsm
+    sha256: fc5f65adbd929552fadc05e9d65861e637557ed24f16f58b71b21f6c853b81f3
+    valid_empty: [BLANK]
+    required: ['^Protocol\s+Address\s+Age \(min\)\s+Hardware Addr\s+Type\s+Interface\s*$']
+  - check_item: topology.arp
+    platform: comware
+    version: 2
+    command: display arp verbose
+    template: H3C/Comware7/display_arp_verbose__topology-1.0.0.textfsm
+    sha256: adfa8013759f67e6cdb9bdbe8283ed4c5b8ea58a32b64acc0eebb74975d39987
+    required: ['^IP address\s+:']
+  - check_item: topology.routes
+    platform: ios
+    command: show ip route
+    scoped_command: show ip route vrf {vrf}
+    # The per-VRF table names its instance; any other name is refused.
+    scope_header: '^Routing Table: (\S+)\s*$'
+    template: Cisco/IOS/show_ip_route__topology-1.0.0.textfsm
+    sha256: d8087d85683b4e669128d5120d654d7a93e85906254b71dc38528519390df20b
+    required: ['^Gateway of last resort ']
+  - check_item: topology.routes
+    platform: comware
+    command: display ip routing-table
+    scoped_command: display ip routing-table vpn-instance {vrf}
+    template: H3C/Comware7/display_ip_routing-table__topology-1.0.0.textfsm
+    sha256: 68c4957d9d6ebb66c3b5783cd3c9c3c7e90e69cda4edb1164c5b9656e864851d
+    required: ['^Destination/Mask\s+Proto\s+Pre\s+Cost\s+NextHop\s+Interface\s*$']
+    counts:
+      - {pattern: '^\s*Destinations\s*:\s*(\d+)\s+Routes\s*:\s*\d+\s*$', of: keys}
+      - {pattern: '^\s*Destinations\s*:\s*\d+\s+Routes\s*:\s*(\d+)\s*$', of: rows}
+  - check_item: topology.vrf_detail
+    platform: ios
+    command: show vrf detail
+    template: Cisco/IOS/show_vrf_detail__topology-1.0.0.textfsm
+    sha256: 9086ef2f312bbba974e5f60a3bfcf4dbe269212eca0ff6813b4268dceec0438b
+    valid_empty: [BLANK]
+  - check_item: topology.vrf_detail
+    platform: comware
+    command: display ip vpn-instance instance-name {vrf}
+    template: H3C/Comware7/display_ip_vpn-instance_instance-name__topology-1.0.0.textfsm
+    sha256: c45195b6fe49e71ca3086a942a4fb5f0a14e480e09b1d2ba45b0621774230f7b
+  - check_item: topology.evpn_peers
+    platform: ios
+    command: show nve peers
+    template: Cisco/IOS/show_nve_peers__topology-1.0.0.textfsm
+    sha256: 6b8e6eb25295446caf1f7c68517ce356633f49200a1e64d5db1227261c2a6144
+    valid_empty: [BLANK]
+  - check_item: topology.evpn_peers
+    platform: comware
+    command: display evpn auto-discovery imet
+    template: H3C/Comware7/display_evpn_auto-discovery_imet__topology-1.0.0.textfsm
+    sha256: 3ed58acc8c850984224c95176f8b232c6204809f58659162375385737dfd5203
+    valid_empty: [BLANK]
+
+  - check_item: topology.ldp_peers
+    platform: ios
+    command: show mpls ldp neighbor
+    template: Cisco/IOS/show_mpls_ldp_neighbor__topology-1.0.0.textfsm
+    sha256: 692907d12c5acbcac928b5c7f93ee25a78d4d65e84f931da3ad731df626ddf60
+    valid_empty: [BLANK]
+  - check_item: topology.ldp_peers
+    platform: comware
+    command: display mpls ldp peer
+    template: H3C/Comware7/display_mpls_ldp_peer__topology-1.0.0.textfsm
+    sha256: a5101632bd203cb91ec273c04ac9a351bd2432ddb64b13c9e460f622837b63d1
+    valid_empty: [BLANK]
+    required: ['^\s*Peer LDP ID\s+State\s+Role\s+GR\s+MD5\s+KA Sent/Rcvd\s*$']
+    counts:
+      - {pattern: '^\s*Total number of peers:\s+(\d+)\s*$', of: rows}
+
+  - check_item: topology.mpls_lfib
+    platform: ios
+    command: show mpls forwarding-table
+    template: Cisco/IOS/show_mpls_forwarding-table__topology-1.0.0.textfsm
+    sha256: fdf4c1f6bc7ca3a8a84c9212727753598f8a2a29dfd9fd7efcd85a59c07259af
+    valid_empty: [BLANK, '\A\s*no MPLS apps enabled or MPLS not enabled on any interfaces\s*\Z']
+    required: ['^Local\s+Outgoing\s+Prefix\s+Bytes Label\s+Outgoing\s+Next Hop\s*$']
+  - check_item: topology.mpls_lfib
+    platform: comware
+    command: display mpls lsp
+    template: H3C/Comware7/display_mpls_lsp__topology-1.0.0.textfsm
+    sha256: a5bbe128f5d871eff41edb70e4e489080d1ae2a1490b836116af5922a6805f89
+    valid_empty: [BLANK]
+    required: ['^FEC\s+Proto\s+In/Out Label\s+Out Inter/NHLFE/LSINDEX\s*$']
+  - check_item: topology.evpn_instances
+    platform: ios
+    command: show l2vpn evpn evi detail
+    template: Cisco/IOS/show_l2vpn_evpn_evi_detail__topology-1.0.0.textfsm
+    sha256: d5fad65ea291941f76060404fa1213e4ac3ea5d9c53590c8846c612663335239
+    valid_empty: [BLANK]
+  - check_item: topology.evpn_instances
+    platform: comware
+    command: display evpn instance verbose
+    template: H3C/Comware7/display_evpn_instance_verbose__topology-1.0.0.textfsm
+    sha256: 31b6ab26f9b6823c9df0ca73fd44b56fcde9a6775cb65ff3ef67fddec3e7ec3e
+    valid_empty: [BLANK]
+  - check_item: topology.vxlan_vnis
+    platform: ios
+    command: show nve vni
+    template: Cisco/IOS/show_nve_vni__topology-1.0.0.textfsm
+    sha256: b9eccd3d56c46f88d9febd953cfe0fa348aba0300e6211da372eed51bc2c44f3
+    valid_empty: [BLANK]
+  - check_item: topology.vxlan_vnis
+    platform: comware
+    command: display l2vpn vsi verbose
+    template: H3C/Comware7/display_l2vpn_vsi_verbose__topology-1.0.0.textfsm
+    sha256: 6c02bb04fefc82fde4294dfad16164fd2f446179eb5a0fd5529daa65f132463b
+    valid_empty: [BLANK]
+  - check_item: topology.tunnel_interfaces
+    platform: comware
+    command: display interface tunnel
+    template: H3C/Comware7/display_interface_tunnel__topology-1.0.0.textfsm
+    sha256: e1b7f3c7fdf02f0f4c41129b8c295b0fa82abad6bf0e57e293cd77d6fe32b002
+    valid_empty: [BLANK]
+  - check_item: topology.evpn_mac
+    platform: ios
+    command: show l2vpn evpn mac
+    template: Cisco/IOS/show_l2vpn_evpn_mac__topology-1.0.0.textfsm
+    sha256: 5e75699aa4af562da253ac31e23be31a6d4f53acbb02772581f4c076e3d6629d
+    valid_empty: [BLANK]
+  - check_item: topology.evpn_mac
+    platform: comware
+    command: display evpn route mac
+    template: H3C/Comware7/display_evpn_route_mac__topology-1.0.0.textfsm
+    sha256: 6fd1027699b29f95c3d027ddb30313b5fc53e7a8642d901809d57653d3a55989
+    valid_empty: [BLANK]
+  - check_item: topology.vrfs
+    platform: ios
+    command: show vrf
+    template: Cisco/IOS/show_vrf__topology-1.0.0.textfsm
+    sha256: d00df029d303c77f4e678ac25c2126bdf503d392370993aadc50ae35fc8e2388
+    required: ['^\s*Name\s+Default RD\s+Protocols\s+Interfaces\s*$']
+  - check_item: topology.vrfs
+    platform: comware
+    command: display ip vpn-instance
+    template: H3C/Comware7/display_ip_vpn-instance__topology-1.0.0.textfsm
+    sha256: 232ad0d3db0dc013bdfe1fca6e7602c6f48a56ae198aa24c25ca232039b05a7a
+    valid_empty: ['\A\s*L3VPN is not configured\.\s*\Z']
+    required: ['^\s*Total VPN-Instances configured\s*:']
+    counts:
+      - {pattern: '^\s*Total VPN-Instances configured\s*:\s*(\d+)\s*$', of: rows}
+  - check_item: topology.bgp_ipv4_peers
+    platform: ios
+    command: show ip bgp summary
+    template: Cisco/IOS/show_bgp_summary__topology-1.0.0.textfsm
+    sha256: 0b03c73aaf23572fd578be5b08fd6c4cc1b6fef50b95c0b1c4d49c1b59b49ec8
+    valid_empty: [BLANK, '\A\s*% BGP not active\.?\s*\Z']
+  - check_item: topology.bgp_ipv4_peers
+    platform: comware
+    command: display bgp peer ipv4
+    template: H3C/Comware7/display_bgp_peer__topology-1.0.0.textfsm
+    sha256: 60d8ebc6d876731f0c114937422068a36212b192d9e2b7f603ee61573f7b8b52
+    valid_empty: [BLANK]
+    counts:
+      - {pattern: '^\s*Total number of peers:\s*(\d+)\s', of: rows}
+  - check_item: topology.bgp_vpnv4_peers
+    platform: ios
+    command: show bgp vpnv4 unicast all summary
+    template: Cisco/IOS/show_bgp_summary__topology-1.0.0.textfsm
+    sha256: 0b03c73aaf23572fd578be5b08fd6c4cc1b6fef50b95c0b1c4d49c1b59b49ec8
+    valid_empty: [BLANK, '\A\s*% BGP not active\.?\s*\Z']
+  - check_item: topology.bgp_vpnv4_peers
+    platform: comware
+    command: display bgp peer vpnv4
+    template: H3C/Comware7/display_bgp_peer__topology-1.0.0.textfsm
+    sha256: 60d8ebc6d876731f0c114937422068a36212b192d9e2b7f603ee61573f7b8b52
+    valid_empty: [BLANK]
+    counts:
+      - {pattern: '^\s*Total number of peers:\s*(\d+)\s', of: rows}
+  - check_item: topology.bgp_evpn_peers
+    platform: ios
+    command: show bgp l2vpn evpn summary
+    template: Cisco/IOS/show_bgp_summary__topology-1.0.0.textfsm
+    sha256: 0b03c73aaf23572fd578be5b08fd6c4cc1b6fef50b95c0b1c4d49c1b59b49ec8
+    valid_empty: [BLANK, '\A\s*% BGP not active\.?\s*\Z']
+  - check_item: topology.bgp_evpn_peers
+    platform: comware
+    command: display bgp peer l2vpn evpn
+    template: H3C/Comware7/display_bgp_peer__topology-1.0.0.textfsm
+    sha256: 60d8ebc6d876731f0c114937422068a36212b192d9e2b7f603ee61573f7b8b52
+    valid_empty: [BLANK]
+    counts:
+      - {pattern: '^\s*Total number of peers:\s*(\d+)\s', of: rows}
+  - check_item: topology.ospf_neighbors
+    platform: ios
+    command: show ip ospf neighbor
+    template: Cisco/IOS/show_ip_ospf_neighbor__topology-1.0.0.textfsm
+    sha256: d7f6af9707e3d0b41a271ef4aec04626bd4fbba75a8d48b50bb15c1aa913fe73
+    valid_empty: [BLANK]
+  - check_item: topology.ospf_neighbors
+    platform: comware
+    command: display ospf peer
+    template: H3C/Comware7/display_ospf_peer__topology-1.0.0.textfsm
+    sha256: 76ba8c112bb3adf81cc170446467303861701a4e8acd37032c49bfcf4f5b3db8
+  - check_item: topology.vrrp
+    platform: ios
+    command: show vrrp
+    template: Cisco/IOS/show_vrrp__topology-1.0.0.textfsm
+    sha256: 20e03beb9d0970ddc2c39d35ccbd308c9ba4486c4c571875e3dc54515e7c7c3f
+    valid_empty: [BLANK, '\A\s*VRRP4 is not configured\.\s*\Z']
+  - check_item: topology.vrrp
+    platform: comware
+    command: display vrrp verbose
+    template: H3C/Comware7/display_vrrp_verbose__topology-1.0.0.textfsm
+    sha256: 2d7a1ab2b933c555c4f514c239c9765c3bfcb735c6ca6fb0e29a4909abf5b63b
+    valid_empty: ['\A\s*VRRP4 is not configured\.\s*\Z']
+    counts:
+      - {pattern: '^\s*Total number of virtual routers\s*:\s*(\d+)\s*$', of: rows}
+  - check_item: topology.lag
+    platform: ios
+    command: show etherchannel summary
+    template: Cisco/IOS/show_etherchannel_summary__topology-1.0.0.textfsm
+    sha256: e4d8126efc0838401fab6751f3363b3311f14354d94c1bff9518d361c7d826e3
+    required: ['^Group\s+Port-channel\s+Protocol\s+Ports\s*$']
+    counts:
+      - {pattern: '^Number of channel-groups in use:\s*(\d+)\s*$', of: rows}
+  - check_item: topology.lag
+    platform: comware
+    command: display link-aggregation verbose
+    template: H3C/Comware7/display_link-aggregation_verbose__topology-1.0.0.textfsm
+    sha256: cd410c8318b331fe538632ba30c309eaee288c9e7f8da5038338cc968837312f
+    valid_empty: ['\A\s*No link aggregation group exists\.\s*\Z']
+  - check_item: topology.stp_ports
+    platform: ios
+    command: show spanning-tree
+    template: Cisco/IOS/show_spanning-tree__topology-1.0.0.textfsm
+    sha256: d0929b4656302b2f3a620be255eb41f0963b6c59c1639d9bd205bcf7f8960744
+    valid_empty: ['\A\s*No spanning tree instances? exists?\.?\s*\Z']
+  - check_item: topology.interfaces
+    platform: ios
+    command: show interfaces description
+    template: Cisco/IOS/show_interfaces_description__topology-1.0.0.textfsm
+    sha256: 4e1f96363721ad3ebf079146fcba3c1955800c8b6bd0c9b2b568fbadc58bd42e
+    required: ['^Interface\s+Status\s+Protocol\s+Description\s*$']
+  - check_item: topology.interfaces
+    platform: comware
+    command: display interface brief
+    template: H3C/Comware7/display_interface_brief__topology-1.0.0.textfsm
+    sha256: 8ffe80b0df0a35cb9d527f2f2531927afd4a7448aadfc3bf5bfdc576489f7499
+    required: ['^Brief information on interfaces in (route|bridge) mode:']
+  - check_item: topology.ip_interfaces
+    platform: ios
+    command: show ip interface
+    template: Cisco/IOS/show_ip_interface__topology-1.0.0.textfsm
+    sha256: 60b6993667547189f1d868c971ae00a28d503a47b3e4ec554235a9994d4bf910
+  - check_item: topology.ip_interfaces
+    platform: comware
+    command: display ip interface brief
+    template: H3C/Comware7/display_ip_interface_brief__topology-1.0.0.textfsm
+    sha256: e3c4df5fd141da5300087d46bea1070f604a2800aeffbddbe312203226e1d918
+    required: ['^Interface\s+Physical\s+Protocol\s+IP address/Mask\s+VPN instance\s+Description\s*$']
+  - check_item: topology.mac
+    platform: ios
+    command: show mac address-table
+    template: Cisco/IOS/show_mac_address-table__topology-1.0.0.textfsm
+    sha256: e798dc93d17644ba1550cedd86f820d3d98d0a1b59e48ef0da8d8af0a80d4741
+    valid_empty: [BLANK]
+    counts:
+      - {pattern: '^Total Mac Addresses for this criterion:\s*(\d+)\s*$', of: rows}
+  - check_item: topology.mac
+    platform: comware
+    command: display mac-address
+    template: H3C/Comware7/display_mac-address__topology-1.0.0.textfsm
+    sha256: 9a90d6b1dbfa34e75d024fcca2227d33a04e4ed773c32c53c4a64762fcd44452
+    required: ['^MAC Address\s+VLAN ID\s+State\s+Port/Nickname\s+Aging\s*$']
+  - check_item: topology.vlans
+    platform: ios
+    command: show vlan brief
+    template: Cisco/IOS/show_vlan_brief__topology-1.0.0.textfsm
+    sha256: bd46c884c6d26c4f209737c0d509f9e6a7d97d30d844e3061c9a4bcd4fe18faf
+    required: ['^VLAN\s+Name\s+Status\s+Ports\s*$']
+  - check_item: topology.vlans
+    platform: comware
+    command: display vlan brief
+    template: H3C/Comware7/display_vlan_brief__topology-1.0.0.textfsm
+    sha256: 89a2804718425dc1539d30a6b3629278d01074f18675d76ba735283340103703
+    required: ['^VLAN ID\s+Name\s+Port\s*$']
+  - check_item: topology.lldp_neighbors
+    platform: ios
+    command: show lldp neighbors detail
+    template: Cisco/IOS/show_lldp_neighbors_detail__topology-1.0.0.textfsm
+    sha256: cbc6492a09d01f0b30790e83ef3adcaeb29b56b22d689fc8e314e6da13be5dfc
+    valid_empty: ['\A\s*Total entries displayed:\s*0\s*\Z']
+    counts:
+      - {pattern: '^Total entries displayed:\s*(\d+)\s*$', of: rows}
+  - check_item: topology.lldp_neighbors
+    platform: comware
+    command: display lldp neighbor-information verbose
+    template: H3C/Comware7/display_lldp_neighbor-information_verbose__topology-1.0.0.textfsm
+    sha256: c653c75fe7208f217b7d1d4e9b31b42826aa5fc61d1f9b0321746a4c6ec2508f
+    valid_empty: ['\A\s*No (LLDP )?neighbors?( found)?\.?\s*\Z']
+  - check_item: topology.device_version
+    platform: ios
+    command: show version
+    template: Cisco/IOS/show_version__topology-1.0.0.textfsm
+    sha256: 78f6e85a9089485fa0c458af607e2c382dd702547f2cc991c3376c0c0db8491c
+    required: ['\bIOS\b.*\bVersion\s']
+  - check_item: topology.device_version
+    platform: comware
+    command: display version
+    template: H3C/Comware7/display_version__topology-1.0.0.textfsm
+    sha256: 80ed5f69c2c4b65b60a90f8daabf93cdd17aff277b9c6adaebb0c8ce1927f3f5
+    required: ['\bComware\b.*\bVersion\s']
+  - check_item: topology.lldp_local
+    platform: comware
+    command: display lldp local-information
+    template: H3C/Comware7/display_lldp_local-information__topology-1.0.0.textfsm
+    sha256: c2057ea05758209236d2c2c525996dfe68a526066b91bf243a4d65040720df46
+    required: ['^\s*Chassis ID\s*:']
+  - check_item: topology.trunks
+    platform: ios
+    command: show interfaces trunk
+    template: Cisco/IOS/show_interfaces_trunk__topology-1.0.0.textfsm
+    sha256: 455aaf7e61efab9ff4d8a06744de14674312d723b656e9c43f7fee049c03a7f7
+    valid_empty: [BLANK]
+    required:
+      - '^Port\s+Mode\s+Encapsulation\s+Status\s+Native vlan\s*$'
+      - '^Port\s+Vlans allowed on trunk\s*$'
+      - '^Port\s+Vlans allowed and active in management domain\s*$'
+      - '^Port\s+Vlans in spanning tree forwarding state and not pruned\s*$'
+  - check_item: topology.trunks
+    platform: comware
+    command: display port trunk
+    template: H3C/Comware7/display_port_trunk__topology-1.0.0.textfsm
+    sha256: 613edd0fc9124993689eb7cfb1af8f3e27537d82b6f44cd1006a820b5e54c81a
+    valid_empty: [BLANK]
+  - check_item: topology.switchports
+    platform: ios
+    command: show interfaces switchport
+    template: Cisco/IOS/show_interfaces_switchport__topology-1.0.0.textfsm
+    sha256: 14186c2842798c90ae3df70678053239ceb2ed8846e718f28db0bbb4131a7459
+  - check_item: topology.ospf_interfaces
+    platform: ios
+    command: show ip ospf interface brief
+    template: Cisco/IOS/show_ip_ospf_interface_brief__topology-1.0.0.textfsm
+    sha256: 724b377e870021093ebc56634abaafa1dfb503e6580a1ac03b34b495e0df364d
+    valid_empty: [BLANK]
+  - check_item: topology.ospf_interfaces
+    platform: comware
+    command: display ospf interface
+    template: H3C/Comware7/display_ospf_interface__topology-1.0.0.textfsm
+    sha256: 47ce58c6f8ec942508cdec14eb9424361b81aafd851e667dfff1b8690a3fe9cc
+  - check_item: topology.ospf_process
+    platform: ios
+    command: show ip ospf
+    template: Cisco/IOS/show_ip_ospf__topology-1.0.0.textfsm
+    sha256: 235c6c4d41bd0dd52653f695ff31e9f1d280ec4435bd83c33486c379b90f7eae
+    valid_empty: [BLANK]
+  - check_item: topology.ospf_process
+    platform: comware
+    command: display ospf
+    template: H3C/Comware7/display_ospf__topology-1.0.0.textfsm
+    sha256: c63a4c6a59d1ac98aed1a7748f1196e0aa2c9cca68bf5fa1a8371c58f295cf45
+
+  - check_item: topology.pbr_bindings
+    platform: ios
+    command: show ip policy
+    template: Cisco/IOS/show_ip_policy__topology-1.0.0.textfsm
+    sha256: f1c3fb77da4ecd9cbd0a900d50297f524783a455ba67f71a31ceda7d070ac177
+    required: ['^Interface\s+Route map\s*$']
+  - check_item: topology.pbr_bindings
+    platform: comware
+    command: display ip policy-based-route setup
+    template: H3C/Comware7/display_ip_policy-based-route_setup__topology-1.0.0.textfsm
+    sha256: 3006a6fd3e0f8d1feac61c9f9bfb181b44ce548f960a5d6586a9fb9434b1fe87
+    valid_empty: ['\A\s*PBR4 is not configured\.\s*\Z']
+    required: ['^Policy name\s+Type\s+Interface\s*$']
+  - check_item: topology.pbr_rules
+    platform: comware
+    command: display ip policy-based-route
+    template: H3C/Comware7/display_ip_policy-based-route__topology-1.0.0.textfsm
+    sha256: fbbba0c55b56ceacaa3515d6a113f3f07c5db00698201ce8594e5787c4408fbf
+  - check_item: topology.nat_bindings
+    platform: ios
+    command: show ip nat statistics
+    template: Cisco/IOS/show_ip_nat_statistics__topology-1.0.0.textfsm
+    sha256: 42c35f0675170d46cc64ad5f1eee868f73b291ac3f73a2e095521ba3c66be4cf
+    valid_empty: [BLANK]  # IOS prints nothing until NAT is configured
+    required: ['^Total active translations:']
+  - check_item: topology.nat_bindings
+    platform: comware
+    command: display nat all
+    template: H3C/Comware7/display_nat_all__topology-1.0.0.textfsm
+    sha256: 25bf5f5a09b1cf3e96ed60a391cdb23e8c8bbad89a864be9e72c91d27d7be045
+    valid_empty: ['\A\s*NAT is not configured\.\s*\Z']
+  - check_item: topology.acl_rules
+    platform: ios
+    command: show ip access-lists
+    template: Cisco/IOS/show_ip_access-lists__topology-1.0.0.textfsm
+    sha256: 55d078b33932472a01ae694f654812743eb9babfb7c2d3029a2d4334226342d8
+    valid_empty: [BLANK]  # no ACL configured
+  - check_item: topology.acl_rules
+    platform: comware
+    command: display acl all
+    template: H3C/Comware7/display_acl_all__topology-1.0.0.textfsm
+    sha256: 6584ca9ec9e3402877c04a039e1c8d5b7ee2b440d20b89a1b20206101d9c1229
+    valid_empty: [BLANK]  # no ACL configured
+    # A Comware rule without vpn-instance applies only to non-VPN packets ("--": the
+    # public network); an IOS entry has no instance condition.
+    defaults: {VRF: '--'}
+  - check_item: topology.acl_bindings
+    platform: ios
+    command: show ip interface
+    template: Cisco/IOS/show_ip_interface_acl__topology-1.0.0.textfsm
+    sha256: 418be122a68bfb7b3c5d6da29fa6c0a520b52cbfc81e62347509494b4e7b55d3
+    required: ['^\S+ is .*, line protocol is ']
+    # IPv4 only; an IOS ACL ends with an implicit deny.
+    defaults: {ADDRESS_FAMILY: IPv4, DEFAULT_ACTION: Deny}
+  - check_item: topology.acl_bindings
+    platform: comware
+    command: display packet-filter interface
+    template: H3C/Comware7/display_packet-filter_interface__topology-1.0.0.textfsm
+    sha256: bd9ea585a63425e31818e04113e6412aa8b195c13c773af14d638d0b4c96d0f9
+    valid_empty: [BLANK]  # no packet filter applied
+  - check_item: topology.security_zones
+    platform: comware
+    command: display security-zone
+    template: H3C/Comware7/display_security-zone__topology-1.0.0.textfsm
+    sha256: 33fbdf5c7b348a5afab2e172f7eaf191c995c63e7c1f31b0b2b782db00c05e29
+    valid_empty: ['\A\s*There is no zone\.\s*\Z']
+  - check_item: topology.nat_rules
+    platform: ios
+    command: show running-config | include ip nat
+    template: Cisco/IOS/show_running-config_include_ip_nat__topology-1.0.0.textfsm
+    sha256: 2dc2b53d3287233dd1ffc7cf7fe43332d1fe10a89ac30c7d9dc8c46d3aeef297
+    valid_empty: [BLANK]  # no NAT statement
+  - check_item: topology.nat_rules
+    platform: comware
+    command: display nat all
+    template: H3C/Comware7/display_nat_all_rules__topology-1.0.0.textfsm
+    sha256: 16a2a5a23f769bb8e13b74d1a48e38cbd2c378a4bc7fa43c4757e22349dbd24e
+    valid_empty: ['\A\s*NAT is not configured\.\s*\Z']
+platforms:
+  ios: {vendor: Cisco, platforms: [ios, iosxe], family: IOS}
+  comware: {vendor: H3C, platforms: [comware], family: Comware7}

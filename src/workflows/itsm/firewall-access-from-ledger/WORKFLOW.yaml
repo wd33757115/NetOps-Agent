@@ -1,0 +1,71 @@
+# SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
+# SPDX-License-Identifier: Apache-2.0
+
+name: firewall-access-from-ledger
+description: 按资源台账开通防火墙策略：从台账取源和目的（IP 或业务系统）的地址与服务端口生成策略申请表，再生成防火墙策略和变更工单
+version: "1.0"
+
+test:
+  context:
+    ticket_id: REQ-TEST-002
+    source: 10.248.255.11
+    destination: 风险评估系统
+    source_subsystem:
+    destination_subsystem:
+    ports:
+    start_time:
+    end_time:
+    long_link:
+    ticket_title: 按台账开通防火墙策略
+    change_background:
+    change_purpose:
+    requester:
+    requester_dept:
+    assignee:
+    due_date:
+  required_context:
+    - ticket_id
+    - source
+    - destination
+
+steps:
+  - name: request_draft
+    label: 按台账生成申请表
+    skill: app:firewall-policy/draft_request
+    inputs:
+      ticket_id: ${context.ticket_id}
+      source: ${context.source}
+      destination: ${context.destination}
+      source_subsystem: ${context.source_subsystem}
+      destination_subsystem: ${context.destination_subsystem}
+      ports: ${context.ports}
+      start_time: ${context.start_time}
+      end_time: ${context.end_time}
+      long_link: ${context.long_link}
+
+  - name: policy_generation
+    label: 生成防火墙策略
+    skill: app:firewall-policy/generate_policy
+    inputs:
+      ticket_id: ${context.ticket_id}
+      policy_file_url: ${steps.request_draft.result.policy_file_url}
+
+  - name: change_ticket
+    label: 编写变更工单
+    skill: app:firewall-policy/write_change_ticket
+    inputs:
+      policy_run_id: ${steps.policy_generation.result.policy_run_id}
+      ticket_title: ${context.ticket_title}
+      change_background: ${context.change_background}
+      change_purpose: ${context.change_purpose}
+      requester: ${context.requester}
+      requester_dept: ${context.requester_dept}
+      assignee: ${context.assignee}
+      due_date: ${context.due_date}
+
+on_complete:
+  message: 已按资源台账生成防火墙策略和变更工单
+  notification:
+    title: "防火墙策略已生成 (${context.ticket_id})"
+    body: "${steps.request_draft.result.message}；${steps.policy_generation.result.message}，变更工单已生成。"
+    level: success

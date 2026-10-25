@@ -1,0 +1,19 @@
+Value TABLE (Interface)
+Value INTERFACE (\S+)
+Value PROCESS_ID (\S+)
+Value AREA (\S+)
+Value ADDRESS (\S+)
+Value COST (\S+)
+Value STATE (\S+)
+Value NEIGHBORS (\S+)
+Value BAD_ROW (\S.*?)
+
+# One record per line of "show ip ospf interface brief" (campus-wan lab, IOS-XE 17): the
+# table header (TABLE), an interface row, or another line led by an interface name
+# (BAD_ROW). Topology checks the order and the values (rules_tables.ospf_interfaces).
+Start
+  ^\s*${TABLE}\s+PID\s+Area\s+IP Address/Mask\s+Cost\s+State\s+Nbrs F/C\s*$$ -> Record
+  ^\s*${INTERFACE}\s+${PROCESS_ID}\s+${AREA}\s+${ADDRESS}\s+${COST}\s+${STATE}\s+${NEIGHBORS}\s*$$ -> Record
+  ^\s*${INTERFACE}\s+${BAD_ROW}\s*$$ -> Record
+  ^\s*$$
+  ^. -> Error "unrecognized ospf interface line"

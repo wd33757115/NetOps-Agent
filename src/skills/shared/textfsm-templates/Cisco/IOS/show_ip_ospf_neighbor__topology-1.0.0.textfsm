@@ -1,0 +1,19 @@
+Value NEIGHBOR_ID (\d+\.\d+\.\d+\.\d+)
+Value PRIORITY (\d+)
+Value STATE ([\w-]+)
+Value ROLE (\S+)
+Value DEAD_TIME (\S+)
+Value ADDRESS (\d+\.\d+\.\d+\.\d+)
+Value INTERFACE (\S+)
+
+# One record per OSPF neighbour, all processes in one table (campus-wan and vpn-fabric
+# labs, IOS-XE 17). "FULL/  -": no DR role on a point-to-point link.
+Start
+  ^Neighbor ID\s+Pri\s+State\s+Dead Time\s+Address\s+Interface\s*$$ -> Neighbors
+  ^\s*$$
+  ^. -> Error "unrecognized show ip ospf neighbor line"
+
+Neighbors
+  ^${NEIGHBOR_ID}\s+${PRIORITY}\s+${STATE}/\s*${ROLE}\s+${DEAD_TIME}\s+${ADDRESS}\s+${INTERFACE}\s*$$ -> Record
+  ^\s*$$
+  ^. -> Error "unrecognized OSPF neighbor row"

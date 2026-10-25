@@ -1,0 +1,41 @@
+Value Filldown KIND (outbound|internal server|inbound|static)
+Value Required INTERFACE (\S+)
+Value RULE (\S+)
+
+# "display nat all": the sections that bind NAT to an interface - "NAT outbound
+# information", "NAT internal server information", "NAT inbound information" and
+# "Interfaces enabled with static NAT" - hold one block per rule, each with its
+# "Interface:" line (an outbound or inbound rule also names its ACL). Blank lines separate
+# the blocks of a section; a line at the left margin starts the next section. The other
+# sections (static mappings, address groups, logging, ALG, global settings) bind no
+# interface and are passed over whole; an interface line in any of them is a binding this
+# template does not know, and fails the output rather than being passed over.
+Start
+  ^\s+.*\b[Ii]nterfaces?\b.*: -> Error "interface in an unrecognized display nat section"
+  ^NAT\s+${KIND}\s+information:\s*$$ -> Rules
+  ^Interfaces enabled with ${KIND} NAT:\s*$$ -> Rules
+  ^\S.*:\s*$$ -> Other
+  ^\S.*$$
+  ^\s*$$
+
+Rules
+  ^\S -> Continue.Record
+  ^NAT\s+${KIND}\s+information:\s*$$
+  ^Interfaces enabled with ${KIND} NAT:\s*$$
+  ^\S.*:\s*$$ -> Other
+  ^\S.*$$ -> Start
+  ^\s+Interface: -> Continue.Record
+  ^\s+Interface:\s+${INTERFACE}\s*$$
+  ^\s+ACL:\s+${RULE}\s*$$
+  ^\s+Totally\s+\d+\s+.*$$
+  ^\s{4}\S.*$$
+  ^\s*$$ -> Record
+  ^.* -> Error "unrecognized display nat line"
+
+Other
+  ^\s*$$ -> Start
+  ^\s+.*\b[Ii]nterfaces?\b.*: -> Error "interface in an unrecognized display nat section"
+  ^NAT\s+${KIND}\s+information:\s*$$ -> Rules
+  ^Interfaces enabled with ${KIND} NAT:\s*$$ -> Rules
+  ^\s+\S.*$$
+  ^\S.*$$ -> Start

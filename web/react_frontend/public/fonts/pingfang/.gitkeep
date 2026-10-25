@@ -1,0 +1,11 @@
+# 可选：替换为自有苹方 woff2
+
+将以下文件放入此目录后，在 `src/styles/fonts.css` 中取消 `@font-face` 注释：
+
+- `PingFangSC-Regular.woff2`（400）
+- `PingFangSC-Medium.woff2`（500）
+- `PingFangSC-Semibold.woff2`（600）
+
+**注意**：苹方为 Apple 商业字体，请确保你有合法授权后再打包进项目。
+
+默认构建使用 npm 依赖 `harmonyos-sans-sc-webfont-splitted`（HarmonyOS Sans SC，开源可分发）。

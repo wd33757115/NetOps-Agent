@@ -1,0 +1,505 @@
+module ietf-simap-topology {
+  yang-version 1.1;
+  namespace "urn:ietf:params:xml:ns:yang:ietf-simap-topology";
+  prefix st;
+
+  import ietf-network {
+    prefix nw;
+    reference
+      "RFC 8345: A YANG Data Model for Network Topologies";
+  }
+
+  import ietf-network-topology {
+    prefix nt;
+    reference
+      "RFC 8345: A YANG Data Model for Network Topologies";
+  }
+
+  import ietf-yang-types {
+    prefix yang;
+  }
+
+  import ietf-inet-types {
+    prefix inet;
+  }
+
+  organization
+    "Network Management Operations (NMOP) Working Group";
+
+  contact
+    "WG Web:    <https://datatracker.ietf.org/group/nmop/>
+     WG List:   <mailto:nmop@ietf.org>
+
+     Editor:    Olga Havel
+                <mailto:havel.olga@huawei.com>
+
+     Editor:    Nigel Davis
+                <mailto:ndavis@ciena.com>
+
+     Editor:    TODO
+                <mailto:TODO>";
+
+
+  description
+    "This module defines the SIMAP core topology model based on the
+     requirements defined in
+     https://datatracker.ietf.org/doc/draft-ietf-nmop-simap-concept/.
+
+     Copyright (c) 2025 IETF Trust and the persons identified as
+     authors of the code.  All rights reserved.
+
+     Redistribution and use in source and binary forms, with or
+     without modification, is permitted pursuant to, and subject to
+     the license terms contained in, the Simplified BSD License set
+     forth in Section 4.c of the IETF Trust's Legal Provisions
+
+
+
+
+
+
+
+     Relating to IETF Documents
+     (https://trustee.ietf.org/license-info).
+
+     This version of this YANG module is part of RFC XXXX
+     (https://www.rfc-editor.org/info/rfcXXXX); see the RFC itself
+     for full legal notices.
+
+    ";
+
+  revision 2025-01-01 {
+    description
+      "Initial revision.";
+    reference
+      "XXX: A YANG Data Model for SIMAP Core Topologies";
+  }
+
+
+
+  identity tp-role {
+    description "Base identity from which all tp roles in the link are
+                 derived.";
+  }
+
+  /*
+   * Common SIMAP groupings for optional RFC8345 extensions
+   * Addressing requirements REQ-PROPERTIES as name, label and
+   * description may be important properties that
+   * clarify the topological roles for different layers and technologies
+   */
+  grouping simap-common {
+    description "A reusable set of optional extensions for network,
+                 node, termination point and link";
+    leaf name {
+      type string;
+      description
+        "The user friendly name, if required.
+        It is optional, for backward compatibility";
+    }
+    leaf-list label {
+      type string;
+      description
+        "Used for optionally adding any labels to the instances,
+         if required";
+    }
+    leaf description {
+      type string;
+      description
+        "Used for optionally adding any description to the instances,
+
+
+
+
+
+
+
+        if required";
+    }
+    anydata extension {
+      config false;
+      description
+        "The extension point for any other meta info or data or any
+        unknown extensions. Proposed solution for SIMAP requirement
+        REQ-EXTENSIBLE. Any additional info that is topologically
+        significant can also be added this way for requirement
+        REQ-TOPO-ONLY or REQ-PROPERTIES.";
+    }
+  }
+
+  augment "/nw:networks/nw:network" {
+    description
+      "Adding optional common simap extensions";
+    uses st:simap-common;
+  }
+
+  augment "/nw:networks/nw:network/nw:node" {
+    description
+      "Adding optional common simap extensions";
+    uses st:simap-common;
+  }
+
+  augment "/nw:networks/nw:network/nw:node/nt:termination-point" {
+    description
+      "Adding optional common simap extensions";
+    uses st:simap-common;
+  }
+
+  augment "/nw:networks/nw:network/nt:link" {
+    description
+      "Adding optional common simap extensions";
+    uses st:simap-common;
+  }
+
+  /*
+   * Candidate for potential (REQ-POTENTIAL) and intended (REQ-INTENDED)
+   * topology requirement
+   */
+
+   /*
+   * Identities related to type of the network:
+   *  live, potential, intended
+   */
+  identity network-category {
+    description "Base identity for the network category";
+
+
+
+
+
+
+
+  }
+
+  identity network-category-none {
+    description "This is used when endpoint selection identifies if
+                 live, potential or intended. This is the default";
+  }
+
+  identity network-category-live {
+    base "st:network-category";
+    description "Live topology, there is only 1 instance of the live
+                 network";
+  }
+
+  identity network-category-potential {
+    base "st:network-category";
+    description "Potential topology. There may be optionally one or
+                 multiple instances of the potential network,
+                 related to the current network";
+  }
+
+  identity network-category-intended {
+    base "st:network-category";
+    description "Intended topology, there is optionally 1 instance of
+                 intended network related to the live network instance";
+  }
+
+  augment "/nw:networks/nw:network" {
+
+    description
+      "Adding optional capability for modelling of potential and
+      intended network";
+
+    leaf network-category {
+      type identityref {
+        base st:network-category;
+      }
+      description
+        "The network category: live, potential, intended.
+        Default is live.";
+    }
+    leaf live-network-ref {
+      description
+        "Required for potential and intended only to connect to the
+        live network instance";
+       type leafref {
+         path "/nw:networks/nw:network/nw:network-id";
+       require-instance false;
+       }
+
+
+
+
+
+
+
+    }
+    leaf timestamp {
+      description
+        "Required for potential only to find related  historical
+        snapshot";
+      type yang:date-and-time;
+    }
+  }
+
+  /*
+   * Adding bidirectional and multi-point capabilities to the link
+   */
+
+  /*
+   * Identities related to link directionality and cardinality of points
+   */
+
+  identity link-direction {
+    description "Base identity for the directionality of the link";
+  }
+
+  identity link-direction-uni {
+    base "st:link-direction";
+    description "Unidirectional link";
+  }
+
+  identity link-direction-bi {
+    base "st:link-direction";
+    description "Bidirectional link";
+  }
+
+  /*
+   * Identities related to link type and cardinality of points
+   */
+  identity link-type {
+      description
+        "Base identity for the internal structure of the link";
+  }
+
+  identity link-type-p2p {
+      base "st:link-type";
+      description "Point to point link";
+  }
+
+  identity link-type-p2mp {
+      base "st:link-type";
+      description "Point to multi-point link";
+  }
+
+
+
+
+
+
+
+  identity link-type-mp2mp {
+      base "st:link-type";
+      description "Multi-point to multi-point link";
+  }
+
+  identity link-type-hybrid {
+      base "st:link-type";
+      description
+        "Hybrid links, combination of the other three
+        The multi-point link is an abstraction of underlying structure
+        detail. The underlying structure is currently expressed in
+        terms of a simple identity which essentially references
+        a pattern of underlying flow where that pattern describes the
+        effect (another abstraction) of that flow between each point
+        of the link. There are currently a few well understood
+        patterns, but the list will expand. The list of patterns, not
+        surprisingly, will be the same as for  service, for
+        connectivity and for flow (as the link arises from them). The
+        approach of introduction of hybrid links allows for a
+        solution to express a complex arrangement in abstraction without
+        needing, for each instance, to lay out the detail. It also
+        allows the client application to “understand” the effect
+        without having to probe that detail.";
+  }
+
+  /*
+   * Identities related to termination point directionality and role
+   * in the link
+   */
+
+  identity tp-direction {
+    description "Base identity for the directionality of the tp";
+  }
+
+  identity tp-direction-symmetric {
+    base "st:tp-direction";
+    description "TP in the bidirectional link";
+  }
+
+  identity tp-direction-source {
+    base "st:tp-direction";
+    description "TP is the source tp in the link";
+  }
+
+  identity tp-direction-destination {
+    base "st:tp-direction";
+    description "TP is the destination tp in the link";
+  }
+
+
+
+
+
+
+
+  augment "/nw:networks/nw:network/nt:link" {
+    description
+      "Models the link that can be unidirectional, bidirectional,
+      point-to-point,point-to-multi-point, multipoint-to-multipoint,
+      therefore addressing requirements:
+      - REQ-BIDIR
+      - REQ-MULTI-POINT
+
+      with augmenting we keep source and destination for backward
+      compatibility.
+
+      Allows for the link to terminate on the termination point that is
+      on another network, therefore also addressing the gap:
+      - REQ-MULTI-DOMAIN
+      ";
+
+    leaf link-type {
+      type identityref {
+        base st:link-type;
+      }
+      description
+        "The reference to the specification for the internal structure
+        of the link. It can be point to point (link-type-p2p), point to
+        multipoint (link-type-p2mp) or multipoint to multipoint
+        (link-type-mp2mp). It can also be any other custom identity
+        defined with base link-type. It is optional, so the model
+        supports the solution without the link type information,
+        either if not known or for backward compatible case.";
+    }
+
+    leaf link-direction {
+      type identityref {
+        base st:link-direction;
+      }
+      description
+        "The direction of the link: unidirectional (link-direction-uni)
+        or bidirectional (link-direction-bi). It can also be any other
+        custom identity defined with base link-direction. It is
+        optional, so the model supports the solution without the link
+        direction information, either if not known or for backward
+        compatible case.";
+    }
+
+    list tp {
+      key "network-ref node-ref tp-ref";
+      description "List of termination points in the link";
+      uses nt:tp-ref;
+
+
+
+
+
+
+
+
+      leaf tp-role {
+        type identityref {
+          base st:tp-role;
+        }
+        description
+          "The role of the termination point in the link defined in the
+           link-type spec.";
+        }
+      leaf tp-direction {
+        type identityref {
+          base st:tp-direction;
+        }
+        description
+          "The direction of the point in the link";
+      }
+    }
+  }
+
+  /*
+   * Subnetworks, requirement REQ-SUBNETWORK
+   */
+  augment "/nw:networks/nw:network" {
+    list subnetwork {
+        key "network-ref";
+           description
+             "A subnetwork of the network, supports partitioning";
+           leaf network-ref {
+             type leafref {
+               path "/nw:networks/nw:network/nw:network-id";
+             require-instance false;
+             }
+             description
+               "References the subnetworks";
+           }
+    }
+  }
+
+  /*
+   * Candidate for graph traversal (REQ-GRAPH-TRAVERSAL)
+   * topology requirement (tp->tp, node->node)
+   */
+  augment "/nw:networks/nw:network/nw:node/nt:termination-point" {
+    description
+      "Adding optional read only link relations between connected
+termination points for optimized graph traversal for paths";
+
+    list linked-termination-point {
+      config false;
+
+
+
+
+
+
+
+      key "network-ref node-ref tp-ref";
+      description
+            "This list identifies any linked termination points, added
+             optionally for read only for optimized path graph
+             traversal";
+
+      uses nt:tp-ref;
+    }
+  }
+
+  augment "/nw:networks/nw:network/nw:node" {
+    description
+      "Adding optional read only link relations between connected
+nodes for optimized graph traversal for paths";
+
+    list linked-node {
+      config false;
+      key "network-ref node-ref";
+      description
+            "This list identifies any linked nodes, added
+             optionally for read only for optimized path graph
+             traversal";
+
+      uses nw:node-ref;
+    }
+  }
+
+  /*
+   * Networks history, requirement REQ-SNAPSHOT
+   */
+
+  container networks-history {
+    config false;
+    list network-history {
+      key "live-network-ref timestamp";
+      description
+        "Historical network. Snapshot is generated for each historical
+        instance, network-ref is the reference for the live network";
+      leaf live-network-ref {
+         type leafref {
+           path "/nw:networks/nw:network/nw:network-id";
+         }
+      }
+      leaf timestamp {
+        type yang:date-and-time;
+      }
+      leaf file-id {
+        type inet:uri;
+      }
+    }
+
+
+
+
+
+
+
+  }
+}

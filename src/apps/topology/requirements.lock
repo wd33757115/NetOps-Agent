@@ -1,0 +1,4 @@
+paramiko==4.0.0
+cryptography==50.0.1
+textfsm==2.1.0
+ntc-templates==9.1.0

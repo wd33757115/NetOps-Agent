@@ -1,0 +1,267 @@
+catalog_id: netops.report-projections
+catalog_version: 1
+status: active
+
+profiles:
+  - profile_id: device_inventory
+    version: 1
+    check_item_id: device.version
+    source_kind: canonical_observation
+    row_grain: device
+    canonical_columns:
+      - {column_id: software_version, source: device.software.version}
+      - {column_id: hardware_model, source: device.hardware.model}
+    status_columns: [execution_status, assessment_status, completeness_status, blocking_reason_codes]
+    evidence_columns: [execution_id, snapshot_id, parser_template_id, runtime_bundle_digest, observed_at]
+    sheet_id: device_version
+    sort: [device_name, entity_key]
+    null_policy: preserve_null
+
+  - profile_id: cpu
+    version: 1
+    check_item_id: system.cpu_usage
+    source_kind: canonical_observation
+    row_grain: device_and_scope
+    canonical_columns:
+      - {column_id: cpu_instant_pct, source: device.cpu.utilization, dimensions: {window: instant}, unit: percent}
+      - {column_id: cpu_5s_pct, source: device.cpu.utilization, dimensions: {window: 5s}, unit: percent}
+      - {column_id: cpu_1m_pct, source: device.cpu.utilization, dimensions: {window: 1m}, unit: percent}
+      - {column_id: cpu_5m_pct, source: device.cpu.utilization, dimensions: {window: 5m}, unit: percent}
+      - {column_id: cpu_15m_pct, source: device.cpu.utilization, dimensions: {window: 15m}, unit: percent}
+    status_columns: [execution_status, assessment_status, completeness_status, threshold_unknown_count, blocking_reason_codes]
+    evidence_columns: [execution_id, snapshot_id, parser_template_id, runtime_bundle_digest, observed_at]
+    sheet_id: cpu
+    sort: [device_name, entity_key]
+    null_policy: preserve_null
+
+  - profile_id: memory
+    version: 1
+    check_item_id: system.memory_usage
+    source_kind: canonical_observation
+    row_grain: device_and_scope
+    canonical_columns:
+      - {column_id: memory_utilization_pct, source: device.memory.utilization, unit: percent}
+      - {column_id: memory_used_bytes, source: device.memory.used, unit: bytes}
+      - {column_id: memory_total_bytes, source: device.memory.total, unit: bytes}
+    status_columns: [execution_status, assessment_status, completeness_status, threshold_unknown_count, blocking_reason_codes]
+    evidence_columns: [execution_id, snapshot_id, parser_template_id, runtime_bundle_digest, observed_at]
+    sheet_id: memory
+    sort: [device_name, entity_key]
+    null_policy: preserve_null
+
+  - profile_id: optical_power
+    version: 1
+    check_item_id: interface.optical_power
+    source_kind: canonical_observation
+    row_grain: device_interface_and_channel
+    canonical_columns:
+      - {column_id: transceiver_presence, source: interface.optical.presence}
+      - {column_id: optical_rx_dbm, source: interface.optical.rx_power, unit: dbm}
+      - {column_id: optical_tx_dbm, source: interface.optical.tx_power, unit: dbm}
+    status_columns: [execution_status, assessment_status, completeness_status, threshold_unknown_count, risk_verification_status, blocking_reason_codes]
+    evidence_columns: [execution_id, snapshot_id, parser_template_id, runtime_bundle_digest, observed_at]
+    sheet_id: optical_power
+    sort: [device_name, entity_key]
+    null_policy: preserve_null
+
+  - profile_id: fan
+    version: 1
+    check_item_id: environment.fan
+    source_kind: canonical_observation
+    row_grain: device_and_fan
+    canonical_columns:
+      - {column_id: fan_state, source: environment.fan.state}
+    status_columns: [execution_status, assessment_status, completeness_status, blocking_reason_codes]
+    evidence_columns: [execution_id, snapshot_id, runtime_bundle_digest, observed_at]
+    sheet_id: fan
+    sort: [device_name, entity_key]
+    null_policy: preserve_null
+
+  - profile_id: power
+    version: 1
+    check_item_id: environment.power
+    source_kind: canonical_observation
+    row_grain: device_and_power_supply
+    canonical_columns:
+      - {column_id: power_state, source: environment.power.state}
+    status_columns: [execution_status, assessment_status, completeness_status, blocking_reason_codes]
+    evidence_columns: [execution_id, snapshot_id, runtime_bundle_digest, observed_at]
+    sheet_id: power
+    sort: [device_name, entity_key]
+    null_policy: preserve_null
+
+  - profile_id: configuration_change
+    version: 1
+    check_item_id: configuration.running
+    source_kind: normalized_change
+    row_grain: device_and_change
+    canonical_columns:
+      - {column_id: source_command, source: change.canonical_command}
+      - {column_id: change_type, source: change.change_type}
+      - {column_id: changed_field, source: change.field}
+      - {column_id: previous_value, source: change.old}
+      - {column_id: current_value, source: change.new}
+      - {column_id: decision_reason, source: change.decision_reason}
+    status_columns: [execution_status, assessment_status, completeness_status, comparison_status, blocking_reason_codes]
+    evidence_columns: [execution_id, previous_snapshot_id, current_snapshot_id, runtime_bundle_digest, observed_at]
+    sheet_id: running_config_change
+    sort: [device_name, entity_key, changed_field]
+    null_policy: preserve_null
+
+  - profile_id: hardware_inventory
+    version: 1
+    check_item_id: device.inventory
+    source_kind: canonical_observation
+    row_grain: device_and_component
+    canonical_columns:
+      - {column_id: hardware_model, source: device.hardware.model}
+      - {column_id: serial_number, source: device.hardware.serial_number}
+      - {column_id: hardware_vendor, source: device.hardware.vendor}
+    status_columns: [execution_status, assessment_status, completeness_status, blocking_reason_codes]
+    evidence_columns: [execution_id, snapshot_id, parser_template_id, runtime_bundle_digest, observed_at]
+    sheet_id: hardware_inventory
+    sort: [device_name, entity_type, entity_key]
+    null_policy: preserve_null
+
+  - profile_id: temperature
+    version: 1
+    check_item_id: environment.temperature
+    source_kind: canonical_observation
+    row_grain: device_and_sensor
+    canonical_columns:
+      - {column_id: temperature_current_c, source: environment.temperature.current, unit: celsius}
+      - {column_id: temperature_warning_c, source: environment.temperature.warning, unit: celsius}
+      - {column_id: temperature_alarm_c, source: environment.temperature.alarm, unit: celsius}
+    status_columns: [execution_status, assessment_status, completeness_status, threshold_unknown_count, blocking_reason_codes]
+    evidence_columns: [execution_id, snapshot_id, parser_template_id, runtime_bundle_digest, observed_at]
+    sheet_id: temperature
+    sort: [device_name, entity_key]
+    null_policy: preserve_null
+
+  - profile_id: interface_ip
+    version: 1
+    check_item_id: interface.ip_assignment
+    source_kind: canonical_observation
+    row_grain: device_interface_and_family
+    canonical_columns:
+      - {column_id: ipv4_address, source: interface.ip.address, dimensions: {address_family: ipv4}}
+      - {column_id: ipv6_address, source: interface.ip.address, dimensions: {address_family: ipv6}}
+    status_columns: [execution_status, assessment_status, completeness_status, blocking_reason_codes]
+    evidence_columns: [execution_id, snapshot_id, parser_template_id, runtime_bundle_digest, observed_at]
+    sheet_id: interface_ip
+    sort: [device_name, entity_key]
+    null_policy: preserve_null
+
+  - profile_id: vrrp
+    version: 1
+    check_item_id: redundancy.vrrp
+    source_kind: canonical_observation
+    row_grain: device_and_instance
+    canonical_columns:
+      - {column_id: vrrp_state, source: redundancy.vrrp.state}
+    status_columns: [execution_status, assessment_status, completeness_status, risk_verification_status, blocking_reason_codes]
+    evidence_columns: [execution_id, snapshot_id, runtime_bundle_digest, observed_at]
+    sheet_id: vrrp
+    sort: [device_name, entity_key]
+    null_policy: preserve_null
+
+  - profile_id: stack_members
+    version: 1
+    check_item_id: redundancy.stack
+    source_kind: canonical_observation
+    row_grain: device_and_member
+    canonical_columns:
+      - {column_id: stack_member_state, source: redundancy.stack.member_state}
+    status_columns: [execution_status, assessment_status, completeness_status, risk_verification_status, blocking_reason_codes]
+    evidence_columns: [execution_id, snapshot_id, runtime_bundle_digest, observed_at]
+    sheet_id: stack_members
+    sort: [device_name, entity_key]
+    null_policy: preserve_null
+
+  - profile_id: mlag
+    version: 1
+    check_item_id: redundancy.mlag
+    source_kind: canonical_observation
+    row_grain: device_and_domain
+    canonical_columns:
+      - {column_id: mlag_state, source: redundancy.mlag.state}
+    status_columns: [execution_status, assessment_status, completeness_status, risk_verification_status, blocking_reason_codes]
+    evidence_columns: [execution_id, snapshot_id, runtime_bundle_digest, observed_at]
+    sheet_id: mlag
+    sort: [device_name, entity_key]
+    null_policy: preserve_null
+
+  - profile_id: vrf_inventory
+    version: 1
+    check_item_id: network.vrf_inventory
+    source_kind: canonical_observation
+    row_grain: device_and_vrf
+    canonical_columns:
+      - {column_id: vrf_state, source: network.vrf.status}
+    status_columns: [execution_status, assessment_status, completeness_status, blocking_reason_codes]
+    evidence_columns: [execution_id, snapshot_id, runtime_bundle_digest, observed_at]
+    sheet_id: vrf_inventory
+    sort: [device_name, entity_key]
+    null_policy: preserve_null
+
+  - profile_id: arp_bindings
+    version: 1
+    check_item_id: network.arp_table
+    source_kind: canonical_observation
+    row_grain: device_and_arp_binding
+    canonical_columns:
+      - {column_id: arp_mac_address, source: network.arp.mac_address}
+    status_columns: [execution_status, assessment_status, completeness_status, blocking_reason_codes]
+    evidence_columns: [execution_id, snapshot_id, runtime_bundle_digest, observed_at]
+    sheet_id: arp_bindings
+    sort: [device_name, entity_key]
+    null_policy: preserve_null
+
+  - profile_id: mac_bindings
+    version: 1
+    check_item_id: network.mac_table
+    source_kind: canonical_observation
+    row_grain: device_and_mac_binding
+    canonical_columns:
+      - {column_id: mac_interface, source: network.mac_table.interface}
+    status_columns: [execution_status, assessment_status, completeness_status, blocking_reason_codes]
+    evidence_columns: [execution_id, snapshot_id, runtime_bundle_digest, observed_at]
+    sheet_id: mac_bindings
+    sort: [device_name, entity_key]
+    null_policy: preserve_null
+
+  - profile_id: startup_configuration_change
+    version: 1
+    check_item_id: configuration.startup
+    source_kind: normalized_change
+    row_grain: device_and_change
+    canonical_columns:
+      - {column_id: source_command, source: change.canonical_command}
+      - {column_id: change_type, source: change.change_type}
+      - {column_id: changed_field, source: change.field}
+      - {column_id: previous_value, source: change.old}
+      - {column_id: current_value, source: change.new}
+      - {column_id: decision_reason, source: change.decision_reason}
+    status_columns: [execution_status, assessment_status, completeness_status, comparison_status, blocking_reason_codes]
+    evidence_columns: [execution_id, previous_snapshot_id, current_snapshot_id, runtime_bundle_digest, observed_at]
+    sheet_id: startup_config_change
+    sort: [device_name, entity_key, changed_field]
+    null_policy: preserve_null
+
+  - profile_id: critical_log_change
+    version: 1
+    check_item_id: operations.critical_logs
+    source_kind: normalized_change
+    row_grain: device_and_change
+    canonical_columns:
+      - {column_id: source_command, source: change.canonical_command}
+      - {column_id: change_type, source: change.change_type}
+      - {column_id: changed_field, source: change.field}
+      - {column_id: previous_value, source: change.old}
+      - {column_id: current_value, source: change.new}
+      - {column_id: decision_reason, source: change.decision_reason}
+    status_columns: [execution_status, assessment_status, completeness_status, comparison_status, blocking_reason_codes]
+    evidence_columns: [execution_id, previous_snapshot_id, current_snapshot_id, runtime_bundle_digest, observed_at]
+    sheet_id: critical_log_change
+    sort: [device_name, entity_key, changed_field]
+    null_policy: preserve_null

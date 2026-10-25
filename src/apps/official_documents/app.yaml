@@ -1,0 +1,31 @@
+manifest_version: 1
+id: official-documents
+aliases: [official-document]
+name: 公文写作
+version: 1.1.0
+platform_api: '>=1.0,<2.0'
+icon: document
+dependencies: {}
+backend:
+  router: src.apps.official_documents.backend.api:router
+  task_modules: [src.apps.official_documents.backend.tasks]
+  task_names: [execute_document_operation, reconcile_document_operations]
+  queue: netops.ai
+  schedules:
+    - name: reconcile
+      task: reconcile_document_operations
+      seconds: 30
+frontend:
+  entry: frontend/index.tsx
+  enabled_env: VITE_OFFICIAL_DOCUMENTS_ENABLED
+agent:
+  legacy_skills: [official-document-writing]
+  tools: src.apps.official_documents.backend.tools:TOOLS
+  skills: skills/
+database:
+  mode: legacy
+  minimum_revision: 0100_official_documents
+  tables: [official_documents, official_document_versions, official_document_operations]
+lifecycle:
+  drain: src.apps.official_documents.backend.lifecycle:drain
+  pending: src.apps.official_documents.backend.lifecycle:pending

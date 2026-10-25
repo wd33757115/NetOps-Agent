@@ -1,0 +1,33 @@
+# SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
+# SPDX-License-Identifier: Apache-2.0
+
+workflow: patrol-change-event
+priority: 105
+description: 聊天触发设备巡检、变化检测与事件构建
+
+match:
+  require_any:
+    - 巡检
+    - 设备检查
+    - 网络检查
+  require_any_secondary:
+    - 变化
+    - 变更
+    - 事件
+    - 异常
+    - 对比
+    - 分析
+
+context_defaults:
+  filter_params: {}
+  save_baseline: false
+  publish_events: true
+
+response_template: |
+  [OK] 已启动巡检变化分析流程
+
+  - **流程 ID**: `{run_id}`
+  - **步骤**: {workflow_description}
+
+  流程将在后台执行，完成后可查看巡检快照、变化记录和运维事件。
+

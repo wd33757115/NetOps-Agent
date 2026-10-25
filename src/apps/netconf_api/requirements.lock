@@ -1,0 +1,5 @@
+# Additional package requirements use exact host-compatible versions.
+alembic==1.18.4
+SQLAlchemy==2.0.49
+defusedxml==0.7.1
+PyYAML==6.0.3

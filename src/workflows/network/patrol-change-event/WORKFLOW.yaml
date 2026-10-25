@@ -1,0 +1,61 @@
+# SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
+# SPDX-License-Identifier: Apache-2.0
+
+name: patrol-change-event
+description: 设备巡检、历史变化检测与运维事件构建
+version: "1.0"
+
+test:
+  context:
+    filter_params: {}
+    execution_plan:
+    ticket_id:
+    save_baseline: false
+    mode: production
+    publish_events: false
+
+steps:
+  - name: patrol
+    label: 执行设备巡检
+    skill: device-patrol
+    inputs:
+      filter_params: ${context.filter_params}
+      execution_plan: ${context.execution_plan}
+      execution_plan_id: ${context.execution_plan_id}
+      ticket_id: ${context.ticket_id}
+      save_baseline: ${context.save_baseline}
+      mode: ${context.mode}
+
+  - name: state_normalization
+    label: 生成状态观察
+    skill: state-normalizer
+    inputs:
+      run_id: ${steps.patrol.result.snapshot_run_id}
+
+  - name: change_detection
+    label: 检测网络变化
+    skill: change-detector
+    inputs:
+      current_run_id: ${steps.patrol.result.snapshot_run_id}
+      device_id: ${context.device_id}
+      use_state_observations: true
+      persist: true
+      runtime_asset_manifest: ${steps.patrol.result.runtime_asset_manifest}
+
+  - name: event_building
+    label: 构建运维事件
+    skill: event-builder
+    inputs:
+      run_id: ${steps.patrol.result.snapshot_run_id}
+      persist: true
+      publish: ${context.publish_events}
+      runtime_asset_manifest: ${steps.patrol.result.runtime_asset_manifest}
+      patrol_batch_id: ${context.patrol_batch_id}
+      device_id: ${context.device_id}
+
+on_complete:
+  message: 巡检变化分析已完成
+  notification:
+    title: 巡检变化分析已完成
+    body: 巡检快照、变化记录和运维事件已生成。
+    level: success

@@ -1,0 +1,18 @@
+Value OS_VERSION (.+?)
+Value IMAGE_NAME ([\w.-]+)
+Value IMAGE_VERSION ([^,\s]+)
+Value HOSTNAME (\S+)
+Value SERIAL (\S+)
+Value MODEL (\S.*?)
+Value UNIX_PROCESSOR ([^)]+)
+
+# The device identity lines of "show version" (campus-wan and vpn-fabric labs, IOS-XE
+# 17); one record. Licence, legal and resource lines carry nothing modeled.
+Start
+  ^.*?\bSoftware \(${IMAGE_NAME}\), Version ${IMAGE_VERSION}[,\s].*$$ -> Continue
+  ^.*?\bIOS\b.*?\bVersion\s+${OS_VERSION}\s*$$
+  ^\s*${HOSTNAME}\s+uptime is\b.*$$
+  ^\s*(?:Processor board ID|System serial number)\s*[:=]?\s+${SERIAL}\s*$$
+  ^\s*(?:Model(?: name| number)?|Device model)\s*[:=]\s*${MODEL}\s*$$
+  ^\s*Linux Unix \(${UNIX_PROCESSOR}\) processor\b.*$$
+  ^.*$$

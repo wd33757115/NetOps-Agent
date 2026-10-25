@@ -1,0 +1,22 @@
+.model-settings { position: relative; flex-shrink: 0; align-self: center; }
+.model-settings-toggle { display: flex; align-items: center; gap: 4px; height: 32px; padding: 0 10px; border: 1px solid #e5e7eb; border-radius: 16px; background: #fff; color: #64748b; font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
+.model-settings-toggle:hover:not(:disabled) { background: #f3f4f6; }
+.model-settings-toggle:focus-visible { outline: 2px solid #4384d6; outline-offset: 2px; }
+.model-settings-toggle:disabled { opacity: .5; cursor: default; }
+.model-settings-toggle.is-thinking { border-color: #c7dbf7; background: #eef4fd; color: #1d5fb8; }
+.model-settings-panel { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 20; width: 248px; padding: 12px; border: 1px solid #e5e7eb; border-radius: 12px; background: #fff; box-shadow: 0 6px 24px rgba(15, 23, 42, .12); }
+.model-settings-heading { margin: 0 0 6px; color: #475569; font-size: 12px; font-weight: 600; }
+.model-settings-heading:not(:first-child) { margin-top: 12px; }
+.model-settings-options { display: flex; flex-wrap: wrap; gap: 6px; }
+.model-settings-options button { min-height: 30px; padding: 0 12px; border: 1px solid #e5e7eb; border-radius: 15px; background: #fff; color: #334155; font: inherit; font-size: 12px; cursor: pointer; }
+.model-settings-options button:hover:not(:disabled) { background: #f3f4f6; }
+.model-settings-options button[aria-pressed=true] { border-color: #1d5fb8; background: #eef4fd; color: #1d5fb8; }
+.model-settings-options button:focus-visible { outline: 2px solid #4384d6; outline-offset: 2px; }
+.model-settings-options button:disabled { cursor: default; }
+.model-settings-note { margin: 12px 0 0; color: #64748b; font-size: 12px; line-height: 1.5; }
+.model-settings-note.is-error { color: #b64b4b; }
+@media (max-width: 480px) {
+  .model-settings-model { display: none; }
+  .model-settings-toggle { padding: 0 8px; }
+  .model-settings-panel { width: min(248px, calc(100vw - 32px)); }
+}

@@ -1,0 +1,60 @@
+# Names a CLI dialect prints in ACL entries instead of numbers (collectors/families.py: a
+# family's "cli"): IP protocols ("any": every IP packet), TCP and UDP ports, ICMP types
+# with the code a name implies (null: any code). A name no table holds makes the entry
+# one a path cannot evaluate; it is never guessed. nat_roles: the NAT binding kinds
+# (topology.nat_bindings) that make an interface "inside" or "outside" for NAT rules that
+# are not bound to an interface of their own. Adding a dialect is adding a block here.
+schema_version: 1
+dialects:
+  ios:
+    nat_roles: {inside: inside, outside: outside}
+    protocols: {ip: any, icmp: 1, igmp: 2, ipinip: 4, tcp: 6, udp: 17, gre: 47, esp: 50,
+                ahp: 51, eigrp: 88, ospf: 89, nos: 94, pim: 103, pcp: 108}
+    ports:
+      tcp: {echo: 7, discard: 9, daytime: 13, chargen: 19, ftp-data: 20, ftp: 21, telnet: 23,
+            smtp: 25, time: 37, whois: 43, tacacs: 49, domain: 53, gopher: 70, finger: 79,
+            www: 80, hostname: 101, pop2: 109, pop3: 110, sunrpc: 111, ident: 113, nntp: 119,
+            msrpc: 135, bgp: 179, irc: 194, pim-auto-rp: 496, exec: 512, login: 513, cmd: 514,
+            lpd: 515, talk: 517, uucp: 540, klogin: 543, kshell: 544}
+      udp: {echo: 7, discard: 9, time: 37, nameserver: 42, tacacs: 49, domain: 53, bootps: 67,
+            bootpc: 68, tftp: 69, sunrpc: 111, ntp: 123, netbios-ns: 137, netbios-dgm: 138,
+            netbios-ss: 139, snmp: 161, snmptrap: 162, xdmcp: 177, dnsix: 195, mobile-ip: 434,
+            pim-auto-rp: 496, isakmp: 500, biff: 512, who: 513, syslog: 514, talk: 517,
+            rip: 520, non500-isakmp: 4500}
+    icmp: {echo-reply: [0, null], unreachable: [3, null], net-unreachable: [3, 0],
+           host-unreachable: [3, 1], protocol-unreachable: [3, 2], port-unreachable: [3, 3],
+           packet-too-big: [3, 4], source-route-failed: [3, 5], network-unknown: [3, 6],
+           host-unknown: [3, 7], host-isolated: [3, 8], dod-net-prohibited: [3, 9],
+           dod-host-prohibited: [3, 10], net-tos-unreachable: [3, 11],
+           host-tos-unreachable: [3, 12], administratively-prohibited: [3, 13],
+           host-precedence-unreachable: [3, 14], precedence-unreachable: [3, 15],
+           source-quench: [4, null], redirect: [5, null], net-redirect: [5, 0],
+           host-redirect: [5, 1], net-tos-redirect: [5, 2], host-tos-redirect: [5, 3],
+           alternate-address: [6, null], echo: [8, null], router-advertisement: [9, null],
+           router-solicitation: [10, null], time-exceeded: [11, null], ttl-exceeded: [11, 0],
+           reassembly-timeout: [11, 1], parameter-problem: [12, null],
+           general-parameter-problem: [12, 0], option-missing: [12, 1],
+           no-room-for-option: [12, 2], timestamp-request: [13, null],
+           timestamp-reply: [14, null], information-request: [15, null],
+           information-reply: [16, null], mask-request: [17, null], mask-reply: [18, null],
+           traceroute: [30, null], conversion-error: [31, null], mobile-redirect: [32, null]}
+  comware:
+    nat_roles: {static: outside}  # where static mappings apply ("nat static enable")
+    protocols: {ip: any, icmp: 1, igmp: 2, ipinip: 4, tcp: 6, udp: 17, gre: 47, ospf: 89}
+    ports:
+      tcp: {echo: 7, discard: 9, daytime: 13, chargen: 19, ftp-data: 20, ftp: 21, telnet: 23,
+            smtp: 25, time: 37, whois: 43, tacacs: 49, domain: 53, gopher: 70, finger: 79,
+            www: 80, hostname: 101, pop2: 109, pop3: 110, sunrpc: 111, nntp: 119, bgp: 179,
+            irc: 194, exec: 512, login: 513, cmd: 514, lpd: 515, talk: 517, uucp: 540,
+            klogin: 543, kshell: 544}
+      udp: {echo: 7, discard: 9, time: 37, nameserver: 42, dns: 53, bootps: 67, bootpc: 68,
+            tftp: 69, sunrpc: 111, ntp: 123, netbios-ns: 137, netbios-dgm: 138,
+            netbios-ssn: 139, snmp: 161, snmptrap: 162, xdmcp: 177, biff: 512, who: 513,
+            syslog: 514, talk: 517, rip: 520}
+    icmp: {echo-reply: [0, 0], net-unreachable: [3, 0], host-unreachable: [3, 1],
+           protocol-unreachable: [3, 2], port-unreachable: [3, 3], fragmentneed-DFset: [3, 4],
+           source-route-failed: [3, 5], source-quench: [4, 0], net-redirect: [5, 0],
+           host-redirect: [5, 1], net-tos-redirect: [5, 2], host-tos-redirect: [5, 3],
+           echo: [8, 0], ttl-exceeded: [11, 0], reassembly-timeout: [11, 1],
+           parameter-problem: [12, 0], timestamp-request: [13, 0], timestamp-reply: [14, 0],
+           information-request: [15, 0], information-reply: [16, 0]}

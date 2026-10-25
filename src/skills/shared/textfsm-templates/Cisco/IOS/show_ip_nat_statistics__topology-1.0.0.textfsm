@@ -1,0 +1,17 @@
+Value Filldown KIND (Inside|Outside)
+Value Required INTERFACE (\S+(?:,\s*\S+)*)
+
+# "show ip nat statistics": the inside and outside interface lists, comma-separated over
+# one or more lines. The counters and mappings around them are not read.
+Start
+  ^${KIND}\s+interfaces:\s*$$ -> Interfaces
+  ^\S.*$$
+  ^\s+\S.*$$
+  ^\s*$$
+
+Interfaces
+  ^${KIND}\s+interfaces:\s*$$
+  ^\s+${INTERFACE}\s*$$ -> Record
+  ^\S.*$$ -> Start
+  ^\s*$$ -> Start
+  ^.* -> Error "unrecognized show ip nat statistics interface line"

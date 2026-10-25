@@ -1,0 +1,56 @@
+schema_version: 1
+id: h3c-comware7
+vendor: H3C/HPE
+os_family: comware
+identity_profiles: [h3c-comware7]
+preferred_driver: netmiko
+session:
+  paging_off: [screen-length disable]
+  encoding: utf-8
+  max_output_bytes: 4194304
+budgets: {fast: 120, standard: 300, full: 600}
+capabilities:
+  version: {command: display version, parser: rules}
+  lldp_local: {parser: rules}
+  lldp: {parser: rules}
+  interfaces: {parser: rules}
+  inventory: {command: display device manuinfo, parser: null}
+  ip: {parser: rules}
+  arp: {parser: rules}
+  mac: {parser: rules}
+  vlan: {parser: rules}
+  trunk: {parser: rules}
+  lag: {parser: rules}
+  routes: {timeout: 300, parser: rules}
+  vrfs: {parser: rules}
+  # Read per VPN instance (the published command names it); see collect._collect_scoped.
+  vrf_detail: {parser: rules}
+  irf: {command: display irf, parser: null}
+  vrrp: {parser: rules}
+  ospf_interfaces: {parser: rules}
+  ospf_process: {parser: rules}
+  ospf_neighbors: {parser: rules}
+  bgp_peers: {parser: rules}
+  bgp_vpnv4: {parser: rules}
+  bgp_evpn: {parser: rules}
+  ldp_peers: {parser: rules}
+  mpls_lfib: {parser: rules}
+  evpn_instances: {parser: rules}
+  evpn_peers: {parser: rules}
+  vxlan_vnis: {parser: rules}
+  tunnel_interfaces: {parser: rules}
+  evpn_mac: {parser: rules}
+  pbr_bindings: {parser: rules}
+  pbr_rules: {parser: rules}
+  nat_bindings: {parser: rules}
+  acl_rules: {parser: rules}
+  acl_bindings: {parser: rules}
+  nat_rules: {parser: rules}
+  security_zones: {parser: rules}
+verified:
+  - model: VSR1000
+    version: 7.1.064 Release 1362P12
+    source: lab capture
+    collected: [version, lldp_local, lldp, interfaces, ip, arp, mac, vlan, lag, routes, vrfs]
+    unsupported: [inventory, irf]
+    parsed: [version, lldp_local, lldp, interfaces, ip, arp, mac, vlan, routes, lag, vrfs]

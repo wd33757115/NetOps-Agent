@@ -1,0 +1,43 @@
+Value Filldown VRF (\S+)
+Value Filldown RD (\S+)
+Value Filldown,List INTERFACES ([^,\s]+)
+Value Required ADDRESS_FAMILY (IPv4 Flowspec|IPv6 Flowspec|IPv4|IPv6|EVPN)
+Value List IMPORT_RT (\d[\d.]*:\d+)
+Value List EXPORT_RT (\d[\d.]*:\d+)
+
+# One VPN instance; one record per address family. Targets set on the instance itself
+# (before any family) are not in this layout and fail as unrecognized.
+Start
+  ^\s*VPN-Instance Name and Index\s*:\s*${VRF},\s*\d+\s*$$
+  ^\s*Route Distinguisher\s*:\s*${RD}\s*$$
+  ^\s*Interfaces\s*:\s*${INTERFACES}(,|\s*$$) -> Continue
+  ^\s*Interfaces\s*:\s*[^,\s]+,\s*${INTERFACES}(,|\s*$$) -> Continue
+  ^\s*Interfaces\s*:\s*[^,\s]+,\s*[^,\s]+,\s*${INTERFACES}(,|\s*$$) -> Continue
+  ^\s*Interfaces\s*:\s*[^,\s]+,\s*[^,\s]+,\s*[^,\s]+,\s*${INTERFACES}(,|\s*$$) -> Continue
+  ^\s*Interfaces\s*:.*$$
+  ^\s*Address-family -> Continue.Record
+  ^\s*Address-family\s+${ADDRESS_FAMILY}:\s*$$
+  ^\s*Export VPN Targets\s*:\s*$$ -> Export
+  ^\s*Import VPN Targets\s*:\s*$$ -> Import
+  ^\s*(TTL mode|Diffserv-mode information|Apply Label Type|Description|Create time|Up time|Label Policy|Maximum number of Routes)\s*:.*$$
+  ^\s*$$
+  ^. -> Error "unrecognized display ip vpn-instance line"
+
+Export
+  ^\s+${EXPORT_RT}(\s|$$) -> Continue
+  ^\s+\S+\s+${EXPORT_RT}(\s|$$) -> Continue
+  ^\s+\S+\s+\S+\s+${EXPORT_RT}(\s|$$) -> Continue
+  ^\s+\d[\d.]*:\d+(\s+\S+){0,3}\s*$$
+  ^\s*Import VPN Targets\s*:\s*$$ -> Import
+  ^. -> Error "unexpected line after export targets"
+
+Import
+  ^\s+${IMPORT_RT}(\s|$$) -> Continue
+  ^\s+\S+\s+${IMPORT_RT}(\s|$$) -> Continue
+  ^\s+\S+\s+\S+\s+${IMPORT_RT}(\s|$$) -> Continue
+  ^\s+\d[\d.]*:\d+(\s+\S+){0,3}\s*$$
+  ^\s*Apply Label Type\s*:.*$$ -> Start
+  ^\s*Address-family -> Continue.Record
+  ^\s*Address-family\s+${ADDRESS_FAMILY}:\s*$$ -> Start
+  ^\s*$$ -> Start
+  ^. -> Error "unexpected line after import targets"

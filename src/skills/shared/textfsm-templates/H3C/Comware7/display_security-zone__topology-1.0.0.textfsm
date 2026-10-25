@@ -1,0 +1,13 @@
+Value Filldown,Required ZONE (\S+)
+Value Required INTERFACE (\S+)
+
+# "display security-zone": each zone and its member interfaces, one row per member
+# ("None": no member). Traffic between zones is denied unless a security policy permits
+# it, whatever the packet-filter default action.
+Start
+  ^Name:\s+${ZONE}\s*$$
+  ^Members:\s*$$
+  ^\s+None\s*$$
+  ^\s+${INTERFACE}(?:\s+.*)?$$ -> Record
+  ^\s*$$
+  ^.* -> Error "unrecognized display security-zone line"

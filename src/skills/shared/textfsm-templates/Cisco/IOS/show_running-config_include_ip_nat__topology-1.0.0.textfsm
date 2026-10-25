@@ -1,0 +1,33 @@
+Value Required KIND (pool|inside source list|inside source static|(?:inside|outside) (?:source|destination) \S+)
+Value POOL (\S+)
+Value POOL_START (\d+\.\d+\.\d+\.\d+)
+Value POOL_END (\d+\.\d+\.\d+\.\d+)
+Value ACL_NAME (\S+)
+Value TO_INTERFACE (\S+)
+Value OVERLOAD (overload)
+Value PROTOCOL (tcp|udp)
+Value LOCAL_ADDRESS (\d+\.\d+\.\d+\.\d+)
+Value LOCAL_PORT (\d+)
+Value GLOBAL_ADDRESS (\d+\.\d+\.\d+\.\d+)
+Value GLOBAL_INTERFACE (\S+)
+Value GLOBAL_PORT (\d+)
+Value VRF (\S+)
+Value OTHER (\S.*?)
+
+# "show running-config | include ip nat": the NAT statements, one per line. Address pools
+# ("ip nat pool"), dynamic source NAT by ACL ("inside source list") to an interface
+# address or a pool, and inside static mappings (one address, or one protocol port) are
+# read; "extendable" and "no-alias" do not change a mapping. Any other NAT statement
+# (route-map, outside source, destination lists, redundancy, ...) is kept with its text
+# in OTHER so it is never treated as absent. Interface roles (" ip nat inside") and
+# global settings (timeouts, logging, services) are not rules and are read past.
+Start
+  ^ip\s+nat\s+(?=pool\s)${KIND}\s+${POOL}\s+${POOL_START}\s+${POOL_END}\s+(?:netmask\s+\S+|prefix-length\s+\d+)\s*$$ -> Record
+  ^ip\s+nat\s+(?=inside source list\s)${KIND}\s+${ACL_NAME}\s+(?:interface\s+${TO_INTERFACE}|pool\s+${POOL})(?:\s+vrf\s+${VRF})?(?:\s+${OVERLOAD})?\s*$$ -> Record
+  ^ip\s+nat\s+(?=inside source static\s)${KIND}\s+${PROTOCOL}\s+${LOCAL_ADDRESS}\s+${LOCAL_PORT}\s+(?:interface\s+${GLOBAL_INTERFACE}|${GLOBAL_ADDRESS})\s+${GLOBAL_PORT}(?:\s+vrf\s+${VRF})?(?:\s+extendable)?(?:\s+no-alias)?\s*$$ -> Record
+  ^ip\s+nat\s+(?=inside source static\s)${KIND}\s+${LOCAL_ADDRESS}\s+${GLOBAL_ADDRESS}(?:\s+vrf\s+${VRF})?(?:\s+extendable)?(?:\s+no-alias)?\s*$$ -> Record
+  ^ip\s+nat\s+(?=(?:inside|outside)\s+(?:source|destination)\s)${KIND}\s+${OTHER}\s*$$ -> Record
+  ^\s+ip\s+nat\s+(?:inside|outside|enable)\s*$$
+  ^(?:no\s+)?ip\s+nat\s+.*$$
+  ^\s*$$
+  ^.* -> Error "unrecognized show running-config include ip nat line"

@@ -1,0 +1,117 @@
+rule_pack:
+  id: builtin-event-rules
+  version: 1
+  description: Built-in deterministic patrol change to event rules.
+
+rules:
+  - name: cpu-high
+    version: 1
+    event_type: CPUHigh
+    severity: warning
+    description: CPU usage crosses the high threshold.
+    condition:
+      kind: threshold
+      observation_types: [device.cpu.utilization]
+      entity_types: [cpu, system_resources]
+      fields: [cpu, cpu_5s, cpu_1m, cpu_5m, cpu_usage]
+      gte: 90
+
+  - name: cpu-recovered
+    version: 1
+    event_type: CPURecovered
+    severity: info
+    event_class: recovery
+    recovery:
+      resolves: [CPUHigh]
+    description: CPU usage falls below the recovery threshold.
+    condition:
+      kind: threshold_recovery
+      observation_types: [device.cpu.utilization]
+      entity_types: [cpu, system_resources]
+      fields: [cpu, cpu_5s, cpu_1m, cpu_5m, cpu_usage]
+      lt: 90
+
+  - name: memory-high
+    version: 1
+    event_type: MemoryHigh
+    severity: warning
+    description: Memory usage crosses the high threshold.
+    condition:
+      kind: threshold
+      observation_types: [device.memory.free_ratio, device.memory.utilization]
+      entity_types: [memory, system_resources]
+      fields: [memory, memory_usage, mem_usage, usage, used_percent, memory_used_percent]
+      gte: 90
+
+  - name: memory-recovered
+    version: 1
+    event_type: MemoryRecovered
+    severity: info
+    event_class: recovery
+    recovery:
+      resolves: [MemoryHigh]
+    description: Memory usage falls below the recovery threshold.
+    condition:
+      kind: threshold_recovery
+      observation_types: [device.memory.free_ratio, device.memory.utilization]
+      entity_types: [memory, system_resources]
+      fields: [memory, memory_usage, mem_usage, usage, used_percent, memory_used_percent]
+      lt: 90
+
+  - name: bgp-neighbor-lost
+    version: 1
+    event_type: BGPNeighborLost
+    severity: critical
+    description: BGP neighbor leaves Established state, or is first observed non-established.
+    condition:
+      kind: bgp_transition
+      fields: [state, bgp_state, peer_state, neighbor_state]
+      from_established: true
+      to_established: false
+      allow_initial_target: true
+
+  - name: bgp-neighbor-established
+    version: 1
+    event_type: BGPNeighborEstablished
+    severity: info
+    event_class: recovery
+    recovery:
+      resolves: [BGPNeighborLost]
+    description: BGP neighbor reaches Established state after a non-established state.
+    condition:
+      kind: bgp_transition
+      fields: [state, bgp_state, peer_state, neighbor_state]
+      from_established: false
+      to_established: true
+      allow_initial_target: false
+
+  - name: config-changed
+    version: 1
+    event_type: ConfigChanged
+    severity: minor
+    description: Raw configuration command hash changed.
+    condition:
+      kind: raw_config_hash
+      command_markers: [configuration, running-config, current-configuration]
+
+  - name: fan-failed
+    version: 1
+    event_type: FanFailed
+    severity: major
+    description: Fan state is failed or absent.
+    condition:
+      kind: entity_status_down
+      observation_types: [environment.fan.state]
+      entity_types: [fan, environment_fan]
+      fields: [state, status]
+
+  - name: power-failed
+    version: 1
+    event_type: PowerFailed
+    severity: major
+    description: Power supply state is failed or absent.
+    condition:
+      kind: entity_status_down
+      observation_types: [environment.power.state]
+      entity_types: [power, power_supply, environment_power]
+      fields: [state, status]

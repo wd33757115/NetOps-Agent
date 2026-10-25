@@ -1,0 +1,15 @@
+.netops-status-notice { --notice-accent: #456b93; display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; background: #f8fafc; border-left: 3px solid var(--notice-accent); border-radius: 0 5px 5px 0; color: #20334d; min-width: 0; }
+.netops-status-notice[data-tone=success] { --notice-accent: #287557; }
+.netops-status-notice[data-tone=warning] { --notice-accent: #996312; }
+.netops-status-notice[data-tone=error] { --notice-accent: #bc3939; background: #fff8f7; }
+.netops-status-notice-icon { margin-top: 3px; color: var(--notice-accent); font-size: 15px; flex: none; }
+.netops-status-notice-content { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.netops-status-notice-title { font-size: 13px; font-weight: 500; line-height: 1.7; }
+.netops-status-notice-description { margin-top: 4px; color: #5e6d81; font-size: 12px; line-height: 1.8; }
+.netops-status-notice-action { flex: none; }
+.netops-status-notice-action .ant-btn { box-shadow: none; transition: border-color .15s, color .15s; }
+@media (max-width: 600px) {
+  .netops-status-notice { flex-wrap: wrap; }
+  .netops-status-notice-action { margin-left: 25px; }
+}
+@media (prefers-reduced-motion: reduce) { .netops-status-notice-action .ant-btn { transition: none; } }

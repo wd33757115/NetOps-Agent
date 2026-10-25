@@ -1,0 +1,47 @@
+schema_version: 1
+id: cisco-ios
+vendor: Cisco
+os_family: ios
+identity_profiles: [cisco-ios, cisco-iosxe]
+preferred_driver: paramiko
+session:
+  paging_off: [terminal width 511, terminal length 0]
+  encoding: utf-8
+  max_output_bytes: 4194304
+budgets: {fast: 120, standard: 300, full: 600}
+# IOS-XE is an explicit identity alias, not an assertion of platform-wide verification.
+capabilities:
+  version: {command: show version, parser: rules}
+  lldp: {parser: rules}
+  interfaces: {parser: rules}
+  inventory: {command: show inventory, parser: null}
+  ip: {parser: rules}
+  arp: {parser: rules}
+  mac: {parser: rules}
+  vlan: {parser: rules}
+  trunk: {parser: rules}
+  switchport: {parser: rules}
+  lag: {parser: rules}
+  stp: {parser: rules}
+  routes: {timeout: 300, parser: rules}
+  vrfs: {parser: rules}
+  vrrp: {parser: rules}
+  ospf_interfaces: {parser: rules}
+  ospf_process: {parser: rules}
+  ospf_neighbors: {parser: rules}
+  bgp_peers: {parser: rules}
+  vrf_detail: {parser: rules}
+  bgp_vpnv4: {parser: rules}
+  bgp_evpn: {parser: rules}
+  ldp_peers: {parser: rules}
+  mpls_lfib: {parser: rules}
+  evpn_instances: {parser: rules}
+  evpn_peers: {parser: rules}
+  vxlan_vnis: {parser: rules}
+  evpn_mac: {parser: rules}
+  pbr_bindings: {parser: rules}
+  nat_bindings: {parser: rules}
+  acl_rules: {parser: rules}
+  acl_bindings: {parser: rules}
+  nat_rules: {parser: rules}
+verified: []

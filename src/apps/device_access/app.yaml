@@ -1,0 +1,18 @@
+manifest_version: 1
+id: device-access
+name: SSH 终端
+version: 0.9.11
+platform_api: '>=1.0,<2.0'
+icon: terminal
+dependencies: {}
+backend:
+  router: src.apps.device_access.backend.api:router
+frontend:
+  entry: frontend/index.tsx
+agent:
+  tools: src.apps.device_access.backend.tools:TOOLS
+database:
+  mode: package
+  migrations: migrations
+  head: device_access_0006
+  tables: [app_device_access_saved_sessions, app_device_access_default_logins, app_device_access_operations, app_device_access_host_keys, app_device_access_session_audit]

@@ -1,0 +1,32 @@
+manifest_version: 1
+id: firewall-policy
+name: 防火墙策略生成
+version: 1.6.0
+platform_api: '>=1.0,<2.0'
+icon: shield
+dependencies: {}
+backend:
+  router: src.apps.firewall_policy.backend.api:router
+  task_modules: [src.apps.firewall_policy.backend.tasks]
+  task_names: [app.firewall_policy.execute, app.firewall_policy.reconcile]
+  queue: app.firewall-policy
+  schedules:
+    - name: reconcile
+      task: app.firewall_policy.reconcile
+      seconds: 30
+frontend:
+  entry: frontend/index.tsx
+agent:
+  legacy_skills: [firewall-policy-generator, itsm-change-ticket-writer]
+  tools: src.apps.firewall_policy.backend.tools:TOOLS
+  skills: skills/
+workflow:
+  actions: src.apps.firewall_policy.backend.workflow_actions:ACTIONS
+database:
+  mode: package
+  migrations: migrations
+  head: firewall_policy_0001
+  tables: [app_firewall_uploads, app_firewall_runs]
+lifecycle:
+  drain: src.apps.firewall_policy.backend.service:drain
+  pending: src.apps.firewall_policy.backend.service:pending

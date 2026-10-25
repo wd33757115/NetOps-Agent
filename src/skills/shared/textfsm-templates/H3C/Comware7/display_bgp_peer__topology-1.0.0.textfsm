@@ -1,0 +1,23 @@
+Value Filldown ROUTER_ID (\S+)
+Value Filldown LOCAL_AS (\d+)
+Value Required PEER (\S+)
+Value PEER_AS (\d+)
+Value PREFIXES_RECEIVED (\d+)
+Value UP_DOWN (\S+)
+Value STATE (\S+)
+
+# One record per BGP peer, for the IPv4, VPNv4 and L2VPN EVPN peer tables (campus-wan and
+# vpn-fabric labs, Comware 7.1). A leading "*" marks a dynamically created peer.
+Start
+  ^\s*BGP local router ID:\s*${ROUTER_ID}\s*$$
+  ^\s*Local AS number:\s*${LOCAL_AS}\s*$$
+  ^\s*Total number of peers:\s*\d+\s+Peers in established state:\s*\d+\s*$$
+  ^\s*\* - Dynamically created peer\s*$$
+  ^\s*Peer\s+AS\s+MsgRcvd\s+MsgSent\s+OutQ\s+PrefRcv\s+Up/Down\s+State\s*$$ -> Peers
+  ^\s*$$
+  ^. -> Error "unrecognized display bgp peer line"
+
+Peers
+  ^\s*\*?\s*${PEER}\s+${PEER_AS}\s+\d+\s+\d+\s+\d+\s+${PREFIXES_RECEIVED}\s+${UP_DOWN}\s+${STATE}\s*$$ -> Record
+  ^\s*$$
+  ^. -> Error "unrecognized display bgp peer row"

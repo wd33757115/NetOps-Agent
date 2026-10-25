@@ -1,0 +1,88 @@
+Value Filldown,Required KIND (address group|outbound|internal server|Static)
+Value Filldown POOL (\S+)
+Value POOL_START (\d+\.\d+\.\d+\.\d+)
+Value POOL_END (\d+\.\d+\.\d+\.\d+)
+Value INTERFACE (\S+)
+Value ACL_NAME (\S+)
+Value NO_PAT (Y|N)
+Value PROTOCOL (\d+)
+Value LOCAL_ADDRESS (\d+\.\d+\.\d+\.\d+)
+Value LOCAL_PORT (\d+)
+Value GLOBAL_ADDRESS (\d+\.\d+\.\d+\.\d+)
+Value GLOBAL_PORT (\d+)
+Value STATUS (\S+)
+Value List OTHER (\S.*?)
+
+# "display nat all": the NAT rules, one row each. An address group gives one row per
+# address range; an outbound rule its interface, ACL ("---": every packet), address group
+# ("---": the interface's address) and NO-PAT; an internal server its interface, protocol
+# and global and local address/port; an outbound IP-to-IP static mapping its local and
+# global address. Inbound rules and other static mappings are not read: they fail the
+# output. Each rule ends with its "Config status" line; blank lines separate rules, a line
+# at the left margin starts the next section. A line of a rule this template does not know is kept in OTHER, so the
+# rule is never read as complete; address-group exclusions, and an interface in a section
+# it does not know, fail the output rather than being passed over. Logging, ALG, mapping
+# behavior, global settings and the interfaces enabled with static NAT (a binding, read
+# by topology.nat_bindings) hold no rule.
+Start
+  ^NAT\s+\S.*\s+information:\s*$$ -> Continue.Clearall
+  ^NAT\s+${KIND}\s+information:\s*$$ -> Rules
+  ^\S+\s+NAT\s+mappings:\s*$$ -> Continue.Clearall
+  ^${KIND}\s+NAT\s+mappings:\s*$$ -> Static
+  ^Interfaces\s+enabled\s+with\s+static\s+NAT:\s*$$ -> Bindings
+  ^\S.*:\s*$$ -> Other
+  ^\S.*$$
+  ^\s*$$
+
+Rules
+  ^NAT\s+\S.*\s+information:\s*$$ -> Continue.Clearall
+  ^NAT\s+${KIND}\s+information:\s*$$
+  ^\S+\s+NAT\s+mappings:\s*$$ -> Continue.Clearall
+  ^${KIND}\s+NAT\s+mappings:\s*$$ -> Static
+  ^Interfaces\s+enabled\s+with\s+static\s+NAT:\s*$$ -> Bindings
+  ^\S.*:\s*$$ -> Other
+  ^\S.*$$ -> Start
+  ^\s+Totally\s+\d+\s+.*$$
+  ^\s+Address\s+group\s+ID:\s+${POOL}\s*$$
+  ^\s+Port\s+range:\s+.*$$
+  ^\s+Address\s+information:\s*$$
+  ^\s+Start\s+address\s+End\s+address\s*$$
+  ^\s+${POOL_START}\s+${POOL_END}\s*$$ -> Record
+  ^\s+Exclude\s+address.*$$ -> Error "address group exclusions are not read"
+  ^\s+Interface:\s+${INTERFACE}\s*$$
+  ^\s+ACL:\s+${ACL_NAME}\s*$$
+  ^\s+Port-preserved:\s+\S+\s+NO-PAT:\s+${NO_PAT}\s+Reversible:\s+\S+\s*$$
+  ^\s+Protocol:\s+${PROTOCOL}\(\S+\)\s*$$
+  ^\s+Global\s+IP/port:\s+${GLOBAL_ADDRESS}/${GLOBAL_PORT}\s*$$
+  ^\s+Local\s+IP/port\s*:\s+${LOCAL_ADDRESS}/${LOCAL_PORT}\s*$$
+  ^\s+NAT\s+counting\s*:\s+\d+\s*$$
+  ^\s+Config\s+status\s*:\s+${STATUS}\s*$$ -> Record
+  ^\s*$$
+  ^\s+${OTHER}\s*$$
+
+Static
+  ^NAT\s+\S.*\s+information:\s*$$ -> Continue.Clearall
+  ^NAT\s+${KIND}\s+information:\s*$$ -> Rules
+  ^\S+\s+NAT\s+mappings:\s*$$ -> Continue.Clearall
+  ^${KIND}\s+NAT\s+mappings:\s*$$
+  ^Interfaces\s+enabled\s+with\s+static\s+NAT:\s*$$ -> Bindings
+  ^\S.*:\s*$$ -> Other
+  ^\S.*$$ -> Start
+  ^\s+Totally\s+\d+\s+outbound\s+static\s+NAT\s+mappings\.\s*$$
+  ^\s+IP-to-IP:\s*$$
+  ^\s+Local\s+IP\s*:\s+${LOCAL_ADDRESS}\s*$$
+  ^\s+Global\s+IP\s*:\s+${GLOBAL_ADDRESS}\s*$$
+  ^\s+NAT\s+counting\s*:\s+\d+\s*$$
+  ^\s+Config\s+status\s*:\s+${STATUS}\s*$$ -> Record
+  ^\s*$$
+  ^\s+.* -> Error "static NAT mapping of a kind this template does not read"
+
+Bindings
+  ^\s*$$ -> Start
+  ^\s+.*$$
+
+Other
+  ^\s*$$ -> Start
+  ^\s+.*\b[Ii]nterfaces?\b.*: -> Error "interface in an unrecognized display nat section"
+  ^\s+.*$$
+  ^\S.*$$ -> Start

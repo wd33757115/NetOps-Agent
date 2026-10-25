@@ -1,0 +1,77 @@
+manifest_version: 1
+id: inspection
+name: 网络巡检
+version: 1.3.6
+platform_api: '>=1.0,<2.0'
+icon: radar
+aliases:
+- patrol
+dependencies: {}
+backend:
+  router: src.apps.inspection.backend.router:router
+  task_modules:
+  - src.apps.inspection.backend.tasks
+  - src.apps.inspection.backend.online_tasks
+  - src.apps.inspection.backend.offline_tasks
+  - src.apps.inspection.backend.preview_tasks
+  - src.apps.inspection.backend.event_tasks
+  task_names:
+  - dispatch_patrol_batch
+  - reconcile_patrol_batch_dispatches
+  - reconcile_current_authority_dispatches
+  - reconcile_patrol_batch_reports
+  - materialize_patrol_batch_report
+  - cleanup_expired_patrol_outputs
+  - publish_network_event_outbox
+  - reconcile_patrol_runs
+  - preview_offline_patrol_job
+  - netops.inspection.execute_online
+  - netops.inspection.recover_online
+  - netops.inspection.execute_offline
+  - netops.inspection.recover_offline
+  queue: netops.patrol
+  legacy_queues:
+  - netops.ai
+  schedules:
+  - name: dispatch
+    task: reconcile_patrol_batch_dispatches
+    seconds: 15
+  - name: authority
+    task: reconcile_current_authority_dispatches
+    seconds: 30
+  - name: reports
+    task: reconcile_patrol_batch_reports
+    seconds: 60
+  - name: event-outbox
+    task: publish_network_event_outbox
+    seconds: 5
+  - name: stale-runs
+    task: reconcile_patrol_runs
+    seconds: 60
+  - name: online-recovery
+    task: netops.inspection.recover_online
+    seconds: 60
+  - name: offline-recovery
+    task: netops.inspection.recover_offline
+    seconds: 60
+  - name: retention
+    task: cleanup_expired_patrol_outputs
+    seconds: 3600
+frontend:
+  entry: frontend/index.tsx
+agent:
+  tools: src.apps.inspection.backend.tools:TOOLS
+database:
+  mode: legacy
+  tables:
+  - netops_patrol_report_requests
+  - netops_patrol_source_qualifications
+  - netops_patrol_current_authority_requests
+  - netops_risk_cases
+  - netops_risk_episode_associations
+  - netops_risk_occurrences
+  - netops_risk_remediations
+  minimum_revision: 0101_patrol_report_templates
+lifecycle:
+  drain: src.apps.inspection.backend.lifecycle:drain
+  pending: src.apps.inspection.backend.lifecycle:pending

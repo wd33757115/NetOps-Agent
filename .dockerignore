@@ -1,0 +1,77 @@
+# 只保留需要的文件，排除所有不需要的
+**
+!src/
+!src/**
+!web/
+!web/**
+!deployment/
+!deployment/**
+!migrations/
+!migrations/**
+!alembic.ini
+!README.md
+!.env
+!requirements.txt
+!requirements-*.txt
+
+# 排除web子目录中的不需要文件
+web/react_frontend/node_modules/
+web/react_frontend/.env
+web/react_frontend/dist/
+web/react_frontend/build/
+web/django_backend/staticfiles/
+web/django_backend/static/
+web/django_backend/db.sqlite3
+
+# Python
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.Python
+**/*.so
+**/*.egg
+**/*.egg-info/
+**/dist/
+**/build/
+
+# Virtual Environment
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Testing
+**/.pytest_cache/
+**/.coverage
+**/htmlcov/
+
+# Logs
+*.log
+logs/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Temporary Files
+tmp/
+temp/
+*.tmp
+*.tmp.*

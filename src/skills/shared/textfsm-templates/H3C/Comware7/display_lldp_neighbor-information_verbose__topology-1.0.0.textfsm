@@ -1,0 +1,31 @@
+Value Filldown LOCAL_INTERFACE (\S+)
+Value CHASSIS_ID_TYPE (.+?)
+Value Required CHASSIS_ID (\S+)
+Value PORT_ID_TYPE (.+?)
+Value PORT_ID (.+?)
+Value NEIGHBOR_NAME (.*?)
+Value List SYSTEM_DESCRIPTION (.*?)
+Value List MGMT_ADDRESS (\S+)
+
+# One record per LLDP neighbour (LLDP agent block) under its local port header
+# (campus-wan, vpn-fabric and VSR labs, Comware 7.1). The system description continues
+# on lines indented further than the keys. A neighbour starts at its index or chassis
+# type line. Other "key : value" lines are not modeled.
+Start
+  ^LLDP neighbor-information of port \d+\s*\[ -> Continue.Record
+  ^LLDP neighbor-information of port \d+\s*\[${LOCAL_INTERFACE}\]:\s*$$
+  ^LLDP agent \S+:\s*$$
+  ^\s*LLDP neighbor index\s*: -> Continue.Record
+  ^\s*LLDP neighbor index\s*:\s*\d+\s*$$
+  ^\s*Chassis type\s*: -> Continue.Record
+  ^\s*Chassis type\s*:\s*${CHASSIS_ID_TYPE}\s*$$
+  ^\s*Chassis ID\s*:\s*${CHASSIS_ID}\s*$$
+  ^\s*Port ID type\s*:\s*${PORT_ID_TYPE}\s*$$
+  ^\s*Port ID\s*:\s*${PORT_ID}\s*$$
+  ^\s*System name\s*:\s*${NEIGHBOR_NAME}\s*$$
+  ^\s*System description\s*:\s*${SYSTEM_DESCRIPTION}\s*$$
+  ^\s*Management address\s*:\s*${MGMT_ADDRESS}\s*$$
+  ^\s{3,}${SYSTEM_DESCRIPTION}\s*$$
+  ^\s*[A-Za-z][\w ()/.,-]*?\s*:(\s.*)?$$
+  ^\s*$$
+  ^. -> Error "unrecognized display lldp neighbor-information line"

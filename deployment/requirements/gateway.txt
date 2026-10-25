@@ -1,0 +1,6 @@
+-r core.txt
+
+uvicorn[standard]==0.32.*
+websockets>=12.0
+python-multipart>=0.0.12
+openpyxl>=3.1.0

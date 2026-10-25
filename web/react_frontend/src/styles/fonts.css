@@ -1,0 +1,14 @@
+/* SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com> */
+/* SPDX-License-Identifier: Apache-2.0 */
+
+/**
+ * macOS / iOS：优先系统 PingFang SC
+ * 其他平台：打包 HarmonyOS Sans SC webfont（开源，字形接近苹方）
+ *
+ * 自有苹方 woff2 可放入 public/fonts/pingfang/ 并在 fonts.css 追加 @font-face
+ */
+
+:root {
+  --grok-font-sans: 'PingFang SC', 'HarmonyOS Sans SC', -apple-system, BlinkMacSystemFont,
+    'Helvetica Neue', 'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif;
+}

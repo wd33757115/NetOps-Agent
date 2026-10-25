@@ -1,0 +1,71 @@
+# SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
+# SPDX-License-Identifier: Apache-2.0
+
+max_retries: 1
+retry_delay: 1.0
+commands_path: "commands"
+templates_path: "templates"
+default_username: test
+default_device_type: generic_ssh
+sheet_name:
+  禁止分页:
+    - screen-length disable
+  时间:
+    - display clock
+  版本:
+    - display version
+  序列号:
+    - display device manuinfo
+  CPU:
+    - display cpu-usage
+  内存:
+    - display memory
+  风扇:
+    - display fan
+  电源:
+    - display power
+  LLDP:
+    - display lldp neighbor-information list
+  堆叠:
+    - display irf
+  display interface brief:
+    - display interface brief
+  display interface:
+    - display interface
+  入方向流量统计:
+    - display counters inbound interface
+  路由表:
+    - display ip routing-table
+  接口光衰:
+    - display transceiver diagnosis interface
+  当前配置:
+    - display current-configuration
+
+
+structured_commands:
+  - display cpu-usage
+  - display memory
+  - display interface
+  - display interface brief
+  - display lldp neighbor-information list
+  - display ip routing-table
+  - display transceiver diagnosis interface
+  - display device manuinfo
+  - display fan
+  - display counters inbound interface
+  - display version
+  - display power
+primary_keys:
+  display interface:
+    - INTERFACE
+  display interface brief:
+    - INTERFACE
+  display lldp neighbor-information list:
+    - LOCAL_INTERFACE
+no_compare:
+    - display clock
+    - display version
+    - display cpu-usage
+    - display memory
+    - display counters inbound interface
+    - display transceiver diagnosis interface

@@ -1,0 +1,17 @@
+Value INTERFACE (\S+)
+Value VNI (\d+)
+Value TYPE (L2CP|L3CP|L2DP|L3DP)
+Value PEER (\d+\.\d+\.\d+\.\d+)
+Value ROUTER_MAC ([0-9a-fA-F]{4}\.[0-9a-fA-F]{4}\.[0-9a-fA-F]{4})
+Value EVNI (\d+)
+Value STATE (UP|DOWN|\S+)
+Value FLAGS (\S+)
+Value UPTIME (\S+)
+
+# RMAC/Num_RTs: the router MAC of an L3 VNI peer, a route-target count for an L2 one.
+Start
+  ^'\S+'\s+-\s+.*$$
+  ^Interface\s+VNI\s+Type\s+Peer-IP\s+RMAC/Num_RTs\s+eVNI\s+state\s+flags\s+UP time\s*$$
+  ^${INTERFACE}\s+${VNI}\s+${TYPE}\s+${PEER}\s+(?:${ROUTER_MAC}|\d+)\s+${EVNI}\s+${STATE}\s+${FLAGS}\s+${UPTIME}\s*$$ -> Record
+  ^\s*$$
+  ^. -> Error "unrecognized show nve peers line"

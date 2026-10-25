@@ -1,0 +1,59 @@
+Value Filldown ACL_TYPE (Basic|Advanced)
+Value Filldown ADDRESS_FAMILY (IPv4)
+Value Filldown,Required ACL_NAME (\S+)
+Value Filldown MATCH_ORDER (auto|config)
+Value Required LINE_NUM (\d+)
+Value ACTION (permit|deny)
+Value PROTOCOL ((?!(?:source|destination|source-port|destination-port|icmp-type|established|fragment|time-range|vpn-instance|logging|counting)\b)(?:[a-z][a-z0-9]*|\d+))
+Value SRC_NETWORK (\d+\.\d+\.\d+\.\d+)
+Value SRC_WILDCARD (\d+\.\d+\.\d+\.\d+|0)
+Value SRC_NETWORK_OBJECT_GROUP_NAME (\S+)
+Value SRC_PORT_MATCH (eq|neq|lt|gt)
+Value SRC_PORT ([\w-]+)
+Value SRC_PORT_RANGE_START ([\w-]+)
+Value SRC_PORT_RANGE_END ([\w-]+)
+Value DST_NETWORK (\d+\.\d+\.\d+\.\d+)
+Value DST_WILDCARD (\d+\.\d+\.\d+\.\d+|0)
+Value DST_NETWORK_OBJECT_GROUP_NAME (\S+)
+Value DST_PORT_MATCH (eq|neq|lt|gt)
+Value DST_PORT ([\w-]+)
+Value DST_PORT_RANGE_START ([\w-]+)
+Value DST_PORT_RANGE_END ([\w-]+)
+Value ICMP_TYPE ([A-Za-z][\w-]*|\d+)
+Value ICMP_CODE (\d+)
+Value TCP_FLAG (established)
+Value FRAGMENTS (fragment)
+Value TIME (\S+)
+Value STATE (Active|Inactive)
+Value VRF (\S+)
+Value OTHER ((?!\()\S.*?)
+Value MATCHES (\d+)
+
+# "display acl all": each IPv4 basic or advanced ACL ("... ACL 3998, 16 rules," or
+# "... ACL named NAME, ...") and its rules in the order they are matched: with
+# "match-order is auto" the device lists them depth-first (most specific first), not by
+# rule number. The device prints a rule's fields in a fixed order and ports, ICMP types
+# by name (53 as "dns", ICMP 3/4 as "fragmentneed-DFset"); a host is "source A 0".
+# "logging", "counting" and the hit counter are read past; any condition this template
+# does not know (dscp, precedence, tos, tcp-flag, ...) is kept whole in OTHER, and a rule
+# of any other form is kept with OTHER only, so it is never evaluated as if the condition
+# were absent. Comments are not rules. Other ACL kinds (IPv6, Layer 2, user-defined) are
+# passed over: an interface bound to one of them finds no IPv4 rules under its name.
+Start
+  ^(?:Basic|Advanced)\s+IPv4\s+ACL\s+(?:named\s+)?\S+,.*$$ -> Continue.Clearall
+  ^${ACL_TYPE}\s+${ADDRESS_FAMILY}\s+ACL\s+(?:named\s+)?${ACL_NAME},(?:\s+\d+\s+rules?,)?(?:\s+match-order\s+is\s+${MATCH_ORDER},)?.*$$
+  ^\S.*\bACL\b.*$$ -> Other
+  ^ACL's\s+.*$$
+  ^\s+rule\s+\d+\s+comment\s.*$$
+  ^\s+rule\s+${LINE_NUM}\s+${ACTION}(?:\s+${PROTOCOL})?(?:\s+source\s+(?:object-group\s+${SRC_NETWORK_OBJECT_GROUP_NAME}|${SRC_NETWORK}\s+${SRC_WILDCARD}))?(?:\s+destination\s+(?:object-group\s+${DST_NETWORK_OBJECT_GROUP_NAME}|${DST_NETWORK}\s+${DST_WILDCARD}))?(?:\s+source-port\s+(?:${SRC_PORT_MATCH}\s+${SRC_PORT}|range\s+${SRC_PORT_RANGE_START}\s+${SRC_PORT_RANGE_END}))?(?:\s+destination-port\s+(?:${DST_PORT_MATCH}\s+${DST_PORT}|range\s+${DST_PORT_RANGE_START}\s+${DST_PORT_RANGE_END}))?(?:\s+icmp-type\s+${ICMP_TYPE}(?:\s+${ICMP_CODE})?)?(?:\s+${TCP_FLAG})?(?:\s+${FRAGMENTS})?(?:\s+time-range\s+${TIME}(?:\s+\(${STATE}\))?)?(?:\s+vpn-instance\s+${VRF})?(?:\s+(?!(?:logging|counting)(?:\s|$$))${OTHER})?(?:\s+logging)?(?:\s+counting)?(?:\s+\(${MATCHES}\s+times?\s+matched\))?\s*$$ -> Record
+  ^\s+rule\s+${LINE_NUM}\s+${OTHER}\s*$$ -> Record
+  ^\s*$$
+  ^.* -> Error "unrecognized display acl line"
+
+Other
+  ^(?=(?:Basic|Advanced)\s+IPv4\s+ACL\s+(?:named\s+)?\S+,.*$$) -> Continue.Clearall
+  ^${ACL_TYPE}\s+${ADDRESS_FAMILY}\s+ACL\s+(?:named\s+)?${ACL_NAME},(?:\s+\d+\s+rules?,)?(?:\s+match-order\s+is\s+${MATCH_ORDER},)?.*$$ -> Start
+  ^\S.*$$
+  ^\s+\S.*$$
+  ^\s*$$
+  ^.* -> Error "unrecognized display acl line"

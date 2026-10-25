@@ -1,0 +1,16 @@
+version: 2
+scoped_value_mappings:
+  - check_item: environment.power
+    vendor: H3C
+    model: S6520XP
+    command: display power
+    canonical: power_supply_status
+    aliases:
+      - state
+  - check_item: environment.fan
+    vendor: H3C
+    model: S6520XP
+    command: display fan
+    canonical: fan_status
+    aliases:
+      - state

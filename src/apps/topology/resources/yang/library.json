@@ -1,0 +1,89 @@
+{
+  "ietf-yang-library:modules-state": {
+    "module-set-id": "netops-topology-simap-l2-l3-vlan-vxlan-fabric",
+    "module": [
+      {
+        "name": "iana-if-type",
+        "revision": "2014-05-08",
+        "namespace": "urn:ietf:params:xml:ns:yang:iana-if-type",
+        "conformance-type": "implement"
+      },
+      {
+        "name": "ieee802-dot1q-types",
+        "revision": "2023-10-26",
+        "namespace": "urn:ieee:std:802.1Q:yang:ieee802-dot1q-types",
+        "conformance-type": "import"
+      },
+      {
+        "name": "ietf-dc-fabric-topology",
+        "revision": "2019-02-25",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-dc-fabric-topology",
+        "conformance-type": "implement"
+      },
+      {
+        "name": "ietf-dc-fabric-types",
+        "revision": "2019-02-25",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-dc-fabric-types",
+        "conformance-type": "implement"
+      },
+      {
+        "name": "ietf-inet-types",
+        "revision": "2025-12-22",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-inet-types",
+        "conformance-type": "import"
+      },
+      {
+        "name": "ietf-interfaces",
+        "revision": "2018-02-20",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-interfaces",
+        "conformance-type": "import"
+      },
+      {
+        "name": "ietf-l2-topology",
+        "revision": "2020-11-15",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-l2-topology",
+        "conformance-type": "implement",
+        "feature": [
+          "VLAN",
+          "VXLAN"
+        ]
+      },
+      {
+        "name": "ietf-l3-unicast-topology",
+        "revision": "2018-02-26",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-l3-unicast-topology",
+        "conformance-type": "implement"
+      },
+      {
+        "name": "ietf-network",
+        "revision": "2018-02-26",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-network",
+        "conformance-type": "implement"
+      },
+      {
+        "name": "ietf-network-topology",
+        "revision": "2018-02-26",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-network-topology",
+        "conformance-type": "implement"
+      },
+      {
+        "name": "ietf-routing-types",
+        "revision": "2017-12-04",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-routing-types",
+        "conformance-type": "import"
+      },
+      {
+        "name": "ietf-simap-topology",
+        "revision": "2025-01-01",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-simap-topology",
+        "conformance-type": "implement"
+      },
+      {
+        "name": "ietf-yang-types",
+        "revision": "2025-12-22",
+        "namespace": "urn:ietf:params:xml:ns:yang:ietf-yang-types",
+        "conformance-type": "import"
+      }
+    ]
+  }
+}

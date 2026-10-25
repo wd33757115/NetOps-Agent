@@ -1,0 +1,32 @@
+schema_version: 1
+verified:
+  - platform: comware
+    vendor: H3C
+    model: VSR1000
+    os_version: "7.1.064 Release 1362P12"
+    date: "2026-09-28"
+    drivers:
+      paramiko: "4.0.0"
+      netmiko: "4.7.0"
+    device_count: 2
+    initialization:
+      - screen-length disable
+    commands:
+      - display version
+      - display interface brief
+      - display ip routing-table
+    comparison:
+      result: equal_after_normalization
+      normalization: trim_lines_drop_empty_and_uptime_lines
+      cases: 6
+    preferred_for_identified_device: netmiko
+    note: >-
+      Both drivers automatically disabled paging in identified controlled sessions;
+      callers supplied only the three collection commands. This fixes the earlier
+      Paramiko session omission that produced an incomplete VSR-2 route table. Unknown platforms
+      continue using Paramiko identification. This record is evidence for P2
+      profiles, not an automatic global driver switch.
+unverified_platforms:
+  - nxos
+  - ios
+  - vrp

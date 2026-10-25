@@ -1,0 +1,38 @@
+# SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
+# SPDX-License-Identifier: Apache-2.0
+
+workflow: rule-asset-approve
+priority: 97
+description: 聊天触发待审批规则资产审批激活
+
+match:
+  require_any:
+    - 审批激活
+    - 批准规则资产
+    - 激活规则资产
+    - approve rule asset
+  require_any_secondary:
+    - 规则资产
+    - 候选资产
+    - job
+    - 任务
+
+required_context:
+  - job_id
+
+context_from_query:
+  job_id: job_id
+
+context_from_state:
+  job_id: selected_rule_generation_job_id
+
+context_defaults:
+  actor: chat
+
+response_template: |
+  [OK] 已启动规则资产审批激活 Workflow
+
+  - **流程 ID**: `{run_id}`
+  - **流程**: {workflow_description}
+
+  该流程会调用确定性审批服务；只有满足验证证据和资产引用前置条件的候选才能激活。

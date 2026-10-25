@@ -1,0 +1,296 @@
+# Repository distribution: source, manuals and installation/operation scripts.
+# New root directories are local until explicitly allowed here.
+/*
+!/.gitignore
+!/.gitattributes
+!/.dockerignore
+!/.editorconfig
+!/.env.example
+!/.github/
+!/LICENSE
+!/README.md
+!/alembic.ini
+!/pyproject.toml
+!/requirements*.txt
+!/src/
+!/web/
+!/migrations/
+!/schemas/
+!/config/
+!/scripts/
+!/deployment/
+!/docs/
+
+# Local plans, review output and historical validation notes (keep on disk).
+
+# Database exports and process/runtime artifacts, including nested locations.
+*.dump
+*.backup
+*.sql.gz
+*.sql.bz2
+.codex-artifacts/
+outputs/
+artifacts/
+playwright-report/
+test-results/
+
+# ============================================================
+# Python
+# ============================================================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+sdist/
+*.whl
+.Python
+pip-wheel-metadata/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ============================================================
+# Backups (scripts/prod/backup.*)
+# ============================================================
+backups/
+
+
+# ============================================================
+# Virtual Environment
+# ============================================================
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv.bak/
+pythonenv*
+
+# ============================================================
+# IDE / Editor
+# ============================================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+*~
+\#*\#
+.project
+.classpath
+.settings/
+
+# ============================================================
+# OS
+# ============================================================
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ============================================================
+# Environment Variables & Secrets
+# ============================================================
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+credentials.json
+service-account.json
+
+# ============================================================
+# Testing & Coverage
+# ============================================================
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+nosetests.xml
+
+# ============================================================
+# Logs
+# ============================================================
+*.log
+logs/
+*.log.*
+
+# ============================================================
+# Database
+# ============================================================
+*.db
+*.sqlite
+*.sqlite3
+*.sqlite3-journal
+dump.rdb
+
+# ============================================================
+# Temporary Files
+# ============================================================
+tmp/
+temp/
+*.tmp
+*.tmp.*
+*.bak
+*.swp
+*.swo
+.cache/
+
+# ============================================================
+# Archives
+# ============================================================
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+*.rar
+
+# ============================================================
+# Excel / Office temp files
+# ============================================================
+*.xlsx
+!web/react_frontend/public/templates/firewall-policy-request.xlsx
+!src/apps/firewall_policy/resources/*.xlsx
+!src/apps/firewall_policy/backend/engine/ticket/templates/*.xlsx
+~$*.xlsx
+~$*.docx
+~$*.pptx
+
+# ============================================================
+# Model Cache (HuggingFace / LLM)
+# ============================================================
+cache/
+models/
+*.bin
+*.safetensors
+*.onnx
+*.gguf
+*.ggml
+
+# ============================================================
+# Vector Store
+# ============================================================
+vectorstore/
+chroma_db/
+deployment/qdrant_storage/
+
+# ============================================================
+# Project-specific directories
+# ============================================================
+src/skills/device-backup/data/db/
+src/skills/device-backup/data/outputs/
+src/skills/textfsm-generator/reports/*.json
+src/skills/textfsm-generator/reports/rejected/
+src/skills/shared/textfsm-templates/*
+!src/skills/shared/textfsm-templates/.gitkeep
+!src/skills/shared/textfsm-templates/Cisco/
+src/skills/shared/textfsm-templates/Cisco/*
+!src/skills/shared/textfsm-templates/Cisco/IOS-C2960/
+src/skills/shared/textfsm-templates/Cisco/IOS-C2960/*
+!src/skills/shared/textfsm-templates/Cisco/IOS-C2960/show_interface_transceiver_detail__1.0.0.textfsm
+# System base check-item templates (topology discovery) ship with rule governance.
+!src/skills/shared/textfsm-templates/Cisco/IOS/
+src/skills/shared/textfsm-templates/Cisco/IOS/*
+!src/skills/shared/textfsm-templates/Cisco/IOS/*__topology-*.textfsm
+!src/skills/shared/textfsm-templates/H3C/
+src/skills/shared/textfsm-templates/H3C/*
+!src/skills/shared/textfsm-templates/H3C/Comware7/
+src/skills/shared/textfsm-templates/H3C/Comware7/*
+!src/skills/shared/textfsm-templates/H3C/Comware7/display_transceiver_diagnosis_interface__1.0.0.textfsm
+!src/skills/shared/textfsm-templates/H3C/Comware7/display_transceiver_diagnosis_interface_thresholds__1.0.0.textfsm
+!src/skills/shared/textfsm-templates/H3C/Comware7/display_interface_values__1.0.0.textfsm
+!src/skills/shared/textfsm-templates/H3C/Comware7/*__topology-*.textfsm
+src/skills/shared/outputs/*
+!src/skills/shared/outputs/.gitkeep
+
+# Device captures and runtime data stay on the machine that produced them
+dev_test*/
+.runtime/
+.playwright-cli/
+
+# ============================================================
+# Node.js / Frontend
+# ============================================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+# Dependency lockfiles belong to the source distribution.
+.eslintcache
+.stylelintcache
+
+# ============================================================
+# React / Vite Frontend Build
+# ============================================================
+web/react_frontend/dist/
+web/react_frontend/build/
+web/react_frontend/test-results/
+web/react_frontend/playwright-report/
+web/react_frontend/.env
+web/react_frontend/.env.local
+web/react_frontend/.env.development.local
+web/react_frontend/.env.test.local
+web/react_frontend/.env.production.local
+
+# ============================================================
+# Django
+# ============================================================
+web/django_backend/staticfiles/
+web/django_backend/static/
+web/django_backend/db.sqlite3
+web/django_backend/media/
+
+# ============================================================
+# Celery
+# ============================================================
+celerybeat-schedule
+celerybeat.pid
+
+# ============================================================
+# Docker
+# ============================================================
+docker-compose.override.yml
+
+# ============================================================
+# Nested Git repository (do not track)
+# ============================================================
+netops-agent/
+
+# ============================================================
+# Trae / Agent internal files
+# ============================================================
+.trae/
+
+# ============================================================
+# Auto-generated Documentation
+# ============================================================
+CODE_QUALITY_REPORT.md
+测试文档.md
+
+# ============================================================
+# Jupyter Notebooks
+# ============================================================
+.ipynb_checkpoints/
+*.ipynb

@@ -1,0 +1,561 @@
+.grok-main-workbench {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  background: #173a64;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+.desktop-surface {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  color: #fff;
+  background: #173a64 url("/desktop-wallpaper.svg") center / cover;
+  overflow: hidden;
+  isolation: isolate;
+}
+.desktop-navigation-toggle {
+  position: absolute;
+  left: 18px;
+  top: 0;
+  height: 40px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
+  border: 0;
+  background: none;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.desktop-navigation-mark {
+  font-size: 19px;
+  font-weight: 800;
+  font-style: italic;
+  letter-spacing: -2px;
+  padding-right: 2px;
+}
+.desktop-navigation-toggle:hover,
+.desktop-navigation-toggle[aria-expanded="true"] {
+  background: #ffffff24;
+}
+.desktop-topbar {
+  display: flex;
+  flex: 0 0 40px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 26px 0 142px;
+  z-index: 2;
+  background: #162f5166;
+  border-bottom: 1px solid #ffffff16;
+  backdrop-filter: blur(30px) saturate(150%);
+}
+.desktop-menu-items {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+}
+.desktop-topbar h1 {
+  font-size: 13px;
+  margin: 0;
+  font-weight: 600;
+}
+.desktop-topbar .ant-btn {
+  color: #fff;
+  font-size: 12px;
+  border-radius: 5px;
+}
+.desktop-topbar .ant-btn:not(:disabled):hover {
+  color: #fff;
+  background: #ffffff20;
+}
+.desktop-topbar .ant-btn:disabled {
+  color: #ffffff60;
+}
+.desktop-clock {
+  display: flex;
+  gap: 14px;
+  font-size: 12px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.desktop-canvas {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  margin: 28px 28px 0;
+  padding: 8px 0 16px;
+}
+.desktop-grid {
+  display: grid;
+  grid-auto-rows: 116px;
+  align-content: start;
+  animation: desktop-icons-enter 450ms ease-out both;
+}
+.desktop-cell {
+  border-radius: 12px;
+  padding: 5px;
+}
+.desktop-cell.is-drop-target {
+  background: #c3e3ff28;
+  outline: 1px dashed #d8eeffa6;
+}
+.desktop-folder-target {
+  border-radius: 12px;
+}
+.desktop-folder-target.is-drop-target {
+  outline: 2px solid #c0e5ff;
+  background: #c3e3ff40;
+}
+.desktop-tile {
+  position: relative;
+  width: 102px;
+  border-radius: 10px;
+  transition:
+    background 150ms,
+    opacity 150ms;
+}
+.desktop-tile.is-selected {
+  background: #b1d7ff26;
+  box-shadow: inset 0 0 0 1px #ffffff40;
+}
+.desktop-tile.is-selected .desktop-label {
+  background: #2469b8;
+}
+.desktop-tile.is-dragging {
+  opacity: 0.3;
+}
+.desktop-launch {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  gap: 8px;
+  padding: 7px 0;
+  background: none;
+  border: 0;
+  cursor: default;
+  touch-action: none;
+  color: inherit;
+}
+.desktop-launch:focus-visible,
+.desktop-dock-app:focus-visible,
+.desktop-navigation-toggle:focus-visible,
+.desktop-window-close:focus-visible {
+  outline: 2px solid #a4d8ff;
+  outline-offset: 3px;
+  border-radius: 8px;
+}
+.desktop-glyph {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 16px;
+  color: #ecfff9;
+  box-shadow:
+    0 7px 12px #061d3c45,
+    inset 0 1px 1px #ffffff90,
+    inset 0 -2px 3px #001e4d25;
+  transition: transform 200ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.desktop-glyph svg {
+  width: 88%;
+  height: 88%;
+  filter: drop-shadow(0 1px 1px #00132c15);
+}
+.desktop-glyph.is-patrol {
+  background: linear-gradient(155deg, #57d4c1, #158f9d 52%, #176a8e);
+}
+.desktop-glyph.is-rules {
+  background: linear-gradient(155deg, #a5c8ff, #6089dc 52%, #4866b1);
+}
+.desktop-glyph.is-document { background: linear-gradient(155deg, #74bdff, #3979d1 60%, #275eae); }
+.desktop-glyph.is-firewall { background: linear-gradient(155deg, #85b4e4, #447bb7 65%, #326298); }
+.desktop-glyph.is-folder {
+  background: none;
+  box-shadow: none;
+  filter: drop-shadow(0 5px 4px #09284440);
+}
+.desktop-glyph.is-folder svg {
+  width: 100%;
+  height: 100%;
+}
+.desktop-launch:hover .desktop-glyph {
+  transform: translateY(-3px);
+}
+.desktop-label {
+  font-size: 12px;
+  line-height: 1.5;
+  font-weight: 500;
+  text-align: center;
+  max-width: 104px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  overflow-wrap: anywhere;
+  text-shadow:
+    0 1px 3px #061b37,
+    0 1px 8px #061b3780;
+}
+.desktop-item-menu {
+  position: absolute;
+  right: -2px;
+  top: 0;
+  border: 1px solid #ffffff50;
+  background: #1d3d65d9;
+  color: #fff;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 150ms;
+}
+.desktop-tile:hover .desktop-item-menu,
+.desktop-tile:focus-within .desktop-item-menu {
+  opacity: 1;
+}
+.desktop-footer {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  padding: 12px 20px 14px;
+  gap: 16px;
+  z-index: 4;
+}
+.desktop-dock {
+  display: flex;
+  order: 1;
+  min-width: 156px;
+  min-height: 82px;
+  max-width: 100%;
+  justify-content: center;
+  align-items: center;
+  padding: 10px 13px;
+  gap: 14px;
+  background: #d7e9fa38;
+  border: 1px solid #e8f4ff70;
+  border-radius: 24px;
+  box-shadow:
+    0 14px 35px #071e3e40,
+    inset 0 0 0 1px #ffffff18;
+  backdrop-filter: blur(28px) saturate(160%);
+  animation: desktop-dock-enter 500ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.desktop-dock.is-drop-target {
+  outline: 2px solid #b7e4ff;
+}
+.desktop-dock-app {
+  position: relative;
+  border: 0;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  touch-action: none;
+}
+.desktop-dock-app .desktop-glyph {
+  width: 58px;
+  height: 58px;
+  border-radius: 15px;
+  transform-origin: center bottom;
+}
+.desktop-dock-tooltip {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 25px);
+  padding: 5px 10px;
+  color: #21334e;
+  background: #edf5ffed;
+  border: 1px solid #ffffff90;
+  border-radius: 7px;
+  box-shadow: 0 4px 12px #071e3e25;
+  font-size: 12px;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translate(-50%, 4px);
+  transition:
+    opacity 160ms,
+    transform 160ms;
+  pointer-events: none;
+}
+.desktop-dock-app:focus-visible .desktop-dock-tooltip {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+@media (hover: hover) and (pointer: fine) {
+  .desktop-dock-app:hover .desktop-glyph {
+    transform: translateY(-7px) scale(1.16);
+  }
+  .desktop-dock-app:hover .desktop-dock-tooltip {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+  .desktop-dock-app:has(+ .desktop-dock-app:hover) .desktop-glyph,
+  .desktop-dock-app:hover + .desktop-dock-app .desktop-glyph {
+    transform: translateY(-3px) scale(1.05);
+  }
+}
+.desktop-hint {
+  font-size: 11px;
+  color: #e5effa;
+  text-shadow: 0 1px 4px #071e3e;
+}
+.desktop-folder-layer {
+  position: absolute;
+  inset: 40px 0 110px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 3;
+  pointer-events: none;
+}
+.desktop-folder-backdrop {
+  position: absolute;
+  inset: 0;
+  background: #10274718;
+  border: 0;
+  pointer-events: auto;
+}
+.desktop-folder-layer.is-dragging .desktop-folder-backdrop {
+  pointer-events: none;
+  opacity: 0.35;
+}
+.desktop-folder-window {
+  position: relative;
+  width: min(540px, 90%);
+  max-height: 90%;
+  overflow: auto;
+  color: #253650;
+  background: #f1f6fce8;
+  backdrop-filter: blur(32px) saturate(140%);
+  border: 1px solid #ffffffb0;
+  border-radius: 13px;
+  box-shadow:
+    0 30px 80px #071b4560,
+    0 3px 10px #071b4520;
+  pointer-events: auto;
+  animation: desktop-folder-enter 220ms ease-out;
+}
+.desktop-folder-window.is-drop-target {
+  outline: 2px solid #80beee;
+}
+.desktop-folder-window header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 54px;
+  padding: 12px 18px;
+  border-bottom: 1px solid #2c497416;
+  background: #ffffff50;
+}
+.desktop-folder-window h2 {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.desktop-folder-count {
+  font-size: 11px;
+  color: #637188;
+  white-space: nowrap;
+}
+.desktop-window-close {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 1px solid #e14a43;
+  background: #ff655c;
+  border-radius: 50%;
+  font-size: 9px;
+  color: #672721;
+  cursor: pointer;
+}
+.desktop-window-close .anticon {
+  opacity: 0;
+}
+.desktop-window-close:hover .anticon,
+.desktop-window-close:focus-visible .anticon {
+  opacity: 1;
+}
+.desktop-folder-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(105px, 1fr));
+  gap: 12px;
+  padding: 24px;
+  min-height: 160px;
+}
+.desktop-folder-grid .desktop-label {
+  text-shadow: none;
+}
+.desktop-folder-grid .is-selected .desktop-label {
+  color: #fff;
+}
+.desktop-folder-grid .is-drop-target {
+  background: #95c6ee50;
+  border-radius: 10px;
+}
+.desktop-empty-folder {
+  padding: 0 24px 24px;
+  font-size: 13px;
+  color: #637188;
+}
+.desktop-drag-preview {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  width: 102px;
+  opacity: 0.9;
+  color: #fff;
+  text-shadow: 0 1px 4px #071e3e;
+}
+.desktop-action-list {
+  width: 100%;
+}
+.desktop-save-status {
+  position: absolute;
+  left: 24px;
+  bottom: 20px;
+  z-index: 2;
+  pointer-events: none;
+  font-size: 11px;
+  color: #d3e4f6;
+  text-shadow: 0 1px 4px #071e3e;
+}
+.grok-main-workbench > .ant-alert {
+  position: absolute;
+  top: 48px;
+  left: 16px;
+  right: 16px;
+  z-index: 6;
+}
+@keyframes desktop-icons-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes desktop-dock-enter {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes desktop-folder-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (max-width: 767px) {
+  .desktop-navigation-toggle {
+    left: 8px;
+    height: 44px;
+    gap: 7px;
+  }
+  .desktop-topbar {
+    flex-basis: 44px;
+    padding: 0 12px 0 116px;
+  }
+  .desktop-menu-items {
+    gap: 7px;
+  }
+  .desktop-topbar h1 {
+    font-size: 12px;
+  }
+  .desktop-topbar .ant-btn {
+    padding-inline: 5px;
+    font-size: 11px;
+  }
+  .desktop-topbar .ant-btn .anticon {
+    display: none;
+  }
+  .desktop-clock-date {
+    display: none;
+  }
+  .desktop-clock {
+    font-size: 11px;
+  }
+  .desktop-canvas {
+    margin: 22px 14px 0;
+  }
+  .desktop-item-menu {
+    opacity: 1;
+  }
+  .desktop-footer {
+    padding-bottom: max(34px, env(safe-area-inset-bottom));
+    gap: 20px;
+  }
+  .desktop-save-status {
+    left: 0;
+    right: 0;
+    bottom: 9px;
+    text-align: center;
+    font-size: 10px;
+  }
+  .desktop-folder-window header {
+    gap: 10px;
+    padding: 12px;
+  }
+  .desktop-window-close {
+    width: 26px;
+    height: 26px;
+  }
+  .desktop-window-close .anticon {
+    opacity: 1;
+  }
+  .desktop-folder-grid {
+    padding: 18px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .desktop-surface *,
+  .desktop-drag-preview {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+.wallpaper-description { color: #53657a; margin: 8px 0 18px; }
+.wallpaper-preview { height: 230px; border-radius: 12px; display: flex; align-items: start; overflow: hidden; }
+.wallpaper-preview > span { padding: 9px 14px; color: white; background: #14243cb3; width: 100%; font-size: 12px; }
+.wallpaper-presets { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 20px 0; }
+.wallpaper-presets button { border: 2px solid transparent; padding: 4px; background: transparent; border-radius: 9px; cursor: pointer; color: #33465e; }
+.wallpaper-presets button[aria-pressed=true] { border-color: #1667cb; background: #f1f7ff; }
+.wallpaper-presets button > span { display: block; height: 64px; border-radius: 5px; }
+.wallpaper-presets strong { display: block; padding: 8px 0 2px; font-size: 13px; font-weight: 500; }
+.wallpaper-upload { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 16px; }
+.wallpaper-upload > span { font-size: 12px; color: #586b83; }
+.wallpaper-reset.ant-btn { padding-left: 0; }
+.wallpaper-presets button:focus-visible { outline: 3px solid #4384d6; outline-offset: 2px; }
+.grok-history-error { padding: 10px 14px; color: #9e3529; font-size: 12px; }
+.grok-history-error button { margin-left: 8px; background: none; border: 0; color: #1667cb; cursor: pointer; }
+@media (max-width: 767px) { .desktop-topbar { gap: 6px; padding-right: 8px; } .desktop-topbar h1 { display: none; } .desktop-clock { display: none; } .wallpaper-preview { height: 175px; } .wallpaper-presets { gap: 6px; } }

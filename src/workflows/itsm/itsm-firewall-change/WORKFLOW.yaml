@@ -1,0 +1,69 @@
+# SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
+# SPDX-License-Identifier: Apache-2.0
+
+name: itsm-firewall-change
+description: ITSM 防火墙策略变更：防火墙策略应用生成策略与变更工单，提供回调地址时回调 ITSM
+version: "2.0"
+
+test:
+  context:
+    ticket_id: REQ-TEST-001
+    ticket_title: Workflow UI test
+    policy_file_url: ""
+    topology_file_url:
+    change_background: Workflow UI test
+    change_purpose: Validate workflow execution
+    requester: tester
+    requester_dept: NetOps
+    assignee:
+    due_date:
+    callback_url:
+    callback_headers: {}
+  required_context:
+    - ticket_id
+    - policy_file_url
+
+steps:
+  - name: policy_generation
+    label: 生成防火墙策略
+    skill: app:firewall-policy/generate_policy
+    inputs:
+      ticket_id: ${context.ticket_id}
+      policy_file_url: ${context.policy_file_url}
+      topology_file_url: ${context.topology_file_url}
+
+  - name: change_ticket
+    label: 编写变更工单
+    skill: app:firewall-policy/write_change_ticket
+    inputs:
+      policy_run_id: ${steps.policy_generation.result.policy_run_id}
+      ticket_title: ${context.ticket_title}
+      change_background: ${context.change_background}
+      change_purpose: ${context.change_purpose}
+      requester: ${context.requester}
+      requester_dept: ${context.requester_dept}
+      assignee: ${context.assignee}
+      due_date: ${context.due_date}
+
+  - name: itsm_callback
+    label: 回调 ITSM
+    skill: itsm-callback
+    when: ${context.callback_url}
+    inputs:
+      ticket_id: ${context.ticket_id}
+      callback_url: ${context.callback_url}
+      callback_headers: ${context.callback_headers}
+      change_excel_url: ${steps.change_ticket.artifacts.change_excel.download_url}
+      change_excel_file_key: ${steps.change_ticket.artifacts.change_excel.file_key}
+      change_excel_filename: ${steps.change_ticket.artifacts.change_excel.filename}
+      config_files_url: ${steps.policy_generation.artifacts.config_zip.download_url}
+      config_file_key: ${steps.policy_generation.artifacts.config_zip.file_key}
+      config_filename: ${steps.policy_generation.artifacts.config_zip.filename}
+      workflow_run_id: ${run.id}
+
+on_complete:
+  message: ITSM 变更流程已完成
+  notification:
+    title: "变更工单已完成 (${context.ticket_id})"
+    body: "${steps.policy_generation.result.message}，变更工单已生成。"
+    level: success

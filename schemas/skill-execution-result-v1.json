@@ -1,0 +1,63 @@
+{
+  "$comment": "Copyright 2026 wangdong <wangdong5919@163.com>. SPDX-License-Identifier: Apache-2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://netops-agent.local/schemas/skill-execution-result-v1.json",
+  "title": "SkillExecutionResult",
+  "description": "Skill 执行结果标准契约 v1",
+  "type": "object",
+  "required": ["schema_version", "execution_id", "skill_name", "status"],
+  "properties": {
+    "schema_version": { "type": "string", "const": "1" },
+    "execution_id": { "type": "string", "format": "uuid" },
+    "skill_name": { "type": "string" },
+    "skill_version": { "type": "string" },
+    "status": {
+      "type": "string",
+      "enum": ["success", "error", "partial", "skipped"]
+    },
+    "message": { "type": "string" },
+    "output": { "type": "object", "additionalProperties": true },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "kind": { "type": "string" },
+          "file_key": { "type": ["string", "null"] },
+          "download_url": { "type": ["string", "null"] },
+          "filename": { "type": ["string", "null"] },
+          "content_type": { "type": ["string", "null"] },
+          "size_bytes": { "type": ["integer", "null"] },
+          "checksum": { "type": ["string", "null"] }
+        },
+        "required": ["kind"]
+      }
+    },
+    "metadata": { "type": "object", "additionalProperties": true },
+    "error_info": {
+      "type": ["object", "null"],
+      "properties": {
+        "code": { "type": ["string", "null"] },
+        "message": { "type": "string" },
+        "detail": { "type": ["string", "null"] }
+      },
+      "required": ["message"]
+    },
+    "context": {
+      "type": "object",
+      "properties": {
+        "source": { "type": "string", "enum": ["chat", "workflow", "api", "celery"] },
+        "message_id": { "type": ["string", "null"] },
+        "thread_id": { "type": ["string", "null"] },
+        "run_id": { "type": ["string", "null"] },
+        "step_name": { "type": ["string", "null"] },
+        "step_id": { "type": ["string", "null"] },
+        "user_id": { "type": ["string", "null"] },
+        "ticket_id": { "type": ["string", "null"] },
+        "trace_id": { "type": ["string", "null"] }
+      }
+    },
+    "executed_at": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}

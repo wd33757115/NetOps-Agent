@@ -1,0 +1,64 @@
+schema_version: 1
+# Version-output signatures only. Banner/LLDP matches never confirm a platform.
+# Non-Comware entries are sample tested, not hardware verified.
+# Everything topology knows about a family is here (collectors/families.py documents the
+# optional keys): adding a family is adding a row, a profile and its rule-governance
+# implementations, not code.
+families:
+  - id: comware
+    vendor: H3C/HPE
+    vendor_pattern: '^\s*(H3C|HPE|HP)\s+Comware'
+    profile_id: h3c-comware7
+    # Family recognition does not prove major-version compatibility.
+    profile_requires: '^\s*(?:(?:H3C|HPE|HP)\s+)?Comware[^\n]*\bversion\s+7\.'
+    command_style: display
+    cli: comware
+    discovery_profile: comware-lldp-v1
+    pattern: '^\s*(?:(?:H3C|HPE|HP)\s+)?Comware (?:Platform )?Software\b'
+  - id: vrp
+    vendor: Huawei
+    profile_id: huawei-vrp
+    command_style: display
+    cli: vrp
+    global_instance: _public_
+    pattern: '^\s*(?:Huawei Versatile Routing Platform Software|VRP \(R\) software)\b'
+  - id: iosxe
+    vendor: Cisco
+    profile_id: cisco-iosxe
+    command_style: show
+    cli: ios
+    supersedes: [ios]  # its version output also has an IOS Software line
+    pattern: '^\s*Cisco IOS XE Software\b'
+  - id: ios
+    vendor: Cisco
+    profile_id: cisco-ios
+    command_style: show
+    cli: ios
+    pattern: '^\s*Cisco (?:IOS Software|Internetwork Operating System Software)\b'
+  - id: nxos
+    vendor: Cisco
+    profile_id: cisco-nxos
+    command_style: show
+    cli: nxos
+    discovery_profile: nxos-lldp-v1
+    pattern: '^\s*Cisco Nexus Operating System\s*\(NX-OS\)\s*Software\b'
+  - id: ruijie
+    vendor: Ruijie
+    profile_id: null
+    command_style: show
+    pattern: '^\s*(?:Ruijie (?:Operating System|Internetwork Operating System)|RGOS Software)\b'
+  - id: junos
+    vendor: Juniper
+    profile_id: null
+    command_style: show
+    pattern: '^\s*JUNOS (?:Software Release|.+ Software|OS Kernel|Base Version)\b'
+  - id: eos
+    vendor: Arista
+    profile_id: null
+    command_style: show
+    pattern: '^\s*(?:Arista (?:DCS-|vEOS)|Arista EOS)'
+  - id: linux
+    vendor: null
+    profile_id: null
+    command_style: unknown
+    pattern: '^\s*Linux (?:version )?[0-9]+\.[0-9]+\b'

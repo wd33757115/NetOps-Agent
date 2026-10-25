@@ -1,0 +1,8 @@
+route_key: demo-text-report
+workflow: demo-text-report
+accepted_message: 已受理，正在生成文本报告
+context_mapping:
+  ticket_id: ticket_id
+  title: title
+  text: text
+  text_after: text_after

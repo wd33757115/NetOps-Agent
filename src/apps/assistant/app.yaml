@@ -1,0 +1,22 @@
+manifest_version: 1
+id: assistant
+name: 知识问答
+version: 0.10.1
+platform_api: '>=1.0,<2.0'
+icon: document
+dependencies:
+  materials: '>=1.0,<2.0'
+backend:
+  router: src.apps.assistant.backend.api:router
+agent:
+  tools: src.apps.assistant.backend.automation:TOOLS
+frontend:
+  entry: frontend/index.tsx
+database:
+  mode: package
+  migrations: migrations
+  head: assistant_0003
+  tables: [app_assistant_documents, app_assistant_revisions, app_assistant_turns, app_assistant_conversation_settings]
+lifecycle:
+  drain: src.apps.assistant.backend.turns:drain
+  pending: src.apps.assistant.backend.turns:pending

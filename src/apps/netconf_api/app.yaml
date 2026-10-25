@@ -1,0 +1,20 @@
+manifest_version: 1
+id: netconf-api
+name: NETCONF 接口
+version: 0.11.0
+platform_api: '>=1.0,<2.0'
+icon: network
+dependencies:
+  device-access: '>=0.9.0,<1.0.0'
+  rule-governance: '>=1.8.0,<2.0.0'
+backend:
+  router: src.apps.netconf_api.backend.api:router
+frontend:
+  entry: frontend/index.tsx
+database:
+  mode: package
+  migrations: migrations
+  head: netconf_api_0002
+  bootstrap: src.apps.netconf_api.backend.bootstrap:initialize
+  bootstrap_version: 5
+  tables: [app_netconf_definitions, app_netconf_definition_versions, app_netconf_capabilities, app_netconf_trials]

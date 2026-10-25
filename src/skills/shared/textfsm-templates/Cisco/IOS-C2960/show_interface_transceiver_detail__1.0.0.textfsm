@@ -1,0 +1,30 @@
+Value Filldown interface (\S+)
+Value transceiver_present (not present|present)
+Value dom_supported (not supported|supported)
+Value tx_power_dbm (-?\d+(?:\.\d+)?)
+Value tx_high_alarm_dbm (-?\d+(?:\.\d+)?)
+Value tx_high_warning_dbm (-?\d+(?:\.\d+)?)
+Value tx_low_warning_dbm (-?\d+(?:\.\d+)?)
+Value tx_low_alarm_dbm (-?\d+(?:\.\d+)?)
+Value rx_power_dbm (-?\d+(?:\.\d+)?)
+Value rx_high_alarm_dbm (-?\d+(?:\.\d+)?)
+Value rx_high_warning_dbm (-?\d+(?:\.\d+)?)
+Value rx_low_warning_dbm (-?\d+(?:\.\d+)?)
+Value rx_low_alarm_dbm (-?\d+(?:\.\d+)?)
+
+Start
+  ^\s*${interface}\s+transceiver is ${transceiver_present} -> Present
+  ^\s*${interface}\s+${tx_power_dbm}\s+[-\d.]+\s+${tx_high_warning_dbm}\s+${tx_low_warning_dbm}\s+${tx_low_alarm_dbm}\s*$$
+  ^\s*${interface}\s+${rx_power_dbm}\s+[-\d.]+\s+${rx_high_warning_dbm}\s+${rx_low_warning_dbm}\s+${rx_low_alarm_dbm}\s*$$ -> Record
+  ^.* -> Start
+
+Present
+  ^\s+DOM is ${dom_supported} -> DomUnsupported
+  ^\s+Tx Power\s+${tx_power_dbm}\s+dBm\s+${tx_high_alarm_dbm}\s+dBm\s+${tx_low_alarm_dbm}\s+dBm\s+${tx_high_warning_dbm}\s+dBm\s+${tx_low_warning_dbm}\s+dBm\s*$$
+  ^\s+Rx Power\s+${rx_power_dbm}\s+dBm\s+${rx_high_alarm_dbm}\s+dBm\s+${rx_low_alarm_dbm}\s+dBm\s+${rx_high_warning_dbm}\s+dBm\s+${rx_low_warning_dbm}\s+dBm\s*$$ -> Record Start
+  ^\s*\S+\s+transceiver is -> Record Start
+  ^.* -> Present
+
+DomUnsupported
+  ^.* -> Continue.Record
+  ^.* -> Start

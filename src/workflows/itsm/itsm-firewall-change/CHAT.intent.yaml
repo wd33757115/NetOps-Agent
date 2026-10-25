@@ -1,0 +1,44 @@
+# SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
+# SPDX-License-Identifier: Apache-2.0
+
+workflow: itsm-firewall-change
+priority: 100
+description: 按工单的策略申请表（xlsx，可在聊天里上传）生成防火墙策略和变更工单；给了 callback_url 时回调 ITSM
+
+match:
+  require_any:
+    - 防火墙
+    - 策略
+  require_any_secondary:
+    - 变更工单
+    - 编写变更
+    - itsm
+    - 提交变更
+    - 回调
+    - 变更流程
+    - 开通
+
+required_context:
+  - ticket_id
+  - policy_file_url
+
+# 聊天附件按扩展名自动填写这些字段（存在网盘里，流程以发起人身份读取）。
+files:
+  policy_file_url: [.xlsx]
+  topology_file_url: [.json]
+
+auto_if_source:
+  - itsm_webhook
+
+context_defaults:
+  ticket_title: 防火墙策略变更
+  change_purpose: 根据用户请求生成防火墙策略并编写变更工单
+
+response_template: |
+  [OK] 已启动 ITSM 防火墙变更流程
+
+  - **流程 ID**: `{run_id}`
+  - **工单**: {ticket_id}
+  - **步骤**: {workflow_description}
+
+  流程在后台执行，可通过 `GET /api/v1/workflows/{run_id}` 查询进度；完成后将收到站内通知。

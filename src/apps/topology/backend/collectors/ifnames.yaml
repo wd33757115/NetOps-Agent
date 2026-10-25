@@ -1,0 +1,43 @@
+# Interface names per CLI dialect (collectors/families.py: a family's "cli"). Each row:
+# canonical prefix, kind, and the aliases a device prints (matched case-insensitively,
+# followed by the port number). A name no row matches is kept as printed, never guessed.
+# Adding a dialect is adding a list here. Values are quoted: YAML reads a bare NULL as null.
+schema_version: 1
+dialects:
+  comware:
+    - {canonical: "GigabitEthernet", kind: "ethernet", aliases: ["GigabitEthernet", "GE"]}
+    - {canonical: "Ten-GigabitEthernet", kind: "ethernet", aliases: ["Ten-GigabitEthernet", "XGE"]}
+    - {canonical: "Bridge-Aggregation", kind: "lag", aliases: ["Bridge-Aggregation", "BAGG"]}
+    - {canonical: "Route-Aggregation", kind: "lag", aliases: ["Route-Aggregation", "RAGG"]}
+    - {canonical: "Vlan-interface", kind: "vlanif", aliases: ["Vlan-interface", "Vlan"]}
+    - {canonical: "LoopBack", kind: "loopback", aliases: ["LoopBack", "Loop"]}
+    - {canonical: "InLoopBack", kind: "loopback", aliases: ["InLoopBack", "InLoop"]}
+    - {canonical: "NULL", kind: "null", aliases: ["NULL"]}
+    - {canonical: "REG", kind: "register", aliases: ["REG"]}
+    - {canonical: "Tunnel", kind: "tunnel", aliases: ["Tunnel", "Tun"]}
+    - {canonical: "Vsi-interface", kind: "vsi", aliases: ["Vsi-interface", "Vsi"]}
+  nxos:
+    - {canonical: "Ethernet", kind: "ethernet", aliases: ["Ethernet", "Eth"]}
+    - {canonical: "port-channel", kind: "lag", aliases: ["port-channel", "Po"]}
+    - {canonical: "Vlan", kind: "vlanif", aliases: ["Vlan"]}
+    - {canonical: "loopback", kind: "loopback", aliases: ["loopback", "Lo"]}
+    - {canonical: "mgmt", kind: "mgmt", aliases: ["mgmt"]}
+    - {canonical: "Null", kind: "null", aliases: ["Null"]}
+  ios:
+    - {canonical: "GigabitEthernet", kind: "ethernet", aliases: ["GigabitEthernet", "Gi"]}
+    - {canonical: "TenGigabitEthernet", kind: "ethernet", aliases: ["TenGigabitEthernet", "Te"]}
+    - {canonical: "FastEthernet", kind: "ethernet", aliases: ["FastEthernet", "Fa"]}
+    - {canonical: "Ethernet", kind: "ethernet", aliases: ["Ethernet", "Et"]}
+    - {canonical: "Port-channel", kind: "lag", aliases: ["Port-channel", "Po"]}
+    - {canonical: "Vlan", kind: "vlanif", aliases: ["Vlan", "Vl"]}
+    - {canonical: "Loopback", kind: "loopback", aliases: ["Loopback", "Lo"]}
+    - {canonical: "Null", kind: "null", aliases: ["Null"]}
+    - {canonical: "Tunnel", kind: "tunnel", aliases: ["Tunnel", "Tu"]}
+    - {canonical: "nve", kind: "nve", aliases: ["nve", "nv"]}
+  vrp:
+    - {canonical: "GigabitEthernet", kind: "ethernet", aliases: ["GigabitEthernet", "GE"]}
+    - {canonical: "XGigabitEthernet", kind: "ethernet", aliases: ["XGigabitEthernet", "XGE"]}
+    - {canonical: "Eth-Trunk", kind: "lag", aliases: ["Eth-Trunk"]}
+    - {canonical: "Vlanif", kind: "vlanif", aliases: ["Vlanif"]}
+    - {canonical: "LoopBack", kind: "loopback", aliases: ["LoopBack"]}
+    - {canonical: "NULL", kind: "null", aliases: ["NULL"]}

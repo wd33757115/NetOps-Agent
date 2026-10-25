@@ -1,0 +1,34 @@
+Value Required PEER_LSR_ID (\d+\.\d+\.\d+\.\d+)
+Value LABEL_SPACE (\d+)
+Value LOCAL_LSR_ID (\d+\.\d+\.\d+\.\d+)
+Value LOCAL_LABEL_SPACE (\d+)
+Value STATE (\w+)
+Value List DISCOVERY_INTERFACE (\S+)
+Value List DISCOVERY_ADDRESS (\d+\.\d+\.\d+\.\d+)
+Value List ADDRESSES (\d+\.\d+\.\d+\.\d+)
+
+# One record per LDP peer (vpn-fabric lab, IOS-XE 17). The addresses a peer bound wrap
+# over several lines, up to four per line.
+Start
+  ^\s*Peer LDP Ident: -> Continue.Record
+  ^\s*Peer LDP Ident:\s+${PEER_LSR_ID}:${LABEL_SPACE};\s+Local LDP Ident\s+${LOCAL_LSR_ID}:${LOCAL_LABEL_SPACE}\s*$$
+  ^\s*TCP connection:\s.*$$
+  ^\s*State:\s+${STATE};\s+Msgs sent/rcvd:\s+\d+/\d+;\s+\S+\s*$$
+  ^\s*Up time:\s.*$$
+  ^\s*LDP discovery sources:\s*$$
+  ^\s*${DISCOVERY_INTERFACE},\s+Src IP addr:\s+${DISCOVERY_ADDRESS}\s*$$
+  ^\s*Addresses bound to peer LDP Ident:\s*$$ -> Addresses
+  ^\s*(Password|Clients):\s.*$$
+  ^\s*$$
+  ^. -> Error "unrecognized show mpls ldp neighbor line"
+
+Addresses
+  ^\s*Peer LDP Ident: -> Continue.Record
+  ^\s*Peer LDP Ident:\s+${PEER_LSR_ID}:${LABEL_SPACE};\s+Local LDP Ident\s+${LOCAL_LSR_ID}:${LOCAL_LABEL_SPACE}\s*$$ -> Start
+  ^\s+${ADDRESSES}(\s|$$) -> Continue
+  ^\s+\S+\s+${ADDRESSES}(\s|$$) -> Continue
+  ^\s+\S+\s+\S+\s+${ADDRESSES}(\s|$$) -> Continue
+  ^\s+\S+\s+\S+\s+\S+\s+${ADDRESSES}(\s|$$) -> Continue
+  ^\s+\d+\.\d+\.\d+\.\d+(\s+\d+\.\d+\.\d+\.\d+){0,3}\s*$$
+  ^\s*$$
+  ^. -> Error "unexpected line after the peer's bound addresses"

@@ -1,0 +1,18 @@
+Value Required VLAN_ID (\d+)
+Value NAME (\S+(?: \S+)*?)
+Value STATUS (active|suspended|act/lshut|sus/lshut|act/ishut|sus/ishut|act/unsup)
+Value List PORTS (\S.*?)
+
+# One record per VLAN (campus-wan lab, IOL L2). The port column lists ports separated
+# by ", " and wraps onto indented continuation lines (PORTS holds each line's text).
+Start
+  ^VLAN\s+Name\s+Status\s+Ports\s*$$ -> Vlans
+  ^\s*$$
+  ^. -> Error "unrecognized show vlan brief line"
+
+Vlans
+  ^[-\s]+$$
+  ^\d+\s -> Continue.Record
+  ^${VLAN_ID}\s+${NAME}\s+${STATUS}(?:\s+${PORTS})?\s*$$
+  ^\s{20,}${PORTS}\s*$$
+  ^. -> Error "unrecognized VLAN row"

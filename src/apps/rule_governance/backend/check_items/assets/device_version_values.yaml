@@ -1,0 +1,194 @@
+id: device.version
+version: 4
+name: 设备版本与资产信息
+category: device
+description: 按槽位保存设备版本、镜像和板卡资产；子槽位作为配对列表明细。七项必填缺失即数据不完整。
+result_mode: structured
+assessment_mode: evidence
+status: draft
+report_projection: auto@1
+canonical_contract:
+  entity_type: device_slot
+  value_contract: same-name/v1
+  identity_dimensions:
+  - SLOT
+  identity_dimension_rules:
+    SLOT:
+      kind: identifier
+      value_type: text
+      description: 源 CLI 明示的槽位标识；禁止虚构槽位或用行号补齐。
+      unavailable_values:
+      - --
+      - N/A
+      - unknown
+  observations:
+  - canonical_field: VENDOR
+    observation_type: device.version.vendor
+    semantic_type: state
+    value_type: text
+    description: 设备厂商；必须来自 CLI 明示，不根据型号猜测。
+    required: true
+    assessment_roles:
+    - change
+    - evidence
+    event_on_change: false
+    unavailable_values:
+    - --
+    - N/A
+    - unknown
+    - not available
+  - canonical_field: SOFTWARE_VERSION
+    observation_type: device.version.software_version
+    semantic_type: state
+    value_type: text
+    description: 完整软件版本，保留 Version、Release 等内容，不能转成数值。
+    required: true
+    assessment_roles:
+    - change
+    - evidence
+    event_on_change: false
+    unavailable_values:
+    - --
+    - N/A
+    - unknown
+    - not available
+  - canonical_field: BOOT_IMAGE
+    observation_type: device.version.boot_image
+    semantic_type: state
+    value_type: text
+    description: 启动镜像文件名或路径；不能用系统镜像代替。
+    required: true
+    assessment_roles:
+    - change
+    - evidence
+    event_on_change: false
+    unavailable_values:
+    - --
+    - N/A
+    - unknown
+    - not available
+  - canonical_field: SYSTEM_IMAGE
+    observation_type: device.version.system_image
+    semantic_type: state
+    value_type: text
+    description: 系统软件镜像文件名或路径；不能用启动镜像代替。
+    required: true
+    assessment_roles:
+    - change
+    - evidence
+    event_on_change: false
+    unavailable_values:
+    - --
+    - N/A
+    - unknown
+    - not available
+  - canonical_field: UPTIME
+    observation_type: device.version.uptime
+    semantic_type: text
+    value_type: text
+    description: 当前槽位板卡的运行时长原文；槽位值优先，只有整机原文明确适用于该槽位才可继承。正常增长不触发变化事件；重启识别需要连续采集证据。
+    required: true
+    assessment_roles:
+    - evidence
+    event_on_change: false
+    unavailable_values:
+    - --
+    - N/A
+    - unknown
+    - not available
+    change_tracking: false
+  - canonical_field: BOARD_TYPE
+    observation_type: device.version.board_type
+    semantic_type: state
+    value_type: text
+    description: 当前槽位板卡型号；不把整机型号推断为板卡型号。
+    required: true
+    assessment_roles:
+    - change
+    - evidence
+    event_on_change: false
+    unavailable_values:
+    - --
+    - N/A
+    - unknown
+    - not available
+  - canonical_field: DRAM
+    observation_type: device.version.dram
+    semantic_type: state
+    value_type: text
+    description: 当前槽位内存容量原文，保留数值及单位，不进行隐式单位换算。
+    required: false
+    assessment_roles:
+    - change
+    - evidence
+    event_on_change: false
+  - canonical_field: FLASH
+    observation_type: device.version.flash
+    semantic_type: state
+    value_type: text
+    description: 当前槽位 Flash 容量原文，保留数值及单位，不进行隐式单位换算。
+    required: false
+    assessment_roles:
+    - change
+    - evidence
+    event_on_change: false
+  - canonical_field: PATCH_VERSION
+    observation_type: device.version.patch_version
+    semantic_type: state
+    value_type: text
+    description: 补丁版本原文；明确未安装与未采集到必须区分。
+    required: false
+    assessment_roles:
+    - change
+    - evidence
+    event_on_change: false
+  - canonical_field: REBOOT_REASON
+    observation_type: device.version.reboot_reason
+    semantic_type: state
+    value_type: text
+    description: 对应槽位最近一次重启原因原文；不自动推断为故障。
+    required: false
+    assessment_roles:
+    - change
+    - evidence
+    event_on_change: false
+  - canonical_field: SUBSLOT
+    observation_type: device.version.subslot
+    semantic_type: text
+    value_type: text
+    description: 槽位内子槽位标识列表，按原文顺序，与 SUBSLOT_INFO 同位置配对；无子槽位为 []。
+    required: false
+    assessment_roles:
+    - change
+    - evidence
+    event_on_change: false
+    collection: list
+    paired_with: SUBSLOT_INFO
+    unique_items: true
+  - canonical_field: SUBSLOT_INFO
+    observation_type: device.version.subslot_info
+    semantic_type: text
+    value_type: text
+    description: 子槽位模块型号或描述列表，与 SUBSLOT 同位置配对；不能丢弃或跨槽位串接。
+    required: false
+    assessment_roles:
+    - change
+    - evidence
+    event_on_change: false
+    collection: list
+    paired_with: SUBSLOT
+  record_semantics:
+    grain: one record per explicit SLOT within the device; whole-device summary is
+      context, not a slot record
+    shared_context: Only inherit VENDOR, SOFTWARE_VERSION, BOOT_IMAGE, SYSTEM_IMAGE
+      when source explicitly applies to the current board; clear context at device
+      boundaries; board-specific overrides take precedence
+    uptime: Use board uptime; inherit whole-device uptime only with explicit applicability;
+      never copy another board uptime
+    children: SUBSLOT and SUBSLOT_INFO are aligned TextFSM Value List fields scoped
+      to SLOT; preserve empty lists, equal lengths and unique SUBSLOT identifiers
+    missing: Required missing or unavailable data is incomplete, never invent slot
+      IDs or mark healthy
+coverage_policy:
+  model: non_exhaustive
+  require_rule_evaluation: false

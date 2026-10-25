@@ -1,0 +1,6 @@
+# Optional new SSH capability. Existing inspection dependencies are unchanged.
+paramiko>=3.4,<5
+netmiko>=4.7,<5
+regex>=2024.11.6
+# VT100 screen for the human terminal whitelist (LGPL-3.0, used unmodified as a library).
+pyte>=0.8.2,<0.9

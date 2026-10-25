@@ -1,0 +1,82 @@
+"""Bounded, job-oriented Parser generation primitives."""
+
+from .compilers import KeyValueCompiler, RepeatedBlockCompiler, TableCompiler
+from .publishing import (
+    PersistedGeneration,
+    RepositoryGenerationObserver,
+    RepositoryModelCallController,
+    latest_reusable_candidate,
+    outcome_records,
+    persist_generation,
+    sample_manifest,
+    sample_set_digest,
+)
+from .samples import ParserSample, SampleExpectation, SampleRole, SampleSet
+from .service import (
+    MAX_PARSER_MODEL_CALLS,
+    PARSER_TOOL_PROTOCOL_VERSION,
+    GenerationAttempt,
+    GenerationOutcome,
+    InMemoryModelCallController,
+    ModelCallBudgetExhaustedError,
+    ParserCandidateReviewer,
+    ParserModelTurn,
+    ParserReviewReport,
+    SimpleParserGenerationService,
+    TemplateCandidate,
+)
+from .spec import (
+    FieldSpec,
+    ParserSpec,
+    ParserSpecDocument,
+    normalize_parser_spec_payload,
+    parser_spec_digest,
+)
+from .validation import (
+    TextFSMValidationBackend,
+    ValidationReport,
+    execute_template_candidate,
+    validate_template_candidate,
+    validate_template_execution,
+    validate_template_runtime_compatibility,
+)
+
+__all__ = [
+    "FieldSpec",
+    "GenerationAttempt",
+    "GenerationOutcome",
+    "InMemoryModelCallController",
+    "MAX_PARSER_MODEL_CALLS",
+    "PARSER_TOOL_PROTOCOL_VERSION",
+    "ParserSample",
+    "ParserCandidateReviewer",
+    "ParserModelTurn",
+    "ParserReviewReport",
+    "ParserSpec",
+    "ParserSpecDocument",
+    "normalize_parser_spec_payload",
+    "parser_spec_digest",
+    "PersistedGeneration",
+    "RepositoryGenerationObserver",
+    "RepositoryModelCallController",
+    "ModelCallBudgetExhaustedError",
+    "SampleExpectation",
+    "SampleRole",
+    "SampleSet",
+    "SimpleParserGenerationService",
+    "TableCompiler",
+    "KeyValueCompiler",
+    "RepeatedBlockCompiler",
+    "TemplateCandidate",
+    "TextFSMValidationBackend",
+    "ValidationReport",
+    "execute_template_candidate",
+    "validate_template_candidate",
+    "validate_template_execution",
+    "validate_template_runtime_compatibility",
+    "latest_reusable_candidate",
+    "outcome_records",
+    "persist_generation",
+    "sample_manifest",
+    "sample_set_digest",
+]

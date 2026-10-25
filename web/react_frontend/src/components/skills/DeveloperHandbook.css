@@ -1,0 +1,412 @@
+/* Developer handbook (Skills 和连接器 → 开发指南). Reads like a manual: one column of text,
+   the table of contents beside it only when the tab is wide enough. */
+.dev-guide-switch {
+  margin-bottom: 20px;
+}
+
+.dev-handbook {
+  container-type: inline-size;
+  color: var(--text-primary);
+}
+
+.dev-handbook-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.handbook-toc {
+  border: 1px solid var(--border-muted);
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: var(--surface-subtle);
+}
+
+.handbook-toc-title {
+  display: block;
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+.handbook-toc ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.handbook-toc a {
+  display: block;
+  padding: 3px 8px;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+  text-decoration: none;
+}
+
+.handbook-toc-2 a {
+  color: var(--text-primary);
+  font-weight: 500;
+  margin-top: 4px;
+}
+
+.handbook-toc-3 a {
+  padding-left: 20px;
+}
+
+.handbook-toc a:hover,
+.handbook-toc a[aria-current="location"] {
+  background: #e8f0fe;
+  color: #0b57d0;
+}
+
+.handbook-toc a:focus-visible {
+  outline: 2px solid #0b57d0;
+  outline-offset: 1px;
+}
+
+/* Narrow: only the chapters above the text. */
+.handbook-toc-3 {
+  display: none;
+}
+
+.handbook-main {
+  max-width: 760px;
+  min-width: 0;
+}
+
+.handbook-runs {
+  margin-top: 40px;
+}
+
+.handbook-article {
+  max-width: 760px;
+  min-width: 0;
+  font-size: 15px;
+  line-height: 1.8;
+}
+
+.handbook-article h1 {
+  font-size: 26px;
+  line-height: 1.35;
+  font-weight: 650;
+  margin: 0 0 12px;
+}
+
+.handbook-article h2 {
+  font-size: 21px;
+  line-height: 1.4;
+  font-weight: 650;
+  margin: 48px 0 12px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border-muted);
+  scroll-margin-top: 16px;
+}
+
+.handbook-article h3 {
+  font-size: 17px;
+  line-height: 1.5;
+  font-weight: 600;
+  margin: 32px 0 8px;
+  scroll-margin-top: 16px;
+}
+
+.handbook-article p,
+.handbook-article ul,
+.handbook-article ol {
+  margin: 0 0 14px;
+}
+
+/* Room for the markers: the page resets list padding, which pushed the numbers out of the column. */
+.handbook-article ul,
+.handbook-article ol {
+  padding-left: 1.6em;
+}
+
+.handbook-article li + li {
+  margin-top: 4px;
+}
+
+.handbook-article :not(pre) > code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.86em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-muted);
+  overflow-wrap: anywhere;
+}
+
+.handbook-code {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.6;
+  overflow-x: auto;
+}
+
+.handbook-code code {
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: inherit;
+}
+
+.handbook-table {
+  overflow-x: auto;
+  margin: 0 0 18px;
+}
+
+.handbook-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+.handbook-table th,
+.handbook-table td {
+  text-align: left;
+  vertical-align: top;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-muted);
+}
+
+.handbook-table th {
+  font-weight: 600;
+  background: var(--surface-subtle);
+  white-space: nowrap;
+}
+
+.handbook-shot {
+  display: block;
+  margin: 8px 0 20px;
+}
+
+.handbook-shot img {
+  display: block;
+  max-width: 100%;
+  border: 1px solid var(--border-muted);
+  border-radius: 8px;
+}
+
+.handbook-shot-caption {
+  display: block;
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* Figures stand in for the ASCII drawings of the Markdown source. */
+.handbook-figure {
+  margin: 8px 0 22px;
+}
+
+.handbook-figure figcaption {
+  margin-top: 10px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.arch-tier {
+  border: 1px solid var(--border-muted);
+  border-radius: 8px;
+  padding: 10px 14px;
+  background: var(--surface-page);
+}
+
+.arch-tier p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+/* The one place identity and grants are decided. */
+.arch-authority {
+  border-color: #b6ccf5;
+  background: #f5f8ff;
+}
+
+.arch-name {
+  font-weight: 600;
+}
+
+.arch-port {
+  margin-left: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.arch-link {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 24px;
+  margin-left: 22px;
+  padding: 2px 0 2px 20px;
+  border-left: 2px solid var(--border-muted);
+}
+
+.arch-arrow {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  padding: 6px 0;
+}
+
+.arch-arrow::before {
+  content: "↓";
+  margin-right: 6px;
+  color: var(--text-primary);
+}
+
+.arch-arrow-back {
+  color: #0b57d0;
+}
+
+.arch-arrow-back::before {
+  content: "↑";
+  color: #0b57d0;
+}
+
+.arch-packages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+}
+
+.arch-packages li {
+  margin: 0;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-muted);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.arch-backing {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border-muted);
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+/* The lifecycle: states in order, the command between them, and what users then get. */
+.lifecycle-track {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.lifecycle-state {
+  margin: 0;
+  padding: 10px 14px 10px 16px;
+  border: 1px solid var(--border-muted);
+  border-left: 4px solid var(--state, var(--status-neutral));
+  border-radius: 8px;
+  background: var(--surface-page);
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 10px;
+  row-gap: 2px;
+  align-items: baseline;
+}
+
+.lifecycle-name {
+  font-weight: 600;
+}
+
+.lifecycle-state code {
+  justify-self: start;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.lifecycle-note,
+.lifecycle-response {
+  grid-column: 1 / -1;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.lifecycle-response {
+  color: var(--state, var(--text-primary));
+  font-weight: 500;
+}
+
+.lifecycle-installed { --state: var(--status-processing); }
+.lifecycle-enabled { --state: var(--status-success); }
+.lifecycle-draining { --state: var(--status-warning); }
+.lifecycle-discovered,
+.lifecycle-disabled { --state: var(--status-neutral); }
+
+.lifecycle-step {
+  margin: 0 0 0 20px;
+  padding: 6px 0 6px 26px;
+  border-left: 2px solid var(--border-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.lifecycle-step span::before {
+  content: "↓ ";
+}
+
+.lifecycle-returns {
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 10px 0 0;
+  border-top: 1px dashed var(--border-muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.lifecycle-returns strong {
+  display: inline-block;
+  min-width: 3em;
+  margin-right: 8px;
+  font-weight: 600;
+}
+
+@container (min-width: 900px) {
+  .dev-handbook-layout {
+    display: grid;
+    grid-template-columns: 220px minmax(0, 1fr);
+    gap: 40px;
+    align-items: start;
+  }
+
+  .handbook-toc {
+    position: sticky;
+    top: 12px;
+    max-height: calc(100vh - 140px);
+    overflow-y: auto;
+    border: 0;
+    border-right: 1px solid var(--border-muted);
+    border-radius: 0;
+    background: transparent;
+    padding: 4px 16px 4px 0;
+  }
+
+  .handbook-toc-3 {
+    display: list-item;
+  }
+}

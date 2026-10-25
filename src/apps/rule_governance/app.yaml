@@ -1,0 +1,147 @@
+manifest_version: 1
+id: rule-governance
+name: 规则治理
+version: 1.19.10
+platform_api: '>=1.0,<2.0'
+icon: rules
+aliases:
+- patrol-rules
+dependencies: {}
+backend:
+  router: src.apps.rule_governance.backend.router:router
+  task_modules:
+  - src.apps.rule_governance.backend.parser.tasks
+  - src.apps.rule_governance.backend.rule_control.tasks
+  - src.apps.rule_governance.backend.source_tasks
+  - src.apps.rule_governance.backend.rollout_tasks
+  - src.apps.rule_governance.backend.adapter_field_tasks
+  task_names:
+  - dispatch_parser_jobs
+  - publish_parser_outbox
+  - sanitize_parser_samples
+  - reconcile_parser_jobs
+  - recover_command_autopilots
+  - promote_parser_gap_ledger
+  - netops.rule_governance.execute_parser
+  - advance_command_autopilot
+  - netops.rule_governance.preview_source
+  - netops.rule_governance.import_source
+  - netops.rule_governance.recover_sources
+  - publish_rollout_outbox
+  - execute_rollout_stage
+  - reconcile_rollout_live_captures
+  - netops.rule_governance.dispatch_capture
+  - netops.rule_governance.recover_capture_dispatch
+  - netops.rule_governance.adapter_fields_trial
+  queue: app.rule-governance
+  legacy_queues:
+  - netops.ai
+  - netops.patrol
+  schedules:
+  - name: dispatch-parser-jobs
+    task: dispatch_parser_jobs
+    seconds: 30
+  - name: publish-parser-outbox
+    task: publish_parser_outbox
+    seconds: 10
+  - name: sanitize-parser-samples
+    task: sanitize_parser_samples
+    seconds: 15
+  - name: reconcile-parser-jobs
+    task: reconcile_parser_jobs
+    seconds: 60
+  - name: recover-command-autopilots
+    task: recover_command_autopilots
+    seconds: 60
+  - name: promote-parser-gap-ledger
+    task: promote_parser_gap_ledger
+    seconds: 3600
+  - name: recover-sources
+    task: netops.rule_governance.recover_sources
+    seconds: 30
+  - name: publish-rollout-outbox
+    task: publish_rollout_outbox
+    seconds: 5
+  - name: reconcile-rollout-live-captures
+    task: reconcile_rollout_live_captures
+    seconds: 10
+  - name: recover-capture-dispatch
+    task: netops.rule_governance.recover_capture_dispatch
+    seconds: 30
+frontend:
+  entry: frontend/index.tsx
+agent:
+  legacy_skills:
+  - textfsm-generator
+  - rule-target-planner
+  - change-policy-generator
+  - event-rule-generator
+  - event-rule-validator
+  - event-rule-replay
+  - rule-asset-approver
+  tools: src.apps.rule_governance.backend.tools:TOOLS
+database:
+  mode: legacy
+  bootstrap: src.apps.rule_governance.backend.bootstrap:initialize
+  bootstrap_version: 8
+  tables:
+  - netops_assessment_policy_bindings
+  - netops_assessment_policy_cutovers
+  - netops_assessment_policy_decisions
+  - netops_assessment_policy_migration_sources
+  - netops_assessment_policy_profiles
+  - netops_assessment_policy_shadow_results
+  - netops_assessment_policy_versions
+  - netops_change_policies
+  - netops_change_policy_versions
+  - netops_check_item_catalog_changes
+  - netops_check_item_collection_actions
+  - netops_check_item_implementation_links
+  - netops_check_item_runtime_bundle_versions
+  - netops_check_item_runtime_bundles
+  - netops_check_item_runtime_manifests
+  - netops_check_item_versions
+  - netops_check_items
+  - netops_collection_implementation_parsers
+  - netops_collection_implementation_versions
+  - netops_collection_implementations
+  - netops_collection_profile_bindings
+  - netops_command_profile_versions
+  - netops_command_profiles
+  - netops_entity_identity_policies
+  - netops_entity_identity_policy_versions
+  - netops_event_rule_versions
+  - netops_event_rules
+  - netops_parser_gap_ledger
+  - netops_parser_spec_revisions
+  - netops_rollout_campaigns
+  - netops_rollout_comparison_evidence
+  - netops_rollout_legacy_routes
+  - netops_rollout_outbox
+  - netops_rollout_projections
+  - netops_rollout_stage_attempts
+  - netops_rollout_stage_executions
+  - netops_rule_agent_loop_attempts
+  - netops_rule_approval_audit
+  - netops_rule_asset_command_unit_check_items
+  - netops_rule_asset_command_units
+  - netops_rule_generation_contexts
+  - netops_rule_generation_jobs
+  - netops_rule_replay_reports
+  - parser_backfill_jobs
+  - parser_backfill_results
+  - parser_candidate_sample_evidence
+  - parser_command_aliases
+  - parser_control_settings
+  - parser_device_profiles
+  - parser_generation_attempts
+  - parser_identity_signatures
+  - parser_job_samples
+  - parser_model_call_ledger
+  - parser_outbox_events
+  - parser_template_jobs
+  - parser_templates
+  minimum_revision: 0103_retire_data_contracts
+lifecycle:
+  drain: src.apps.rule_governance.backend.lifecycle:drain
+  pending: src.apps.rule_governance.backend.lifecycle:pending

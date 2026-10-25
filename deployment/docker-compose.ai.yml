@@ -1,0 +1,43 @@
+# Optional AI runtime overlay. Use with the base compose file and profiles core,ai.
+services:
+  fastapi:
+    build:
+      args:
+        REQUIREMENTS_FILE: requirements.txt
+    environment:
+      - NETOPS_AI_ENABLED=true
+
+  celery-ai:
+    profiles: ["ai"]
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.core-worker
+      args:
+        REQUIREMENTS_FILE: deployment/requirements/ai-worker.txt
+    container_name: netops-celery-ai
+    env_file:
+      - ../.env
+    environment:
+      - NETOPS_AUTHORITY_URL=http://django:8001
+      - POSTGRES_HOST=postgres
+      - REDIS_HOST=redis
+      - MINIO_ENDPOINT=minio:9000
+      - CELERY_BROKER_URL=amqp://guest:guest@rabbitmq:5672//
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - CELERY_WORKER_ROLE=ai
+      - CELERY_WORKER_QUEUES=netops.ai
+      - DEBUG=false
+      - TZ=Asia/Shanghai
+    command: python -m src.platform.kernel.worker --queues netops.ai --exclude-queues netops.patrol --loglevel=info -c 2
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - netops-network

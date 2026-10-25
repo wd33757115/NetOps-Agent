@@ -1,0 +1,83 @@
+presentation_id: netops.report-projections.zh-CN
+version: 1
+locale: zh-CN
+
+sheets:
+  device_version: 设备版本
+  cpu: CPU
+  memory: 内存
+  interface_status: 接口状态
+  optical_power: 接口光功率
+  fan: 风扇
+  power: 电源
+  running_config_change: 运行配置变更
+  hardware_inventory: 硬件清单
+  temperature: 温度
+  interface_statistics: 接口统计
+  interface_ip: 接口地址
+  vrrp: VRRP
+  stack_members: 堆叠成员
+  mlag: MLAG
+  vrf_inventory: VRF
+  arp_bindings: ARP绑定
+  mac_bindings: MAC绑定
+  startup_config_change: 启动配置变更
+  critical_log_change: 关键日志变更
+
+columns:
+  device_name: 设备名称
+  management_ip: 管理IP
+  entity_type: 实体类型
+  entity_key: 实体
+  software_version: 软件版本
+  hardware_model: 设备型号
+  cpu_instant_pct: CPU即时使用率(%)
+  cpu_5s_pct: CPU 5秒使用率(%)
+  cpu_1m_pct: CPU 1分钟使用率(%)
+  cpu_5m_pct: CPU 5分钟使用率(%)
+  cpu_15m_pct: CPU 15分钟使用率(%)
+  memory_utilization_pct: 内存使用率(%)
+  memory_used_bytes: 已用内存(Bytes)
+  memory_total_bytes: 总内存(Bytes)
+  interface_oper_status: 运行状态
+  interface_admin_status: 管理状态
+  transceiver_presence: 光模块状态
+  optical_rx_dbm: 接收功率(dBm)
+  optical_tx_dbm: 发送功率(dBm)
+  fan_state: 风扇状态
+  power_state: 电源状态
+  serial_number: 序列号
+  hardware_vendor: 硬件厂商
+  temperature_current_c: 当前温度(°C)
+  temperature_warning_c: 告警阈值(°C)
+  temperature_alarm_c: 严重阈值(°C)
+  input_errors: 输入错误数
+  output_errors: 输出错误数
+  ipv4_address: IPv4地址
+  ipv6_address: IPv6地址
+  vrrp_state: VRRP状态
+  stack_member_state: 堆叠成员状态
+  mlag_state: MLAG状态
+  vrf_state: VRF状态
+  arp_mac_address: ARP MAC地址
+  mac_interface: MAC学习接口
+  source_command: 来源命令
+  change_type: 变化类型
+  changed_field: 变化字段
+  previous_value: 原值
+  current_value: 当前值
+  decision_reason: 判定依据
+  execution_status: 执行状态
+  assessment_status: 评估结论
+  completeness_status: 完整性
+  comparison_status: 可比性
+  threshold_unknown_count: 阈值未知实体数
+  risk_verification_status: 风险复核状态
+  blocking_reason_codes: 阻断原因
+  execution_id: 执行ID
+  snapshot_id: 快照ID
+  previous_snapshot_id: 基线快照ID
+  current_snapshot_id: 当前快照ID
+  parser_template_id: Parser模板ID
+  runtime_bundle_digest: 运行资产摘要
+  observed_at: 采集时间

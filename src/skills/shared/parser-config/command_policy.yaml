@@ -1,0 +1,142 @@
+capabilities:
+  vrf.inventory:
+    template_scope: family
+    empty_semantics:
+      blank: valid_empty
+      valid_empty_patterns:
+        - '(?i)(?:no|zero)\s+(?:vrf|vpn[- ]instance)'
+        - '(?i)(?:vrf|vpn[- ]instance).*not configured'
+
+unstructured_comparison:
+  profiles:
+    configuration:
+      version: 1
+      label: 配置输出
+      mode: ordered_lines
+      ignore_blank_lines: true
+      max_preview_lines: 24
+      max_line_length: 220
+      ignore_patterns:
+        - '^\s*(?:Building|Current) configuration(?:\.\.\.|\s*:)?\s*$'
+        - '^\s*(?:Last configuration change|Configuration last modified)\b.*$'
+      redact_patterns:
+        - pattern: '(?i)(\b(?:password|secret|community|token|key-string|pre-shared-key|authentication-key)\b(?:\s+(?:simple|cipher))?\s+)\S+'
+          replacement: '\1<redacted>'
+      categories:
+        - name: interface
+          label: 接口配置
+          patterns: ['\binterface\b', '\bshutdown\b', '\bduplex\b', '\bspeed\b']
+        - name: routing
+          label: 路由与 VPN
+          patterns: ['\b(?:bgp|ospf|isis|rip|route|vrf|vpn-instance)\b']
+        - name: security
+          label: 安全与访问控制
+          patterns: ['\b(?:acl|aaa|password|secret|community|ssh|user-interface)\b']
+        - name: management
+          label: 管理与可观测
+          patterns: ['\b(?:snmp|ntp|syslog|logging|netconf|telemetry)\b']
+      other_category_label: 其他配置
+    log_window:
+      version: 1
+      label: 设备日志窗口
+      mode: rolling_window
+      ignore_blank_lines: true
+      max_preview_lines: 16
+      max_line_length: 220
+      ignore_patterns:
+        - '^\s*Overwritten messages\s*:\s*\d+\s*$'
+      normalize_patterns:
+        - pattern: '^%[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}:\d{3}\s+\d{4}\s+'
+          replacement: '%<timestamp> '
+        - pattern: '^\*?[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:\s+\S+)?\s*:\s*'
+          replacement: '<timestamp>: '
+      redact_patterns:
+        - pattern: '(?i)(\b(?:password|secret|community|token|key-string|pre-shared-key|authentication-key)\b(?:\s+(?:simple|cipher))?\s+)\S+'
+          replacement: '\1<redacted>'
+      categories:
+        - name: collection
+          label: 巡检命令与采集日志
+          patterns: ['\bSHELL_CMD_MATCHFAIL\b', '\bcommand\b.*\bfailed\b', '\b(?:invalid|unrecognized) command\b']
+        - name: link
+          label: 接口与链路日志
+          patterns: ['\b(?:interface|ifnet|link|phy_updown|updown)\b']
+        - name: security
+          label: 安全与认证日志
+          patterns: ['\b(?:login|logout|auth|aaa|ssh|acl|attack|denied)\b']
+        - name: hardware
+          label: 硬件与环境日志
+          patterns: ['\b(?:fan|power|temperature|transceiver|module|hardware)\b']
+        - name: routing
+          label: 路由协议日志
+          patterns: ['\b(?:bgp|ospf|isis|rip|route|neighbor|peer)\b']
+      other_category_label: 其他日志
+  rules:
+    - command_pattern: '^(?:display logbuffer|show logging)(?:\s+.*)?$'
+      handling: raw_hash_diff
+      profile: log_window
+
+commands:
+  display version: {enabled: true}
+  show version: {enabled: true}
+  display device manuinfo: {enabled: true}
+  show inventory: {enabled: true}
+  display cpu: {enabled: true}
+  display cpu-usage: {enabled: true}
+  show processes cpu: {enabled: true}
+  show system resources: {enabled: true}
+  display memory: {enabled: true}
+  show processes memory: {enabled: true}
+  display interface: {enabled: true}
+  display interface brief: {enabled: true}
+  display ip interface brief: {enabled: true}
+  show ip interface brief: {enabled: true}
+  show interface status: {enabled: true}
+  show interface transceiver detail: {enabled: true}
+  display transceiver diagnosis interface: {enabled: true}
+  display fan: {enabled: true}
+  show environment fan: {enabled: true}
+  display power: {enabled: true}
+  show environment power: {enabled: true}
+  display environment: {enabled: true}
+  show environment temperature: {enabled: true}
+  show env all: {enabled: true}
+  display vrrp statistics: {enabled: true}
+  show vrrp brief: {enabled: true}
+  display irf: {enabled: true}
+  display m-lag system: {enabled: true}
+  show vpc: {enabled: true}
+  display arp: {enabled: true}
+  show ip arp: {enabled: true}
+  display mac-address: {enabled: true}
+  show mac address-table: {enabled: true}
+  show switch detail: {enabled: true}
+  display vrf:
+    enabled: true
+    capability: vrf.inventory
+    supported_on:
+      - {vendor: H3C, families: [Comware7]}
+      - {vendor: H3C, model_patterns: ['^S[0-9]']}
+    template_scope: family
+  display ip vpn-instance:
+    enabled: true
+    capability: vrf.inventory
+    supported_on:
+      - {vendor: Huawei, families: [VRP]}
+    template_scope: family
+  show vrf:
+    enabled: true
+    capability: vrf.inventory
+    supported_on:
+      - {vendor: Cisco, families: [NXOS9K, IOS, IOS-XE]}
+    template_scope: family
+
+  display current-configuration: {enabled: false, handling: raw_hash_diff, comparison_profile: configuration}
+  display startup: {enabled: false, handling: raw_hash_diff, comparison_profile: configuration}
+  display saved-configuration: {enabled: false, handling: raw_hash_diff, comparison_profile: configuration}
+  show running-config: {enabled: false, handling: raw_hash_diff, comparison_profile: configuration}
+  show startup-config: {enabled: false, handling: raw_hash_diff, comparison_profile: configuration}
+  display logbuffer: {enabled: false, handling: raw_only}
+  show logging: {enabled: false, handling: raw_only}
+  display clock: {enabled: false, handling: raw_only}
+  show clock: {enabled: false, handling: raw_only}
+  screen-length disable: {enabled: false, handling: not_applicable}

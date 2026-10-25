@@ -1,0 +1,94 @@
+# SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
+# SPDX-License-Identifier: Apache-2.0
+
+name: patrol-history-change-event
+description: 导入两个历史巡检目录，对比变化并构建运维事件
+version: "1.1"
+
+test:
+  context:
+    offline_job_id: ""
+    baseline_path: ""
+    baseline_run_id: history-baseline-test
+    baseline_observed_at: "2026-01-01T00:00:00+00:00"
+    current_path: ""
+    current_run_id: history-current-test
+    current_observed_at: "2026-04-01T00:00:00+00:00"
+    publish_events: false
+  required_context: []
+
+steps:
+  - name: quality_gate
+    label: 执行前质量门禁
+    skill: offline-patrol-quality-gate
+    when: ${context.offline_job_id}
+    inputs:
+      offline_job_id: ${context.offline_job_id}
+
+  - name: baseline_ingest
+    label: 导入上一季度巡检
+    skill: patrol-raw-ingestor
+    inputs:
+      file_path: ${context.baseline_path}
+      offline_job_id: ${context.offline_job_id}
+      period_role: baseline
+      run_id: ${context.baseline_run_id}
+      observed_at: ${context.baseline_observed_at}
+      mode: production
+
+  - name: baseline_normalization
+    label: 生成基线状态观察
+    skill: state-normalizer
+    inputs:
+      run_id: ${steps.baseline_ingest.result.run_id}
+      update_current_state: false
+
+  - name: current_ingest
+    label: 导入本季度巡检
+    skill: patrol-raw-ingestor
+    inputs:
+      file_path: ${context.current_path}
+      offline_job_id: ${context.offline_job_id}
+      period_role: current
+      run_id: ${context.current_run_id}
+      observed_at: ${context.current_observed_at}
+      mode: production
+
+  - name: current_normalization
+    label: 生成当前状态观察
+    skill: state-normalizer
+    inputs:
+      run_id: ${steps.current_ingest.result.run_id}
+      update_current_state: false
+
+  - name: change_detection
+    label: 对比季度巡检变化
+    skill: change-detector
+    inputs:
+      previous_run_id: ${steps.baseline_ingest.result.run_id}
+      current_run_id: ${steps.current_ingest.result.run_id}
+      use_state_observations: true
+      allow_partial_normalization: true
+      persist: true
+
+  - name: event_building
+    label: 构建运维事件
+    skill: event-builder
+    inputs:
+      run_id: ${steps.current_ingest.result.run_id}
+      persist: true
+      publish: ${context.publish_events}
+
+  - name: report_generation
+    label: 生成离线巡检报告
+    skill: report-generator
+    inputs:
+      run_id: ${steps.current_ingest.result.run_id}
+      output_format: markdown
+
+on_complete:
+  message: 历史巡检变化与事件分析已完成
+  notification:
+    title: 历史巡检分析已完成
+    body: 两个巡检周期的数据、变化记录和运维事件已生成。
+    level: success

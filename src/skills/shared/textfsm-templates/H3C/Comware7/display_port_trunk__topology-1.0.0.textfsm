@@ -1,0 +1,8 @@
+Value PORT ([A-Za-z][\w./-]*\d)
+Value BAD_ROW (\S.*?)
+
+# Comware 7.1: the campus captures of a router print nothing (the implementation's
+# valid_empty). No layout with trunk ports is verified yet, so any line is refused.
+Start
+  ^\s*$$
+  ^. -> Error "trunk format not verified"

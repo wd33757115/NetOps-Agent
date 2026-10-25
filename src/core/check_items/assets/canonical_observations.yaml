@@ -1,0 +1,3186 @@
+catalog_id: netops.canonical-observations
+catalog_version: 9
+status: active
+observation_types:
+- id: device.software.version
+  description: Device operating-system software version as an inventory fact.
+  semantic_type: state
+  value_types:
+  - text
+  dimensions: []
+  assessment_roles:
+  - change
+  - evidence
+- id: device.hardware.model
+  description: Device chassis or platform model as an inventory fact.
+  semantic_type: state
+  value_types:
+  - text
+  dimensions: []
+  assessment_roles:
+  - change
+  - evidence
+- id: device.cpu.utilization
+  description: CPU utilization for one canonical CPU scope and time window.
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: percent
+  dimensions:
+  - window
+  allowed_dimension_values:
+    window:
+    - instant
+    - 5s
+    - 1m
+    - 5m
+    - 15m
+  assessment_roles:
+  - current_state
+  - change
+- id: device.cpu.high_warning
+  description: Device-output or approved device-profile CPU warning threshold.
+  semantic_type: threshold
+  value_types:
+  - number
+  canonical_unit: percent
+  dimensions:
+  - window
+  assessment_roles:
+  - reference
+- id: device.cpu.high_alarm
+  description: Device-output or approved device-profile CPU alarm threshold.
+  semantic_type: threshold
+  value_types:
+  - number
+  canonical_unit: percent
+  dimensions:
+  - window
+  assessment_roles:
+  - reference
+- id: device.memory.utilization
+  description: Used memory as a percentage of total memory for one memory scope.
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: percent
+  dimensions:
+  - window
+  assessment_roles:
+  - current_state
+  - change
+- id: device.memory.high_warning
+  description: Device-output or approved device-profile memory warning threshold.
+  semantic_type: threshold
+  value_types:
+  - number
+  canonical_unit: percent
+  dimensions: []
+  assessment_roles:
+  - reference
+- id: device.memory.high_alarm
+  description: Device-output or approved device-profile memory alarm threshold.
+  semantic_type: threshold
+  value_types:
+  - number
+  canonical_unit: percent
+  dimensions: []
+  assessment_roles:
+  - reference
+- id: device.memory.used
+  description: Used memory capacity for one memory scope.
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: bytes
+  dimensions: []
+  assessment_roles:
+  - change
+  - evidence
+- id: device.memory.total
+  description: Total available memory capacity for one memory scope.
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: bytes
+  dimensions: []
+  assessment_roles:
+  - change
+  - evidence
+- id: interface.optical.presence
+  description: Whether an optical transceiver is physically present and diagnosable
+    on the interface channel.
+  semantic_type: state
+  value_types:
+  - boolean
+  - text
+  allowed_values:
+  - present
+  - absent
+  - unknown
+  state_groups:
+    healthy:
+    - present
+    unhealthy:
+    - absent
+    unknown:
+    - unknown
+  dimensions:
+  - channel
+  assessment_roles:
+  - current_state
+  - change
+- id: interface.optical.rx_power
+  description: Current received optical power measurement for one interface channel.
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: dbm
+  dimensions:
+  - channel
+  assessment_roles:
+  - current_state
+  - change
+- id: interface.optical.tx_power
+  description: Current transmitted optical power measurement for one interface channel.
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: dbm
+  dimensions:
+  - channel
+  assessment_roles:
+  - current_state
+  - change
+- id: interface.optical.rx_low_warning
+  description: Device-reported low receive-power warning threshold for one interface
+    channel.
+  semantic_type: threshold
+  value_types:
+  - number
+  canonical_unit: dbm
+  dimensions:
+  - channel
+  assessment_roles:
+  - reference
+- id: interface.optical.rx_low_alarm
+  description: Device-reported low receive-power alarm threshold for one interface
+    channel.
+  semantic_type: threshold
+  value_types:
+  - number
+  canonical_unit: dbm
+  dimensions:
+  - channel
+  assessment_roles:
+  - reference
+- id: interface.optical.rx_high_warning
+  description: Device-reported high receive-power warning threshold for one interface
+    channel.
+  semantic_type: threshold
+  value_types:
+  - number
+  canonical_unit: dbm
+  dimensions:
+  - channel
+  assessment_roles:
+  - reference
+- id: interface.optical.rx_high_alarm
+  description: Device-reported high receive-power alarm threshold for one interface
+    channel.
+  semantic_type: threshold
+  value_types:
+  - number
+  canonical_unit: dbm
+  dimensions:
+  - channel
+  assessment_roles:
+  - reference
+- id: interface.optical.tx_low_warning
+  description: Device-reported low transmit-power warning threshold for one interface
+    channel.
+  semantic_type: threshold
+  value_types:
+  - number
+  canonical_unit: dbm
+  dimensions:
+  - channel
+  assessment_roles:
+  - reference
+- id: interface.optical.tx_low_alarm
+  description: Device-reported low transmit-power alarm threshold for one interface
+    channel.
+  semantic_type: threshold
+  value_types:
+  - number
+  canonical_unit: dbm
+  dimensions:
+  - channel
+  assessment_roles:
+  - reference
+- id: interface.optical.tx_high_warning
+  description: Device-reported high transmit-power warning threshold for one interface
+    channel.
+  semantic_type: threshold
+  value_types:
+  - number
+  canonical_unit: dbm
+  dimensions:
+  - channel
+  assessment_roles:
+  - reference
+- id: interface.optical.tx_high_alarm
+  description: Device-reported high transmit-power alarm threshold for one interface
+    channel.
+  semantic_type: threshold
+  value_types:
+  - number
+  canonical_unit: dbm
+  dimensions:
+  - channel
+  assessment_roles:
+  - reference
+- id: interface.optical.part_number
+  description: Optical transceiver manufacturer part number used to bind baselines.
+  semantic_type: state
+  value_types:
+  - text
+  dimensions:
+  - channel
+  assessment_roles:
+  - evidence
+- id: interface.optical.serial_number
+  description: Optical transceiver serial number used to bind baselines.
+  semantic_type: state
+  value_types:
+  - text
+  dimensions:
+  - channel
+  assessment_roles:
+  - evidence
+- id: environment.fan.state
+  description: Current presence and operating health state of one fan.
+  semantic_type: state
+  value_types:
+  - text
+  allowed_values:
+  - normal
+  - up
+  - down
+  - failed
+  - absent
+  - unknown
+  - faulty
+  state_groups:
+    healthy:
+    - normal
+    - up
+    unhealthy:
+    - down
+    - failed
+    - absent
+    - faulty
+    unknown:
+    - unknown
+  dimensions: []
+  assessment_roles:
+  - current_state
+  - change
+- id: environment.power.state
+  description: Current presence and operating health state of one power supply.
+  semantic_type: state
+  value_types:
+  - text
+  allowed_values:
+  - normal
+  - up
+  - down
+  - failed
+  - absent
+  - unknown
+  - faulty
+  state_groups:
+    healthy:
+    - normal
+    - up
+    unhealthy:
+    - down
+    - failed
+    - absent
+    - faulty
+    unknown:
+    - unknown
+  dimensions: []
+  assessment_roles:
+  - current_state
+  - change
+- id: device.hardware.serial_number
+  description: Manufacturer serial number for one device hardware component.
+  semantic_type: state
+  value_types:
+  - text
+  dimensions: []
+  assessment_roles:
+  - change
+  - evidence
+- id: device.hardware.vendor
+  description: Manufacturer identity reported for one device hardware component.
+  semantic_type: state
+  value_types:
+  - text
+  dimensions: []
+  assessment_roles:
+  - change
+  - evidence
+- id: device.module.oper_status
+  description: Current operating health of one replaceable device module or line card.
+  semantic_type: state
+  value_types:
+  - text
+  allowed_values:
+  - up
+  - down
+  - degraded
+  - absent
+  - unknown
+  state_groups:
+    healthy:
+    - up
+    unhealthy:
+    - down
+    - degraded
+    - absent
+    unknown:
+    - unknown
+  dimensions: []
+  assessment_roles:
+  - current_state
+  - change
+- id: environment.temperature.current
+  description: Current temperature reported by one device sensor.
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: celsius
+  dimensions: []
+  assessment_roles:
+  - current_state
+  - change
+- id: environment.temperature.warning
+  description: Device-reported warning threshold for one temperature sensor.
+  semantic_type: threshold
+  value_types:
+  - number
+  canonical_unit: celsius
+  dimensions: []
+  assessment_roles:
+  - reference
+- id: environment.temperature.alarm
+  description: Device-reported alarm threshold for one temperature sensor.
+  semantic_type: threshold
+  value_types:
+  - number
+  canonical_unit: celsius
+  dimensions: []
+  assessment_roles:
+  - reference
+- id: interface.ip.address
+  description: IP address assigned to one interface and address family.
+  semantic_type: state
+  value_types:
+  - text
+  dimensions:
+  - address_family
+  allowed_dimension_values:
+    address_family:
+    - ipv4
+    - ipv6
+  assessment_roles:
+  - change
+  - evidence
+- id: redundancy.vrrp.state
+  description: Current operational role of one VRRP instance.
+  semantic_type: state
+  value_types:
+  - text
+  allowed_values:
+  - master
+  - backup
+  - initialize
+  - inactive
+  - unknown
+  state_groups:
+    healthy:
+    - master
+    - backup
+    transitional:
+    - initialize
+    unhealthy:
+    - inactive
+    unknown:
+    - unknown
+  dimensions: []
+  assessment_roles:
+  - current_state
+  - change
+- id: redundancy.stack.member_state
+  description: Current membership and operating state of one stack or IRF member.
+  semantic_type: state
+  value_types:
+  - text
+  allowed_values:
+  - active
+  - ready
+  - normal
+  - standby
+  - down
+  - failed
+  - absent
+  - unknown
+  state_groups:
+    healthy:
+    - active
+    - ready
+    - normal
+    - standby
+    unhealthy:
+    - down
+    - failed
+    - absent
+    unknown:
+    - unknown
+  dimensions: []
+  assessment_roles:
+  - current_state
+  - change
+- id: redundancy.mlag.state
+  description: Current operating state of one multi-chassis link aggregation domain.
+  semantic_type: state
+  value_types:
+  - text
+  allowed_values:
+  - active
+  - up
+  - normal
+  - down
+  - degraded
+  - failed
+  - unknown
+  state_groups:
+    healthy:
+    - active
+    - up
+    - normal
+    unhealthy:
+    - down
+    - degraded
+    - failed
+    unknown:
+    - unknown
+  dimensions: []
+  assessment_roles:
+  - current_state
+  - change
+- id: network.vrf.status
+  description: Presence or operating status of one virtual routing and forwarding
+    instance.
+  semantic_type: state
+  value_types:
+  - text
+  allowed_values:
+  - present
+  - active
+  - inactive
+  - unknown
+  dimensions: []
+  assessment_roles:
+  - change
+  - evidence
+- id: network.arp.mac_address
+  description: MAC address currently bound to one IP address in an ARP table.
+  semantic_type: state
+  value_types:
+  - text
+  dimensions: []
+  assessment_roles:
+  - change
+  - evidence
+- id: network.mac_table.interface
+  description: Interface currently associated with one VLAN and MAC address.
+  semantic_type: state
+  value_types:
+  - text
+  dimensions: []
+  assessment_roles:
+  - change
+  - evidence
+- id: interface.runtime_statistics.line_status
+  description: 接口物理状态，保留管理关闭及故障原因等完整原文
+  semantic_type: state
+  value_types:
+  - text
+  canonical_unit: null
+  assessment_roles:
+  - change
+- id: interface.runtime_statistics.protocol_status
+  description: 接口链路协议状态，保留括号中的状态说明
+  semantic_type: state
+  value_types:
+  - text
+  canonical_unit: null
+  assessment_roles:
+  - change
+- id: interface.runtime_statistics.description
+  description: 接口描述，空字符串也是有效描述
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  assessment_roles:
+  - change
+- id: interface.runtime_statistics.hw_address
+  description: 接口硬件 MAC 地址
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  assessment_roles:
+  - change
+- id: interface.runtime_statistics.bandwidth_kbps
+  description: 接口原文 Bandwidth 配置带宽，单位 kbps，不等于当前吞吐量
+  semantic_type: gauge
+  value_types:
+  - integer
+  canonical_unit: kbps
+  assessment_roles:
+  - change
+- id: interface.runtime_statistics.speed
+  description: 接口当前速度原文，保留原文单位或厂商显示格式
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  assessment_roles:
+  - change
+- id: interface.runtime_statistics.duplex
+  description: 接口双工模式原文
+  semantic_type: state
+  value_types:
+  - text
+  canonical_unit: null
+  assessment_roles:
+  - change
+- id: interface.runtime_statistics.port_link_type
+  description: 接口链路类型，保留 configured/negotiated 等原文
+  semantic_type: state
+  value_types:
+  - text
+  canonical_unit: null
+  assessment_roles:
+  - change
+- id: interface.runtime_statistics.vlan_native
+  description: 接口缺省 VLAN/PVID 编号
+  semantic_type: gauge
+  value_types:
+  - integer
+  canonical_unit: null
+  assessment_roles:
+  - change
+- id: interface.runtime_statistics.mtu
+  description: 接口三层最大传输单元，不与二层最大帧长混用
+  semantic_type: gauge
+  value_types:
+  - integer
+  canonical_unit: bytes
+  assessment_roles:
+  - change
+- id: interface.runtime_statistics.l2mtu
+  description: 接口二层最大帧长度，不与三层 MTU 混用
+  semantic_type: gauge
+  value_types:
+  - integer
+  canonical_unit: bytes
+  assessment_roles:
+  - change
+- id: interface.runtime_statistics.input_packets
+  description: 接口累计接收报文数
+  semantic_type: counter
+  value_types:
+  - integer
+  canonical_unit: count
+  assessment_roles:
+  - change
+- id: interface.runtime_statistics.output_packets
+  description: 接口累计发送报文数
+  semantic_type: counter
+  value_types:
+  - integer
+  canonical_unit: count
+  assessment_roles:
+  - change
+- id: interface.runtime_statistics.input_bytes
+  description: 接口累计接收字节数
+  semantic_type: counter
+  value_types:
+  - integer
+  canonical_unit: bytes
+  assessment_roles:
+  - change
+- id: interface.runtime_statistics.output_bytes
+  description: 接口累计发送字节数
+  semantic_type: counter
+  value_types:
+  - integer
+  canonical_unit: bytes
+  assessment_roles:
+  - change
+- id: interface.runtime_statistics.input_errors
+  description: 接口接收错误总数；Huawei Input 下的 Total Error；没有输出则缺失
+  semantic_type: counter
+  value_types:
+  - integer
+  canonical_unit: count
+  assessment_roles:
+  - change
+- id: interface.runtime_statistics.output_errors
+  description: 接口发送错误总数；只取输出方向明确的错误总数
+  semantic_type: counter
+  value_types:
+  - integer
+  canonical_unit: count
+  assessment_roles:
+  - change
+- id: interface.runtime_statistics.input_crc_errors
+  description: 接收方向 CRC/FCS 错误计数，保留厂商计数口径
+  semantic_type: counter
+  value_types:
+  - integer
+  canonical_unit: count
+  assessment_roles:
+  - change
+- id: interface.runtime_statistics.last_physical_up_time
+  description: 最近物理 Up 时间，原文 - 表示未记录
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  assessment_roles:
+  - change
+- id: interface.runtime_statistics.last_physical_down_time
+  description: 最近物理 Down 时间，原文 - 表示未记录
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  assessment_roles:
+  - change
+- id: interface.runtime_statistics.negotiation
+  description: 接口自协商状态原文
+  semantic_type: state
+  value_types:
+  - text
+  canonical_unit: null
+  assessment_roles:
+  - change
+- id: interface.runtime_statistics.port_mode
+  description: 接口介质工作模式原文
+  semantic_type: state
+  value_types:
+  - text
+  canonical_unit: null
+  assessment_roles:
+  - change
+- id: interface.runtime_statistics.loopback
+  description: 接口环回模式原文
+  semantic_type: state
+  value_types:
+  - text
+  canonical_unit: null
+  assessment_roles:
+  - change
+- id: system.cpu_usage.cpu_5s_percent
+  description: 明确标注 last 5 seconds 的 CPU 使用率
+  semantic_type: gauge
+  value_types:
+  - number
+  dimensions:
+  - window
+  assessment_roles:
+  - evidence
+  canonical_unit: percent
+  allowed_dimension_values:
+    window:
+    - 5s
+- id: system.cpu_usage.cpu_1m_percent
+  description: 明确标注 last 1 minute 的 CPU 使用率
+  semantic_type: gauge
+  value_types:
+  - number
+  dimensions:
+  - window
+  assessment_roles:
+  - evidence
+  canonical_unit: percent
+  allowed_dimension_values:
+    window:
+    - 1m
+- id: system.memory_usage.memory_total_kb
+  description: Mem 行 Total，原文 KB 容量
+  semantic_type: gauge
+  value_types:
+  - number
+  dimensions: []
+  assessment_roles:
+  - evidence
+  canonical_unit: kb
+- id: system.memory_usage.memory_used_kb
+  description: Mem 行 Used，原文 KB 容量
+  semantic_type: gauge
+  value_types:
+  - number
+  dimensions: []
+  assessment_roles:
+  - evidence
+  canonical_unit: kb
+- id: system.memory_usage.memory_free_kb
+  description: Mem 行 Free，原文 KB 容量
+  semantic_type: gauge
+  value_types:
+  - number
+  dimensions: []
+  assessment_roles:
+  - evidence
+  canonical_unit: kb
+- id: system.memory_usage.memory_shared_kb
+  description: Mem 行 Shared，原文 KB 容量
+  semantic_type: gauge
+  value_types:
+  - number
+  dimensions: []
+  assessment_roles:
+  - evidence
+  canonical_unit: kb
+- id: system.memory_usage.memory_buffers_kb
+  description: Mem 行 Buffers，原文 KB 容量
+  semantic_type: gauge
+  value_types:
+  - number
+  dimensions: []
+  assessment_roles:
+  - evidence
+  canonical_unit: kb
+- id: system.memory_usage.memory_cached_kb
+  description: Mem 行 Cached，原文 KB 容量
+  semantic_type: gauge
+  value_types:
+  - number
+  dimensions: []
+  assessment_roles:
+  - evidence
+  canonical_unit: kb
+- id: system.memory_usage.memory_free_percent
+  description: 设备直接输出的 FreeRatio；不由容量相除计算
+  semantic_type: gauge
+  value_types:
+  - number
+  dimensions: []
+  assessment_roles:
+  - evidence
+  canonical_unit: percent
+- id: environment.fan.fan_airflow_direction
+  description: 风扇实际气流方向原文
+  semantic_type: text
+  value_types:
+  - text
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: environment.fan.preferred_fan_airflow_direction
+  description: 设备期望气流方向原文
+  semantic_type: text
+  value_types:
+  - text
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: environment.power.mode
+  description: 电源 AC/DC 模式原文
+  semantic_type: text
+  value_types:
+  - text
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: environment.power.current_amperes
+  description: 此电源 Current(A)，-- 表示未提供
+  semantic_type: gauge
+  value_types:
+  - number
+  dimensions: []
+  assessment_roles:
+  - evidence
+  canonical_unit: amperes
+- id: environment.power.voltage_volts
+  description: 此电源 Voltage(V)，-- 表示未提供
+  semantic_type: gauge
+  value_types:
+  - number
+  dimensions: []
+  assessment_roles:
+  - evidence
+  canonical_unit: volts
+- id: environment.power.output_watts
+  description: 此电源 Power(W)，不等于机框总输入功率
+  semantic_type: gauge
+  value_types:
+  - number
+  dimensions: []
+  assessment_roles:
+  - evidence
+  canonical_unit: watts
+- id: environment.power.fan_direction
+  description: 电源风扇方向原文
+  semantic_type: text
+  value_types:
+  - text
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: environment.power.slot_input_watts
+  description: 槽位 Input Power(W)，在该槽位电源行重复展示，不能按电源求和
+  semantic_type: gauge
+  value_types:
+  - number
+  dimensions: []
+  assessment_roles:
+  - evidence
+  canonical_unit: watts
+- id: device.version.vendor
+  description: 设备厂商；必须来自 CLI 明示，不根据型号猜测。
+  semantic_type: state
+  value_types:
+  - text
+  dimensions: []
+  assessment_roles:
+  - change
+  - evidence
+- id: device.version.software_version
+  description: 完整软件版本，保留 Version、Release 等内容，不能转成数值。
+  semantic_type: state
+  value_types:
+  - text
+  dimensions: []
+  assessment_roles:
+  - change
+  - evidence
+- id: device.version.boot_image
+  description: 启动镜像文件名或路径；不能用系统镜像代替。
+  semantic_type: state
+  value_types:
+  - text
+  dimensions: []
+  assessment_roles:
+  - change
+  - evidence
+- id: device.version.system_image
+  description: 系统软件镜像文件名或路径；不能用启动镜像代替。
+  semantic_type: state
+  value_types:
+  - text
+  dimensions: []
+  assessment_roles:
+  - change
+  - evidence
+- id: device.version.uptime
+  description: 当前槽位板卡的运行时长原文；槽位值优先，只有整机原文明确适用于该槽位才可继承。正常增长不触发变化事件；重启识别需要连续采集证据。
+  semantic_type: text
+  value_types:
+  - text
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: device.version.board_type
+  description: 当前槽位板卡型号；不把整机型号推断为板卡型号。
+  semantic_type: state
+  value_types:
+  - text
+  dimensions: []
+  assessment_roles:
+  - change
+  - evidence
+- id: device.version.dram
+  description: 当前槽位内存容量原文，保留数值及单位，不进行隐式单位换算。
+  semantic_type: state
+  value_types:
+  - text
+  dimensions: []
+  assessment_roles:
+  - change
+  - evidence
+- id: device.version.flash
+  description: 当前槽位 Flash 容量原文，保留数值及单位，不进行隐式单位换算。
+  semantic_type: state
+  value_types:
+  - text
+  dimensions: []
+  assessment_roles:
+  - change
+  - evidence
+- id: device.version.patch_version
+  description: 补丁版本原文；明确未安装与未采集到必须区分。
+  semantic_type: state
+  value_types:
+  - text
+  dimensions: []
+  assessment_roles:
+  - change
+  - evidence
+- id: device.version.reboot_reason
+  description: 对应槽位最近一次重启原因原文；不自动推断为故障。
+  semantic_type: state
+  value_types:
+  - text
+  dimensions: []
+  assessment_roles:
+  - change
+  - evidence
+- id: device.version.subslot
+  description: 槽位内子槽位标识列表，按原文顺序，与 SUBSLOT_INFO 同位置配对；无子槽位为 []。
+  semantic_type: text
+  value_types:
+  - text
+  dimensions: []
+  assessment_roles:
+  - change
+  - evidence
+- id: device.version.subslot_info
+  description: 子槽位模块型号或描述列表，与 SUBSLOT 同位置配对；不能丢弃或跨槽位串接。
+  semantic_type: text
+  value_types:
+  - text
+  dimensions: []
+  assessment_roles:
+  - change
+  - evidence
+- id: device.version.hostname
+  description: 设备主机名原文；不是管理 IP。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: device.version.serial
+  description: 对应板卡或设备序列号；NTC 的多成员 List 不能拼成一个槽位值。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: device.version.bios
+  description: NX-OS BIOS 版本原文。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: device.version.rommon
+  description: IOS 引导程序版本；不等同于 BOOT_IMAGE。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: device.version.software_image
+  description: IOS 软件特性镜像标识，不能替代实际系统镜像路径。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: device.version.release
+  description: IOS Release 修饰原文。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: device.version.config_register
+  description: 配置寄存器值，保留十六进制文本。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: device.version.mac_address
+  description: 设备或板卡基础 MAC；多成员地址须按所属板卡展开。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: device.version.restarted
+  description: 最近重启时间原文；与 UPTIME、重启原因分别保存。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: device.inventory.name
+  description: 组件名称原文，保留机箱、槽位和收发器位置。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: device.inventory.description
+  description: 组件完整描述。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: device.inventory.product_id
+  description: 厂商产品编号；PID 在 inventory 中不是进程号。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: device.inventory.hardware_version
+  description: 硬件修订号；不等同于软件版本。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: environment.fan.fan_model
+  description: 风扇型号；当前 NTC 模板未保留该列，来自样本 Model 列。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: environment.fan.hardware_revision
+  description: 风扇硬件版本原文，-- 表示未提供。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: environment.fan.speed_rpm
+  description: IOS 环境传感器明确给出的风扇转速；不能把十六进制 Fan Zone Speed 当 RPM。
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: rpm
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: environment.power.model
+  description: 电源模块型号。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: environment.power.input_watts
+  description: 单个电源实际输入功率。
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: w
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: environment.power.capacity_watts
+  description: 单个电源额定容量，不是当前输出功率。
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: w
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: environment.power.input_state
+  description: 输入供电状态原文。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: environment.power.output_state
+  description: 输出供电状态原文。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: environment.temperature.sensor_status
+  description: 设备报告的温度传感器状态；保留 Ok/Normal 等原文。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: environment.temperature.temperature_low_warning_celsius
+  description: 设备明确报告的低温告警阈值；未输出时缺失。
+  semantic_type: threshold
+  value_types:
+  - number
+  canonical_unit: celsius
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: environment.temperature.temperature_low_alarm_celsius
+  description: 设备明确报告的低温严重告警阈值。
+  semantic_type: threshold
+  value_types:
+  - number
+  canonical_unit: celsius
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: interface.ip_assignment.interface_status
+  description: 接口管理/物理状态原文，administratively down 与 down 不混同。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: interface.ip_assignment.link_status
+  description: NX-OS Link 列原文。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: interface.ip_assignment.protocol_status
+  description: 接口协议状态原文。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: interface.ip_assignment.vrf
+  description: 接口所属 VRF；默认域只能由命令作用域明确给出。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: interface.optical_power.temperature_celsius
+  description: 光模块温度，不是机箱环境温度。
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: celsius
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: interface.optical_power.voltage_volts
+  description: 光模块供电电压。
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: v
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: interface.optical_power.bias_current_ma
+  description: 激光器偏置电流；mA 与 A 不可混用。
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: ma
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: interface.optical_power.transceiver_type
+  description: 模块类型原文，例如 QSFP-100G。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: interface.optical_power.vendor_name
+  description: 模块 name/vendor 原文，不由设备厂商推断。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: interface.optical_power.revision
+  description: 光模块硬件修订号。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: interface.optical_power.wavelength_nm
+  description: 模块波长；只有源输出明确 nm 时使用。
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: nm
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: interface.optical_power.dom_supported
+  description: DOM 是否支持及不支持原因原文；不提供 DOM 不表示零光功率。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: interface.optical_power.temperature_high_alarm_celsius
+  description: 模块明确输出的温度 high_alarm 阈值；保留缺失，不套用通用阈值。
+  semantic_type: threshold
+  value_types:
+  - number
+  canonical_unit: celsius
+  dimensions: []
+  assessment_roles:
+  - reference
+- id: interface.optical_power.temperature_low_alarm_celsius
+  description: 模块明确输出的温度 low_alarm 阈值；保留缺失，不套用通用阈值。
+  semantic_type: threshold
+  value_types:
+  - number
+  canonical_unit: celsius
+  dimensions: []
+  assessment_roles:
+  - reference
+- id: interface.optical_power.temperature_high_warning_celsius
+  description: 模块明确输出的温度 high_warning 阈值；保留缺失，不套用通用阈值。
+  semantic_type: threshold
+  value_types:
+  - number
+  canonical_unit: celsius
+  dimensions: []
+  assessment_roles:
+  - reference
+- id: interface.optical_power.temperature_low_warning_celsius
+  description: 模块明确输出的温度 low_warning 阈值；保留缺失，不套用通用阈值。
+  semantic_type: threshold
+  value_types:
+  - number
+  canonical_unit: celsius
+  dimensions: []
+  assessment_roles:
+  - reference
+- id: interface.optical_power.voltage_high_alarm_volts
+  description: 模块明确输出的电压 high_alarm 阈值；保留缺失，不套用通用阈值。
+  semantic_type: threshold
+  value_types:
+  - number
+  canonical_unit: v
+  dimensions: []
+  assessment_roles:
+  - reference
+- id: interface.optical_power.voltage_low_alarm_volts
+  description: 模块明确输出的电压 low_alarm 阈值；保留缺失，不套用通用阈值。
+  semantic_type: threshold
+  value_types:
+  - number
+  canonical_unit: v
+  dimensions: []
+  assessment_roles:
+  - reference
+- id: interface.optical_power.voltage_high_warning_volts
+  description: 模块明确输出的电压 high_warning 阈值；保留缺失，不套用通用阈值。
+  semantic_type: threshold
+  value_types:
+  - number
+  canonical_unit: v
+  dimensions: []
+  assessment_roles:
+  - reference
+- id: interface.optical_power.voltage_low_warning_volts
+  description: 模块明确输出的电压 low_warning 阈值；保留缺失，不套用通用阈值。
+  semantic_type: threshold
+  value_types:
+  - number
+  canonical_unit: v
+  dimensions: []
+  assessment_roles:
+  - reference
+- id: interface.optical_power.bias_current_high_alarm_ma
+  description: 模块明确输出的偏置电流 high_alarm 阈值；保留缺失，不套用通用阈值。
+  semantic_type: threshold
+  value_types:
+  - number
+  canonical_unit: ma
+  dimensions: []
+  assessment_roles:
+  - reference
+- id: interface.optical_power.bias_current_low_alarm_ma
+  description: 模块明确输出的偏置电流 low_alarm 阈值；保留缺失，不套用通用阈值。
+  semantic_type: threshold
+  value_types:
+  - number
+  canonical_unit: ma
+  dimensions: []
+  assessment_roles:
+  - reference
+- id: interface.optical_power.bias_current_high_warning_ma
+  description: 模块明确输出的偏置电流 high_warning 阈值；保留缺失，不套用通用阈值。
+  semantic_type: threshold
+  value_types:
+  - number
+  canonical_unit: ma
+  dimensions: []
+  assessment_roles:
+  - reference
+- id: interface.optical_power.bias_current_low_warning_ma
+  description: 模块明确输出的偏置电流 low_warning 阈值；保留缺失，不套用通用阈值。
+  semantic_type: threshold
+  value_types:
+  - number
+  canonical_unit: ma
+  dimensions: []
+  assessment_roles:
+  - reference
+- id: interface.runtime_statistics.input_rate_bps
+  description: 原文明确时间窗口的输入比特率；不是累计字节。
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: bps
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: interface.runtime_statistics.output_rate_bps
+  description: 原文明确时间窗口的输出比特率。
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: bps
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: interface.runtime_statistics.input_rate_pps
+  description: 原文明确时间窗口的输入包速率。
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: pps
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: interface.runtime_statistics.output_rate_pps
+  description: 原文明确时间窗口的输出包速率。
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: pps
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: interface.runtime_statistics.rate_interval
+  description: 采样时间窗口原文，5 minutes 与 30 seconds 不混用。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: interface.runtime_statistics.input_drops
+  description: 累计接收丢弃数量，不能替代 input_errors。
+  semantic_type: counter
+  value_types:
+  - number
+  canonical_unit: count
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: interface.runtime_statistics.output_drops
+  description: 累计发送丢弃数量，不能替代 output_errors。
+  semantic_type: counter
+  value_types:
+  - number
+  canonical_unit: count
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: interface.runtime_statistics.interface_resets
+  description: 接口累计重置次数，不等同于设备重启。
+  semantic_type: counter
+  value_types:
+  - number
+  canonical_unit: count
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: network.arp_table.interface
+  description: ARP 邻接出口接口。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: network.arp_table.age
+  description: ARP 老化时间原文；IOS 分钟、NX-OS 时分秒及 - 不作无单位数值比较。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: network.arp_table.protocol
+  description: 地址协议原文，例如 Internet。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: network.arp_table.entry_type
+  description: 协议封装或条目类型原文，例如 ARPA；不能据此直接判定动态/静态。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: network.mac_table.entry_type
+  description: MAC 条目类型原文，例如 dynamic/static。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: network.mac_table.age
+  description: MAC 老化时间原文，- 为未提供而非零。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: network.mac_table.secure
+  description: 安全 MAC 标记原文。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: network.mac_table.notify
+  description: 通知标记原文。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: network.mac_table.ports
+  description: 有序端口列表；多个出口不得仅保留第一个。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: network.vrf_inventory.vrf_id
+  description: 设备本地 VRF ID，保留原文。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: network.vrf_inventory.route_distinguisher
+  description: 默认 RD 原文，<not set> 为未配置。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: network.vrf_inventory.vpn_id
+  description: VPN 标识原文。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: network.vrf_inventory.max_routes
+  description: 最大路由限制原文，保留无限制等非数值状态。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: redundancy.mlag.peer_keepalive_status
+  description: 对端 keepalive 状态，与 peer adjacency 分开。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: redundancy.mlag.configuration_consistency
+  description: 全局配置一致性状态原文。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: redundancy.mlag.per_vlan_consistency
+  description: 按 VLAN 配置一致性状态原文。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: redundancy.mlag.type2_consistency
+  description: Type-2 一致性状态原文。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: redundancy.mlag.role
+  description: 本机 vPC/M-LAG 角色原文。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: redundancy.mlag.peer_gateway
+  description: peer-gateway 配置/运行状态原文。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: redundancy.mlag.dual_active_excluded_vlans
+  description: 双活排除 VLAN 原文，保留范围表达式。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: redundancy.mlag.graceful_consistency_check
+  description: graceful consistency-check 状态原文。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: redundancy.mlag.auto_recovery_status
+  description: 自动恢复状态原文。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: redundancy.mlag.delay_restore_status
+  description: delay-restore 状态原文。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: redundancy.stack.role
+  description: 堆叠成员角色；主控不等于故障。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: redundancy.stack.mac_address
+  description: 成员基础 MAC 地址。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: redundancy.stack.priority
+  description: 主控选举优先级，非健康分数。
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: redundancy.stack.hardware_version
+  description: show switch detail 的 H/W Version，不是软件版本。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: redundancy.stack.stack_port1_status
+  description: Stack Port 1 状态。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: redundancy.stack.stack_port2_status
+  description: Stack Port 2 状态。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: redundancy.stack.stack_port1_neighbor
+  description: Stack Port 1 邻接成员，None 原文保留。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: redundancy.stack.stack_port2_neighbor
+  description: Stack Port 2 邻接成员，None 原文保留。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: redundancy.vrrp.address_family
+  description: IPv4/IPv6 地址族；未来同接口组号双栈时需复核实体键。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: redundancy.vrrp.priority
+  description: VRRP 选举优先级。
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: redundancy.vrrp.master_ip
+  description: 当前 Master 地址原文，不是虚拟地址。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: redundancy.vrrp.virtual_ip
+  description: VRRP 虚拟网关地址。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: redundancy.vrrp.preempt
+  description: 抢占状态原文。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: redundancy.vrrp.owner
+  description: 虚拟地址所有者标志原文。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: redundancy.vrrp.timer
+  description: VRRP brief 的时间列原文，不猜测秒/毫秒。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: system.cpu_usage.cpu_interrupt_5s_percent
+  description: 五秒 CPU 使用率中的中断部分，不应再次加到总 CPU 使用率上。
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: percent
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: system.cpu_usage.cpu_user_percent
+  description: NX-OS 当前 user 状态百分比，与五分钟平均值不同。
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: percent
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: system.cpu_usage.cpu_kernel_percent
+  description: NX-OS 当前 kernel 状态百分比。
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: percent
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: system.cpu_usage.cpu_idle_percent
+  description: NX-OS 当前 idle 百分比，不能直接写入五分钟 cpu_usage_percent。
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: percent
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: system.memory_usage.pool
+  description: 内存池名称，例如 Processor/lsmpi_io；多池数据不能相互覆盖。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: system.memory_usage.memory_total_bytes
+  description: IOS Processor Pool 原文总字节数；不能直接放入 memory_total_kb。
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: bytes
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: system.memory_usage.memory_used_bytes
+  description: IOS Processor Pool 已使用字节数。
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: bytes
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: system.memory_usage.memory_free_bytes
+  description: IOS Processor Pool 空闲字节数。
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: bytes
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: system.memory_usage.memory_status
+  description: NX-OS Current memory status 原文。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: device.module.ports
+  description: 板卡端口数量。
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: count
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: device.module.type
+  description: 模块类型完整原文。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: device.module.model
+  description: 板卡产品型号。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: device.module.status
+  description: 板卡运行状态原文。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: interface.port_status.name
+  description: 端口描述，可为空。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: interface.port_status.status
+  description: 端口连接状态原文；connected/notconnect/disabled/err-disabled 分开。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: interface.port_status.vlan_id
+  description: VLAN 或 trunk/routed 原文，不能强制全部转整数。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: interface.port_status.duplex
+  description: 双工状态，保留 auto 前缀。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: interface.port_status.speed
+  description: 速率原文，保留 auto、单位及未协商状态。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: interface.port_status.type
+  description: 端口介质/模块类型原文。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: interface.port_status.fc_mode
+  description: 设备支持时的 Fibre Channel 模式。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: system.clock.time
+  description: 设备时间原文，保留毫秒；不等于采集时间。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: system.clock.timezone
+  description: 设备明确给出的时区，不用服务器时区补齐。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: system.clock.dayweek
+  description: 星期原文。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: system.clock.month
+  description: 月份原文。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: system.clock.day
+  description: 日。
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: system.clock.year
+  description: 年。
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: system.clock.clock_marker
+  description: IOS 开头 * 或 . 等时钟状态标记；NTC 模板未保留，不推断已同步。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: system.cpu_process.process_name
+  description: 进程名称原文。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: system.cpu_process.process_runtime
+  description: 进程累计 CPU 运行毫秒数；重启或进程重建后可归零。
+  semantic_type: counter
+  value_types:
+  - number
+  canonical_unit: ms
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: system.cpu_process.process_invoked
+  description: 累计调用次数。
+  semantic_type: counter
+  value_types:
+  - number
+  canonical_unit: count
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: system.cpu_process.process_cpu_time_for_invocation
+  description: 原表 uSecs 每次调用 CPU 时间。
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: us
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: system.cpu_process.process_cpu_usage_5_sec
+  description: 进程五秒使用率。
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: percent
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: system.cpu_process.process_cpu_usage_1_min
+  description: 进程一分钟使用率。
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: percent
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: system.cpu_process.process_cpu_usage_5_min
+  description: 进程五分钟使用率。
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: percent
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: system.cpu_process.process_tty
+  description: 关联终端标识。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: system.memory_process.process
+  description: 进程名称原文。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: system.memory_process.process_allocated
+  description: 进程累计分配字节数，不等于当前占用。
+  semantic_type: counter
+  value_types:
+  - number
+  canonical_unit: bytes
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: system.memory_process.process_freed
+  description: 进程累计释放字节数。
+  semantic_type: counter
+  value_types:
+  - number
+  canonical_unit: bytes
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: system.memory_process.process_holding
+  description: 进程当前持有字节数。
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: bytes
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: system.memory_process.process_tty
+  description: 进程关联终端标识。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: system.memory_process.getbufs
+  description: Getbufs 累计次数。
+  semantic_type: counter
+  value_types:
+  - number
+  canonical_unit: count
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: system.memory_process.retbufs
+  description: Retbufs 累计次数。
+  semantic_type: counter
+  value_types:
+  - number
+  canonical_unit: count
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: redundancy.vpc_member.port
+  description: vPC 成员对应的 Port-channel。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: redundancy.vpc_member.status
+  description: 成员运行状态原文。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: redundancy.vpc_member.consistency
+  description: 单个成员配置一致性结果。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: redundancy.vpc_member.consistency_reason
+  description: 单个成员一致性失败原因。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: redundancy.vpc_member.active_vlans
+  description: 成员活动 VLAN 列表或范围原文。
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+
+# Cisco manually authored evidence checks; no automatic health rules.
+- id: system.cpu_instant.user
+  description: 用户态瞬时 CPU 百分比，不代表五分钟均值
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: percent
+  dimensions: &id001
+  - CPU
+  assessment_roles:
+  - evidence
+- id: system.cpu_instant.kernel
+  description: 内核态瞬时 CPU 百分比
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: percent
+  dimensions: *id001
+  assessment_roles:
+  - evidence
+- id: system.cpu_instant.idle
+  description: 空闲瞬时 CPU 百分比
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: percent
+  dimensions: *id001
+  assessment_roles:
+  - evidence
+- id: system.memory_pool.total
+  description: 该池总容量，保留 CLI 的字节单位
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: bytes
+  dimensions: &id002
+  - POOL
+  assessment_roles:
+  - evidence
+- id: system.memory_pool.used
+  description: 该池已用字节数
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: bytes
+  dimensions: *id002
+  assessment_roles:
+  - evidence
+- id: system.memory_pool.free
+  description: 该池空闲字节数
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: bytes
+  dimensions: *id002
+  assessment_roles:
+  - evidence
+- id: redundancy.stack_ports.port1_status
+  description: 成员堆叠端口 1 状态原文
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: &id003
+  - SWITCH
+  assessment_roles:
+  - evidence
+- id: redundancy.stack_ports.port2_status
+  description: 成员堆叠端口 2 状态原文
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: *id003
+  assessment_roles:
+  - evidence
+- id: redundancy.stack_ports.port1_neighbor
+  description: 端口 1 对端成员号，None 等原文不改写
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: *id003
+  assessment_roles:
+  - evidence
+- id: redundancy.stack_ports.port2_neighbor
+  description: 端口 2 对端成员号
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: *id003
+  assessment_roles:
+  - evidence
+- id: interface.switching_statistics.pkts_in
+  description: 此交换路径累计输入包数；Total 不能与子路径相加
+  semantic_type: counter
+  value_types:
+  - number
+  canonical_unit: count
+  dimensions: &id004
+  - INTERFACE
+  - SWITCHING_PATH
+  assessment_roles:
+  - evidence
+- id: interface.switching_statistics.chars_in
+  description: 此交换路径累计输入字节数
+  semantic_type: counter
+  value_types:
+  - number
+  canonical_unit: bytes
+  dimensions: *id004
+  assessment_roles:
+  - evidence
+- id: interface.switching_statistics.pkts_out
+  description: 此交换路径累计输出包数
+  semantic_type: counter
+  value_types:
+  - number
+  canonical_unit: count
+  dimensions: *id004
+  assessment_roles:
+  - evidence
+- id: interface.switching_statistics.chars_out
+  description: 此交换路径累计输出字节数
+  semantic_type: counter
+  value_types:
+  - number
+  canonical_unit: bytes
+  dimensions: *id004
+  assessment_roles:
+  - evidence
+- id: interface.switching_statistics.admin_state
+  description: 原文 disabled；禁用接口没有交换路径与计数，保持缺失
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: *id004
+  assessment_roles:
+  - evidence
+- id: interface.controller_statistics.admin_state
+  description: 驱动管理状态
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: &id005
+  - INTERFACE
+  assessment_roles:
+  - evidence
+- id: interface.controller_statistics.mtu
+  description: 控制器帧长配置，不能冒充三层 MTU
+  semantic_type: counter
+  value_types:
+  - number
+  canonical_unit: bytes
+  dimensions: *id005
+  assessment_roles:
+  - evidence
+- id: interface.controller_statistics.speed
+  description: 驱动速率原文，保留单位
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: *id005
+  assessment_roles:
+  - evidence
+- id: interface.controller_statistics.duplex
+  description: 驱动双工状态
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: *id005
+  assessment_roles:
+  - evidence
+- id: interface.controller_statistics.autoneg
+  description: 驱动自动协商状态
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: *id005
+  assessment_roles:
+  - evidence
+- id: interface.controller_statistics.stats_interval
+  description: 驱动统计间隔原值，样本未标单位，不推断为秒
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: *id005
+  assessment_roles:
+  - evidence
+- id: interface.controller_statistics.input_packets
+  description: 控制器累计输入包数
+  semantic_type: counter
+  value_types:
+  - number
+  canonical_unit: count
+  dimensions: *id005
+  assessment_roles:
+  - evidence
+- id: interface.controller_statistics.input_multicast
+  description: 累计输入组播包数
+  semantic_type: counter
+  value_types:
+  - number
+  canonical_unit: count
+  dimensions: *id005
+  assessment_roles:
+  - evidence
+- id: interface.controller_statistics.input_broadcast
+  description: 累计输入广播包数
+  semantic_type: counter
+  value_types:
+  - number
+  canonical_unit: count
+  dimensions: *id005
+  assessment_roles:
+  - evidence
+- id: interface.controller_statistics.crc_errors
+  description: 输入 CRC 错误计数
+  semantic_type: counter
+  value_types:
+  - number
+  canonical_unit: count
+  dimensions: *id005
+  assessment_roles:
+  - evidence
+- id: interface.controller_statistics.fragments
+  description: 输入分片计数
+  semantic_type: counter
+  value_types:
+  - number
+  canonical_unit: count
+  dimensions: *id005
+  assessment_roles:
+  - evidence
+- id: interface.controller_statistics.dropped_packets
+  description: 驱动丢弃包计数
+  semantic_type: counter
+  value_types:
+  - number
+  canonical_unit: count
+  dimensions: *id005
+  assessment_roles:
+  - evidence
+- id: interface.controller_statistics.runts
+  description: 短帧计数
+  semantic_type: counter
+  value_types:
+  - number
+  canonical_unit: count
+  dimensions: *id005
+  assessment_roles:
+  - evidence
+- id: interface.controller_statistics.giants
+  description: 巨帧计数
+  semantic_type: counter
+  value_types:
+  - number
+  canonical_unit: count
+  dimensions: *id005
+  assessment_roles:
+  - evidence
+- id: interface.controller_statistics.total_errors
+  description: 控制器错误包总数；不与子计数相加
+  semantic_type: counter
+  value_types:
+  - number
+  canonical_unit: count
+  dimensions: *id005
+  assessment_roles:
+  - evidence
+- id: interface.controller_statistics.input_bytes
+  description: 控制器累计输入字节数
+  semantic_type: counter
+  value_types:
+  - number
+  canonical_unit: bytes
+  dimensions: *id005
+  assessment_roles:
+  - evidence
+- id: interface.controller_statistics.link_state
+  description: PCS Link State 原文
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: *id005
+  assessment_roles:
+  - evidence
+- id: system.debug_status.scope
+  description: 原文槽位或调试分组，未提供则为空
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: system.debug_status.debug_status
+  description: 原文调试级别、调试启用或条件调试状态；不能据此推断所有调试均关闭
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: []
+  assessment_roles:
+  - evidence
+- id: interface.optical_measurements.unit
+  description: 表头明确的 Celsius、Volts、dBm 或 mA；不得混合不同单位计算
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: &id006
+  - INTERFACE
+  - METRIC
+  assessment_roles:
+  - evidence
+- id: interface.optical_measurements.value
+  description: 该端口该指标读数，单位由 UNIT 明示
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: null
+  dimensions: *id006
+  assessment_roles:
+  - evidence
+- id: interface.optical_measurements.high_alarm
+  description: 原文高告警门限
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: null
+  dimensions: *id006
+  assessment_roles:
+  - evidence
+- id: interface.optical_measurements.high_warning
+  description: 原文高预警门限
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: null
+  dimensions: *id006
+  assessment_roles:
+  - evidence
+- id: interface.optical_measurements.low_warning
+  description: 原文低预警门限
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: null
+  dimensions: *id006
+  assessment_roles:
+  - evidence
+- id: interface.optical_measurements.low_alarm
+  description: 原文低告警门限
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: null
+  dimensions: *id006
+  assessment_roles:
+  - evidence
+- id: environment.sensor_reading.state
+  description: 原文 Normal 等状态
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: &id007
+  - SENSOR
+  - LOCATION
+  assessment_roles:
+  - evidence
+- id: environment.sensor_reading.reading
+  description: 原文传感器读数，单位由 UNIT 指定；不执行隐式换算
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: null
+  dimensions: *id007
+  assessment_roles:
+  - evidence
+- id: environment.sensor_reading.unit
+  description: Celsius、mV、A、Watts 或 RPM 等原文单位
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions: *id007
+  assessment_roles:
+  - evidence
+
+# H3C manual evidence checks: source grain, no health conclusions.
+- id: device.subslot_inventory.detail
+  description: 子槽位原文规格或硬件、驱动、CPLD 版本，不覆盖同槽位的其他组件
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - SLOT
+  - SUBSLOT
+  - COMPONENT
+  assessment_roles:
+  - evidence
+- id: device.manufacture_inventory.device_name
+  description: 设备或部件型号原文
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - SCOPE
+  - SLOT_TYPE
+  - SLOT_ID
+  assessment_roles:
+  - evidence
+- id: device.manufacture_inventory.device_serial_number
+  description: 部件序列号；NONE 保留原文，不视为有效序列号
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - SCOPE
+  - SLOT_TYPE
+  - SLOT_ID
+  assessment_roles:
+  - evidence
+- id: device.manufacture_inventory.mac_address
+  description: 部件 MAC 地址
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - SCOPE
+  - SLOT_TYPE
+  - SLOT_ID
+  assessment_roles:
+  - evidence
+- id: device.manufacture_inventory.manufacturing_date
+  description: 制造日期
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - SCOPE
+  - SLOT_TYPE
+  - SLOT_ID
+  assessment_roles:
+  - evidence
+- id: device.manufacture_inventory.vendor_name
+  description: 制造商
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - SCOPE
+  - SLOT_TYPE
+  - SLOT_ID
+  assessment_roles:
+  - evidence
+- id: device.manufacture_inventory.product_id
+  description: 产品订货号
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - SCOPE
+  - SLOT_TYPE
+  - SLOT_ID
+  assessment_roles:
+  - evidence
+- id: device.manufacture_inventory.support_status
+  description: 不支持制造信息时保留设备提示，不编造资产信息
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - SCOPE
+  - SLOT_TYPE
+  - SLOT_ID
+  assessment_roles:
+  - evidence
+- id: environment.fan_speed_level.speed_level
+  description: 风扇离散档位，原文 Speedlevel；不是 RPM 转速
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: null
+  dimensions:
+  - FAN
+  assessment_roles:
+  - evidence
+- id: interface.link_brief.link
+  description: 链路状态 UP、DOWN、ADM、Stby 原文
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - INTERFACE
+  assessment_roles:
+  - evidence
+- id: interface.link_brief.protocol
+  description: 路由模式协议状态，保留 spoofing 标记
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - INTERFACE
+  assessment_roles:
+  - evidence
+- id: interface.link_brief.main_ip
+  description: 路由模式主 IP 地址
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - INTERFACE
+  assessment_roles:
+  - evidence
+- id: interface.link_brief.speed
+  description: 桥接模式速率，保留 G/M 与自动协商标记
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - INTERFACE
+  assessment_roles:
+  - evidence
+- id: interface.link_brief.duplex
+  description: 双工原文 F/H/A
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - INTERFACE
+  assessment_roles:
+  - evidence
+- id: interface.link_brief.type
+  description: 桥接端口 A/T/H 模式
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - INTERFACE
+  assessment_roles:
+  - evidence
+- id: interface.link_brief.vlan_id
+  description: 桥接端口 PVID
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - INTERFACE
+  assessment_roles:
+  - evidence
+- id: interface.link_brief.description
+  description: 接口描述
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - INTERFACE
+  assessment_roles:
+  - evidence
+- id: interface.ip_brief.physical
+  description: 物理状态原文
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - INTERFACE
+  assessment_roles:
+  - evidence
+- id: interface.ip_brief.protocol
+  description: 协议状态原文，含 spoofing 标记
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - INTERFACE
+  assessment_roles:
+  - evidence
+- id: interface.ip_brief.ip_address
+  description: 接口 IP；未分配时缺失
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - INTERFACE
+  assessment_roles:
+  - evidence
+- id: interface.ip_brief.prefix_length
+  description: 仅在原文 /Mask 明示时提取前缀长度
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: null
+  dimensions:
+  - INTERFACE
+  assessment_roles:
+  - evidence
+- id: interface.ip_brief.vpn_instance
+  description: VPN 名称；-- 不推断为某个命名 VPN
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - INTERFACE
+  assessment_roles:
+  - evidence
+- id: interface.ip_brief.description
+  description: 接口描述
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - INTERFACE
+  assessment_roles:
+  - evidence
+- id: network.arp_entries.mac_address
+  description: 邻居 MAC 地址
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - IP_ADDRESS
+  - VLAN_ID
+  - INTERFACE
+  assessment_roles:
+  - evidence
+- id: network.arp_entries.aging
+  description: 原文 Aging 数值，单位未标时不推断
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - IP_ADDRESS
+  - VLAN_ID
+  - INTERFACE
+  assessment_roles:
+  - evidence
+- id: network.arp_entries.type
+  description: 原文 D/S 等类型；VLAN/VSI 与 VRF 不混用
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - IP_ADDRESS
+  - VLAN_ID
+  - INTERFACE
+  assessment_roles:
+  - evidence
+- id: network.mac_forwarding.state
+  description: 转发表状态原文；同 VLAN/MAC 可在多个端口出现，全部保留
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - VLAN_ID
+  - MAC_ADDRESS
+  - INTERFACE
+  assessment_roles:
+  - evidence
+- id: network.mac_forwarding.aging
+  description: 原文 Y/N 老化标志，不冒充老化时间
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - VLAN_ID
+  - MAC_ADDRESS
+  - INTERFACE
+  assessment_roles:
+  - evidence
+- id: redundancy.irf_members.role
+  description: Master/Standby 角色，不冒充成员健康状态
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - MEMBER_ID
+  assessment_roles:
+  - evidence
+- id: redundancy.irf_members.priority
+  description: 成员优先级原值
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: null
+  dimensions:
+  - MEMBER_ID
+  assessment_roles:
+  - evidence
+- id: redundancy.irf_members.cpu_mac
+  description: 成员 CPU MAC
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - MEMBER_ID
+  assessment_roles:
+  - evidence
+- id: redundancy.irf_members.description
+  description: 成员描述
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - MEMBER_ID
+  assessment_roles:
+  - evidence
+- id: configuration.startup_files.current_file
+  description: 当前启动配置文件路径，保留 (*) 标记
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - BOARD
+  assessment_roles:
+  - evidence
+- id: configuration.startup_files.next_main_file
+  description: 下次主启动配置文件路径
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - BOARD
+  assessment_roles:
+  - evidence
+- id: configuration.startup_files.next_backup_file
+  description: 下次备启动配置文件路径；NULL 不代表配置正文
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - BOARD
+  assessment_roles:
+  - evidence
+- id: redundancy.mlag_system.peer_number
+  description: 对端系统号
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: null
+  dimensions:
+  - LOCAL_NUMBER
+  assessment_roles:
+  - evidence
+- id: redundancy.mlag_system.local_mac
+  description: 本端系统 MAC
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - LOCAL_NUMBER
+  assessment_roles:
+  - evidence
+- id: redundancy.mlag_system.peer_mac
+  description: 对端系统 MAC
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - LOCAL_NUMBER
+  assessment_roles:
+  - evidence
+- id: redundancy.mlag_system.local_priority
+  description: 本端优先级
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: null
+  dimensions:
+  - LOCAL_NUMBER
+  assessment_roles:
+  - evidence
+- id: redundancy.mlag_system.peer_priority
+  description: 对端优先级
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: null
+  dimensions:
+  - LOCAL_NUMBER
+  assessment_roles:
+  - evidence
+- id: redundancy.mlag_system.local_bridge_mac
+  description: 本端桥 MAC
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - LOCAL_NUMBER
+  assessment_roles:
+  - evidence
+- id: redundancy.mlag_system.peer_bridge_mac
+  description: 对端桥 MAC
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - LOCAL_NUMBER
+  assessment_roles:
+  - evidence
+- id: redundancy.mlag_system.local_role
+  description: 本端有效角色
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - LOCAL_NUMBER
+  assessment_roles:
+  - evidence
+- id: redundancy.mlag_system.peer_role
+  description: 对端有效角色
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - LOCAL_NUMBER
+  assessment_roles:
+  - evidence
+- id: redundancy.mlag_system.health_level
+  description: 设备报告的健康等级，不转换成健康结论
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: null
+  dimensions:
+  - LOCAL_NUMBER
+  assessment_roles:
+  - evidence
+- id: redundancy.mlag_system.split_mode
+  description: 分裂时独立模式配置
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - LOCAL_NUMBER
+  assessment_roles:
+  - evidence
+- id: redundancy.mlag_system.standalone
+  description: 当前是否独立模式原文
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - LOCAL_NUMBER
+  assessment_roles:
+  - evidence
+- id: redundancy.mlag_timers.state
+  description: 定时器启用状态原文
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - TIMER
+  assessment_roles:
+  - evidence
+- id: redundancy.mlag_timers.value_seconds
+  description: 配置时长，单位秒；- 保持缺失
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: seconds
+  dimensions:
+  - TIMER
+  assessment_roles:
+  - evidence
+- id: redundancy.mlag_timers.remaining_seconds
+  description: 剩余秒数；- 保持缺失
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: seconds
+  dimensions:
+  - TIMER
+  assessment_roles:
+  - evidence
+- id: operations.syslog_records.host
+  description: 设备日志主机名
+  semantic_type: text
+  value_types:
+  - text
+  canonical_unit: null
+  dimensions:
+  - TIMESTAMP
+  - FACILITY
+  - MNEMONIC
+  - MESSAGE
+  assessment_roles:
+  - evidence
+- id: operations.syslog_records.severity
+  description: 原文 syslog 严重级别 0–7，不自动生成健康规则
+  semantic_type: gauge
+  value_types:
+  - number
+  canonical_unit: null
+  dimensions:
+  - TIMESTAMP
+  - FACILITY
+  - MNEMONIC
+  - MESSAGE
+  assessment_roles:
+  - evidence

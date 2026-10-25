@@ -1,0 +1,11 @@
+manifest_version: 1
+id: hello-demo
+name: 演示应用
+version: 0.2.0
+platform_api: '>=1.0,<2.0'
+icon: document
+dependencies: {}
+backend:
+  router: src.apps.hello_demo.backend.api:router
+frontend:
+  entry: frontend/index.tsx

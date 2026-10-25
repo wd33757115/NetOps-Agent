@@ -1,0 +1,39 @@
+manifest_version: 1
+id: resource-ledger
+name: 资源台账
+version: 0.4.0
+platform_api: '>=1.0,<2.0'
+icon: server
+dependencies: {}
+backend:
+  router: src.apps.resource_ledger.backend.api:router
+frontend:
+  entry: frontend/index.tsx
+agent:
+  tools: src.apps.resource_ledger.backend.tools:TOOLS
+database:
+  mode: package
+  migrations: migrations
+  head: resource_ledger_0004
+  tables:
+    - app_resource_ledger_regions
+    - app_resource_ledger_sites
+    - app_resource_ledger_spaces
+    - app_resource_ledger_zones
+    - app_resource_ledger_prefixes
+    - app_resource_ledger_reservations
+    - app_resource_ledger_addresses
+    - app_resource_ledger_changes
+    - app_resource_ledger_levels
+    - app_resource_ledger_systems
+    - app_resource_ledger_subsystems
+    - app_resource_ledger_hosts
+    - app_resource_ledger_services
+    - app_resource_ledger_providers
+    - app_resource_ledger_provider_networks
+    - app_resource_ledger_pops
+    - app_resource_ledger_circuit_types
+    - app_resource_ledger_risk_groups
+    - app_resource_ledger_circuits
+    - app_resource_ledger_circuit_terminations
+    - app_resource_ledger_circuit_risks

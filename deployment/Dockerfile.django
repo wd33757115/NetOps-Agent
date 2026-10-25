@@ -1,0 +1,45 @@
+# SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
+# SPDX-License-Identifier: Apache-2.0
+
+FROM python:3.11-slim
+
+# 设置工作目录
+WORKDIR /app
+
+# 设置环境变量
+ENV PYTHONDONTWRITEBYTECODE 1
+ENV PYTHONUNBUFFERED 1
+
+# 安装系统依赖
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# 复制 requirements 文件
+COPY web/django_backend/requirements.txt /app/
+COPY src/__init__.py /app/src/__init__.py
+COPY src/platform /app/src/platform
+COPY src/apps /app/src/apps
+
+# 安装 Python 依赖
+RUN python -m src.platform.kernel.build_constraints --output /tmp/app-requirements.lock \
+    && pip install --no-cache-dir -r requirements.txt -r /tmp/app-requirements.lock
+
+# 复制项目文件
+COPY . /app/
+
+# 设置工作目录到 Django 项目
+WORKDIR /app/web/django_backend
+
+# 收集静态文件
+RUN python manage.py collectstatic --noinput || true
+
+# 暴露端口
+EXPOSE 8001
+
+# 开发环境用 daphne ASGI（支持 WebSocket 代理），生产环境用 uvicorn
+CMD if [ "$DJANGO_DEBUG" = "True" ]; then \
+      daphne -b 0.0.0.0 -p 8001 django_backend.asgi:application; \
+    else \
+      uvicorn django_backend.asgi:application --host 0.0.0.0 --port 8001 --workers 4; \
+    fi

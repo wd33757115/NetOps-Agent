@@ -1,0 +1,70 @@
+name: NetOps CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Each job proves one part of "it deploys and runs from a clean checkout".
+jobs:
+  repository-scope:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python scripts/check_repository_scope.py
+
+  backend:
+    needs: repository-scope
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python -m compileall -q src web/django_backend scripts
+      - name: Django system check
+        run: cd web/django_backend && python manage.py check
+      - name: Gateway and worker import
+        run: |
+          python -c "from src.gateway.main import app; print('gateway', len(app.routes), 'routes')"
+          python -c "from src.core.celery_tasks import celery_app; print('celery', celery_app.main)"
+
+  frontend:
+    needs: repository-scope
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web/react_frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/react_frontend/package-lock.json
+      - run: npm ci
+      - run: npm run check:utf8
+      - run: npm run build
+        env:
+          VITE_API_BASE_URL: /api
+
+  docker-build:
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cp .env.example .env
+      - run: docker compose -f deployment/docker-compose.yml --profile core config --quiet
+      - run: docker compose -f deployment/docker-compose.yml -f deployment/docker-compose.ai.yml --profile core --profile ai config --quiet
+      - run: docker compose -f deployment/docker-compose.yml -f deployment/docker-compose.ai.yml -f deployment/docker-compose.prod.yml --profile core --profile ai config --quiet
+      - run: docker build -t netops-gateway-core -f deployment/Dockerfile.fastapi --build-arg REQUIREMENTS_FILE=deployment/requirements/gateway.txt .
+      - run: docker build -t netops-worker-core -f deployment/Dockerfile.core-worker --build-arg REQUIREMENTS_FILE=deployment/requirements/core.txt .
+      - run: docker build -t netops-worker-ai -f deployment/Dockerfile.core-worker --build-arg REQUIREMENTS_FILE=deployment/requirements/ai-worker.txt .
+      - run: docker build -t netops-django -f deployment/Dockerfile.django .
+      - run: docker build -t netops-react -f deployment/Dockerfile.react --build-arg VITE_API_BASE_URL=/api .

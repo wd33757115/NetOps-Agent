@@ -1,0 +1,13 @@
+manifest_version: 1
+id: device-management
+name: 设备管理
+version: 1.0.4
+platform_api: '>=1.0,<2.0'
+icon: server
+dependencies: {}
+backend:
+  router: src.apps.device_management.backend.router:router
+frontend:
+  entry: frontend/index.tsx
+database:
+  mode: none

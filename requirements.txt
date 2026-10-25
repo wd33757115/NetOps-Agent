@@ -1,0 +1,10 @@
+# Full Windows/application installation. App pins are merged by install.ps1.
+-r deployment/requirements/gateway.txt
+-r deployment/requirements/ai-worker.txt
+-r web/django_backend/requirements.txt
+
+# Development and validation tools
+black>=24.0
+ruff>=0.4
+pytest>=8.0
+pytest-asyncio>=0.23

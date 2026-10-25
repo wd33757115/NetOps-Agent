@@ -1,0 +1,77 @@
+# Trusted policy data; unknown syntax requires approval. No device support claim.
+schema_version: 1
+platform: vrp
+aliases:
+  dis: display
+  disp: display
+  displ: display
+  displa: display
+readonly:
+- display
+- dir
+blocked:
+- install
+- boot
+- boot-loader
+- reinitialize
+approval:
+- display diagnostic-information
+- debugging
+- terminal monitor
+deny_regex:
+- ^(?:show|display)\s+\S+.*\s(?:redirect|append|tee)\b
+- ^dir\s+.*(?:ftp|http|scp|tftp)://
+probes:
+  ping:
+    layout: before
+    vrf_prefix: false
+    ip_marker: false
+    options:
+      -c:
+        kind: count
+        min: 1
+        max: 5
+        default: 3
+      -s:
+        kind: size
+        min: 20
+        max: 1500
+        default: 56
+      -t:
+        kind: timeout_ms
+        min: 1
+        max: 2000
+        default: 2000
+      -a:
+        kind: source
+      -vpn-instance:
+        kind: vrf
+  tracert:
+    layout: before
+    vrf_prefix: false
+    ip_marker: false
+    options:
+      -q:
+        kind: count
+        min: 1
+        max: 5
+        default: 3
+      -w:
+        kind: timeout_ms
+        min: 1
+        max: 2000
+        default: 2000
+      -m:
+        kind: hops
+        min: 1
+        max: 30
+        default: 30
+      -a:
+        kind: source
+      -vpn-instance:
+        kind: vrf
+      -s:
+        kind: size
+        min: 20
+        max: 1500
+        default: 40

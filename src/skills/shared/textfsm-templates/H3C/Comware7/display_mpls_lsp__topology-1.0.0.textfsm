@@ -1,0 +1,12 @@
+Value FEC (\S+)
+Value PROTOCOL (\S+)
+Value LOCAL_LABEL ([^/\s]+)
+Value OUT_LABEL ([^/\s]+)
+Value INTERFACE (\S+)
+
+# One record per LSP (vpn-fabric lab, Comware 7.1). "-" is no label / no interface.
+Start
+  ^FEC\s+Proto\s+In/Out Label\s+Out Inter/NHLFE/LSINDEX\s*$$
+  ^${FEC}\s+${PROTOCOL}\s+${LOCAL_LABEL}/${OUT_LABEL}\s+${INTERFACE}\s*$$ -> Record
+  ^\s*$$
+  ^. -> Error "unrecognized display mpls lsp line"

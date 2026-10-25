@@ -1,0 +1,3 @@
+paramiko==4.0.0
+cryptography==50.0.1
+netmiko==4.7.0

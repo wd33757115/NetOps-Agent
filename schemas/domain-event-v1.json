@@ -1,0 +1,19 @@
+{
+  "$comment": "Copyright 2026 wangdong <wangdong5919@163.com>. SPDX-License-Identifier: Apache-2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://netops-agent.local/schemas/domain-event-v1.json",
+  "title": "DomainEvent",
+  "type": "object",
+  "required": ["event_id", "event_type", "schema_version", "occurred_at", "source", "correlation_id"],
+  "properties": {
+    "event_id": { "type": "string" },
+    "event_type": { "type": "string" },
+    "schema_version": { "type": "string", "const": "1" },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "source": { "type": "string" },
+    "correlation_id": { "type": "string" },
+    "payload": { "type": "object", "additionalProperties": true },
+    "trace_id": { "type": ["string", "null"] }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,40 @@
+name: demo-text-report
+description: 开发手册演示：统计文本并生成报告；提供修改后的文本时再对比前后差异
+category: custom
+version: "1.0"
+
+test:
+  context:
+    ticket_id: DEMO-1
+    title: 演示文本
+    text: "hostname R1\ninterface Gi0/0\n shutdown"
+    text_after:
+  required_context:
+    - text
+
+steps:
+  - name: stats
+    label: 统计文本
+    skill: demo-text-stats
+    inputs:
+      text: ${context.text}
+      title: ${context.title}
+      ticket_id: ${context.ticket_id}
+
+  - name: compare
+    label: 对比修改前后
+    skill: config-diff-tool
+    # Runs only when the trigger supplied a second version of the text.
+    when: ${context.text_after}
+    inputs:
+      config1: ${context.text}
+      config2: ${context.text_after}
+
+on_complete:
+  message: 文本报告已生成
+  notify_each_step: false
+  notify_on_failure: true
+  notification:
+    title: "文本报告已生成 (${context.ticket_id})"
+    body: "统计结果：${steps.stats.result.summary}"
+    level: success

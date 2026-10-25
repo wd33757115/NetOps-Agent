@@ -1,0 +1,333 @@
+# SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
+# SPDX-License-Identifier: Apache-2.0
+
+networks:
+  netops-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:
+  rabbitmq-data:
+  django-static:
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: netops-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-netops_agent}
+      POSTGRES_USER: ${POSTGRES_USER:-netops}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      TZ: Asia/Shanghai
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\"" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - netops-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: netops-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - netops-network
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: netops-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+      TZ: Asia/Shanghai
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: [ "CMD", "rabbitmq-diagnostics", "-q", "ping" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - netops-network
+
+  minio:
+    # MinIO no longer publishes community images to Docker Hub or Quay; pgsty builds the same
+    # AGPLv3 server from source (RELEASE.2026-08-04T00-00-00Z), same entrypoint and health check.
+    image: pgsty/minio@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
+    container_name: netops-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:?Set MINIO_ACCESS_KEY in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?Set MINIO_SECRET_KEY in .env}
+      TZ: Asia/Shanghai
+    volumes:
+      - minio-data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - netops-network
+
+  langfuse:
+    profiles: ["observability"]
+    image: docker.io/langfuse/langfuse:2
+    container_name: netops-langfuse
+    ports:
+      - "3001:3000"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-netops}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-netops_agent}
+      NEXTAUTH_URL: http://localhost:3001
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-${SECRET_KEY}}
+      SALT: ${LANGFUSE_SALT:-${JWT_SECRET_KEY}}
+      TELEMETRY_ENABLED: false
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - netops-network
+
+  migrate:
+    profiles: ["core"]
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.fastapi
+      args:
+        REQUIREMENTS_FILE: deployment/requirements/bootstrap.txt
+    container_name: netops-migrate
+    env_file:
+      - ../.env
+    environment:
+      - POSTGRES_HOST=postgres
+      - TZ=Asia/Shanghai
+    command: python -m src.platform.database.bootstrap apply
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - netops-network
+
+  fastapi:
+    profiles: ["core"]
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.fastapi
+      args:
+        REQUIREMENTS_FILE: deployment/requirements/gateway.txt
+    container_name: netops-fastapi
+    # 仅内网可达，不映射 host 8000（前端统一走 Django :8001）
+    expose:
+      - "8000"
+    env_file:
+      - ../.env
+    environment:
+      - NETOPS_AUTHORITY_URL=http://django:8001
+      - POSTGRES_HOST=postgres
+      - REDIS_HOST=redis
+      - MINIO_ENDPOINT=minio:9000
+      - CELERY_BROKER_URL=amqp://guest:guest@rabbitmq:5672//
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - DEBUG=false
+      - ENFORCE_BFF_ORIGIN=true
+      - TZ=Asia/Shanghai
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - netops-network
+
+  celery-patrol:
+    profiles: ["core"]
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.core-worker
+      args:
+        REQUIREMENTS_FILE: deployment/requirements/core.txt
+    container_name: netops-celery-patrol
+    env_file:
+      - ../.env
+    environment:
+      - NETOPS_AUTHORITY_URL=http://django:8001
+      - POSTGRES_HOST=postgres
+      - REDIS_HOST=redis
+      - MINIO_ENDPOINT=minio:9000
+      - CELERY_BROKER_URL=amqp://guest:guest@rabbitmq:5672//
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - DEBUG=false
+      - CELERY_WORKER_ROLE=patrol
+      - CELERY_WORKER_QUEUES=netops.patrol
+      - TZ=Asia/Shanghai
+    command: celery -A src.core.celery_tasks.celery_app worker --loglevel=info -Q netops.patrol -c 2
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - netops-network
+
+  celery-control:
+    profiles: ["core"]
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.core-worker
+      args:
+        REQUIREMENTS_FILE: deployment/requirements/core.txt
+    container_name: netops-celery-control
+    env_file:
+      - ../.env
+    environment:
+      - NETOPS_AUTHORITY_URL=http://django:8001
+      - POSTGRES_HOST=postgres
+      - REDIS_HOST=redis
+      - MINIO_ENDPOINT=minio:9000
+      - CELERY_BROKER_URL=amqp://guest:guest@rabbitmq:5672//
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - CELERY_WORKER_ROLE=control
+      - CELERY_WORKER_QUEUES=netops.default,netops.firewall,netops.health
+      - DEBUG=false
+      - TZ=Asia/Shanghai
+    command: celery -A src.core.celery_tasks.celery_app worker --loglevel=info -Q netops.default,netops.firewall,netops.health -c 2
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - netops-network
+
+  celery-beat:
+    profiles: ["core"]
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.core-worker
+      args:
+        REQUIREMENTS_FILE: deployment/requirements/core.txt
+    container_name: netops-celery-beat
+    env_file:
+      - ../.env
+    environment:
+      - NETOPS_AUTHORITY_URL=http://django:8001
+      - POSTGRES_HOST=postgres
+      - REDIS_HOST=redis
+      - CELERY_BROKER_URL=amqp://guest:guest@rabbitmq:5672//
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - CELERY_WORKER_ROLE=beat
+      - MINIO_ENDPOINT=minio:9000
+      - TZ=Asia/Shanghai
+    command: celery -A src.core.celery_tasks.celery_app beat --loglevel=info
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    networks:
+      - netops-network
+
+  django:
+    profiles: ["core"]
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.django
+    container_name: netops-django
+    ports:
+      - "8001:8001"
+    env_file:
+      - ../.env
+    environment:
+      - POSTGRES_HOST=postgres
+      - REDIS_HOST=redis
+      - MINIO_ENDPOINT=minio:9000
+      - DJANGO_DEBUG=false
+      - DJANGO_ALLOWED_HOSTS=${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1},django
+      - FASTAPI_BASE_URL=http://fastapi:8000
+      - CELERY_BROKER_URL=amqp://guest:guest@rabbitmq:5672//
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - TZ=Asia/Shanghai
+    volumes:
+      - django-static:/app/web/django_backend/staticfiles
+      - ..:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    networks:
+      - netops-network
+
+  react:
+    profiles: ["core"]
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.react
+      args:
+        - VITE_API_BASE_URL=/api
+    container_name: netops-react
+    ports:
+      - "3000:80"
+    depends_on:
+      - django
+    restart: unless-stopped
+    networks:
+      - netops-network
+
+  frontend-dev:
+    profiles: ["development"]
+    image: node:22-alpine
+    working_dir: /app/web/react_frontend
+    volumes:
+      - ..:/app
+    environment:
+      - NETOPS_PYTHON=python3
+    command: sh -c "apk add --no-cache python3 py3-yaml py3-packaging && npm run dev -- --host 0.0.0.0 --port 4173"
+    ports:
+      - "4173:4173"
+    networks:
+      - netops-network

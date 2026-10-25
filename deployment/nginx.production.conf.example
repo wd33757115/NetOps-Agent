@@ -1,0 +1,78 @@
+# 生产环境外层 Nginx（宿主机）示例
+# 用途：TLS 终止 + 将流量转发到 Docker 内 React(Nginx) :3000
+#
+# 安装：
+#   1. 复制到 /etc/nginx/sites-available/netops.conf 并 ln -s sites-enabled/
+#   2. 替换 your-domain.com 与 ssl 证书路径
+#   3. certbot certonly --nginx -d your-domain.com
+#   4. nginx -t && systemctl reload nginx
+#
+# Docker 启动：docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+upstream netops_frontend {
+    server 127.0.0.1:3000;
+    keepalive 32;
+}
+
+# HTTP → HTTPS 重定向
+server {
+    listen 80;
+    listen [::]:80;
+    server_name your-domain.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name your-domain.com;
+
+    ssl_certificate     /etc/letsencrypt/live/your-domain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/your-domain.com/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+
+    client_max_body_size 100m;
+
+    # 安全头（按需调整 CSP）
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    location / {
+        proxy_pass http://netops_frontend;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # Chat answers stream as server-sent events and can run for minutes.
+        proxy_buffering off;
+        proxy_read_timeout 300s;
+    }
+
+    # 浏览器上传文件经前端容器转给 MinIO；放宽大小并直接流式转发，不在这里缓存整个文件。
+    location /object-storage/ {
+        proxy_pass http://netops_frontend;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_request_buffering off;
+        client_max_body_size 5g;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+    }
+
+    # SSE / WebSocket（容器内 Nginx 已转发 /ws → Django，此处透传 Upgrade）
+    location /ws/ {
+        proxy_pass http://netops_frontend;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
+    }
+}

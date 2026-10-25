@@ -1,0 +1,31 @@
+# SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
+# SPDX-License-Identifier: Apache-2.0
+
+FROM python:3.11-slim
+
+ARG REQUIREMENTS_FILE=deployment/requirements/core.txt
+
+WORKDIR /app
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV TZ=Asia/Shanghai
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libpq-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt /app/
+COPY deployment/requirements /app/deployment/requirements
+COPY web/django_backend/requirements.txt /app/web/django_backend/requirements.txt
+COPY src/__init__.py /app/src/__init__.py
+COPY src/platform /app/src/platform
+COPY src/apps /app/src/apps
+RUN python -m src.platform.kernel.build_constraints --output /tmp/app-requirements.lock \
+    && pip install --no-cache-dir -r ${REQUIREMENTS_FILE} -r /tmp/app-requirements.lock
+
+COPY . /app/
+
+CMD ["celery", "-A", "src.core.celery_tasks.celery_app", "worker", "--loglevel=info"]

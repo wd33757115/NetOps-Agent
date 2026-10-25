@@ -1,0 +1,41 @@
+# SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
+# SPDX-License-Identifier: Apache-2.0
+
+name: parser-validation-ingest
+description: 导入巡检样本到解析验证库，并登记模板创建或修复候选
+version: "1.0"
+
+test:
+  context:
+    file_path: ""
+    offline_job_id: ""
+    period_role: sample
+    dataset_id: dev-test-previous-quarter
+    run_id: parser-validation-workflow-test
+    observed_at: "2026-01-01T00:00:00+00:00"
+    vendor:
+    model:
+  required_context:
+    - file_path
+
+steps:
+  - name: validation_ingest
+    label: 导入解析验证样本
+    skill: patrol-raw-ingestor
+    inputs:
+      file_path: ${context.file_path}
+      offline_job_id: ${context.offline_job_id}
+      period_role: ${context.period_role}
+      dataset_id: ${context.dataset_id}
+      run_id: ${context.run_id}
+      observed_at: ${context.observed_at}
+      vendor: ${context.vendor}
+      model: ${context.model}
+      mode: parser_validation
+
+on_complete:
+  message: 解析验证样本已导入，候选任务已按策略聚合
+  notification:
+    title: 解析验证导入完成
+    body: 样本已写入 PostgreSQL parser_validation 数据集，正式巡检数据未受影响。
+    level: success

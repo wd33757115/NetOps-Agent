@@ -1,0 +1,10 @@
+Value Required INTERFACE (\S+)
+Value POLICY (\S+)
+
+# "show ip policy": each interface and the route map applied to packets arriving on it
+# ("local" names the policy for locally generated packets).
+Start
+  ^Interface\s+Route map\s*$$
+  ^${INTERFACE}\s+${POLICY}\s*$$ -> Record
+  ^\s*$$
+  ^.* -> Error "unrecognized show ip policy line"

@@ -1,0 +1,20 @@
+Value Required INTERFACE (\S+)
+Value PHYSICAL (\S+)
+Value PROTOCOL (\S+)
+Value ADDRESS (\S+)
+Value VRF (\S+)
+Value DESCRIPTION (.*?)
+
+# One record per interface (campus-wan, vpn-fabric and VSR labs, Comware 7.1). "--" is
+# no address, or the public instance in the VPN column.
+Start
+  ^\*down: administratively down\s*$$
+  ^\(s\): spoofing\s+\(l\): loopback\s*$$
+  ^Interface\s+Physical\s+Protocol\s+IP address/Mask\s+VPN instance\s+Description\s*$$ -> Interfaces
+  ^\s*$$
+  ^. -> Error "unrecognized display ip interface brief line"
+
+Interfaces
+  ^${INTERFACE}\s+${PHYSICAL}\s+${PROTOCOL}\s+${ADDRESS}\s+${VRF}(?:\s+${DESCRIPTION})?\s*$$ -> Record
+  ^\s*$$
+  ^. -> Error "unrecognized interface address row"

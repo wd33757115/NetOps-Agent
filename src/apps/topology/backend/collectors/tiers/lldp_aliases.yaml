@@ -1,0 +1,13 @@
+# Exact normalized keys. Do not turn these into prefix matches.
+# A per-neighbour key line; port headers yield local_if and cover every block below them.
+local_port: [local intf, local interface, local port id, local port]
+chassis: [chassis id, chassisid]
+chassis_subtype: [chassis type, chassis id subtype]
+port: [port id, portid]
+port_subtype: [port id type, port id subtype]
+sysname: [system name, sysname, device id]
+description: [system description, system descr, sysdescr]
+mgmt: [management address, mgmt address, ipv4 address, ip address, management ip address, ip]
+serial: [serialnum, serial number]
+model: [model name]
+manufacturer: [manufacturer name]

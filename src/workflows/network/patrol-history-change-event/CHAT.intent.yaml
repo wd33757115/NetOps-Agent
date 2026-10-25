@@ -1,0 +1,38 @@
+# SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
+# SPDX-License-Identifier: Apache-2.0
+
+workflow: patrol-history-change-event
+priority: 120
+description: 聊天触发两个历史巡检目录的变化与事件分析
+
+match:
+  require_any:
+    - 历史巡检
+    - 季度巡检
+    - 离线巡检
+  require_any_secondary:
+    - 对比
+    - 变化
+    - 事件
+    - 分析
+
+required_context:
+  - baseline_path
+  - current_path
+
+context_from_query:
+  baseline_path: path_0
+  current_path: path_1
+
+context_defaults:
+  baseline_run_id: patrol-baseline
+  current_run_id: patrol-current
+  publish_events: false
+
+response_template: |
+  [OK] 已启动历史巡检变化分析
+
+  - **流程 ID**: `{run_id}`
+  - **步骤**: {workflow_description}
+
+  流程将依次导入两个巡检目录、检测变化并构建运维事件。

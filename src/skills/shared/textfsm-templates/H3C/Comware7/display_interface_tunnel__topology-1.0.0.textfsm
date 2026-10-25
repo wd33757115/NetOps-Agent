@@ -1,0 +1,22 @@
+Value Required INTERFACE (Tunnel\d+)
+Value STATE (\S+)
+Value PROTOCOL_STATE (\S+)
+Value SOURCE (\S+)
+Value DESTINATION (\S+)
+Value MODE (\S+)
+
+# One record per tunnel interface (vpn-fabric lab, Comware 7.1). Description, bandwidth,
+# MTU, queue and counter lines of the same interface are not modeled.
+Start
+  ^${INTERFACE}\s*$$ -> Interface
+  ^\s*$$
+  ^. -> Error "unrecognized display interface tunnel line"
+
+Interface
+  ^Tunnel\d+\s*$$ -> Continue.Record
+  ^${INTERFACE}\s*$$
+  ^Current state:\s*${STATE}\s*$$
+  ^Line protocol state:\s*${PROTOCOL_STATE}\s*$$
+  ^Tunnel source ${SOURCE}, destination ${DESTINATION}\s*$$
+  ^Tunnel protocol/transport ${MODE}\s*$$
+  ^.*$$

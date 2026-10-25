@@ -1,0 +1,47 @@
+policy_id: netops.default-entity-identity
+version: 1
+status: active
+
+entity_policies:
+  - entity_type_patterns:
+      - ^interface(?:_|$)
+      - ^physical_interface$
+      - ^transceiver
+    identity_fields: [interface, channel]
+    field_normalizers:
+      interface: [trim, compact_whitespace, interface_name]
+      channel: [trim, compact_whitespace, numeric_text]
+
+  - entity_type_patterns:
+      - ^cpu_scope$
+      - ^memory_scope$
+      - ^slot
+    identity_fields: [scope, scope_id, slot]
+    field_normalizers:
+      scope: [trim, casefold]
+      scope_id: [trim, compact_whitespace, numeric_text]
+      slot: [trim, compact_whitespace, numeric_text]
+
+  - entity_type_patterns:
+      - ^environment_
+    identity_fields: [slot, fan, power_supply]
+    field_normalizers:
+      slot: [trim, compact_whitespace, numeric_text]
+      fan: [trim, compact_whitespace, casefold]
+      power_supply: [trim, compact_whitespace, casefold]
+
+interface_prefixes:
+  eth: Ethernet
+  ethernet: Ethernet
+  fa: FastEthernet
+  fastethernet: FastEthernet
+  gi: GigabitEthernet
+  gigabitethernet: GigabitEthernet
+  te: TenGigabitEthernet
+  tengigabitethernet: TenGigabitEthernet
+  twentyfivegige: TwentyFiveGigE
+  fortygigabitethernet: FortyGigabitEthernet
+  hu: HundredGigE
+  hundredgige: HundredGigE
+  port-channel: Port-Channel
+  po: Port-Channel
