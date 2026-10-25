@@ -113,6 +113,10 @@ def run(action, *, adopt_existing=False):
                 raise ValueError("Authority migrations pending; run bootstrap apply")
         else:
             call_command("migrate", interactive=False, verbosity=0)
+            from bff.default_admin import PASSWORD, USERNAME, ensure_default_admin
+            if ensure_default_admin():
+                print(f"[OK] Default administrator {USERNAME} / {PASSWORD} created; "
+                      "change the password after the first login", flush=True)
         from bff.app_lifecycle import lifecycle_lock
         with lifecycle_lock():
             # A live package with changed code keeps its deployed schema until it

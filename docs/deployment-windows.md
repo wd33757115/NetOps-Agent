@@ -31,19 +31,16 @@
 
 # 3. 启动全部服务，并启用需要的应用
 .\scripts\windows\start.ps1 -SkipLangfuse -EnableApps device-management,inspection,rule-governance,device-access,netconf-api,topology,firewall-policy,resource-ledger,official-documents,materials,assistant
-
-# 4. 创建第一个管理员
-.\venv\Scripts\python.exe web\django_backend\manage.py createsuperuser
 ```
 
-打开 `http://localhost:3000`，用管理员登录。之后在“系统管理”里创建用户、用户组并授予应用使用权。
+打开 `http://localhost:3000`，用默认管理员 `admin`（密码 `admin123`）登录，先在“系统管理 → 用户”里重置它的密码，再创建用户、用户组并授予应用使用权。
 
 说明：
 
 - 第一次运行 `install.ps1` 时，如果没有 `.env`，会从 `.env.example` 生成，并自动填好随机的认证密钥、内部调用密钥、数据库和 MinIO 密码，以及设备凭据加密密钥。已有的 `.env` 原样保留。不要在安装前手工复制含 `change-me` 的模板。
 - AI 功能（规则自动制作、公文写作、知识问答）需要在 `.env` 中填写 `DEEPSEEK_API_KEY`，改完后重新运行 `start.ps1`。
 - 默认 pip 源是 PyPI，可用 `-IndexUrl https://.../simple` 换成可信的镜像。
-- 安装不会创建演示账号、不会修改授权，也不会自动启用应用；应用由 `-EnableApps` 显式启用，以后启动会保留启用状态。
+- 初始化数据库时，如果还没有任何超级管理员，会创建默认管理员 `admin`（密码 `admin123`）；已有管理员或已有名为 admin 的用户时不会创建，也不会改动任何密码。安装不会修改授权，也不会自动启用应用；应用由 `-EnableApps` 显式启用，以后启动会保留启用状态。
 - 应用之间的依赖：`topology` 依赖 `device-access`、`rule-governance`、`netconf-api`；`netconf-api` 依赖 `device-access`、`rule-governance`；`assistant` 依赖 `materials`。
 
 ## 访问地址

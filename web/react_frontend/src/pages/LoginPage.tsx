@@ -44,7 +44,7 @@ const LoginPage: React.FC = () => {
           <Form.Item name="username" label="用户名" rules={[{ required: true, message: '请输入用户名' }]}>
             <Input
               prefix={<UserOutlined />}
-              placeholder="admin / operator / viewer"
+              placeholder="用户名"
               size="large"
               autoComplete="username"
             />
@@ -61,9 +61,6 @@ const LoginPage: React.FC = () => {
             登录
           </Button>
         </Form>
-        <Paragraph type="secondary" className="grok-login-hint">
-          演示账号：admin/admin123 · operator/operator123 · viewer/viewer123
-        </Paragraph>
       </Card>
     </main>
   )
