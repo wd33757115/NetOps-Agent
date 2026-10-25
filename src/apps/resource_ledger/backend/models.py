@@ -95,8 +95,6 @@ class Zone(Base):
     title = Column(String(64))
     kind = Column(String(20), nullable=False)
     security_level = Column(String(20))
-    firewall = Column(String(80))
-    security_domain = Column(String(80))
     note = Column(String(500))
     __table_args__ = (UniqueConstraint("site_id", "name", name="uq_resource_ledger_zone"),)
 

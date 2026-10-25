@@ -378,10 +378,6 @@ export function ZoneModal({ open, overview, zone, onClose, onSaved }: { open: bo
       <Form.Item name="kind" label="类型" rules={[{ required: true }]}><Select options={ZONE_KINDS.map(value => ({ value }))} /></Form.Item>
       <Form.Item name="security_level" label="安全等级"><Input maxLength={20} placeholder="例如 等保三级" /></Form.Item>
     </Row>
-    <Row>
-      <Form.Item name="firewall" label="对应防火墙"><Input maxLength={80} placeholder="tra-FW1" /></Form.Item>
-      <Form.Item name="security_domain" label="安全域"><Input maxLength={80} placeholder="Untrust" /></Form.Item>
-    </Row>
     <Form.Item name="note" label="备注"><Input.TextArea maxLength={500} autoSize={{ minRows: 2 }} /></Form.Item>
   </FormModal>
 }

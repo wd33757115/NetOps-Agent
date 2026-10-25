@@ -34,7 +34,7 @@ export interface Site {
 export interface Space { id: string; name: string; kind: string; note?: string | null }
 export interface Zone {
   id: string; site_id: string; name: string; title?: string | null; kind: string; security_level?: string | null
-  firewall?: string | null; security_domain?: string | null; note?: string | null
+  note?: string | null
 }
 export interface Level { id: string; position: number; dimension: Dimension; title: string; default_length: number | null }
 export interface SystemRef { id: string; name: string; short_name?: string | null; importance?: string }
@@ -47,7 +47,6 @@ export interface Overview {
 export interface Usage { kind: 'planned' | 'addresses'; used: number; total: number; percent: number }
 export interface ZoneRef {
   id: string; name: string; title?: string | null; inherited: boolean; site?: string | null; region?: string | null
-  firewall?: string | null; security_domain?: string | null
 }
 export interface PathStep { level: string; dimension: Dimension; id: string | null; name: string; prefix_id: string }
 export interface Binding { region_id: string | null; site_id: string | null; zone_id: string | null; system_id: string | null; subsystem_id: string | null }

@@ -25,7 +25,7 @@ export default function ZonesPage() {
   })
 
   return <Layout active="zones" crumbs={['资源台账', '网络区域']} title="网络区域"
-    subtitle="区域的网段来自网段规划里划到“网络区域”层级的块；对应的防火墙和安全域只作登记参考，生成防火墙策略时以拓扑为准。"
+    subtitle="区域的网段来自网段规划里划到“网络区域”层级的块。"
     actions={<>
       <Button onClick={() => setLocations(true)}>地域与站点</Button>
       {canEdit && <Button type="primary" icon={<PlusOutlined aria-hidden="true" />} onClick={() => setZoneModal({ open: true })}>新增网络区域</Button>}
@@ -40,8 +40,6 @@ export default function ZonesPage() {
         { title: '网段（划到这个区域的块）', key: 'prefixes', render: (_, row) => row.prefixes.length
           ? <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>{row.prefixes.map(p => <Link key={p.id} to={`${ROOT}/prefixes/${p.id}`}>{p.network}{several && <span className="rl-muted" style={{ fontSize: 12 }}> {p.space}</span>}</Link>)}</div>
           : <span className="rl-muted">还没有网段划到这个区域</span> },
-        { title: '对应防火墙 / 安全域', key: 'firewall', width: 170, render: (_, row) => row.firewall || row.security_domain
-          ? `${row.firewall || '—'} / ${row.security_domain || '—'}` : <span className="rl-muted">未填写</span> },
         { title: '安全等级', dataIndex: 'security_level', width: 90, render: value => value || <span className="rl-muted">—</span> },
         { title: '末级网段', dataIndex: 'subnets', width: 86, render: value => `${value} 个` },
         { title: '使用率', dataIndex: 'usage', width: 76, render: value => value === null ? <span className="rl-muted">—</span> : <span style={{ color: value >= 80 ? 'var(--rl-warn)' : undefined }}>{value}%</span> },

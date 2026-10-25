@@ -58,8 +58,6 @@ class ZoneIn(Body):
     title: str | None = Field(None, max_length=64)
     kind: Literal[ZONE_KINDS] = "生产"
     security_level: str | None = Field(None, max_length=20)
-    firewall: str | None = Field(None, max_length=80)
-    security_domain: str | None = Field(None, max_length=80)
     note: str | None = Field(None, max_length=500)
 
 

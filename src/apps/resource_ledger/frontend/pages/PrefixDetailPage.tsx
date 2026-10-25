@@ -68,7 +68,6 @@ export default function PrefixDetailPage() {
       <div><dt>状态</dt><dd><State value={prefix.status} /></dd></div>
       <div><dt>负责人</dt><dd>{prefix.owner || <span className="rl-muted">—</span>}</dd></div>
       <div><dt>申请工单号</dt><dd>{prefix.ticket || <span className="rl-muted">—</span>}</dd></div>
-      {prefix.zone?.firewall && <div><dt>防火墙 / 安全域</dt><dd>{prefix.zone.firewall}{prefix.zone.security_domain ? ` / ${prefix.zone.security_domain}` : ''}</dd></div>}
     </dl>
     {(prefix.purpose || prefix.note) && <p className="rl-note" style={{ marginTop: -10, marginBottom: 18 }}>
       {[prefix.purpose && prefix.purpose !== prefix.title && `用途：${prefix.purpose}`, prefix.note && `备注：${prefix.note}`].filter(Boolean).join('　')}</p>}

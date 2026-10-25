@@ -60,7 +60,7 @@ MAX_ROWS = 5000
 TOP = "地址资源"
 SHEETS = {
     **circuit_import.SITE_SHEET,
-    "网络区域": ["地域", "机房", "网络区域", "说明名", "类型", "安全等级", "对应防火墙", "安全域", "备注"],
+    "网络区域": ["地域", "机房", "网络区域", "说明名", "类型", "安全等级", "备注"],
     "业务系统": ["业务系统", "子系统", "简称", "重要性", "主管部门", "业务负责人", "运维负责人", "联系方式", "备注"],
     "网段": ["网段", "层级", "归属", "用途", "VLAN", "网关", "状态", "负责人", "申请工单号", "备注", "路由域"],
     "保留范围": ["起始 IP", "结束 IP", "用途", "路由域"],
@@ -75,7 +75,7 @@ REQUIRED = {
     "保留范围": ["起始 IP", "结束 IP", "用途"], "IP 地址": ["IP"], "主机": ["主机名", "业务系统"],
 }
 EXAMPLES = {
-    "网络区域": [["西安", "西安机房", "region2", "生产业务区", "生产", "三级", "tra-FW1", "Untrust", ""]],
+    "网络区域": [["西安", "西安机房", "region2", "生产业务区", "生产", "三级", ""]],
     "业务系统": [["风险评估系统", "", "风评", "核心", "风险管理部", "王敏", "周宁", "029-88886666", ""],
               ["风险评估系统", "风险评估子系统1", "", "", "", "", "周宁", "", "Web 与应用"]],
     "网段": [["10.1.0.0/16", TOP, "西部生产地址", "西安、成都生产", "", "", "使用中", "网络组", "", "", ""],
@@ -98,7 +98,7 @@ def notes(levels):
     return [
         "每个工作表第一行是列名，请勿修改；用不到的工作表可以删除。导入顺序：站点 → 网络区域 → 业务系统 → 网段 → 保留范围 → "
         "IP 地址 → 主机 → 运营商 → 运营商网络 → 局端 → 专线类型 → 共享风险 → 专线。",
-        "网络区域：机房不存在时需要填写地域，导入会一并新建。对应防火墙和安全域只作登记参考，生成防火墙策略时以拓扑为准。",
+        "网络区域：机房不存在时需要填写地域，导入会一并新建。",
         "业务系统：子系统一栏为空的行是业务系统本身；填了子系统的行只取运维负责人（作为子系统负责人）和备注。"
         "重要性可填：" + "、".join(IMPORTANCE) + "。",
         f"网段：写成 10.1.1.0/24，必须是网段的起始地址；已存在的网段按本表更新。层级填“{TOP}”或规划层级（{names}）。",
@@ -155,7 +155,7 @@ def export(actor):
         for zone in sorted(lookup.objects["zone"].values(), key=lambda z: z.name):
             ref = lookup.zone_ref(zone.id)
             sheets["网络区域"].append([ref["region"], ref["site"], zone.name, zone.title, zone.kind,
-                                    zone.security_level, zone.firewall, zone.security_domain, zone.note])
+                                    zone.security_level, zone.note])
         for system in sorted(lookup.objects["system"].values(), key=lambda s: s.name):
             sheets["业务系统"].append([system.name, None, system.short_name, system.importance, system.department,
                                     system.business_owner, system.ops_owner, system.contact, system.note])
@@ -348,8 +348,7 @@ class Run(circuit_import.CircuitRows):
                 site = self.site(row["机房"], self.region(region).id)
             values = {
                 "title": row.get("说明名") or None, "kind": choice(row, "类型", ZONE_KINDS, "生产"),
-                "security_level": row.get("安全等级") or None, "firewall": row.get("对应防火墙") or None,
-                "security_domain": row.get("安全域") or None, "note": row.get("备注") or None,
+                "security_level": row.get("安全等级") or None, "note": row.get("备注") or None,
             }
         except ValueError as exc:
             return self.result("网络区域", number, label, "错误", str(exc))

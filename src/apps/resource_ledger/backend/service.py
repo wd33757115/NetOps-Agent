@@ -113,7 +113,6 @@ class Lookup:
         return {
             "id": zone.id, "name": zone.name, "title": zone.title, "inherited": inherited,
             "site": site.name if site else None, "region": region.name if region else None,
-            "firewall": zone.firewall, "security_domain": zone.security_domain,
         }
 
     def ref(self, kind, ident):
@@ -160,8 +159,7 @@ def space_view(space):
 
 def zone_view(zone):
     return {key: getattr(zone, key) for key in (
-        "id", "site_id", "name", "title", "kind", "security_level", "firewall",
-        "security_domain", "note")}
+        "id", "site_id", "name", "title", "kind", "security_level", "note")}
 
 
 def bound(session, field, ident):
@@ -302,7 +300,7 @@ def delete_space(actor, space_id):
 
 ZONE_NAMES = {
     "site_id": "机房", "name": "名称", "title": "说明名", "kind": "类型", "security_level": "安全等级",
-    "firewall": "防火墙", "security_domain": "安全域", "note": "备注",
+    "note": "备注",
 }
 
 

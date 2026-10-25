@@ -1,7 +1,7 @@
 manifest_version: 1
 id: resource-ledger
 name: 资源台账
-version: 0.3.3
+version: 0.4.0
 platform_api: '>=1.0,<2.0'
 icon: server
 dependencies: {}
@@ -14,7 +14,7 @@ agent:
 database:
   mode: package
   migrations: migrations
-  head: resource_ledger_0003
+  head: resource_ledger_0004
   tables:
     - app_resource_ledger_regions
     - app_resource_ledger_sites

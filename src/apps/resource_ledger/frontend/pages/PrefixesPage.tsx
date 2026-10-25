@@ -184,8 +184,7 @@ function SearchResults({ query, several, data, loading, error }: {
           ? `已分配${result.address.host ? `给主机 ${result.address.host.hostname}` : result.address.circuit ? `给专线 ${result.address.circuit.cid} 的 ${result.address.circuit.side} 端`
             : result.address.hostname ? `给 ${result.address.hostname}` : ''}（${result.address.kind}）`
           : result.reservation ? `在保留范围内（${result.reservation.purpose}）` : '未分配'}
-        {result.prefix && <span className="rl-sub">属于 {result.prefix.network}，{result.prefix.path.map(step => step.name).join(' › ') || result.prefix.title || '未归属'}
-          {result.prefix.zone?.firewall ? `；防火墙 ${result.prefix.zone.firewall}${result.prefix.zone.security_domain ? ` / ${result.prefix.zone.security_domain}` : ''}` : ''}</span>}
+        {result.prefix && <span className="rl-sub">属于 {result.prefix.network}，{result.prefix.path.map(step => step.name).join(' › ') || result.prefix.title || '未归属'}</span>}
       </> : result.kind === 'prefix' ? <>
         <strong>{result.network}</strong> {result.title}
         <span className="rl-sub">{[result.level, result.relation && (result.relation === '相同' ? '就是这个网段' : result.relation), several && result.space.name].filter(Boolean).join('，') || result.status}</span>
