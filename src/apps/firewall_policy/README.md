@@ -1,6 +1,6 @@
 # 防火墙策略业务能力包
 
-`firewall-policy` 1.6.1 包含策略计算、拓扑证据、配置校验、预览、申请表导出、IP 地址封禁、变更工单、前端、API、任务、独立迁移和 Agent 工具。`app.yaml` 是唯一平台注册入口。复制本目录并按平台安装流程构建、安装、校验和启用即可接入；不在运行时安装依赖。
+`firewall-policy` 1.6.2 包含策略计算、拓扑证据、配置校验、预览、申请表导出、IP 地址封禁、变更工单、前端、API、任务、独立迁移和 Agent 工具。`app.yaml` 是唯一平台注册入口。复制本目录并按平台安装流程构建、安装、校验和启用即可接入；不在运行时安装依赖。
 
 ## 使用
 
@@ -63,7 +63,7 @@ Agent 工具与 HTTP API 调用同一业务服务，身份由平台提供。文�
 | `generate_policy` | 取得 `policy_file_url`（及可选 `topology_file_url`）：`netdisk:<文件ID>` 以运行所属用户的身份从网盘读取（聊天附件就是这种），其他只接受 http(s) 下载，均不超过 10 MB；作为该用户的上传保存，提交策略任务并等待完成（最长 360 秒） | `policy_run_id`、`devices`、`risk_level`；产物 `config_zip`、`policy_preview`、`policy_request` |
 | `write_change_ticket` | 按 `policy_run_id` 生成变更工单，只接受工单头字段 | `ticket_run_id`；产物 `change_excel` |
 
-`firewall-access-from-ledger` 流程把三个动作串起来，并开放聊天启动：用户说“开通北京 10.248.255.11 到西安风险评估系统的防火墙策略”并给出工单号即可，不用上传申请表。台账里查不到的地址照常放行，在结果的 `notes` 里说明。
+`firewall-access-from-ledger` 流程把三个动作串起来，并开放聊天启动（聊天里附带的拓扑 JSON 作为 `topology_file_url` 交给 `generate_policy`，不附带时用默认拓扑）：用户说“开通北京 10.248.255.11 到西安风险评估系统的防火墙策略”并给出工单号即可，不用上传申请表。台账里查不到的地址照常放行，在结果的 `notes` 里说明。
 
 动作以 Workflow 运行所属的用户执行，受该用户的应用授权约束；没有用户的运行（未认证的 Webhook）直接失败。任务和上传与页面提交的一样出现在该用户的历史记录里。请求标识由 Workflow 运行编号生成，同一运行重投递不会重复提交，重试 Workflow 会提交新任务。产物由平台保存为步骤产物，下载链接由平台签名，本包仍不发布 MinIO 签名地址。
 
