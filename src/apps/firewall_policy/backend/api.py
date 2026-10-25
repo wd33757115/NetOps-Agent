@@ -1,4 +1,3 @@
-from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -9,6 +8,7 @@ from src.auth.models import CurrentUser
 from src.platform.authorization.client import require_app
 
 from . import block_template, request_draft, service, storage
+from .engine.policy.scripts import request_template
 from .schemas import BlockRequest, LedgerDraft, LedgerUpload, PolicyRequest, TicketRequest
 from .schemas import Request as RetryRequest
 
@@ -31,12 +31,7 @@ def attachment(data, filename, content_type):
 
 @router.get("/template")
 def template(user: CurrentUser = Depends(actor)):
-    path = Path(__file__).parents[1] / "resources/firewall-policy-request.xlsx"
-    return attachment(
-        path.read_bytes(),
-        "policies.xlsx",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
+    return attachment(request_template.workbook(), "policies.xlsx", request_template.XLSX)
 
 
 def drafted(user, body):
