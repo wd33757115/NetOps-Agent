@@ -8,8 +8,8 @@ from starlette.concurrency import run_in_threadpool
 from src.auth.models import CurrentUser
 from src.platform.authorization.client import require_app
 
-from . import request_draft, service, storage
-from .schemas import LedgerDraft, LedgerUpload, PolicyRequest, TicketRequest
+from . import block_template, request_draft, service, storage
+from .schemas import BlockRequest, LedgerDraft, LedgerUpload, PolicyRequest, TicketRequest
 from .schemas import Request as RetryRequest
 
 router = APIRouter(tags=["Firewall policy"])
@@ -68,7 +68,9 @@ def ledger_file(body: LedgerDraft, user: CurrentUser = Depends(actor)):
 def ledger_upload(body: LedgerUpload, user: CurrentUser = Depends(actor)):
     """The drafted sheet saved as this user's upload, ready for an ordinary policy run."""
     rows, notes, data = drafted(user, body)
-    saved = service.save_upload(user.user_id, f"{body.ticket_id}-策略申请表.xlsx", "policy", data, body.request_id)
+    saved = service.save_upload(
+        user.user_id, f"{body.ticket_id}-策略申请表.xlsx", "policy", data, body.request_id
+    )
     return {**saved, "rows": rows, "notes": notes}
 
 
@@ -76,7 +78,7 @@ def ledger_upload(body: LedgerUpload, user: CurrentUser = Depends(actor)):
 async def upload(
     request: Request,
     filename: str = Query(max_length=255),
-    kind: str = Query(pattern="^(policy|topology)$"),
+    kind: str = Query(pattern="^(policy|topology|block|whitelist)$"),
     request_id: str = Query(min_length=1, max_length=100),
     user: CurrentUser = Depends(actor),
 ):
@@ -99,9 +101,29 @@ def submit(body: PolicyRequest, user: CurrentUser = Depends(actor)):
 def history(
     offset: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
+    kind: str = Query("policy", pattern="^(policy|block)$"),
     user: CurrentUser = Depends(actor),
 ):
-    return service.history(user.user_id, offset, limit)
+    return service.history(user.user_id, offset, limit, kind)
+
+
+@router.get("/block/template")
+def block_list_template(user: CurrentUser = Depends(actor)):
+    return attachment(
+        block_template.build(),
+        "ip-block.xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+@router.get("/block/devices")
+def block_devices(user: CurrentUser = Depends(actor)):
+    return {"items": service.block_devices()}
+
+
+@router.post("/block/runs", status_code=202)
+def submit_block(body: BlockRequest, user: CurrentUser = Depends(actor)):
+    return service.submit_block(user.user_id, body)
 
 
 @router.get("/runs/{run_id}")

@@ -11,6 +11,7 @@ import FirewallBusinessPaths from '../components/FirewallBusinessPaths'
 import PolicySettings from '../components/PolicySettings'
 import PolicyFileArtwork from '../components/PolicyFileArtwork'
 import LedgerDraft from '../components/LedgerDraft'
+import FirewallModes from '../components/FirewallModes'
 import { useAuth } from '@netops/context/AuthContext'
 
 type Stage = 'idle' | 'uploading' | 'generating'
@@ -150,7 +151,7 @@ export default function FirewallPolicyPage() {
   return <ConfigProvider theme={{ token: { colorPrimary: '#1671e8', borderRadius: 9, colorText: '#242b38', colorBorder: '#dce1e9', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif', controlHeight: 40 } }}>
     <div className="fw-app" ref={scrollRef}>
       <header className="fw-toolbar">
-        <div className="fw-breadcrumb"><Link className="fw-back" to="/workbench"><ArrowLeftOutlined aria-hidden="true" /> 工作台</Link><span className="fw-breadcrumb-divider">/</span><span className="fw-toolbar-title">防火墙策略</span></div>
+        <div className="fw-breadcrumb"><Link className="fw-back" to="/workbench"><ArrowLeftOutlined aria-hidden="true" /> 工作台</Link><span className="fw-breadcrumb-divider">/</span><span className="fw-toolbar-title">防火墙策略</span><FirewallModes current="policy" /></div>
         <div className="fw-toolbar-right"><Select aria-label="历史策略任务" placeholder="历史策略任务" style={{ width: 250 }} value={runId || undefined} onChange={id => { setRun(undefined); setParams({ run: id }) }} options={history.map(item => ({ value: item.id, label: `${item.input.ticket_id} · ${item.status === 'completed' ? '已完成' : item.status === 'failed' ? '失败' : item.status === 'cancelled' ? '已取消' : '处理中'}` }))} /><Button onClick={() => { setParams({}); setRun(undefined); setResult(undefined); setEditing(true) }}>新建策略</Button><span className="fw-account" title={user?.username} aria-label={`当前用户 ${user?.username || ''}`}>{user?.username?.slice(0, 1).toUpperCase() || 'N'}</span></div>
       </header>
       <div className="fw-window">
@@ -239,7 +240,8 @@ export default function FirewallPolicyPage() {
               </> : <div className="fw-commands"><div><span>生成的设备配置</span><Button size="small" icon={<CopyOutlined aria-hidden="true" />} onClick={copyCommands}>复制命令</Button></div><pre tabIndex={0} aria-label="设备配置命令"><code>{plan.commands[device]}</code></pre></div>}
             </section>
           </div>
-          <FirewallChangeTicket key={result.run_id} policy={result} open={ticketOpen} onOpenChange={setTicketOpen} />
+          <FirewallChangeTicket key={result.run_id} open={ticketOpen} onOpenChange={setTicketOpen}
+            source={{ run_id: result.run_id, ticket_id: plan.ticket_id, devices, summary: `${devices.length} 台设备 · ${plan.rules.length} 条策略`, manifest: result.manifest || {} }} />
           <footer className="fw-result-footer"><span>需要调整？修改申请表后重新生成。</span><div>
             <Button type="text" icon={<FileExcelOutlined aria-hidden="true" />} onClick={() => download('policy_request')} disabled={!artifactHref(result, 'policy_request')}>下载申请表</Button>
             <Button type="text" icon={<DownloadOutlined aria-hidden="true" />} onClick={() => download('policy_preview')} disabled={!artifactHref(result, 'policy_preview')}>下载完整预览</Button>

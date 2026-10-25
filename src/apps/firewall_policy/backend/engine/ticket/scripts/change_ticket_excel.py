@@ -55,10 +55,9 @@ def _write_row(
         cell = ws.cell(row=row_idx, column=col, value=value)
         if style_cells and col <= len(style_cells):
             _copy_cell_style(style_cells[col - 1], cell)
-    if style_cells and len(style_cells) >= 6:
-        cmd_cell = ws.cell(row=row_idx, column=6)
-        if cmd_cell.value and isinstance(cmd_cell.value, str) and "\n" in cmd_cell.value:
-            cmd_cell.alignment = Alignment(wrap_text=True, vertical="top")
+    for col, value in enumerate(values, start=1):
+        if isinstance(value, str) and "\n" in value:
+            ws.cell(row=row_idx, column=col).alignment = Alignment(wrap_text=True, vertical="top")
 
 
 def _parse_due_date(value: Any) -> Any:
@@ -215,7 +214,8 @@ def _build_from_template(manifest: dict[str, Any]) -> bytes:
         row += 1
 
     row = _append_section_header(ws, row, verify_header)
-    for step in _build_verification_steps(manifest):
+    # A manifest may carry its own steps (IP block batches check books, not ACLs).
+    for step in manifest.get("verification") or _build_verification_steps(manifest):
         _write_row(
             ws,
             row,

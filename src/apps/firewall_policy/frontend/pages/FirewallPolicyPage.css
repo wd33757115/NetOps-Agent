@@ -219,6 +219,40 @@
 .fw-ticket-submit > span { font-size: 12px; color: #5d6c82; display: flex; gap: 7px; }
 .fw-ticket-submit > div { display: flex; gap: 10px; }
 .fw-ticket-submit .ant-btn { font-size: 13px; }
+.fw-modes { display: flex; gap: 2px; padding: 3px; margin-left: -6px; border-radius: 9px; background: #dde3ec; }
+.fw-app .fw-modes a { padding: 5px 13px; border-radius: 7px; font-size: 13px; color: #5c687a; transition: background .16s, color .16s; }
+.fw-app .fw-modes a:hover { color: #1671e8; }
+.fw-app .fw-modes a.active { background: #fff; color: #1d4f91; box-shadow: 0 1px 3px #30466218; }
+.fw-product-icon.is-block { background: linear-gradient(155deg, #f2766b, #dc4a3f 55%, #c4372d); box-shadow: inset 0 1px 1px #ffffff8c, 0 5px 11px #c4372d30, 0 0 0 1px #b2302633; font-size: 24px; }
+.fw-whitelist { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 14px; padding: 13px 15px; border: 1px solid #e3e9f1; border-radius: 11px; background: #fbfcfe; }
+.fw-whitelist strong { font-size: 13px; font-weight: 500; }
+.fw-whitelist p { margin: 5px 0 0; font-size: 12px; color: var(--fw-muted); overflow-wrap: anywhere; }
+.fw-field .ant-select-selector { min-height: 42px; border-color: #dbe2ec !important; }
+.fw-device-option { display: inline-flex; align-items: baseline; gap: 8px; }
+.fw-device-option small { color: var(--fw-muted); font-size: 11px; margin: 0; }
+.fw-device-add { display: grid; grid-template-columns: minmax(0, 1fr) 132px auto; gap: 8px; }
+.fw-device-add .ant-input { height: 38px; }
+.fw-device-add .ant-select, .fw-device-add .ant-btn { height: 38px; }
+.fw-device-add .ant-select-selector { min-height: 38px; }
+.fw-block-checks { padding: 18px 0 4px; border-bottom: 1px solid #e9eef5; font-size: 12px; }
+.fw-block-tally { display: flex; flex-wrap: wrap; gap: 22px; margin: 0 0 14px; color: var(--fw-muted); }
+.fw-block-tally b { font-size: 15px; font-weight: 500; color: #33435a; margin-right: 3px; font-variant-numeric: tabular-nums; }
+.fw-block-tally .is-error b { color: #b0382a; }
+.fw-block-check { margin-bottom: 12px; border: 1px solid #e4eaf2; border-radius: 10px; background: #f8fafd; }
+.fw-block-check summary { cursor: pointer; padding: 11px 14px; color: #4a5a70; }
+.fw-block-check.is-error { border-color: #f4d6d1; background: #fff7f5; }
+.fw-block-check.is-error summary { color: #a33427; }
+.fw-block-check.is-warning summary { color: #8a5a0a; }
+.fw-block-check ul { list-style: none; margin: 0; padding: 4px 14px 10px; max-height: 260px; overflow: auto; border-top: 1px solid #e9eef5; }
+.fw-block-check li { display: grid; grid-template-columns: 112px minmax(120px, 220px) minmax(0, 1fr); gap: 12px; padding: 7px 0; color: #5d6c82; line-height: 1.6; }
+.fw-block-check li + li { border-top: 1px dashed #e3e9f1; }
+.fw-block-check code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; color: #3a4a60; overflow-wrap: anywhere; }
+.fw-block-check em { font-style: normal; overflow-wrap: anywhere; }
+.fw-block-checks > .fw-muted { margin: 0 0 12px; }
+.fw-device-heading h2 small { margin-left: 10px; font-size: 12px; font-weight: 400; color: var(--fw-muted); }
+.fw-book-usage { display: grid; gap: 7px; font-variant-numeric: tabular-nums; color: #41516a; }
+.fw-book-usage i { display: block; height: 4px; border-radius: 2px; background: #e6ebf2; overflow: hidden; }
+.fw-book-usage b { display: block; height: 100%; background: #4f8fe0; border-radius: 2px; }
 @keyframes fw-arrive { from { opacity: 0; transform: translateY(9px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes fw-file-arrive { from { transform: translateY(-5px) scale(.93); } to { transform: translateY(0) scale(1); } }
 @media (min-width: 1500px) {
@@ -345,5 +379,9 @@
   .fw-ticket-submit > span { font-size: 11px; }
   .fw-ticket-submit > div { gap: 7px; }
   .fw-ticket-submit .ant-btn { padding: 4px 12px; font-size: 12px; }
+  .fw-device-add { grid-template-columns: minmax(0, 1fr) 118px; }
+  .fw-device-add .ant-btn { grid-column: 1 / -1; }
+  .fw-block-check li { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .fw-whitelist { align-items: start; }
 }
 @media (prefers-reduced-motion: reduce) { .fw-app *, .fw-app *::before, .fw-app *::after, .fw-ticket-modal * { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }

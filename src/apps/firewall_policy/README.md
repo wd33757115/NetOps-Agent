@@ -1,6 +1,6 @@
 # 防火墙策略业务能力包
 
-`firewall-policy` 1.5.2 包含策略计算、拓扑证据、配置校验、预览、申请表导出、变更工单、前端、API、任务、独立迁移和 Agent 工具。`app.yaml` 是唯一平台注册入口。复制本目录并按平台安装流程构建、安装、校验和启用即可接入；不在运行时安装依赖。
+`firewall-policy` 1.6.0 包含策略计算、拓扑证据、配置校验、预览、申请表导出、IP 地址封禁、变更工单、前端、API、任务、独立迁移和 Agent 工具。`app.yaml` 是唯一平台注册入口。复制本目录并按平台安装流程构建、安装、校验和启用即可接入；不在运行时安装依赖。
 
 ## 使用
 
@@ -14,6 +14,19 @@
   - 有效期或长连接不同的申请不会合并到同一条策略；CLI 回读同时核对时间段和长连接。H3C F1000、天融信、山石暂不支持，申请行填写了这些列且路径经过这些设备时拒绝生成。
 - 默认拓扑使用包内 `backend/engine/policy/scripts/topology.json`，提交时保存快照。生产使用前应核对该拓扑或上传自己的拓扑。
 
+## IP 地址封禁
+
+页面 `/apps/firewall-policy/block`（顶部切换“策略生成 / IP 封禁”）。导入一份地址名单，在所选防火墙上用“地址本 + 安全策略”拒绝这些来源的访问。
+
+- 名单：XLSX 的“封禁地址”表（IP地址、到期时间、备注）和“白名单”表（IP地址、备注），找不到表名时按第一、第二张表读取；或一个 CSV 名单，白名单另选一个 CSV/XLSX 文件。表头可省略，CSV 支持 UTF-8 和 GBK。模板从 `GET /block/template` 下载。
+- 地址：一格可写多个地址，支持 IP、CIDR、掩码写法和地址范围（含 `x.x.x.a-b`）。无效地址、IPv6、已过期、超过一个 /16（未勾选“允许大范围封禁”）的行不封禁并逐行说明；`0.0.0.0/0` 始终拒绝。内网、组播等地址照常封禁并给出提示。白名单有无效行时整批拒绝生成，避免漏掉必须放行的地址。
+- 合并：按到期时间分组，组内地址做区间合并，再扣除白名单；同一地址出现在多行时按最晚到期（永久优先）归组，各组互不重叠。每段连续地址是一条成员（主机、整网段或范围），每个地址本最多 2000 条（可调小），超出拆分；每条规则最多引用 32 个地址本。
+- 设备：从拓扑的防火墙中选择，或手动添加设备名和类型。支持华为 USG（`ip address-set … type object`、`source-address address-set`、`action deny`、`rule move … top`）和 H3C F5000/F1000（`object-group ip address`、`source-ip`、`action drop`、`move rule name … top`）。规则不写安全域、目的地址和服务，对所有安全域的入方向流量生效。
+- 到期：留空为永久；有到期时间的组建一个时间段（从生成当天 0 点到到期时间），规则引用它，到期后自动失效。
+- 批次：每次导入新建一批对象，名称为 `BLK_<工单号>_<摘要>` 加 `_001`（地址本）、`_R01`（规则）、`_T01`（时间段），不改动其他批次。生成后按厂商回读封禁命令和清理命令：只允许拒绝动作、地址本条数不超限、覆盖范围等于计算结果且不含白名单地址、清理命令正好删除本批次的规则、地址本和时间段。
+- 产物：每台设备的封禁命令和清理命令、封禁核对表（汇总、地址本成员及来源行、名单逐行结果、白名单剔除、问题）打包下载；变更工单以清理命令作回退方案。页面只预览地址本成员的开头，完整命令以下载包为准。
+- 暂不支持从历史批次中解封部分地址（需要时整批清理后重新导入）。
+
 ## API 与权限
 
 所有入口均在 `/api/apps/firewall-policy`，由平台统一校验 App 授权，不设置应用内角色或功能权限。个人上传和任务保持账号数据隔离；不提供跨账号代操作。
@@ -25,11 +38,14 @@
 | `POST /ledger/preview` | 按台账拼出的申请行和说明，不保存 |
 | `POST /ledger/file` | 按台账生成的申请表文件 |
 | `POST /ledger/uploads` | 按台账生成申请表并保存为该账号的上传，返回上传 ID；request_id 幂等 |
-| `POST /uploads?filename=...&kind=policy或topology&request_id=...` | 原始二进制上传，最大 10 MiB |
+| `POST /uploads?filename=...&kind=policy、topology、block或whitelist&request_id=...` | 原始二进制上传，最大 10 MiB |
 | `POST /runs` | 上传 ID、工单号、合并和业务路径选项；request_id 幂等 |
-| `GET /runs?offset=0&limit=20` | 当前账号策略任务历史 |
+| `GET /block/template` | 下载封禁名单模板 |
+| `GET /block/devices` | 拓扑中的防火墙及是否支持封禁 |
+| `POST /block/runs` | 名单与白名单上传 ID、工单号、设备（名称和类型）、地址本上限、是否允许大范围；request_id 幂等 |
+| `GET /runs?offset=0&limit=20&kind=policy或block` | 当前账号策略任务或封禁批次历史 |
 | `GET /runs/{id}` | 任务状态、结果、最近 50 个工单子任务 |
-| `POST /runs/{id}/tickets` | request_id 和 fields；拒绝传入 manifest、命令或任意 URL |
+| `POST /runs/{id}/tickets` | 策略任务或封禁批次的变更工单；request_id 和 fields，拒绝传入 manifest、命令或任意 URL |
 | `POST /runs/{id}/cancel` | 取消 queued/running 任务 |
 | `POST /runs/{id}/retry` | 使用新的 request_id 重试失败或取消的任务，返回新任务 |
 | `GET /runs/{id}/artifacts/{key}` | 重新授权并校验 SHA-256 后下载，不发布 MinIO 签名 URL |

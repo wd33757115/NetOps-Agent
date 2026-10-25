@@ -17,6 +17,7 @@ from .models import Run, Upload, now
 APP_ID = "firewall-policy"
 log = logging.getLogger(__name__)
 DEFAULT_TOPOLOGY = Path(__file__).parent / "engine/policy/scripts/topology.json"
+BLOCK_VENDORS = {"华为", "H3C", "H3CF1000"}
 
 
 @contextmanager
@@ -164,11 +165,42 @@ def submit_policy(owner, payload):
     return _submit(owner, payload.request_id, "policy", request, prepare)
 
 
+def submit_block(owner, payload):
+    request = payload.model_dump(exclude={"request_id"})
+
+    def prepare(session):
+        inputs = {}
+        for key, label in [("block", "封禁名单"), ("whitelist", "白名单")]:
+            identity = getattr(payload, f"{key}_upload_id")
+            if identity:
+                upload = owned(session, Upload, identity, owner)
+                if upload.kind != key:
+                    raise HTTPException(422, f"请选择{label}文件")
+                inputs[key] = {k: getattr(upload, k) for k in ["object_key", "sha256", "filename"]}
+        return inputs
+
+    return _submit(owner, payload.request_id, "block", request, prepare)
+
+
+def block_devices():
+    """Firewalls of the configured topology; blocking renders Huawei and H3C commands."""
+    topology = json.loads(DEFAULT_TOPOLOGY.read_text(encoding="utf-8-sig"))
+    return [
+        dict(
+            name=item["name"],
+            vendor=item.get("type") or "",
+            supported=item.get("type") in BLOCK_VENDORS,
+        )
+        for item in topology.get("firewalls", [])
+        if item.get("name")
+    ]
+
+
 def submit_ticket(owner, parent_id, payload):
     def prepare(session):
         parent = owned(session, Run, parent_id, owner)
-        if parent.kind != "policy" or parent.status != "completed":
-            raise HTTPException(409, "请先完成策略生成")
+        if parent.kind not in {"policy", "block"} or parent.status != "completed":
+            raise HTTPException(409, "请先完成策略或封禁命令生成")
         return {}  # Only the persisted parent plan supplies device commands.
 
     return _submit(
@@ -196,9 +228,9 @@ def read(owner, identity):
         return result
 
 
-def history(owner, offset=0, limit=20):
+def history(owner, offset=0, limit=20, kind="policy"):
     with sessions() as session:
-        query = select(Run).where(Run.owner_id == str(owner), Run.kind == "policy")
+        query = select(Run).where(Run.owner_id == str(owner), Run.kind == kind)
         return {
             "items": [
                 describe(row)
@@ -296,9 +328,8 @@ def execute_run(identity, authorize):
             return
         session.refresh(row)
         inputs, kind = row.input_json, row.kind
-        parent_result = (
-            owned(session, Run, row.parent_id, owner).result_json if row.parent_id else None
-        )
+        parent = owned(session, Run, row.parent_id, owner) if row.parent_id else None
+        parent_run = parent and dict(result=parent.result_json, artifacts=parent.artifacts_json)
 
     def active():
         return (Run.id == identity) & (Run.lease_token == token) & (Run.status == "running")
@@ -316,7 +347,7 @@ def execute_run(identity, authorize):
 
     try:
         checkpoint()
-        result, files = generate(kind, inputs, parent_result, checkpoint)
+        result, files = generate(kind, inputs, parent_run, checkpoint)
         artifacts = {}
         for key, (filename, content_type, data) in files.items():
             checkpoint()

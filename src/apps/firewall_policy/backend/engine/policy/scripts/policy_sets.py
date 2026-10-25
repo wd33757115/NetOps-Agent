@@ -16,6 +16,23 @@ def union(intervals):
     return tuple(result)
 
 
+def subtract(intervals, removed):
+    """``intervals`` minus ``removed``; both sorted and disjoint, as ``union`` returns them."""
+    result, index = [], 0
+    for low, high in intervals:
+        while index < len(removed) and removed[index][1] <= low:
+            index += 1
+        cursor, scan = low, index
+        while scan < len(removed) and removed[scan][0] < high:
+            if removed[scan][0] > cursor:
+                result.append((cursor, removed[scan][0]))
+            cursor = max(cursor, removed[scan][1])
+            scan += 1
+        if cursor < high:
+            result.append((cursor, high))
+    return tuple(result)
+
+
 def tokens(value):
     return [v for v in re.split(r"[,，;；、\s]+", str(value).strip()) if v]
 

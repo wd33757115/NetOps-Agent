@@ -10,6 +10,12 @@ from fastapi import HTTPException
 
 PREFIX = "apps/firewall-policy/"
 MAX_UPLOAD = 10 * 1024 * 1024
+SUFFIXES = {
+    "policy": {".xlsx"},
+    "topology": {".json"},
+    "block": {".xlsx", ".csv"},
+    "whitelist": {".xlsx", ".csv"},
+}
 
 
 def storage():
@@ -47,14 +53,21 @@ def validate(filename, kind, data):
         or any(ord(c) < 32 for c in filename)
     ):
         raise HTTPException(422, "文件名无效")
-    if kind not in {"policy", "topology"} or PurePath(filename).suffix.lower() != (
-        ".xlsx" if kind == "policy" else ".json"
-    ):
-        raise HTTPException(422, "策略文件须为 XLSX，拓扑文件须为 JSON")
+    suffix = PurePath(filename).suffix.lower()
+    if suffix not in SUFFIXES.get(kind, ()):
+        raise HTTPException(
+            422,
+            "封禁名单和白名单须为 XLSX 或 CSV"
+            if kind in {"block", "whitelist"}
+            else "策略文件须为 XLSX，拓扑文件须为 JSON",
+        )
     try:
-        if kind == "topology":
+        if suffix == ".json":
             if not isinstance(json.loads(data), dict):
                 raise ValueError("拓扑应为 JSON 对象")
+        elif suffix == ".csv":
+            if not any(_decodes(data, encoding) for encoding in ("utf-8-sig", "gb18030")):
+                raise ValueError("CSV 须为 UTF-8 或 GBK 编码")
         else:
             with zipfile.ZipFile(io.BytesIO(data)) as archive:
                 entries = archive.infolist()
@@ -66,3 +79,11 @@ def validate(filename, kind, data):
                     raise ValueError("不支持加密工作簿")
     except (ValueError, UnicodeError, zipfile.BadZipFile) as exc:
         raise HTTPException(422, "文件格式无效或内容超出限制") from exc
+
+
+def _decodes(data, encoding):
+    try:
+        data.decode(encoding)
+    except UnicodeDecodeError:
+        return False
+    return True

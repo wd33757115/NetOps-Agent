@@ -15,7 +15,7 @@
 | SSH 终端 | `device-access` | 网页 SSH 终端、会话与主机密钥 |
 | 网络拓扑 | `topology` | 基于 LLDP 的拓扑发现、RFC 8345 标准模型、路径查询 |
 | NETCONF 接口 | `netconf-api` | 把设备的 NETCONF 表映射成检查项的值 |
-| 防火墙策略生成 | `firewall-policy` | 申请表导入、策略计算、配置生成与校验、变更工单 |
+| 防火墙策略生成 | `firewall-policy` | 申请表导入、策略计算、配置生成与校验、IP 地址封禁、变更工单 |
 | 资源台账 | `resource-ledger` | IP 地址规划、业务系统与主机、运营商专线 |
 | 公文写作 | `official-documents` | 公文起草、修订和 Word 导出 |
 | 资料管理 | `materials` | 资料导入、修订比较、停用与恢复 |
