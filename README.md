@@ -42,10 +42,9 @@ Windows 上的最短路径（在仓库根目录的 PowerShell 中执行）：
 .\scripts\windows\install.ps1
 .\scripts\windows\bootstrap.ps1 -Action apply
 .\scripts\windows\start.ps1 -SkipLangfuse -EnableApps device-management,inspection,rule-governance,device-access,netconf-api,topology,firewall-policy,resource-ledger,official-documents,materials,assistant
-.\venv\Scripts\python.exe web\django_backend\manage.py createsuperuser
 ```
 
-然后打开 `http://localhost:3000`，用刚创建的管理员登录；其他电脑访问时的防火墙和主机名设置见部署文档。AI 功能（规则自动制作、公文、问答）需要在 `.env` 中填写 `DEEPSEEK_API_KEY`。
+然后打开 `http://localhost:3000`，用默认管理员 `admin`（密码 `admin123`）登录，登录后到“系统管理 → 用户”重置这个密码；其他电脑访问时的防火墙和主机名设置见部署文档。AI 功能（规则自动制作、公文、问答）需要在 `.env` 中填写 `DEEPSEEK_API_KEY`。
 
 ## 许可
 

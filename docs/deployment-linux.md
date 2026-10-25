@@ -44,7 +44,7 @@ docker compose --env-file .env -f deployment/docker-compose.yml -f deployment/do
 
 `migrate` 是唯一的数据库初始化作业，执行 `python -m src.platform.database.bootstrap apply`：依次完成平台迁移、Django 迁移、各应用的迁移和初始数据，其他服务等它成功后才启动。迁移失败时先看 `docker compose logs migrate`，修复后重新 `up`，已完成的阶段会跳过。
 
-创建第一个管理员：
+第一次初始化时，如果还没有任何超级管理员，`migrate` 会创建默认管理员 `admin`（密码 `admin123`）；已有管理员时不会创建，也不会改动任何密码。登录后先在“系统管理 → 用户”里重置它的密码。需要另建管理员时：
 
 ```sh
 docker compose --env-file .env -f deployment/docker-compose.yml exec django python manage.py createsuperuser

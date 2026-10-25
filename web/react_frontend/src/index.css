@@ -5716,12 +5716,6 @@ body {
   border-radius: 12px !important;
 }
 
-.grok-login-hint {
-  margin-top: 16px !important;
-  margin-bottom: 0 !important;
-  font-size: 12px !important;
-  line-height: 1.5 !important;
-}
 
 .grok-login-page .ant-typography-secondary {
   color: #475569;

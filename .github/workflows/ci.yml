@@ -20,6 +20,19 @@ jobs:
   backend:
     needs: repository-scope
     runs-on: ubuntu-latest
+    # The gateway refuses to start without a current database, so the import check
+    # runs against a freshly bootstrapped PostgreSQL (the settings' defaults).
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: netops_agent
+          POSTGRES_USER: netops
+          POSTGRES_PASSWORD: netops123456
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U netops -d netops_agent"
+          --health-interval 5s --health-timeout 5s --health-retries 12
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -30,10 +43,12 @@ jobs:
       - run: python -m compileall -q src web/django_backend scripts
       - name: Django system check
         run: cd web/django_backend && python manage.py check
+      - name: Database bootstrap from scratch
+        run: python -m src.platform.database.bootstrap apply
       - name: Gateway and worker import
         run: |
           python -c "from src.gateway.main import app; print('gateway', len(app.routes), 'routes')"
-          python -c "from src.core.celery_tasks import celery_app; print('celery', celery_app.main)"
+          python -c "from src.core.celery_tasks.celery_app import celery; print('celery', celery.main)"
 
   frontend:
     needs: repository-scope
