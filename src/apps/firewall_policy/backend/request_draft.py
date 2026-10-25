@@ -2,19 +2,15 @@
 
 The ledger is asked through the platform tool registry, as the requesting user and under
 that user's grant of the resource-ledger App, so this App never reads another App's tables.
-The sheet has the columns of the uploaded request template, so the rest of the pipeline
-treats it exactly like a request a person filled in.
+The sheet is the downloadable request template with the rows filled in, so the rest of the
+pipeline treats it exactly like a request a person filled in.
 """
 
-import io
+from .engine.policy.scripts import request_template
 
-from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill
+XLSX = request_template.XLSX
 
-HEADERS = ["seq", "源业务系统", "src_ip", "目的业务系统", "dst_ip", "port", "proto",
-           "start_time", "end_time", "action", "long_link"]
 PLAN_TOOL = "resource_ledger__plan_access"
-XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
 def plan(user, body):
@@ -54,21 +50,21 @@ def build(user, body):
 
 
 def workbook(rows, *, start_time=None, end_time=None, long_link=None, note=""):
-    book = Workbook()
-    sheet = book.active
-    sheet.title = "策略申请"
-    sheet.append(HEADERS)
-    for cell in sheet[1]:
-        cell.font, cell.fill = Font(bold=True), PatternFill("solid", fgColor="EAF2FE")
-    for seq, row in enumerate(rows, 1):
-        sheet.append([seq, row["source_system"], row["src_ip"], row["destination_system"], row["dst_ip"],
-                      row["port"], row["proto"], start_time or None, end_time or None, "permit",
-                      (long_link if row["proto"] == "tcp" else None) or None])
-    sheet.append([])
-    # The reader stops at this line, so the explanation never becomes a policy row.
-    sheet.append([f"策略规则说明：{note}" if note else "策略规则说明"])
-    for letter, width in zip("ABCDEFGHIJK", (6, 18, 34, 18, 34, 14, 8, 18, 18, 9, 10)):
-        sheet.column_dimensions[letter].width = width
-    buffer = io.BytesIO()
-    book.save(buffer)
-    return buffer.getvalue()
+    return request_template.workbook(
+        [
+            {
+                "源业务系统": row["source_system"],
+                "src_ip": row["src_ip"],
+                "目的业务系统": row["destination_system"],
+                "dst_ip": row["dst_ip"],
+                "port": row["port"],
+                "proto": row["proto"],
+                "start_time": start_time,
+                "end_time": end_time,
+                "action": "permit",
+                "long_link": long_link if row["proto"] == "tcp" else None,
+            }
+            for row in rows
+        ],
+        note=note or None,
+    )

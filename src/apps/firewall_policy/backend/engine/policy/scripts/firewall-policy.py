@@ -7,6 +7,7 @@ import sys
 from hashlib import sha256
 from pathlib import Path
 
+import request_template
 from plan_preview import render
 from policy_input import read_policy_workbook
 from policy_plan import build_plan, digest, vendor_rules
@@ -117,8 +118,10 @@ def main():
         json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     (output / "策略计划预览.html").write_text(render(plan), encoding="utf-8")
-    # Editable validated request, for human intervention through the existing upload flow.
-    # Window and long link as the requester wrote them, so a re-upload reads them the same.
+    # Editable validated request in the template layout, for human intervention through the
+    # existing upload flow. Window and long link as the requester wrote them, so a re-upload
+    # reads them the same.
+    names = {"source_system": "源业务系统", "destination_system": "目的业务系统"}
     columns = [
         key
         for key in [
@@ -130,13 +133,20 @@ def main():
             "proto",
             "start_time",
             "end_time",
+            "action",
             "long_link",
         ]
         if key in df
     ]
-    df[columns].rename(
-        columns={"source_system": "源业务系统", "destination_system": "目的业务系统"}
-    ).to_excel(output / "策略申请表.xlsx", index=False)
+    rows = [
+        {names.get(key, key): record[key] for key in columns}
+        for record in df[columns].to_dict("records")
+    ]
+    (output / "策略申请表.xlsx").write_bytes(
+        request_template.workbook(
+            rows, note=f"工单 {args.ticket_id} 校验后的申请，可修改后重新上传生成"
+        )
+    )
 
 
 if __name__ == "__main__":

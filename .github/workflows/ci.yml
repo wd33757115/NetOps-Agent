@@ -75,9 +75,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: cp .env.example .env
-      - run: docker compose -f deployment/docker-compose.yml --profile core config --quiet
-      - run: docker compose -f deployment/docker-compose.yml -f deployment/docker-compose.ai.yml --profile core --profile ai config --quiet
-      - run: docker compose -f deployment/docker-compose.yml -f deployment/docker-compose.ai.yml -f deployment/docker-compose.prod.yml --profile core --profile ai config --quiet
+      - run: docker compose --env-file .env -f deployment/docker-compose.yml --profile core config --quiet
+      - run: docker compose --env-file .env -f deployment/docker-compose.yml -f deployment/docker-compose.ai.yml --profile core --profile ai config --quiet
+      - run: docker compose --env-file .env -f deployment/docker-compose.yml -f deployment/docker-compose.ai.yml -f deployment/docker-compose.prod.yml --profile core --profile ai config --quiet
       - run: docker build -t netops-gateway-core -f deployment/Dockerfile.fastapi --build-arg REQUIREMENTS_FILE=deployment/requirements/gateway.txt .
       - run: docker build -t netops-worker-core -f deployment/Dockerfile.core-worker --build-arg REQUIREMENTS_FILE=deployment/requirements/core.txt .
       - run: docker build -t netops-worker-ai -f deployment/Dockerfile.core-worker --build-arg REQUIREMENTS_FILE=deployment/requirements/ai-worker.txt .
