@@ -10,6 +10,7 @@ description: >-
   用户指定端口或目的是 IP 时填 ports（如 tcp/443,udp/53）；有效期填 start_time、end_time（2026-11-01 20:00），
   用户只说了日期时只填日期（结束日期表示当天结束），不要自己补时刻；
   长连接填 long_link（小时，0 表示永不老化）。不确定系统名时可先用资源台账的 find_systems 或 plan_access 核对。
+  用户附带了拓扑 JSON 时按它计算下发的防火墙和安全域，否则用系统默认拓扑。
 
 match:
   require_any:
@@ -24,6 +25,10 @@ required_context:
   - ticket_id
   - source
   - destination
+
+# 聊天附件按扩展名自动填写（存在网盘里，流程以发起人身份读取）。
+files:
+  topology_file_url: [.json]
 
 context_defaults:
   ticket_title: 按台账开通防火墙策略

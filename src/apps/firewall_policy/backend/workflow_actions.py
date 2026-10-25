@@ -82,7 +82,10 @@ def outcome(owner, run, seconds, label):
             files[key] = (filename, content_type, data)
         return files
     if run["status"] in DONE:
-        raise RuntimeError(f"{label}{'已取消' if run['status'] == 'cancelled' else '失败'}：{run['error'] or '未知原因'}")
+        state = "已取消" if run["status"] == "cancelled" else "失败"
+        # The engine's own message already starts with "<label>失败："; say it once.
+        reason = (run["error"] or "未知原因").removeprefix(f"{label}{state}：")
+        raise RuntimeError(f"{label}{state}：{reason}")
     raise RuntimeError(f"{label}未在 {seconds} 秒内完成，可在防火墙策略应用中查看任务 {run['id']}")
 
 

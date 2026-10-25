@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: firewall-access-from-ledger
-description: 按资源台账开通防火墙策略：从台账取源和目的（IP 或业务系统）的地址与服务端口生成策略申请表，再生成防火墙策略和变更工单
-version: "1.0"
+description: 按资源台账开通防火墙策略：从台账取源和目的（IP 或业务系统）的地址与服务端口生成策略申请表，再按拓扑（附带的拓扑 JSON，或系统默认拓扑）生成防火墙策略和变更工单
+version: "1.1"
 
 test:
   context:
@@ -16,6 +16,7 @@ test:
     start_time:
     end_time:
     long_link:
+    topology_file_url:
     ticket_title: 按台账开通防火墙策略
     change_background:
     change_purpose:
@@ -49,6 +50,7 @@ steps:
     inputs:
       ticket_id: ${context.ticket_id}
       policy_file_url: ${steps.request_draft.result.policy_file_url}
+      topology_file_url: ${context.topology_file_url}
 
   - name: change_ticket
     label: 编写变更工单

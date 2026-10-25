@@ -312,7 +312,7 @@ POST /api/itsm/webhook/firewall-policy/   （HTTP Basic）
 
 ### 7.2 按资源台账开通防火墙策略
 
-`src/workflows/itsm/firewall-access-from-ledger/` 三步：`app:firewall-policy/draft_request` 按资源台账生成策略申请表（经平台工具 `resource_ledger__plan_access` 以发起人身份读取台账，申请表存进发起人网盘“防火墙申请表”文件夹，结果 `policy_file_url` 是 `netdisk:<文件ID>`），接着 `generate_policy` 和 `write_change_ticket`。`context` 字段：`ticket_id`、`source`、`destination`（必填，IP、网段、范围或业务系统名称），`source_subsystem`、`destination_subsystem`、`ports`、`start_time`、`end_time`、`long_link` 和工单头字段（可选）。
+`src/workflows/itsm/firewall-access-from-ledger/` 三步：`app:firewall-policy/draft_request` 按资源台账生成策略申请表（经平台工具 `resource_ledger__plan_access` 以发起人身份读取台账，申请表存进发起人网盘“防火墙申请表”文件夹，结果 `policy_file_url` 是 `netdisk:<文件ID>`），接着 `generate_policy` 和 `write_change_ticket`。`context` 字段：`ticket_id`、`source`、`destination`（必填，IP、网段、范围或业务系统名称），`source_subsystem`、`destination_subsystem`、`ports`、`start_time`、`end_time`、`long_link`、`topology_file_url` 和工单头字段（可选）。聊天里附带的拓扑 JSON 会自动填进 `topology_file_url`，不附带时用系统默认拓扑。
 
 **聊天启动**（2026-10-23，台账里有风险评估系统的 3 个子系统、8 台主机）：
 

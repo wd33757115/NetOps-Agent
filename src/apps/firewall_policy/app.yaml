@@ -1,7 +1,7 @@
 manifest_version: 1
 id: firewall-policy
 name: 防火墙策略生成
-version: 1.6.1
+version: 1.6.2
 platform_api: '>=1.0,<2.0'
 icon: shield
 dependencies: {}
