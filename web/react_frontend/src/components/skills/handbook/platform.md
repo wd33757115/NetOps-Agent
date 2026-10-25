@@ -14,7 +14,7 @@
 浏览器
   │  /api/...
   ▼
-React 工作台 :3000 ── 前端静态资源；/api 代理到 Django
+React 工作台 :3000 ── 前端静态资源；/api 代理到 Django，/object-storage 代理到 MinIO（浏览器上传文件）
   │
   ▼
 Django BFF :8001 ── 登录、用户与用户组、应用授权、应用安装状态
@@ -31,7 +31,7 @@ FastAPI Gateway :8000 ── 平台内核 + 已装配的能力包
 
 | 进程 | 端口 | 负责什么 | 入口 |
 | --- | --- | --- | --- |
-| React 工作台 | 3000 | 页面；生产模式下是 `vite build` 的产物，`/api` 代理到 Django | `web/react_frontend/src/App.tsx` |
+| React 工作台 | 3000 | 页面；生产模式下是 `vite build` 的产物，`/api` 代理到 Django，`/object-storage` 代理到 MinIO；浏览器只访问这一个端口 | `web/react_frontend/src/App.tsx`、`vite.config.ts` |
 | Django BFF | 8001 | 认证、用户与用户组、应用授权、应用安装与生命周期、转发 `/api/apps/*` | `web/django_backend/bff/` |
 | FastAPI Gateway | 8000 | 平台内核，扫描并挂载所有能力包 | `src/gateway/`、`src/platform/kernel/` |
 | Celery Worker / Beat | — | 包的异步任务与周期任务 | `src/platform/kernel/worker.py`、`scheduler.py` |
@@ -195,6 +195,7 @@ export default {
 | Workflow 动作 | `workflow.actions: src.apps.<目录>.backend.workflow_actions:ACTIONS` | 让 Workflow 步骤以 `skill: app:<应用ID>/<动作>` 调用，按运行所属用户的授权执行，可以运行几分钟，返回的文件由平台保存为步骤产物。见“Workflow 开发手册 3.3”，例子是 `src/apps/firewall_policy/backend/workflow_actions.py` |
 | 停用收尾 | `lifecycle.drain`、`lifecycle.pending` | `drain` 取消排队、清理过期租约；`pending` 返回仍需处理的工作数，降到 0 才算排空 |
 | 依赖其它包 | `dependencies` | 被依赖的包要先安装、先启用；停用时要先停依赖它的包 |
+| 浏览器上传文件 | 不需要清单 | 用平台网盘接口：`POST /api/storage/upload/init/` 返回的 `upload_url` 是工作台地址上的 `/object-storage/...` 路径，浏览器对它 `PUT` 文件，再调用 `POST /api/storage/upload/complete/`；读取走 `/api/storage/files/<id>/content/` 或 `download/`。不要把 MinIO 的地址交给浏览器，从其他电脑访问时它是不通的。例子见 `web/react_frontend/src/pages/StoragePage.tsx` |
 
 ### 2.6 生命周期与状态
 

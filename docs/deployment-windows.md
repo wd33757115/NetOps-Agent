@@ -58,6 +58,16 @@
 
 容器端口只绑定 `127.0.0.1`。日志在 `.runtime/test/logs/`，进程 PID 在 `.runtime/test/`。
 
+## 从其他电脑访问
+
+其他电脑用 `http://<这台电脑的地址>:3000` 打开工作台。页面、接口、WebSocket 和文件上传都只走这一个端口：上传文件时，浏览器把文件发到工作台的 `/object-storage/`，由前端服务原样转给本机的 MinIO，MinIO 不需要对外开放。`start.ps1` 结束时会列出本机可用的访问地址。
+
+在 Windows 防火墙里放行 TCP 3000（管理员 PowerShell，执行一次）：
+
+```powershell
+New-NetFirewallRule -DisplayName "NetOps 工作台" -Direction Inbound -Protocol TCP -LocalPort 3000 -Action Allow
+```
+
 ## 日常操作
 
 ```powershell
@@ -99,10 +109,6 @@
 ## 备份
 
 停止应用写入后执行 `.\scripts\windows\backup.ps1`（使用 Langfuse 时加 `-WithLangfuse`），输出 PostgreSQL 备份、MinIO 卷归档和清单。`.env` 需要单独妥善保存。恢复时数据库和对象存储要一起恢复。普通停机、升级和回退都不要使用 `docker compose down -v`，它会删除数据卷。
-
-## 已知限制：从其他电脑上传文件
-
-上传文件（离线巡检数据、网盘、资料导入的原文件等）时，浏览器拿到的是 MinIO 的预签名地址，直接把文件传给 MinIO。这个地址取自 `.env` 的 `MINIO_ENDPOINT`，默认是服务器本机地址，所以只有在服务器本机打开的浏览器能上传；从其他电脑访问工作台时，上传这一步会失败，其余功能不受影响。
 
 ## 依赖冲突时重建 venv
 

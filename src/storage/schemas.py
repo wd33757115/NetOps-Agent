@@ -84,6 +84,7 @@ class UploadInitRequest(BaseModel):
 class UploadInitResponse(BaseModel):
     file_id: str
     object_key: str
+    # A path on the workbench address (/object-storage/...); PUT the file there.
     upload_url: str
     expires_in: int
 

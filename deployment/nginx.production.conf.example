@@ -51,6 +51,17 @@ server {
         proxy_read_timeout 300s;
     }
 
+    # 浏览器上传文件经前端容器转给 MinIO；放宽大小并直接流式转发，不在这里缓存整个文件。
+    location /object-storage/ {
+        proxy_pass http://netops_frontend;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_request_buffering off;
+        client_max_body_size 5g;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+    }
+
     # SSE / WebSocket（容器内 Nginx 已转发 /ws → Django，此处透传 Upgrade）
     location /ws/ {
         proxy_pass http://netops_frontend;

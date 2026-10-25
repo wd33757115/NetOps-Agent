@@ -465,6 +465,8 @@ if ($DevMode) {
 }
 New-LauncherScript -Path $reactLauncher -WorkingDirectory $reactDir -EnvVars @{
     VITE_DJANGO_BACKEND_URL = "http://127.0.0.1:$DjangoPort"
+    # Browser uploads reach MinIO through the workbench port; same address the gateway signs for.
+    VITE_OBJECT_STORAGE_URL = "http://$($fastapiEnv.MINIO_ENDPOINT)"
 } -CommandLine $reactCmd -LogFile $reactLog
 $pids.react = (Start-LauncherProcess -LauncherPath $reactLauncher).Id
 Write-ColorOutput "  [OK] React PID=$($pids.react)" "Green"
@@ -513,6 +515,13 @@ Write-ColorOutput "============================================================"
 Write-ColorOutput "  Windows Environment Ready" "Green"
 Write-ColorOutput "============================================================" "Cyan"
 Write-ColorOutput "  React:   http://localhost:$ReactPort/chat  $(if ($reactOk) { '[OK]' } else { '[WAIT]' })" "Gray"
+# Other computers use the same port: pages, API, WebSocket and file uploads all go through it.
+$lanAddresses = @(Get-NetIPConfiguration -ErrorAction SilentlyContinue |
+    Where-Object { $_.IPv4DefaultGateway -and $_.NetAdapter.Status -eq 'Up' } |
+    ForEach-Object { $_.IPv4Address.IPAddress } | Where-Object { $_ -notlike '169.254.*' })
+foreach ($address in $lanAddresses) {
+    Write-ColorOutput "  Other computers: http://${address}:$ReactPort/  (allow inbound TCP $ReactPort in Windows Firewall)" "Gray"
+}
 Write-ColorOutput "  Django:  http://127.0.0.1:$DjangoPort/api/health/  $(if ($bffOk) { '[OK]' } else { '[WAIT]' })" "Gray"
 if ($appWarnings.Count) {
     # The platform is up; these Apps stay closed until their problem is resolved.

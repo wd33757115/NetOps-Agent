@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from urllib.parse import urlsplit
 
 from fastapi import HTTPException
 from sqlalchemy import func
@@ -38,6 +39,16 @@ from src.storage.schemas import (
 
 UPLOAD_EXPIRES = 3600
 DOWNLOAD_EXPIRES = 3600 * 24
+# Browsers upload through the workbench's own address: the frontend server forwards
+# /object-storage/... to MinIO unchanged, so uploads work from any machine that can open
+# the workbench, while MinIO itself stays on an internal address (127.0.0.1, minio:9000).
+UPLOAD_PROXY_PREFIX = "/object-storage"
+
+
+def browser_upload_url(presigned_url: str) -> str:
+    """The presigned PUT as a path on the workbench origin; its signature still names MinIO's host."""
+    parts = urlsplit(presigned_url)
+    return f"{UPLOAD_PROXY_PREFIX}{parts.path}?{parts.query}"
 settings = get_settings()
 
 
@@ -152,7 +163,7 @@ def init_upload(session: Session, user: CurrentUser, req: UploadInitRequest) -> 
     return UploadInitResponse(
         file_id=file_id,
         object_key=object_key,
-        upload_url=upload_url,
+        upload_url=browser_upload_url(upload_url),
         expires_in=UPLOAD_EXPIRES,
     )
 

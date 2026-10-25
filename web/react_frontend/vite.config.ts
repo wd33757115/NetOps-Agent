@@ -30,6 +30,14 @@ const vendorChunk = (id: string) => {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const djangoTarget = env.VITE_DJANGO_BACKEND_URL || 'http://localhost:8001'
+  // Uploads go to /object-storage/... on this server and on to MinIO unchanged. The target
+  // must be the address the gateway signs uploads for (its MINIO_ENDPOINT), because the
+  // signature covers the Host header that MinIO receives.
+  const objectStorage = {
+    target: env.VITE_OBJECT_STORAGE_URL || 'http://127.0.0.1:9000',
+    changeOrigin: true,
+    rewrite: (path: string) => path.replace(/^\/object-storage/, ''),
+  }
 
   return {
     plugins: [
@@ -75,7 +83,8 @@ export default defineConfig(({ mode }) => {
           target: djangoTarget,
           changeOrigin: true,
           ws: true
-        }
+        },
+        '/object-storage': objectStorage
       }
     },
     preview: {
@@ -91,7 +100,8 @@ export default defineConfig(({ mode }) => {
           target: djangoTarget,
           changeOrigin: true,
           ws: true
-        }
+        },
+        '/object-storage': objectStorage
       }
     }
   }

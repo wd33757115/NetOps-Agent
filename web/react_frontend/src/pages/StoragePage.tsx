@@ -322,7 +322,7 @@ const StoragePage: React.FC = () => {
       message.success('上传完成')
       invalidate()
     } catch (e: unknown) {
-      message.error((e as Error).message || '上传失败，请确认 MinIO CORS 已配置')
+      message.error((e as Error).message || '上传失败，请稍后重试')
     } finally {
       setUploading(false)
       if (fileInputRef.current) fileInputRef.current.value = ''

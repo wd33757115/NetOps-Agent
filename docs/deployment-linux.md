@@ -68,13 +68,19 @@ $DC exec django python manage.py app_packages status --compact
 
 1. `docker compose ... ps`：`migrate` 已成功退出，其余服务健康。
 2. `curl http://127.0.0.1:8001/api/health/` 返回正常；`/api/health/diagnostics/` 中 PostgreSQL、MinIO、Worker 队列和 Beat 都可用。
-3. 浏览器打开 `http://<主机>:3000`（生产组合下经反向代理访问），用管理员登录。
+3. 浏览器打开 `http://<主机>:3000`（生产组合下经反向代理访问），用管理员登录；从其他电脑访问前先按下文配置 `DJANGO_ALLOWED_HOSTS`。
 
 对外 HTTPS 反向代理可参考 `deployment/nginx.production.conf.example`。反向代理在其他容器里时，通过明确的 Docker 网络连接，不要依赖宿主机的 loopback 绑定。
 
-## 已知限制：从其他电脑上传文件
+## 从其他电脑访问
 
-上传文件（离线巡检数据、网盘、资料导入的原文件等）时，浏览器拿到的是 MinIO 的预签名地址，直接把文件传给 MinIO。这个地址取自 `.env` 的 `MINIO_ENDPOINT`，在容器里是 `minio:9000`，所以只有在服务器本机打开的浏览器能上传；从其他电脑访问工作台时，上传这一步会失败，其余功能不受影响。
+浏览器只访问前端（`3000` 端口，或外层反向代理的 HTTPS 地址）。页面、接口、WebSocket 和文件上传都经过它：上传文件时，浏览器把文件发到 `/object-storage/`，由前端容器原样转给 `minio:9000`，MinIO 不需要对外开放。
+
+Django 只接受 `DJANGO_ALLOWED_HOSTS` 里的主机名。用服务器 IP 或域名访问时，把它们加进 `.env`，再重新 `up -d`：
+
+```sh
+DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,10.0.0.5,netops.example.com
+```
 
 ## 备份与升级
 

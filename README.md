@@ -29,6 +29,8 @@
 
 浏览器 → React 前端（3000）→ Django BFF（8001，登录与授权）→ FastAPI 网关（8000）→ Celery Worker。PostgreSQL 保存业务数据，Redis 与 RabbitMQ 承担缓存和任务队列，MinIO 保存文件与采集证据；Langfuse 为可选的模型调用追踪。
 
+浏览器只访问前端这一个端口：接口和 WebSocket 由前端转给 BFF，上传文件经 `/object-storage/` 转给 MinIO。其他电脑打开 `http://<服务器地址>:3000` 就能使用全部功能，包括上传。
+
 ## 部署
 
 - [Windows 部署](docs/deployment-windows.md)：应用进程运行在本机，中间件运行在 Docker Desktop。
@@ -43,7 +45,7 @@ Windows 上的最短路径（在仓库根目录的 PowerShell 中执行）：
 .\venv\Scripts\python.exe web\django_backend\manage.py createsuperuser
 ```
 
-然后打开 `http://localhost:3000`，用刚创建的管理员登录。AI 功能（规则自动制作、公文、问答）需要在 `.env` 中填写 `DEEPSEEK_API_KEY`。
+然后打开 `http://localhost:3000`，用刚创建的管理员登录；其他电脑访问时的防火墙和主机名设置见部署文档。AI 功能（规则自动制作、公文、问答）需要在 `.env` 中填写 `DEEPSEEK_API_KEY`。
 
 ## 许可
 
