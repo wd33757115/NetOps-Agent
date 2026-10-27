@@ -763,16 +763,15 @@ def _assessment(
             "conclusion_allowed": False,
         }
     if risks:
-        top = _severity(risks[0].get("severity"))
         partial = not full_execution or not facts_complete or bool(incomplete_domains)
         return {
             "code": "abnormal_partial" if partial else "abnormal",
-            "status": "发现重大网络风险" if top in {"critical", "major"} else "发现网络异常",
+            # A conclusion names abnormalities; it does not grade them.
+            "status": "发现网络异常",
             "trust": "中" if partial else "高",
             "basis": (
-                f"识别 {len(risks)} 项当前风险（由当前状态规则命中或尚未恢复的"
-                "周期变化事件形成）；"
-                f"最高等级为{SEVERITY_LABEL[top]}"
+                f"识别 {len(risks)} 项当前异常（由当前状态规则命中或尚未恢复的"
+                "周期变化事件形成）"
                 + (
                     f"；另有 {len(correlated_evidence)} 项症状已通过独立复核归入主问题，不重复计数"
                     if correlated_evidence
@@ -840,22 +839,11 @@ def _recommendations(
     correlated_evidence: list[dict[str, Any]],
 ) -> list[dict[str, str]]:
     result: list[dict[str, str]] = []
-    critical = sum(_severity(item.get("severity")) == "critical" for item in risks)
-    major = sum(_severity(item.get("severity")) == "major" for item in risks)
-    if critical:
-        result.append(
-            {
-                "priority": "P0",
-                "action": f"立即核查并处置 {critical} 项严重风险，确认业务影响和冗余状态",
-                "owner": "网络运维负责人",
-                "deadline": "立即",
-            }
-        )
-    if major:
+    if risks:
         result.append(
             {
                 "priority": "P1",
-                "action": f"在一个工作日内完成 {major} 项重大风险定位、处置和复测",
+                "action": f"核查并处置 {len(risks)} 项异常，确认业务影响后复测",
                 "owner": "网络运维组",
                 "deadline": "1 个工作日",
             }
@@ -1824,7 +1812,7 @@ def render_leadership_markdown(report: dict[str, Any]) -> str:
     if report["risk_groups"]:
         for index, risk in enumerate(report["risk_groups"], start=1):
             lines.append(
-                f"{index}. [{SEVERITY_LABEL[risk['severity']]}] {risk['risk_name']}："
+                f"{index}. {risk['risk_name']}："
                 f"{risk['device_name']} / {risk['objects']}，{risk['count']} 项，"
                 f"当前值 {risk['current_values']}，判据 {risk['criterion']}。"
             )

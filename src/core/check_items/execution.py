@@ -1252,6 +1252,11 @@ class CheckItemExecutionService:
                     observed_entity_count=1,
                     evaluated_entity_count=1,
                     rule_assets_ready=True,
+                    # A text comparison judges nothing, but its evidence was still qualified.
+                    evidence_qualification_id=execution.evidence_qualification_id,
+                    source_identity_status=str(execution.source_identity_status),
+                    output_quality_status=str(execution.output_quality_status),
+                    freshness_status=str(execution.freshness_status),
                     evidence_refs=tuple(evidence),
                     assessment_rule_bundle_digest=(
                         execution.runtime_bundle_digest
@@ -1332,6 +1337,11 @@ class CheckItemExecutionService:
                     observed_entity_count=1,
                     evaluated_entity_count=1,
                     rule_assets_ready=True,
+                    # A text comparison judges nothing, but its evidence was still qualified.
+                    evidence_qualification_id=execution.evidence_qualification_id,
+                    source_identity_status=str(execution.source_identity_status),
+                    output_quality_status=str(execution.output_quality_status),
+                    freshness_status=str(execution.freshness_status),
                     evidence_refs=tuple(evidence),
                     assessment_rule_bundle_digest=(
                         execution.runtime_bundle_digest

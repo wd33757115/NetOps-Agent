@@ -1,6 +1,6 @@
 import { api, API_BASE_URL } from '@netops/config/api'
 import { createOfflineJobApi } from '@netops/services/offlineJobApi'
-import type { PatrolCurrentAuthority, ProductionFeedbackStatus, ProductionFeedbackType, ProductionFeedbackPage, ProductionFeedbackContext, ProductionFeedback, ProductionFeedbackWorkItemKind, ProductionFeedbackWorkItem, PatrolReportReleaseView, PatrolReportContentReviewPreview, PatrolReportContentReview, PatrolReportContentReviewItemStatus, PatrolReportContentReviewItemPage, PatrolReportClaim, PatrolReportClaimPage, PatrolReportVersionPage, PatrolReportMaterializationStatus, RiskCaseStatus, RiskSeverity, RiskRemediationStatus, RiskCasePage, RiskCaseDetail, RiskEpisodeAssociationStatus, RiskEpisodeAssociationPage, RiskEpisodeAssociationRelation, RiskEpisodeAssociation, RiskCase, RiskRecoveryCandidate, RiskRemediation, DeviceListResponse, DevicePatrolLaunchRequest, DevicePatrolPreview, PatrolProductionReadiness, DevicePatrolLaunchResult, DeviceConnectionHealthResponse, DeviceExecutionPlanResponse, DeviceEvidenceTimelineResponse, DeviceDynamicGroup, WorkflowRunSummary, PatrolBatchPage, PatrolBatchGovernanceResult, PatrolBatchCancellationResult, PatrolBatchResultSummary, PatrolBatchCheckResultPage, PatrolBatchCheckResultDetail, PatrolBatchDevicePage, PatrolReportDownload } from '@netops/services/api'
+import type { PatrolCurrentAuthority, ProductionFeedbackStatus, ProductionFeedbackType, ProductionFeedbackPage, ProductionFeedbackContext, ProductionFeedback, ProductionFeedbackWorkItemKind, ProductionFeedbackWorkItem, PatrolReportReleaseView, PatrolReportContentReviewPreview, PatrolReportContentReview, PatrolReportContentReviewItemStatus, PatrolReportContentReviewItemPage, PatrolReportClaim, PatrolReportClaimPage, PatrolReportVersionPage, PatrolReportMaterializationStatus, RiskCaseStatus, RiskSeverity, RiskRemediationStatus, RiskCasePage, RiskCaseDetail, RiskEpisodeAssociationStatus, RiskEpisodeAssociationPage, RiskEpisodeAssociationRelation, RiskEpisodeAssociation, RiskCase, RiskRecoveryCandidate, RiskRemediation, DeviceListResponse, DevicePatrolLaunchRequest, DevicePatrolPreview, PatrolProductionReadiness, DevicePatrolLaunchResult, DeviceConnectionHealthResponse, DeviceExecutionPlanResponse, DeviceEvidenceTimelineResponse, DeviceDynamicGroup, WorkflowRunSummary, PatrolBatchPage, PatrolBatchGovernanceResult, PatrolBatchCancellationResult, PatrolBatchResultSummary, PatrolBatchCheckResultPage, PatrolBatchCheckResultDetail, PatrolBatchDevicePage, PatrolReportDownload, OfflinePatrolAnalysisSummary, OfflinePatrolComparisonEvidence } from '@netops/services/api'
 const responseFilename = (contentDisposition: unknown, fallback: string) => {
   const value = String(contentDisposition || '');
   const encoded = value.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
@@ -549,6 +549,16 @@ export const inspectionBatchApi = {
     });
     return response.data;
   },
+  /** The result model an offline job's result page reads, built from this batch's device runs. */
+  getPatrolBatchResultSummary: async (batchId: string): Promise<OfflinePatrolAnalysisSummary> => (
+    await api.get<OfflinePatrolAnalysisSummary>(`/apps/inspection/batches/${batchId}/result-summary`, { timeout: 300000 })
+  ).data,
+  getPatrolBatchComparisonEvidence: async (batchId: string, changeId: string): Promise<OfflinePatrolComparisonEvidence> => (
+    await api.get<OfflinePatrolComparisonEvidence>(
+      `/apps/inspection/batches/${batchId}/comparison-evidence/${encodeURIComponent(changeId)}`,
+      { timeout: 300000 },
+    )
+  ).data,
   getPatrolBatchCheckResultDetail: async (batchId: string, executionId: string, params: {
     entry_limit?: number;
     entry_offset?: number;
@@ -564,7 +574,7 @@ export const inspectionBatchApi = {
     search?: string;
     selection_status?: string;
   }): Promise<PatrolBatchDevicePage> => {
-    const response = await api.get<PatrolBatchDevicePage>(`/apps/inspection/batches/${batchId}/apps/inspection/devices`, {
+    const response = await api.get<PatrolBatchDevicePage>(`/apps/inspection/batches/${batchId}/devices`, {
       params
     });
     return response.data;

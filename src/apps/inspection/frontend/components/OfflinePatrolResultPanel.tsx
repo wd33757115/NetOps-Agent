@@ -369,7 +369,7 @@ const OfflinePatrolResultPanel: React.FC<OfflinePatrolResultPanelProps> = ({
             <h3>{report.assessment.status}</h3></div>
           <span className="patrol-result-trust">结论可信度 <strong>{report.assessment.trust}</strong></span>
         </div>
-        <p className="patrol-result-basis">{report.assessment.basis.replaceAll('当前风险', '分析期风险')}</p>
+        <p className="patrol-result-basis">{report.assessment.basis}</p>
         {!presentation.validation && <>
           <dl className="patrol-result-metrics" aria-label="巡检关键指标">
             <div><dt>当前异常</dt><dd>{metric(report, 'current_state_finding_count')}</dd></div>

@@ -223,18 +223,22 @@ def project_findings(report, source, metadata, view):
     current_count = sum(row[0] in {"当前异常", "未关闭风险"} for row in findings)
     recovered_count = sum(row[0] == "已恢复" for row in findings)
     changes_count = sum(row[0] in {"变化事项", "文本变化", "趋势提示"} for row in findings)
+    online = (source or {}).get("collection_mode") == "online"
     scalar["narrative.summary"] = (
-        f"本次分析列出 {current_count} 项风险、{recovered_count} 项恢复和 "
+        f"本次分析列出 {current_count} 项异常、{recovered_count} 项恢复和 "
         f"{changes_count} 项其他变化或趋势提示。"
-        "恢复与一般变化单独列示，不计入当前故障。"
+        "恢复与一般变化单独列示，不计入当前异常。"
     )
     scalar["scope.overview"] = (
-        "本报告基于本次提供的巡检材料和已完成的分析结果，"
+        ("本报告基于本次在线采集的巡检数据和已完成的分析结果，" if online else "本报告基于本次提供的巡检材料和已完成的分析结果，")
+        +
         f"覆盖 {(report.get('metrics') or {}).get('target_device_count', len(inventory))} 台设备。"
         "正文仅列需要关注的问题、变化及数据缺口，正常指标明细不展开。结论仅反映采集时点及实际覆盖范围。"
     )
     scalar["scope.periods"] = (
-        "基线采集："
+        "采集时间：" + date_text(scalar.get("scope.current_capture_time")) + "\n基线：每台设备取其上一次合格巡检"
+        if online
+        else "基线采集："
         + date_text(scalar.get("scope.baseline_capture_time"))
         + "\n本期采集："
         + date_text(scalar.get("scope.current_capture_time"))
@@ -243,7 +247,9 @@ def project_findings(report, source, metadata, view):
         "编制人员：" + scalar["meta.author"] + "；复核人员：" + scalar["meta.reviewer"]
     )
     scalar["scope.method"] = (
-        "本报告由已保存的巡检分析结果生成。离线材料分析不登录设备、不修改配置；不据此声称已完成配置备份或在线复检。"
+        "本报告由已保存的巡检分析结果生成。在线巡检只执行只读命令，不修改配置；不据此声称已完成配置备份。"
+        if online
+        else "本报告由已保存的巡检分析结果生成。离线材料分析不登录设备、不修改配置；不据此声称已完成配置备份或在线复检。"
     )
     if not findings:
         findings = [

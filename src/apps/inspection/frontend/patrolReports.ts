@@ -1,7 +1,10 @@
 import { api } from '@netops/config/api'
 
 const root = '/apps/inspection/patrol'
-const job = (id: string) => `${root}/offline-jobs/${encodeURIComponent(id)}/report`
+// An online batch uses the same report routes, template and dialog as an offline job.
+const job = (id: string) => id.startsWith('patrol-batch-')
+  ? `${root}/batches/${encodeURIComponent(id)}/report`
+  : `${root}/offline-jobs/${encodeURIComponent(id)}/report`
 export type ReportSection = 'narrative.summary' | 'changes.summary'
 export interface ReportTemplate { id: string; name: string; digest: string; builtin?: boolean }
 export interface ReportPreview { text: Record<ReportSection, string>; conclusion: string; limitations: string; evidence_count: number }
@@ -20,7 +23,10 @@ export const patrolReports = {
   templateFile: async (id: string) => (await api.get(`${root}/report-templates/${encodeURIComponent(id)}/file`, { responseType: 'blob' })).data as Blob,
   importTemplate: async (file: File) => { const body = new FormData(); body.append('file', file); return (await api.post<ReportTemplate>(`${root}/report-templates`, body, { headers: { 'Content-Type': 'multipart/form-data' } })).data },
   preview: async (id: string) => (await api.get<ReportPreview>(job(id))).data,
-  details: async (id: string) => (await api.get(`${job(id)}/details`, { responseType: 'blob', timeout: 120000 })).data as Blob,
+  details: async (id: string) => (await api.get(
+    id.startsWith('patrol-batch-') ? `/apps/inspection/batches/${encodeURIComponent(id)}/report.xlsx` : `${job(id)}/details`,
+    { responseType: 'blob', timeout: 120000 },
+  )).data as Blob,
   evidence: async (id: string, offset: number, reference?: string, signal?: AbortSignal) => (await api.get<{ total: number; source_digest: string; items: ReportEvidence[] }>(`${job(id)}/evidence`, { params: { offset, reference }, signal, timeout: 20000 })).data,
   fullEvidence: async (id: string, entry: string, source_digest: string, reference?: string, signal?: AbortSignal) => (await api.get<{ baseline: string | null; current: string | null }>(`${job(id)}/evidence/${encodeURIComponent(entry)}/full`, { params: { source_digest, reference }, signal, timeout: 20000 })).data,
   export: async (id: string, options: { template_id: string; metadata: Record<string, string>; draft_id?: string; bundle: boolean }) => (await api.post(`${job(id)}/export`, options, { responseType: 'blob', timeout: 120000 })).data as Blob,

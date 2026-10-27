@@ -29,7 +29,6 @@ from src.core.check_items.reporting import (
 from src.core.patrol.batch_manifest import PatrolBatchManifestRepository
 from src.core.patrol.leadership_report import (
     build_leadership_report,
-    render_leadership_docx,
     render_leadership_json,
 )
 from src.core.patrol.patrol_report_service import PatrolReportService
@@ -382,23 +381,19 @@ async def list_patrol_batch_devices(
     patrol_batch_id: str,
     limit: int = 50,
     offset: int = 0,
-    cursor: str | None = None,
     search: str | None = None,
     selection_status: str | None = None,
 ):
     from src.core.patrol.batch_manifest import PatrolBatchManifestRepository
 
-    try:
-        result = PatrolBatchManifestRepository().list_devices(
-            patrol_batch_id,
-            limit=limit,
-            offset=offset,
-            cursor=cursor,
-            search=search,
-            selection_status=selection_status,
-        )
-    except Exception:
-        result = None
+    # Only a batch without a stored device list is "legacy"; any other failure is a real error.
+    result = PatrolBatchManifestRepository().list_devices(
+        patrol_batch_id,
+        limit=limit,
+        offset=offset,
+        search=search,
+        selection_status=selection_status,
+    )
     if result is None:
         raise HTTPException(
             status_code=404,
@@ -1315,6 +1310,28 @@ async def export_patrol_batch_report(
     )
 
 
+@router.get("/runs/patrol-batches/{patrol_batch_id}/result-summary")
+def get_patrol_batch_result_summary(patrol_batch_id: str):
+    """The same result model an offline job's result page reads."""
+
+    from .patrol.batch_report import batch_result_summary
+
+    try:
+        return batch_result_summary(patrol_batch_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="patrol batch not found") from exc
+
+
+@router.get("/runs/patrol-batches/{patrol_batch_id}/comparison-evidence/{change_id}")
+def get_patrol_batch_comparison_evidence(patrol_batch_id: str, change_id: str):
+    from .patrol.batch_report import batch_comparison_evidence
+
+    try:
+        return batch_comparison_evidence(patrol_batch_id, change_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @router.get("/runs/patrol-batches/{patrol_batch_id}/report.docx")
 async def export_patrol_batch_leadership_report(
     patrol_batch_id: str,
@@ -1324,15 +1341,26 @@ async def export_patrol_batch_leadership_report(
     runs = _list_patrol_batch_runs(patrol_batch_id)
     if not runs and not _patrol_batch_manifest_exists(patrol_batch_id):
         raise HTTPException(status_code=404, detail="patrol batch not found")
-    check_item_artifact = _build_check_item_report_artifact(
-        patrol_batch_id,
-        "docx",
-        report_manifest_id=report_manifest_id,
-    )
-    if check_item_artifact is not None:
-        return _check_item_report_response(*check_item_artifact)
-    report = _build_patrol_batch_leadership_report(patrol_batch_id, runs)
-    content = render_leadership_docx(report)
+    if report_manifest_id:
+        # A released version stays the file that was frozen and signed off.
+        check_item_artifact = _build_check_item_report_artifact(
+            patrol_batch_id,
+            "docx",
+            report_manifest_id=report_manifest_id,
+        )
+        if check_item_artifact is not None:
+            return _check_item_report_response(*check_item_artifact)
+    # Otherwise the report is the offline patrol template, filled with this batch's facts.
+    from src.core.patrol.report_renderer import render_report
+    from src.core.patrol.report_templates import load_template
+
+    from .patrol.batch_report import batch_report_context
+
+    try:
+        report, source = batch_report_context(patrol_batch_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    content = render_report(load_template(), report, source)
     return Response(
         content=content,
         media_type=("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
