@@ -25,6 +25,7 @@ from src.core.patrol.report_templates import (
 from src.core.patrol.report_view import project_report
 
 from .access import app_user
+from .patrol.batch_report import batch_report_context, is_batch
 from .patrol.reference_evidence import reference_evidence
 
 router = APIRouter(prefix="/api/v1/patrol", tags=["Patrol reports"])
@@ -50,8 +51,10 @@ class DraftRequest(BaseModel):
 
 
 def context(job_id, user, loader=None):
+    # An online batch reaches the same report as an offline job, built from its device runs.
+    loader = loader or (batch_report_context if is_batch(job_id) else report_context)
     try:
-        return (loader or report_context)(job_id, owner_id=user.user_id, is_admin=user.is_admin())
+        return loader(job_id, owner_id=user.user_id, is_admin=user.is_admin())
     except KeyError as exc:
         raise HTTPException(404, "巡检任务不存在") from exc
     except PermissionError as exc:
@@ -267,3 +270,16 @@ def accept(
     return checked(
         drafting.accept_draft, draft_id, job_id, user.user_id, report, sha256(template).hexdigest()
     )
+
+
+# Online batches use the offline report routes: one template, one dialog, one export.
+for _suffix, _endpoint, _methods in (
+    ("/report", preview_report, ["GET"]),
+    ("/report/evidence", evidence, ["GET"]),
+    ("/report/evidence/{entry_id}/full", full_evidence, ["GET"]),
+    ("/report/export", export, ["POST"]),
+    ("/report/drafts/preview", prepare, ["POST"]),
+    ("/report/drafts/{draft_id}/generate", generate, ["POST"]),
+    ("/report/drafts/{draft_id}/accept", accept, ["POST"]),
+):
+    router.add_api_route("/batches/{job_id}" + _suffix, _endpoint, methods=_methods)

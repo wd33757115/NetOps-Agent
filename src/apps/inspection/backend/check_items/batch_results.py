@@ -224,6 +224,16 @@ def _keyset_after(
     )
 
 
+
+def _known(assessed: Any, executed: Any) -> str:
+    """The assessment's status, unless it is unknown and the execution knows better."""
+
+    value = str(assessed) if assessed is not None else ""
+    if value and value != "unknown":
+        return value
+    return str(executed or "unknown")
+
+
 class CheckItemBatchResultService:
     """Expose scalable live and terminal views of the target-check matrix."""
 
@@ -787,20 +797,19 @@ class CheckItemBatchResultService:
                 if assessment is not None
                 else execution.coverage_decision_id
             ),
-            "source_identity_status": (
-                str(assessment.source_identity_status)
-                if assessment is not None
-                else str(execution.source_identity_status)
+            # Text assessments made before they carried these statuses say "unknown"
+            # where the execution recorded what the evidence actually was.
+            "source_identity_status": _known(
+                assessment.source_identity_status if assessment is not None else None,
+                execution.source_identity_status,
             ),
-            "output_quality_status": (
-                str(assessment.output_quality_status)
-                if assessment is not None
-                else str(execution.output_quality_status)
+            "output_quality_status": _known(
+                assessment.output_quality_status if assessment is not None else None,
+                execution.output_quality_status,
             ),
-            "freshness_status": (
-                str(assessment.freshness_status)
-                if assessment is not None
-                else str(execution.freshness_status)
+            "freshness_status": _known(
+                assessment.freshness_status if assessment is not None else None,
+                execution.freshness_status,
             ),
             "empty_result_classification": (
                 str(assessment.empty_result_classification)

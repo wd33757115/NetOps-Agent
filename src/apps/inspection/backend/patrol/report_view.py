@@ -62,9 +62,12 @@ def project_report(report, source=None, metadata=None):
     metrics = report.get("metrics") or {}
     assessment = report.get("assessment") or {}
     periods = {p.get("role"): p for p in source.get("periods") or []}
-    limitations = (
-        "；".join(report.get("limitations") or []) or "仅适用于本次提供材料及已完成判定的范围"
-    )
+    online = source.get("collection_mode") == "online"
+    window = source.get("capture_window") or {}
+    # Each limitation is already a sentence; joining them with "；" left "。；" between them.
+    limitations = "".join(
+        item if str(item).endswith(("。", "；")) else f"{item}。" for item in report.get("limitations") or []
+    ) or ("仅适用于本次采集及已完成判定的范围" if online else "仅适用于本次提供材料及已完成判定的范围")
     scalar = {
         "conclusion.text": assessment.get("status"),
         "conclusion.basis": assessment.get("basis"),
@@ -80,21 +83,33 @@ def project_report(report, source=None, metadata=None):
         "trace.standards_version": (report.get("evidence", {}).get("analysis") or {}).get(
             "rule_bundle_digest"
         ),
-        "scope.current_capture_time": periods.get("current", {}).get("observed_at"),
+        "scope.current_capture_time": (
+            window.get("completed_at") or window.get("started_at")
+            if online
+            else periods.get("current", {}).get("observed_at")
+        ),
         "scope.baseline_capture_time": periods.get("baseline", {}).get("observed_at"),
         "scope.analysis_time": (report.get("evidence", {}).get("analysis") or {}).get(
             "completed_at"
         ),
-        "scope.source_purpose": "离线材料分析；不代表生成报告时的设备状态",
+        "scope.source_purpose": (
+            "在线采集；反映采集时点的设备状态" if online else "离线材料分析；不代表生成报告时的设备状态"
+        ),
         "scope.disclosure": limitations,
-        "scope.method": "用户提供离线命令输出，按冻结分析结果生成",
+        "scope.method": (
+            "登录设备执行只读命令采集，按分析结果生成" if online else "用户提供离线命令输出，按冻结分析结果生成"
+        ),
         "scope.difference": (
             f"目标 {metrics.get('target_device_count', 0)} 台，"
             f"执行完成 {metrics.get('completed_device_count', 0)} 台；完成不等于健康。"
         ),
         "backup.disclosure": "未核实备份完整性；采集配置文本不等于备份验证完成。",
-        "comparison.scope": "按本次选定的基线及本期材料比较；没有基线的项目不能表述为无变化。",
-        "issues.review_notes": "风险事项按系统判定展示，业务影响与处置方案需人工复核。",
+        "comparison.scope": (
+            "每台设备与其上一次合格巡检比较；没有基线的项目不能表述为无变化。"
+            if online
+            else "按本次选定的基线及本期材料比较；没有基线的项目不能表述为无变化。"
+        ),
+        "issues.review_notes": "异常事项按系统判定展示，业务影响与处置方案需人工复核。",
         "resources.gaps": limitations,
     }
     for key in [
@@ -279,7 +294,7 @@ def project_report(report, source=None, metadata=None):
     for index, risk in enumerate(report.get("risk_groups") or [], 1):
         tables["issues"].append(
             [
-                f"R{index:03d} / {risk.get('severity')}",
+                f"R{index:03d}",
                 f"{risk.get('risk_name')}；{risk.get('device_name')}；{risk.get('objects')}",
                 risk.get("criterion"),
                 "核对原始证据后确定处置",

@@ -1,7 +1,7 @@
 manifest_version: 1
 id: inspection
 name: 网络巡检
-version: 1.3.6
+version: 1.4.1
 platform_api: '>=1.0,<2.0'
 icon: radar
 aliases:

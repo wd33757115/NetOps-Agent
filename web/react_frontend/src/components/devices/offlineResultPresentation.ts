@@ -11,8 +11,8 @@ export function offlineResultPresentation(report: OfflinePatrolAnalysisSummary, 
     validation,
     tone: validation ? 'info' as const : hasRisks ? 'error' as const
       : allowed && complete ? 'success' as const : 'warning' as const,
-    riskLabel: '分析期风险',
-    emptyText: allowed && complete ? '本次已覆盖范围内未发现风险' : '尚不能形成完整风险结论，请查看覆盖缺口和证据',
+    riskLabel: '分析期异常',
+    emptyText: allowed && complete ? '本次已覆盖范围内未发现异常' : '尚不能形成完整结论，请查看覆盖缺口和证据',
     reportLabel: validation ? '下载验证报告' : '下载巡检报告',
     workbookLabel: validation ? '下载验证明细' : '下载巡检明细 Excel',
   }

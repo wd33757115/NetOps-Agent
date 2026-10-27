@@ -142,6 +142,16 @@ export const formatOfflineBlockerMessage = (item: Record<string, unknown>) => {
   return period ? `${period}：${text}` : text
 }
 
+/** One line per distinct message, counted: the same instruction for twenty templates is one instruction. */
+export const groupBlockerMessages = (items: Record<string, unknown>[]) => {
+  const groups = new Map<string, number>()
+  items.forEach((item) => {
+    const message = formatOfflineBlockerMessage(item)
+    groups.set(message, (groups.get(message) || 0) + 1)
+  })
+  return Array.from(groups, ([message, count]) => ({ message, count }))
+}
+
 export const buildOfflineAssetControlUrl = (job: OfflinePatrolJob) => {
   const params = new URLSearchParams({
     workspace: 'production',
@@ -1163,10 +1173,13 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
                   <List
                     className="offline-detail-blocker-list"
                     size="small"
-                    dataSource={detail.blockers || []}
-                    renderItem={(item) => (
+                    dataSource={groupBlockerMessages(detail.blockers || [])}
+                    renderItem={(group) => (
                       <List.Item>
-                        <Typography.Text>{formatOfflineBlockerMessage(item)}</Typography.Text>
+                        <Typography.Text>
+                          {group.message}
+                          {group.count > 1 && <Typography.Text type="secondary">（{group.count} 项）</Typography.Text>}
+                        </Typography.Text>
                       </List.Item>
                     )}
                   />
@@ -1175,8 +1188,9 @@ export const OfflineFileJobWorkbench: React.FC<OfflineFileJobWorkbenchProps> = (
                   <Button size="small" onClick={() => changeDetailTab('assets')}>查看导入进度</Button>
                 ) : undefined}
               />
-            ) : (detail.blockers || []).map((item, index) => (
-              <Alert key={`${item.period_role || 'job'}-${item.code}-${index}`} type="warning" showIcon message={formatOfflineBlockerMessage(item)} />
+            ) : groupBlockerMessages(detail.blockers || []).map((group) => (
+              <Alert key={group.message} type="warning" showIcon
+                message={group.count > 1 ? `${group.message}（${group.count} 项）` : group.message} />
             ))}
             {(detail.output_review_items?.length || 0) > 0 && (
               <Alert

@@ -13,11 +13,21 @@ import { useIsMobile } from '@netops/hooks/useBreakpoint'
 import PatrolBatchPipeline from '@netops/components/devices/PatrolBatchPipeline'
 import OfflinePatrolPanel from '@netops/components/devices/PatrolOfflineWorkbench'
 import ReportReleasePanel from '@netops/components/devices/ReportReleasePanel'
+import OfflinePatrolResultPanel from '@netops/components/devices/OfflinePatrolResultPanel'
+import PatrolReportDialog from '@netops/components/devices/PatrolReportDialog'
+import { businessHref } from '@netops/apps/appRoutes'
+import { inspectionBatchApi } from '../api'
 import RiskCaseWorkspace from '@netops/components/devices/RiskCaseWorkspace'
 import ProductionFeedbackWorkspace from '@netops/components/devices/ProductionFeedbackWorkspace'
 import { canCancelPatrolBatch } from '@netops/components/devices/patrolBatchLifecycle'
 
 type TableColumns<T> = TableProps<T>['columns']
+
+/** When the batch collected, in the words the offline page uses for its periods. */
+const batchCaptureTime = (batch?: PatrolBatchSummary) => {
+  const value = batch?.completed_at || batch?.created_at
+  return value ? new Date(value).toLocaleString() : '采集时间待确认'
+}
 
 interface PatrolBatchCounts {
   total: number
@@ -211,15 +221,43 @@ const statusText = (status: string) => {
   return text[status] || status || '-'
 }
 
-const renderCounterTags = (items?: Record<string, number>) => {
+const renderCounterTags = (items?: Record<string, number>, label: (key: string) => string = (key) => key) => {
   const entries = Object.entries(items || {}).filter(([, value]) => Number(value) > 0)
   if (!entries.length) return <Typography.Text type="secondary">暂无</Typography.Text>
   return (
     <Space wrap size={[4, 4]}>
-      {entries.map(([key, value]) => <Tag key={key}>{key}: {value}</Tag>)}
+      {entries.map(([key, value]) => <Tag key={key}>{label(key)} {value}</Tag>)}
     </Space>
   )
 }
+
+const SELECTOR_FILTER_LABELS: Record<string, string> = {
+  keyword: '关键字', vendor: '厂商', model: '型号', family: '系列', platform: '平台',
+  group: '设备分组', site: '站点', role: '角色', status: '状态', tag: '标签',
+}
+
+/** What a filter-based scope selected, in words. A device list or group is already named by the label. */
+const describeSelector = (selector?: Record<string, unknown> | null) => {
+  if (!selector || selector.device_ids || selector.dynamic_group_id) return ''
+  return Object.entries(selector)
+    .filter(([key, value]) => key in SELECTOR_FILTER_LABELS && value !== null && value !== undefined && value !== '')
+    .map(([key, value]) => `${SELECTOR_FILTER_LABELS[key]}：${Array.isArray(value) ? value.join('、') : String(value)}`)
+    .join('；')
+}
+
+const COVERAGE_BASIS_LABELS: Record<string, string> = {
+  fixed: '固定分母',
+  inventory: '资产清单分母',
+  inventory_entity_set: '资产清单实体分母',
+  derived_entity_set: '历史实体分母',
+  command_reported_total: '命令报告总数分母',
+  non_exhaustive: '非穷举结果',
+  previous_qualified_observation: '历史合格观测分母',
+  unbounded: '无确定分母',
+  unknown: '分母未知',
+}
+
+const coverageBasisLabel = (basis?: string | null) => COVERAGE_BASIS_LABELS[basis || 'unknown'] || basis || '分母未知'
 
 const noEventReasonLabel = (reason: string) => {
   const labels: Record<string, string> = {
@@ -297,6 +335,28 @@ const PatrolOperationsPanel: React.FC<PatrolOperationsPanelProps> = ({
   })
 
   const checkItemSummary = activeBatchResultSummary?.check_item_summary
+  // The online page reads the same result model, opens the same report dialog and keeps its tab in the URL, as the offline page does.
+  const [reportBatchId, setReportBatchId] = useState<string>()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const batchTab = searchParams.get('patrol_batch_tab') || 'overview'
+  const changeBatchTab = (value: string) => {
+    const next = new URLSearchParams(searchParams)
+    if (value === 'overview') next.delete('patrol_batch_tab')
+    else next.set('patrol_batch_tab', value)
+    setSearchParams(next)
+  }
+  const batchResultQuery = useQuery(
+    ['patrol-batch-result-summary', activePatrolBatchId, activeBatchSummary.completed, activeBatchSummary.running],
+    () => inspectionBatchApi.getPatrolBatchResultSummary(activePatrolBatchId!),
+    { enabled: Boolean(activePatrolBatchId) && batchTab === 'result', refetchOnWindowFocus: false, retry: false },
+  )
+  const batchState = activeBatchSummary.running || activeBatchSummary.pending
+    ? { color: 'processing', label: '运行中' }
+    : activeBatch?.dispatch_status === 'cancelled'
+      ? { color: 'default', label: '已取消' }
+      : activeBatchSummary.failed
+        ? { color: 'warning', label: '部分完成' }
+        : { color: 'success', label: '已完成' }
   const checkResultCursor = checkResultPage > 1
     ? checkResultCursors[checkResultPage]
     : undefined
@@ -515,15 +575,8 @@ const PatrolOperationsPanel: React.FC<PatrolOperationsPanelProps> = ({
     </Space>
     {activePatrolBatchId && (
       <InspectionDetailPage open title={activeBatch?.target_label || '在线巡检批次'}
-        subtitle={activePatrolBatchId} backLabel="返回在线任务" onClose={onClearActiveBatch}>
-      <Space direction="vertical" size={12} style={{ width: '100%' }}>
-        <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-          <Space wrap>
-            <Typography.Text strong>巡检批次详情</Typography.Text>
-            <Typography.Text copyable code>{activePatrolBatchId}</Typography.Text>
-            {activeBatch?.archived && <Tag color="warning">已归档</Tag>}
-          </Space>
-          <Space>
+        subtitle={activePatrolBatchId} backLabel="返回在线任务" onClose={onClearActiveBatch}
+        extra={<Space>
             {canCancelPatrolBatch({
               archived: activeBatch?.archived,
               dispatchStatus: activeBatch?.dispatch_status,
@@ -542,576 +595,596 @@ const PatrolOperationsPanel: React.FC<PatrolOperationsPanelProps> = ({
             )}
             <Button size="small" onClick={onRefreshActiveBatchRuns}>刷新</Button>
 
+        </Space>}>
+      <Space direction="vertical" size={12} style={{ width: '100%' }}>
+        <section className="patrol-task-context" aria-label="巡检范围">
+          <Space wrap>
+            <Tag color={batchState.color}>{batchState.label}</Tag>
+            <Tag>在线采集 · 当前巡检</Tag>
+            {activeBatch?.archived && <Tag color="warning">已归档</Tag>}
+            <Typography.Text type="secondary">采集：{batchCaptureTime(activeBatch)}</Typography.Text>
           </Space>
-        </Space>
-
-        <Descriptions
-          size="small"
-          bordered
-          column={isMobile ? 1 : 2}
-          labelStyle={isMobile ? { minWidth: 88, width: 88 } : undefined}
-        >
-          <Descriptions.Item label="巡检范围" span={2}>
-            <Space direction="vertical" size={2}>
-              <Typography.Text strong>{activeBatch?.target_label || activeBatchDevices?.target_label || '旧批次未保存范围快照'}</Typography.Text>
-              {(activeBatch?.selector || activeBatchDevices?.selector) && (
-                <Typography.Text code copyable>
-                  {JSON.stringify(activeBatch?.selector || activeBatchDevices?.selector)}
-                </Typography.Text>
+          <Typography.Paragraph type="secondary">结论仅适用于上述采集时间和已覆盖范围。</Typography.Paragraph>
+        </section>
+        <Tabs activeKey={batchTab} onChange={changeBatchTab} items={[
+          { key: 'overview', label: '任务信息', children: <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Descriptions
+              size="small"
+              bordered
+              column={isMobile ? 1 : 2}
+              labelStyle={isMobile ? { minWidth: 88, width: 88 } : undefined}
+            >
+              <Descriptions.Item label="巡检范围" span={2}>
+                <Space direction="vertical" size={2}>
+                  <Typography.Text strong>{activeBatch?.target_label || activeBatchDevices?.target_label || '旧批次未保存范围快照'}</Typography.Text>
+                  {describeSelector(activeBatch?.selector || activeBatchDevices?.selector) && (
+                    <Typography.Text type="secondary">
+                      {describeSelector(activeBatch?.selector || activeBatchDevices?.selector)}
+                    </Typography.Text>
+                  )}
+                </Space>
+              </Descriptions.Item>
+              <Descriptions.Item label="设备范围">
+                目标 {activeBatch?.target_count ?? activeBatchDevices?.target_count ?? activeBatchSummary.total} · 发起 {activeBatch?.launched_count ?? activeBatchDevices?.launched_count ?? activeBatchSummary.total} · 跳过 {activeBatch?.skipped_count ?? activeBatchDevices?.skipped_count ?? 0}
+              </Descriptions.Item>
+              <Descriptions.Item label="执行结果">
+                完成 {activeBatchSummary.completed} · 运行 {activeBatchSummary.running} · 等待 {activeBatchSummary.pending} · 失败 {activeBatchSummary.failed} · 取消 {activeBatchSummary.cancelled}
+              </Descriptions.Item>
+              {activeBatch?.dispatch_status === 'cancelled' && activeBatch.dispatch_error && (
+                <Descriptions.Item label="取消记录" span={2}>
+                  <Typography.Text type="secondary">{activeBatch.dispatch_error}</Typography.Text>
+                </Descriptions.Item>
               )}
-            </Space>
-          </Descriptions.Item>
-          <Descriptions.Item label="设备范围">
-            目标 {activeBatch?.target_count ?? activeBatchDevices?.target_count ?? activeBatchSummary.total} · 发起 {activeBatch?.launched_count ?? activeBatchDevices?.launched_count ?? activeBatchSummary.total} · 跳过 {activeBatch?.skipped_count ?? activeBatchDevices?.skipped_count ?? 0}
-          </Descriptions.Item>
-          <Descriptions.Item label="执行结果">
-            完成 {activeBatchSummary.completed} · 运行 {activeBatchSummary.running} · 等待 {activeBatchSummary.pending} · 失败 {activeBatchSummary.failed} · 取消 {activeBatchSummary.cancelled}
-          </Descriptions.Item>
-          {activeBatch?.dispatch_status === 'cancelled' && activeBatch.dispatch_error && (
-            <Descriptions.Item label="取消记录" span={2}>
-              <Typography.Text type="secondary">{activeBatch.dispatch_error}</Typography.Text>
-            </Descriptions.Item>
-          )}
-          {activeBatchResultSummary && (
-            <>
-              {checkItemSummary && (
+              {activeBatchResultSummary && (
                 <>
-                  <Descriptions.Item label="检查项覆盖">
-                    已评估 {checkItemSummary.coverage.assessed_check_count} / 计划 {checkItemSummary.coverage.expected_check_count}
+                  {checkItemSummary && (
+                    <>
+                      <Descriptions.Item label="检查项覆盖">
+                        已评估 {checkItemSummary.coverage.assessed_check_count} / 计划 {checkItemSummary.coverage.expected_check_count}
+                      </Descriptions.Item>
+                      <Descriptions.Item label="检查项结论">
+                        {renderCounterTags(checkItemSummary.assessment_counts, (key) => assessmentStatus(key).text)}
+                      </Descriptions.Item>
+                    </>
+                  )}
+                  <Descriptions.Item label="变化 / 事件">
+                    {activeBatchResultSummary.change_count} / {activeBatchResultSummary.event_count}
                   </Descriptions.Item>
-                  <Descriptions.Item label="检查项结论">
-                    {renderCounterTags(checkItemSummary.assessment_counts)}
+                  <Descriptions.Item label="当前异常 / 规则评估">
+                    {activeBatchResultSummary.current_finding_count || 0} / {activeBatchResultSummary.current_state_rule_coverage?.evaluated_observation_count || 0}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="事件类型">
+                    {renderCounterTags(activeBatchResultSummary.event_types)}
                   </Descriptions.Item>
                 </>
               )}
-              <Descriptions.Item label="变化 / 事件">
-                {activeBatchResultSummary.change_count} / {activeBatchResultSummary.event_count}
-              </Descriptions.Item>
-              <Descriptions.Item label="当前异常 / 规则评估">
-                {activeBatchResultSummary.current_finding_count || 0} / {activeBatchResultSummary.current_state_rule_coverage?.evaluated_observation_count || 0}
-              </Descriptions.Item>
-              <Descriptions.Item label="事件类型">
-                {renderCounterTags(activeBatchResultSummary.event_types)}
-              </Descriptions.Item>
-            </>
-          )}
-        </Descriptions>
+            </Descriptions>
+            <Progress
+              percent={(activeBatch?.target_count || activeBatchSummary.total)
+                ? Math.round(((activeBatchSummary.completed + activeBatchSummary.failed + activeBatchSummary.cancelled + (activeBatch?.skipped_count || 0))
+                  / (activeBatch?.target_count || activeBatchSummary.total)) * 100)
+                : 0}
+              status={activeBatchSummary.failed || activeBatch?.skipped_count ? 'exception'
+                : activeBatchSummary.running || activeBatchSummary.pending ? 'active' : 'success'}
+            />
 
-        {checkItemSummary ? (
-          <Alert
-            showIcon
-            type={checkItemSummary.conclusion.code.startsWith('at_risk')
-              ? 'error'
-              : checkItemSummary.conclusion.code === 'in_progress'
-                  || checkItemSummary.conclusion.code === 'pending_report'
-                ? 'info'
-                : checkItemSummary.conclusion.code === 'healthy'
-                  ? 'success'
-                  : 'warning'}
-            message={`巡检结论：${checkItemSummary.conclusion.text}`}
-            description={`${checkItemSummary.conclusion.basis}（可信度：${checkItemSummary.conclusion.trust}）`}
-          />
-        ) : activeBatchResultSummary?.assessment ? (
-          <Alert
-            showIcon
-            type={activeBatchResultSummary.assessment.code.startsWith('abnormal')
-              ? 'error'
-              : activeBatchResultSummary.assessment.code === 'in_progress'
-                ? 'info'
-                : activeBatchResultSummary.assessment.code === 'normal_in_scope'
-                    || activeBatchResultSummary.assessment.code === 'normal_with_changes'
-                  ? 'success'
-                  : 'warning'}
-            message={`巡检结论：${activeBatchResultSummary.assessment.status}`}
-            description={`${activeBatchResultSummary.assessment.basis}（可信度：${activeBatchResultSummary.assessment.trust}）`}
-          />
-        ) : null}
+            {liveStreamUnavailable && (
+              <Alert
+                type="warning"
+                showIcon
+                message="实时事件流暂不可用"
+                description="页面仍按固定间隔刷新批次状态；任务执行不受影响，错误信息可能延迟数秒显示。"
+              />
+            )}
 
-        <PatrolBatchPipeline
-          batch={activeBatch}
-          counts={activeBatchSummary}
-          summary={activeBatchResultSummary}
-        />
-
-        {checkItemSummary && (
-          <Space direction="vertical" size={8} style={{ width: '100%' }}>
-            <div className="patrol-history__header">
-              <Space direction="vertical" size={0}>
-                <Typography.Text strong>检查项执行与结论</Typography.Text>
-                <Typography.Text type="secondary">
-                  每行代表一台设备的一项业务检查，结论来自 CheckAssessment，不以 Workflow 完成或事件为零替代健康判断。
-                </Typography.Text>
-              </Space>
-              <div className="patrol-history__filters">
-                <Input.Search
-                  allowClear
-                  size="small"
-                  placeholder="设备、管理 IP 或检查项"
-                  className="patrol-history__search"
-                  onSearch={(value) => {
-                    setCheckResultSearch(value.trim())
-                    setCheckResultPage(1)
-                    setCheckResultCursors({ 1: undefined })
-                  }}
-                />
-                <Select
-                  allowClear
-                  size="small"
-                  placeholder="评估结论"
-                  value={checkResultStatus}
-                  style={{ width: 128 }}
-                  options={[
-                    { value: 'healthy', label: '正常' },
-                    { value: 'at_risk', label: '存在风险' },
-                    { value: 'unable_to_determine', label: '无法判断' },
-                    { value: 'not_applicable', label: '不适用' },
-                    { value: 'informational', label: '信息性结果' },
-                    { value: 'pending', label: '待评估' },
-                  ]}
-                  onChange={(value) => {
-                    setCheckResultStatus(value)
-                    setCheckResultPage(1)
-                    setCheckResultCursors({ 1: undefined })
-                  }}
-                />
-                <Select
-                  allowClear
-                  size="small"
-                  placeholder="证据质量"
-                  value={checkEvidenceFilter}
-                  style={{ width: 150 }}
-                  options={[
-                    { value: 'source_identity:unknown', label: '身份待确认' },
-                    { value: 'source_identity:conflict', label: '身份冲突' },
-                    { value: 'output_quality:truncated', label: '输出被截断' },
-                    { value: 'output_quality:paged', label: '分页未结束' },
-                    { value: 'output_quality:device_error', label: '设备返回错误' },
-                    { value: 'freshness:stale', label: '数据已过期' },
-                    { value: 'coverage:partial', label: '覆盖不完整' },
-                    { value: 'coverage:unknown', label: '覆盖未知' },
-                    { value: 'coverage:unbounded', label: '覆盖不可穷举' },
-                  ]}
-                  onChange={(value) => {
-                    setCheckEvidenceFilter(value)
-                    setCheckResultPage(1)
-                    setCheckResultCursors({ 1: undefined })
-                  }}
-                />
-                <Button size="small" onClick={() => checkResultsQuery.refetch()}>刷新</Button>
-              </div>
-            </div>
-            {checkResultsQuery.isError && (
+            {liveEvents.length > 0 && (
               <Alert
                 type="error"
                 showIcon
-                message="检查项结果加载失败"
-                description="请刷新后重试；该错误不会改变已冻结的巡检事实。"
-              />
-            )}
-            <Table<PatrolBatchCheckResult>
-              rowKey="execution_id"
-              size="small"
-              loading={checkResultsQuery.isFetching}
-              dataSource={checkResultsQuery.data?.items || []}
-              pagination={false}
-              columns={[
-                {
-                  title: '设备',
-                  width: 220,
-                  render: (_, row) => (
-                    <Space direction="vertical" size={0}>
-                      <Typography.Text strong>{row.device_name || row.device_id}</Typography.Text>
-                      <Typography.Text type="secondary">{row.management_ip || row.device_id}</Typography.Text>
-                    </Space>
-                  ),
-                },
-                {
-                  title: '检查项',
-                  width: 250,
-                  render: (_, row) => (
-                    <Space direction="vertical" size={0}>
-                      <Typography.Text strong>{row.check_item_name}</Typography.Text>
-                      <Typography.Text code>{row.check_item_id}</Typography.Text>
-                    </Space>
-                  ),
-                },
-                {
-                  title: '执行',
-                  dataIndex: 'execution_status',
-                  width: 120,
-                  render: (value) => <Tag color={statusColor(value)}>{statusText(value)}</Tag>,
-                },
-                {
-                  title: '评估结论',
-                  dataIndex: 'assessment_status',
-                  width: 120,
-                  render: (value) => {
-                    const display = assessmentStatus(value)
-                    return <Tag color={display.color}>{display.text}</Tag>
-                  },
-                },
-                {
-                  title: '完整性',
-                  dataIndex: 'completeness_status',
-                  width: 110,
-                  render: (value) => completenessStatus(value),
-                },
-                {
-                  title: '基线',
-                  dataIndex: 'comparison_status',
-                  width: 120,
-                  render: (value) => comparisonStatus(value),
-                },
-                {
-                  title: '证据资格',
-                  width: 250,
-                  render: (_, row) => (
-                    <Space wrap size={[2, 2]}>
-                      {([
-                        ['identity', row.source_identity_status],
-                        ['output', row.output_quality_status],
-                        ['freshness', row.freshness_status],
-                      ] as const).map(([kind, value]) => {
-                        const display = evidenceStatus(kind, value)
-                        return <Tag key={kind} color={display.color}>{display.text}</Tag>
-                      })}
-                    </Space>
-                  ),
-                },
-                {
-                  title: '实体覆盖',
-                  width: 210,
-                  render: (_, row) => (
-                    <Space direction="vertical" size={0}>
-                      {(() => {
-                        const display = evidenceStatus('coverage', row.coverage_status)
-                        return <Tag color={display.color}>{display.text}</Tag>
-                      })()}
-                      <Typography.Text type="secondary">
-                        已见 {row.observed_entity_count}
-                        {row.expected_entity_count != null ? ` / 应有 ${row.expected_entity_count}` : ''}
-                        {' · '}{row.coverage_basis}
+                message="实时失败推送"
+                description={(
+                  <Space direction="vertical" size={2}>
+                    {liveEvents.slice(0, 5).map((event, index) => (
+                      <Typography.Text key={`${String(event.type)}-${index}`} type="danger">
+                        {String(event.type || 'event')}
+                        {event.device_id ? ` · ${String(event.device_id)}` : ''}
+                        {event.failure_code ? ` · ${String(event.failure_code)}` : ''}
+                        {event.error ? ` · ${String(event.error)}` : ''}
                       </Typography.Text>
-                    </Space>
-                  ),
-                },
-                {
-                  title: '判断依据',
-                  width: 230,
-                  render: (_, row) => {
-                    const conflicts = row.assessment_basis_summary?.status_counts?.conflict || 0
-                    const missing = row.assessment_basis_summary?.status_counts?.missing || 0
-                    return (
-                      <Space direction="vertical" size={0}>
-                        <Typography.Text
-                          type={conflicts || missing || !row.assessment_basis_digest ? 'warning' : undefined}
-                          title={row.assessment_basis_digest || undefined}
-                        >
-                          {assessmentBasisText(row)}
-                        </Typography.Text>
-                        {conflicts > 0 && <Tag color="red">冲突 {conflicts}</Tag>}
-                        {!conflicts && missing > 0 && <Tag color="orange">缺失 {missing}</Tag>}
-                        <Button
-                          type="link"
-                          size="small"
-                          onClick={() => {
-                            setSelectedCheckExecutionId(row.execution_id)
-                            setBasisEntryPage(1)
-                          }}
-                        >
-                          查看依据
-                        </Button>
-                      </Space>
-                    )
-                  },
-                },
-                {
-                  title: '阻断原因',
-                  width: 280,
-                  render: (_, row) => row.blocking_reason_codes.length
-                    ? <Typography.Text type="warning">{row.blocking_reason_codes.join(', ')}</Typography.Text>
-                    : <Typography.Text type="secondary">-</Typography.Text>,
-                },
-                {
-                  title: '操作',
-                  width: 96,
-                  render: (_, row) => (
-                    <Button
-                      type="text"
-                      size="small"
-                      icon={<SearchOutlined />}
-                      title="查看检查证据"
-                      onClick={() => onOpenDeviceEvidence(
-                        row.device_id,
-                        row.device_name,
-                        undefined,
-                        activePatrolBatchId,
-                      )}
-                    >
-                      查看
-                    </Button>
-                  ),
-                },
-              ]}
-              scroll={{ x: 2010 }}
-            />
-            <Space
-              wrap
-              size={8}
-              style={{ width: '100%', justifyContent: 'flex-end' }}
-            >
-              <Typography.Text type="secondary">
-                共 {checkResultsQuery.data?.total || 0} 项，第 {checkResultPage} 页
-              </Typography.Text>
-              <Select
-                aria-label="检查项结果每页条数"
-                size="small"
-                value={String(checkResultPageSize)}
-                style={{ width: 96 }}
-                options={PATROL_BATCH_PAGE_SIZE_OPTIONS.map((value) => ({
-                  label: `${value} 条/页`,
-                  value,
-                }))}
-                onChange={(value) => {
-                  setCheckResultPageSize(Number(value))
-                  setCheckResultPage(1)
-                  setCheckResultCursors({ 1: undefined })
-                }}
+                    ))}
+                  </Space>
+                )}
               />
-              <Button
-                size="small"
-                icon={<LeftOutlined />}
-                disabled={checkResultPage <= 1 || checkResultsQuery.isFetching}
-                onClick={() => setCheckResultPage((page) => Math.max(1, page - 1))}
-              >
-                上一页
-              </Button>
-              <Button
-                size="small"
-                icon={<RightOutlined />}
-                disabled={
-                  checkResultsQuery.isFetching
-                  || !checkResultsQuery.data?.has_more
-                  || !checkResultsQuery.data?.next_cursor
-                }
-                onClick={() => {
-                  const nextCursor = checkResultsQuery.data?.next_cursor
-                  if (!nextCursor) return
-                  setCheckResultCursors((current) => ({
-                    ...current,
-                    [checkResultPage + 1]: nextCursor,
-                  }))
-                  setCheckResultPage((page) => page + 1)
-                }}
-              >
-                下一页
-              </Button>
+            )}
+
+            {(activeBatchSummary.failed > 0 || activeBatchSummary.cancelled > 0 || (activeBatch?.skipped_count || 0) > 0) && (
+              <Alert type="warning" showIcon
+                message={`有 ${activeBatchSummary.failed + activeBatchSummary.cancelled + (activeBatch?.skipped_count || 0)} 台设备需要处理`}
+                description="预检跳过（含 Parser 覆盖策略 skip/block）、登录/采集失败和取消设备均保留在设备清单中，可按状态筛选后查看证据或重试。" />
+            )}
+
+          </Space> },
+          { key: 'devices', label: `设备 (${activeBatchDevices?.total ?? activeBatch?.target_count ?? activeBatchSummary.total})`, children: <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Space direction="vertical" size={8} style={{ width: '100%' }}>
+              <Space wrap>
+                <Typography.Text strong>设备执行明细</Typography.Text>
+                <Input.Search key={`${activePatrolBatchId}-${batchDeviceSearch}`} allowClear
+                  defaultValue={batchDeviceSearch}
+                  placeholder="搜索设备名、设备 ID 或管理地址" style={{ width: 320 }}
+                  onSearch={onBatchDeviceSearchChange}
+                  onChange={(event) => !event.target.value && onBatchDeviceSearchChange('')} />
+                <Select allowClear aria-label="设备选择结果" placeholder="全部设备" style={{ width: 160 }}
+                  value={batchDeviceSelectionStatus}
+                  onChange={onBatchDeviceSelectionStatusChange}
+                  options={[
+                    { value: 'launched', label: '已发起' },
+                    { value: 'skipped', label: '预检跳过' },
+                  ]} />
+              </Space>
+              {activeBatchDevices ? (
+                <Table<PatrolBatchDeviceItem>
+                  rowKey="device_id"
+                  size="small"
+                  loading={activeBatchDevicesLoading}
+                  dataSource={activeBatchDevices.items}
+                  pagination={{
+                    current: batchDevicePage,
+                    pageSize: activeBatchDevices.limit,
+                    total: activeBatchDevices.total,
+                    showSizeChanger: false,
+                    showTotal: (total) => `共 ${total} 台设备`,
+                    onChange: onBatchDevicePageChange,
+                  }}
+                  columns={[
+                    { title: '设备', width: 260, render: (_, row) => (
+                      <Space direction="vertical" size={0}>
+                        <Typography.Text strong>{row.device_name || row.device_id}</Typography.Text>
+                        <Typography.Text type="secondary">{row.management_ip || row.device_id}</Typography.Text>
+                      </Space>
+                    ) },
+                    { title: '范围结果', dataIndex: 'selection_status', width: 120,
+                      render: (value) => <Tag color={value === 'launched' ? 'green' : 'orange'}>{value === 'launched' ? '已发起' : '预检跳过'}</Tag> },
+                    { title: '登录 / 采集', dataIndex: 'connection_status', width: 130,
+                      render: (value) => <Tag color={value === 'succeeded' ? 'green' : value === 'failed' ? 'red' : value === 'pending' ? 'blue' : 'default'}>{value === 'succeeded' ? '成功' : value === 'failed' ? '失败' : value === 'pending' ? '处理中' : value === 'not_attempted' ? '未尝试' : '待确认'}</Tag> },
+                    { title: '执行状态', dataIndex: 'workflow_status', width: 120,
+                      render: (value, row) => {
+                        const executionStatus = row.execution_status || value
+                        return executionStatus ? <Tag color={statusColor(executionStatus)}>{statusText(executionStatus)}</Tag> : '-'
+                      } },
+                    { title: '失败原因', width: 320, render: (_, row) => row.error_message
+                      ? <Typography.Text type="danger">{row.failure_code ? `${row.failure_code}: ` : ''}{row.error_message}</Typography.Text>
+                      : <Typography.Text type="secondary">-</Typography.Text> },
+                    { title: '操作', width: 180, fixed: 'right', render: (_, row) => (
+                      <Space>
+                        <Button size="small" icon={<SearchOutlined />}
+                          onClick={() => onOpenDeviceEvidence(
+                            row.device_id,
+                            row.device_name,
+                            row.workflow_run_id,
+                            activePatrolBatchId,
+                          )}>巡检详情</Button>
+                        {row.workflow_run_id && ACTIONABLE_STATUSES.has(row.workflow_status || '') && (
+                          <Button size="small" icon={<ReloadOutlined />} loading={retryRunLoading}
+                            onClick={() => onRetryRun(row.workflow_run_id!)}>重试</Button>
+                        )}
+                      </Space>
+                    ) },
+                  ]}
+                  scroll={{ x: 1200 }}
+                />
+              ) : (
+                <Alert type="info" showIcon message="旧批次没有设备清单"
+                  description="仍可查看最终报告；新发起批次会保存完整目标范围并支持服务端分页。" />
+              )}
             </Space>
-          </Space>
-        )}
-
-        {activeBatchResultSummary?.quality && (
-          <Alert
-            type={activeBatchResultSummary.quality.status === 'ready'
-              ? 'success'
-              : activeBatchResultSummary.quality.status === 'not_started'
-                ? 'info'
-                : 'warning'}
-            showIcon
-            message={`巡检质量：${activeBatchResultSummary.quality.status === 'ready'
-              ? '就绪'
-              : activeBatchResultSummary.quality.status === 'not_started'
-                ? '未开始 / 暂无质量数据'
-                : '降级'}`}
-            description={
-              `命令 ${activeBatchResultSummary.quality.execution_success_count || 0}/${activeBatchResultSummary.quality.command_count || 0} 执行成功，`
-              + `解析 ${activeBatchResultSummary.quality.parser_ready_count || 0}/${activeBatchResultSummary.quality.parser_eligible_count || 0} 项就绪，`
-              + `形成 ${activeBatchResultSummary.quality.observation_count || 0} 条结构化结果`
-            }
-          />
-        )}
-
-        {(activeBatchResultSummary?.no_event_summary?.total || 0) > 0 && (
-          <Alert
-            type="warning"
-            showIcon
-            message={`${activeBatchResultSummary!.no_event_summary!.total} 条变化未生成事件`}
-            description={(
-              <Space direction="vertical" size={4}>
-                <Space wrap size={[4, 4]}>
-                  {noEventTop3.map(([reason, count]) => (
-                    <Tag color="warning" key={reason}>{noEventReasonLabel(reason)}：{count}</Tag>
-                  ))}
-                </Space>
-                <Typography.Link href="/skills/parser?workspace=runtime&subtab=rule-gaps">
-                  查看治理缺口并导入证据
-                </Typography.Link>
-              </Space>
-            )}
-          />
-        )}
-
-        {liveStreamUnavailable && (
-          <Alert
-            type="warning"
-            showIcon
-            message="实时事件流暂不可用"
-            description="页面仍按固定间隔刷新批次状态；任务执行不受影响，错误信息可能延迟数秒显示。"
-          />
-        )}
-
-        {liveEvents.length > 0 && (
-          <Alert
-            type="error"
-            showIcon
-            message="实时失败推送"
-            description={(
-              <Space direction="vertical" size={2}>
-                {liveEvents.slice(0, 5).map((event, index) => (
-                  <Typography.Text key={`${String(event.type)}-${index}`} type="danger">
-                    {String(event.type || 'event')}
-                    {event.device_id ? ` · ${String(event.device_id)}` : ''}
-                    {event.failure_code ? ` · ${String(event.failure_code)}` : ''}
-                    {event.error ? ` · ${String(event.error)}` : ''}
-                  </Typography.Text>
-                ))}
-              </Space>
-            )}
-          />
-        )}
-
-        <Progress
-          percent={(activeBatch?.target_count || activeBatchSummary.total)
-            ? Math.round(((activeBatchSummary.completed + activeBatchSummary.failed + activeBatchSummary.cancelled + (activeBatch?.skipped_count || 0))
-              / (activeBatch?.target_count || activeBatchSummary.total)) * 100)
-            : 0}
-          status={activeBatchSummary.failed || activeBatch?.skipped_count ? 'exception'
-            : activeBatchSummary.running || activeBatchSummary.pending ? 'active' : 'success'}
-        />
-
-        {checkItemSummary && (
-          <ReportReleasePanel
-            batchId={activePatrolBatchId}
-            batchActive={Boolean(
-              activeBatchSummary.running || activeBatchSummary.pending,
-            )}
-          />
-        )}
-
-        <Space direction="vertical" size={8} style={{ width: '100%' }}>
-          <Typography.Text strong>批次交付物</Typography.Text>
-          <Space wrap>
-            <Button icon={<DownloadOutlined />}
-              loading={exportBatchRawCliLoading}
-              onClick={() => onExportBatchRawCli(activePatrolBatchId)}>
-              原始输出
-            </Button>
-            <Button icon={<DownloadOutlined />} loading={exportBatchEventsLoading}
-              onClick={() => onExportBatchEvents(activePatrolBatchId)}>
-              事件数据
-            </Button>
-            <Button icon={<DownloadOutlined />} loading={exportBatchReportLoading}
-              onClick={() => onExportBatchReport(activePatrolBatchId)}>
-              巡检报告
-            </Button>
-            <Button icon={<FileExcelOutlined />}
-              loading={exportBatchTechnicalWorkbookLoading}
-              onClick={() => onExportBatchTechnicalWorkbook(activePatrolBatchId)}>
-              巡检明细 Excel
-            </Button>
-            <Button icon={<SafetyCertificateOutlined />}
-              loading={exportBatchEvidencePackageLoading}
-              onClick={() => onExportBatchEvidencePackage(activePatrolBatchId)}>
-              证据包
-            </Button>
-          </Space>
-          <Typography.Text type="secondary">
-            原始输出按设备保留采集器生成的 .txt，并附完整设备清单和登录失败清单；
-            事件数据为 CSV；巡检报告为适合汇报与归档的 Word；巡检明细 Excel 按检查项分 Sheet，
-            未关联检查项的命令单独成 Sheet；证据包保存冻结事实、检查项结论、风险生命周期
-            与命令快照索引，不重复包含原始 CLI 正文。
-          </Typography.Text>
-        </Space>
-
-        {(activeBatchSummary.failed > 0 || activeBatchSummary.cancelled > 0 || (activeBatch?.skipped_count || 0) > 0) && (
-          <Alert type="warning" showIcon
-            message={`有 ${activeBatchSummary.failed + activeBatchSummary.cancelled + (activeBatch?.skipped_count || 0)} 台设备需要处理`}
-            description="预检跳过（含 Parser 覆盖策略 skip/block）、登录/采集失败和取消设备均保留在设备清单中，可按状态筛选后查看证据或重试。" />
-        )}
-
-        <Space direction="vertical" size={8} style={{ width: '100%' }}>
-          <Space wrap>
-            <Typography.Text strong>设备执行明细</Typography.Text>
-            <Input.Search key={`${activePatrolBatchId}-${batchDeviceSearch}`} allowClear
-              defaultValue={batchDeviceSearch}
-              placeholder="搜索设备名、设备 ID 或管理地址" style={{ width: 320 }}
-              onSearch={onBatchDeviceSearchChange}
-              onChange={(event) => !event.target.value && onBatchDeviceSearchChange('')} />
-            <Select allowClear aria-label="设备选择结果" placeholder="全部设备" style={{ width: 160 }}
-              value={batchDeviceSelectionStatus}
-              onChange={onBatchDeviceSelectionStatusChange}
-              options={[
-                { value: 'launched', label: '已发起' },
-                { value: 'skipped', label: '预检跳过' },
-              ]} />
-          </Space>
-          {activeBatchDevices ? (
-            <Table<PatrolBatchDeviceItem>
-              rowKey="device_id"
-              size="small"
-              loading={activeBatchDevicesLoading}
-              dataSource={activeBatchDevices.items}
-              pagination={{
-                current: batchDevicePage,
-                pageSize: activeBatchDevices.limit,
-                total: activeBatchDevices.total,
-                showSizeChanger: false,
-                showTotal: (total) => `共 ${total} 台设备`,
-                onChange: onBatchDevicePageChange,
-              }}
-              columns={[
-                { title: '设备', width: 260, render: (_, row) => (
-                  <Space direction="vertical" size={0}>
-                    <Typography.Text strong>{row.device_name || row.device_id}</Typography.Text>
-                    <Typography.Text type="secondary">{row.management_ip || row.device_id}</Typography.Text>
-                  </Space>
-                ) },
-                { title: '范围结果', dataIndex: 'selection_status', width: 120,
-                  render: (value) => <Tag color={value === 'launched' ? 'green' : 'orange'}>{value === 'launched' ? '已发起' : '预检跳过'}</Tag> },
-                { title: '登录 / 采集', dataIndex: 'connection_status', width: 130,
-                  render: (value) => <Tag color={value === 'succeeded' ? 'green' : value === 'failed' ? 'red' : value === 'pending' ? 'blue' : 'default'}>{value === 'succeeded' ? '成功' : value === 'failed' ? '失败' : value === 'pending' ? '处理中' : value === 'not_attempted' ? '未尝试' : '待确认'}</Tag> },
-                { title: '执行状态', dataIndex: 'workflow_status', width: 120,
-                  render: (value, row) => {
-                    const executionStatus = row.execution_status || value
-                    return executionStatus ? <Tag color={statusColor(executionStatus)}>{statusText(executionStatus)}</Tag> : '-'
-                  } },
-                { title: '失败原因', width: 320, render: (_, row) => row.error_message
-                  ? <Typography.Text type="danger">{row.failure_code ? `${row.failure_code}: ` : ''}{row.error_message}</Typography.Text>
-                  : <Typography.Text type="secondary">-</Typography.Text> },
-                { title: '操作', width: 180, fixed: 'right', render: (_, row) => (
-                  <Space>
-                    <Button size="small" icon={<SearchOutlined />}
-                      onClick={() => onOpenDeviceEvidence(
-                        row.device_id,
-                        row.device_name,
-                        row.workflow_run_id,
-                        activePatrolBatchId,
-                      )}>巡检详情</Button>
-                    {row.workflow_run_id && ACTIONABLE_STATUSES.has(row.workflow_status || '') && (
-                      <Button size="small" icon={<ReloadOutlined />} loading={retryRunLoading}
-                        onClick={() => onRetryRun(row.workflow_run_id!)}>重试</Button>
-                    )}
-                  </Space>
-                ) },
-              ]}
-              scroll={{ x: 1200 }}
+          </Space> },
+          { key: 'flow', label: '巡检执行流程', children: <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <PatrolBatchPipeline
+              batch={activeBatch}
+              counts={activeBatchSummary}
+              summary={activeBatchResultSummary}
             />
-          ) : (
-            <Alert type="info" showIcon message="旧批次没有设备清单"
-              description="仍可查看最终报告；新发起批次会保存完整目标范围并支持服务端分页。" />
-          )}
-        </Space>
+
+            {activeBatchResultSummary?.quality && (
+              <Alert
+                type={activeBatchResultSummary.quality.status === 'ready'
+                  ? 'success'
+                  : activeBatchResultSummary.quality.status === 'not_started'
+                    ? 'info'
+                    : 'warning'}
+                showIcon
+                message={`巡检质量：${activeBatchResultSummary.quality.status === 'ready'
+                  ? '就绪'
+                  : activeBatchResultSummary.quality.status === 'not_started'
+                    ? '未开始 / 暂无质量数据'
+                    : '降级'}`}
+                description={
+                  `命令 ${activeBatchResultSummary.quality.execution_success_count || 0}/${activeBatchResultSummary.quality.command_count || 0} 执行成功，`
+                  + `解析 ${activeBatchResultSummary.quality.parser_ready_count || 0}/${activeBatchResultSummary.quality.parser_eligible_count || 0} 项就绪，`
+                  + `形成 ${activeBatchResultSummary.quality.observation_count || 0} 条结构化结果`
+                }
+              />
+            )}
+
+            {(activeBatchResultSummary?.no_event_summary?.total || 0) > 0 && (
+              <Alert
+                type="warning"
+                showIcon
+                message={`${activeBatchResultSummary!.no_event_summary!.total} 条变化未生成事件`}
+                description={(
+                  <Space direction="vertical" size={4}>
+                    <Space wrap size={[4, 4]}>
+                      {noEventTop3.map(([reason, count]) => (
+                        <Tag color="warning" key={reason}>{noEventReasonLabel(reason)}：{count}</Tag>
+                      ))}
+                    </Space>
+                    <Typography.Link href="/skills/parser?workspace=runtime&subtab=rule-gaps">
+                      查看治理缺口并导入证据
+                    </Typography.Link>
+                  </Space>
+                )}
+              />
+            )}
+
+          </Space> },
+          { key: 'result', label: '巡检结果', children: (
+            <OfflinePatrolResultPanel
+              canManageRules
+              purpose="offline_patrol"
+              report={batchResultQuery.data}
+              loading={batchResultQuery.isLoading}
+              error={batchResultQuery.error}
+              isMobile={isMobile}
+              workbookDownloading={exportBatchTechnicalWorkbookLoading}
+              onRetry={() => batchResultQuery.refetch()}
+              onDownloadReport={() => setReportBatchId(activePatrolBatchId)}
+              onDownloadWorkbook={() => onExportBatchTechnicalWorkbook(activePatrolBatchId)}
+              onLoadComparisonEvidence={(changeId) => inspectionBatchApi.getPatrolBatchComparisonEvidence(activePatrolBatchId, changeId)}
+              onOpenRuleAssets={() => { window.location.href = businessHref('/skills/parser?workspace=production') }}
+            />
+          ) },
+          { key: 'trace', label: '技术追溯', children: <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            {checkItemSummary ? (
+              <Alert
+                showIcon
+                type={checkItemSummary.conclusion.code.startsWith('at_risk')
+                  ? 'error'
+                  : checkItemSummary.conclusion.code === 'in_progress'
+                      || checkItemSummary.conclusion.code === 'pending_report'
+                    ? 'info'
+                    : checkItemSummary.conclusion.code === 'healthy'
+                      ? 'success'
+                      : 'warning'}
+                message={`检查项结论：${checkItemSummary.conclusion.text}`}
+                description={`${checkItemSummary.conclusion.basis}（可信度：${checkItemSummary.conclusion.trust}）`}
+              />
+            ) : null /* Without check items the batch conclusion is the one on the result tab. */}
+
+            {checkItemSummary && (
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                <div className="patrol-history__header">
+                  <Space direction="vertical" size={0}>
+                    <Typography.Text strong>检查项执行与结论</Typography.Text>
+                    <Typography.Text type="secondary">
+                      每行代表一台设备的一项检查。结论来自检查项评估，任务完成或没有事件都不代表健康。
+                    </Typography.Text>
+                  </Space>
+                  <div className="patrol-history__filters">
+                    <Input.Search
+                      allowClear
+                      size="small"
+                      placeholder="设备、管理 IP 或检查项"
+                      className="patrol-history__search"
+                      onSearch={(value) => {
+                        setCheckResultSearch(value.trim())
+                        setCheckResultPage(1)
+                        setCheckResultCursors({ 1: undefined })
+                      }}
+                    />
+                    <Select
+                      allowClear
+                      size="small"
+                      placeholder="评估结论"
+                      value={checkResultStatus}
+                      style={{ width: 128 }}
+                      options={[
+                        { value: 'healthy', label: '正常' },
+                        { value: 'at_risk', label: '存在风险' },
+                        { value: 'unable_to_determine', label: '无法判断' },
+                        { value: 'not_applicable', label: '不适用' },
+                        { value: 'informational', label: '信息性结果' },
+                        { value: 'pending', label: '待评估' },
+                      ]}
+                      onChange={(value) => {
+                        setCheckResultStatus(value)
+                        setCheckResultPage(1)
+                        setCheckResultCursors({ 1: undefined })
+                      }}
+                    />
+                    <Select
+                      allowClear
+                      size="small"
+                      placeholder="证据质量"
+                      value={checkEvidenceFilter}
+                      style={{ width: 150 }}
+                      options={[
+                        { value: 'source_identity:unknown', label: '身份待确认' },
+                        { value: 'source_identity:conflict', label: '身份冲突' },
+                        { value: 'output_quality:truncated', label: '输出被截断' },
+                        { value: 'output_quality:paged', label: '分页未结束' },
+                        { value: 'output_quality:device_error', label: '设备返回错误' },
+                        { value: 'freshness:stale', label: '数据已过期' },
+                        { value: 'coverage:partial', label: '覆盖不完整' },
+                        { value: 'coverage:unknown', label: '覆盖未知' },
+                        { value: 'coverage:unbounded', label: '覆盖不可穷举' },
+                      ]}
+                      onChange={(value) => {
+                        setCheckEvidenceFilter(value)
+                        setCheckResultPage(1)
+                        setCheckResultCursors({ 1: undefined })
+                      }}
+                    />
+                    <Button size="small" onClick={() => checkResultsQuery.refetch()}>刷新</Button>
+                  </div>
+                </div>
+                {checkResultsQuery.isError && (
+                  <Alert
+                    type="error"
+                    showIcon
+                    message="检查项结果加载失败"
+                    description="请刷新后重试；该错误不会改变已冻结的巡检事实。"
+                  />
+                )}
+                <Table<PatrolBatchCheckResult>
+                  rowKey="execution_id"
+                  size="small"
+                  loading={checkResultsQuery.isFetching}
+                  dataSource={checkResultsQuery.data?.items || []}
+                  pagination={false}
+                  columns={[
+                    {
+                      title: '设备',
+                      width: 220,
+                      render: (_, row) => (
+                        <Space direction="vertical" size={0}>
+                          <Typography.Text strong>{row.device_name || row.device_id}</Typography.Text>
+                          <Typography.Text type="secondary">{row.management_ip || row.device_id}</Typography.Text>
+                        </Space>
+                      ),
+                    },
+                    {
+                      title: '检查项',
+                      width: 250,
+                      render: (_, row) => (
+                        <Space direction="vertical" size={0}>
+                          <Typography.Text strong>{row.check_item_name}</Typography.Text>
+                          <Typography.Text code>{row.check_item_id}</Typography.Text>
+                        </Space>
+                      ),
+                    },
+                    {
+                      title: '执行',
+                      dataIndex: 'execution_status',
+                      width: 120,
+                      render: (value) => <Tag color={statusColor(value)}>{statusText(value)}</Tag>,
+                    },
+                    {
+                      title: '评估结论',
+                      dataIndex: 'assessment_status',
+                      width: 120,
+                      render: (value) => {
+                        const display = assessmentStatus(value)
+                        return <Tag color={display.color}>{display.text}</Tag>
+                      },
+                    },
+                    {
+                      title: '完整性',
+                      dataIndex: 'completeness_status',
+                      width: 110,
+                      render: (value) => completenessStatus(value),
+                    },
+                    {
+                      title: '基线',
+                      dataIndex: 'comparison_status',
+                      width: 120,
+                      render: (value) => comparisonStatus(value),
+                    },
+                    {
+                      title: '证据资格',
+                      width: 250,
+                      render: (_, row) => (
+                        <Space wrap size={[2, 2]}>
+                          {([
+                            ['identity', row.source_identity_status],
+                            ['output', row.output_quality_status],
+                            ['freshness', row.freshness_status],
+                          ] as const).map(([kind, value]) => {
+                            const display = evidenceStatus(kind, value)
+                            return <Tag key={kind} color={display.color}>{display.text}</Tag>
+                          })}
+                        </Space>
+                      ),
+                    },
+                    {
+                      title: '实体覆盖',
+                      width: 210,
+                      render: (_, row) => (
+                        <Space direction="vertical" size={0}>
+                          {(() => {
+                            const display = evidenceStatus('coverage', row.coverage_status)
+                            return <Tag color={display.color}>{display.text}</Tag>
+                          })()}
+                          <Typography.Text type="secondary">
+                            已见 {row.observed_entity_count}
+                            {row.expected_entity_count != null ? ` / 应有 ${row.expected_entity_count}` : ''}
+                            {' · '}{coverageBasisLabel(row.coverage_basis)}
+                          </Typography.Text>
+                        </Space>
+                      ),
+                    },
+                    {
+                      title: '判断依据',
+                      width: 230,
+                      render: (_, row) => {
+                        const conflicts = row.assessment_basis_summary?.status_counts?.conflict || 0
+                        const missing = row.assessment_basis_summary?.status_counts?.missing || 0
+                        return (
+                          <Space direction="vertical" size={0}>
+                            <Typography.Text
+                              type={conflicts || missing || !row.assessment_basis_digest ? 'warning' : undefined}
+                              title={row.assessment_basis_digest || undefined}
+                            >
+                              {assessmentBasisText(row)}
+                            </Typography.Text>
+                            {conflicts > 0 && <Tag color="red">冲突 {conflicts}</Tag>}
+                            {!conflicts && missing > 0 && <Tag color="orange">缺失 {missing}</Tag>}
+                            <Button
+                              type="link"
+                              size="small"
+                              onClick={() => {
+                                setSelectedCheckExecutionId(row.execution_id)
+                                setBasisEntryPage(1)
+                              }}
+                            >
+                              查看依据
+                            </Button>
+                          </Space>
+                        )
+                      },
+                    },
+                    {
+                      title: '阻断原因',
+                      width: 280,
+                      render: (_, row) => row.blocking_reason_codes.length
+                        ? <Typography.Text type="warning">{row.blocking_reason_codes.join(', ')}</Typography.Text>
+                        : <Typography.Text type="secondary">-</Typography.Text>,
+                    },
+                    {
+                      title: '操作',
+                      width: 96,
+                      render: (_, row) => (
+                        <Button
+                          type="text"
+                          size="small"
+                          icon={<SearchOutlined />}
+                          title="查看检查证据"
+                          onClick={() => onOpenDeviceEvidence(
+                            row.device_id,
+                            row.device_name,
+                            undefined,
+                            activePatrolBatchId,
+                          )}
+                        >
+                          查看
+                        </Button>
+                      ),
+                    },
+                  ]}
+                  scroll={{ x: 2010 }}
+                />
+                <Space
+                  wrap
+                  size={8}
+                  style={{ width: '100%', justifyContent: 'flex-end' }}
+                >
+                  <Typography.Text type="secondary">
+                    共 {checkResultsQuery.data?.total || 0} 项，第 {checkResultPage} 页
+                  </Typography.Text>
+                  <Select
+                    aria-label="检查项结果每页条数"
+                    size="small"
+                    value={String(checkResultPageSize)}
+                    style={{ width: 96 }}
+                    options={PATROL_BATCH_PAGE_SIZE_OPTIONS.map((value) => ({
+                      label: `${value} 条/页`,
+                      value,
+                    }))}
+                    onChange={(value) => {
+                      setCheckResultPageSize(Number(value))
+                      setCheckResultPage(1)
+                      setCheckResultCursors({ 1: undefined })
+                    }}
+                  />
+                  <Button
+                    size="small"
+                    icon={<LeftOutlined />}
+                    disabled={checkResultPage <= 1 || checkResultsQuery.isFetching}
+                    onClick={() => setCheckResultPage((page) => Math.max(1, page - 1))}
+                  >
+                    上一页
+                  </Button>
+                  <Button
+                    size="small"
+                    icon={<RightOutlined />}
+                    disabled={
+                      checkResultsQuery.isFetching
+                      || !checkResultsQuery.data?.has_more
+                      || !checkResultsQuery.data?.next_cursor
+                    }
+                    onClick={() => {
+                      const nextCursor = checkResultsQuery.data?.next_cursor
+                      if (!nextCursor) return
+                      setCheckResultCursors((current) => ({
+                        ...current,
+                        [checkResultPage + 1]: nextCursor,
+                      }))
+                      setCheckResultPage((page) => page + 1)
+                    }}
+                  >
+                    下一页
+                  </Button>
+                </Space>
+              </Space>
+            )}
+
+            {checkItemSummary && (
+              <ReportReleasePanel
+                batchId={activePatrolBatchId}
+                batchActive={Boolean(
+                  activeBatchSummary.running || activeBatchSummary.pending,
+                )}
+              />
+            )}
+
+            <Space direction="vertical" size={8} style={{ width: '100%' }}>
+              <Typography.Text strong>批次交付物</Typography.Text>
+              <Space wrap>
+                <Button icon={<DownloadOutlined />}
+                  loading={exportBatchRawCliLoading}
+                  onClick={() => onExportBatchRawCli(activePatrolBatchId)}>
+                  原始输出
+                </Button>
+                <Button icon={<DownloadOutlined />} loading={exportBatchEventsLoading}
+                  onClick={() => onExportBatchEvents(activePatrolBatchId)}>
+                  事件数据
+                </Button>
+                <Button icon={<DownloadOutlined />} loading={exportBatchReportLoading}
+                  onClick={() => onExportBatchReport(activePatrolBatchId)}>
+                  巡检报告
+                </Button>
+                <Button icon={<FileExcelOutlined />}
+                  loading={exportBatchTechnicalWorkbookLoading}
+                  onClick={() => onExportBatchTechnicalWorkbook(activePatrolBatchId)}>
+                  巡检明细 Excel
+                </Button>
+                <Button icon={<SafetyCertificateOutlined />}
+                  loading={exportBatchEvidencePackageLoading}
+                  onClick={() => onExportBatchEvidencePackage(activePatrolBatchId)}>
+                  证据包
+                </Button>
+              </Space>
+              <Typography.Text type="secondary">
+                原始输出按设备保留采集器生成的 .txt，并附完整设备清单和登录失败清单；
+                事件数据为 CSV；巡检报告为适合汇报与归档的 Word；巡检明细 Excel 按检查项分 Sheet，
+                未关联检查项的命令单独成 Sheet；证据包保存冻结事实、检查项结论、风险生命周期
+                与命令快照索引，不重复包含原始 CLI 正文。
+              </Typography.Text>
+            </Space>
+
+          </Space> },
+        ]} />
       </Space>
+      {reportBatchId && <PatrolReportDialog key={reportBatchId} jobId={reportBatchId} onClose={() => setReportBatchId(undefined)} />}
       </InspectionDetailPage>
     )}
   </Space>
