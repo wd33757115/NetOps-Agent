@@ -2747,6 +2747,44 @@ body {
   min-height: 0;
 }
 
+/* A thin, faint scrollbar that only darkens and widens under the pointer.
+   Chromium ignores ::-webkit-scrollbar once scrollbar-width/color are set, so
+   those are kept for browsers without the pseudo-elements. */
+.grok-history::-webkit-scrollbar {
+  width: 10px;
+}
+
+.grok-history::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.grok-history::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 10px;
+  background-color: rgba(15, 23, 42, 0.07);
+  background-clip: padding-box;
+}
+
+.grok-history::-webkit-scrollbar-thumb:hover {
+  border-width: 2px;
+  background-color: rgba(15, 23, 42, 0.3);
+}
+
+.grok-history::-webkit-scrollbar-button {
+  display: none;
+}
+
+@supports not selector(::-webkit-scrollbar) {
+  .grok-history {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(15, 23, 42, 0.1) transparent;
+  }
+
+  .grok-history:hover {
+    scrollbar-color: rgba(15, 23, 42, 0.3) transparent;
+  }
+}
+
 .grok-history-empty {
   padding: 12px;
   font-size: 13px;
@@ -2767,6 +2805,29 @@ body {
 .grok-history-loading {
   text-align: center;
   padding: 24px;
+}
+
+/* The end of the loaded history: the next page loads as it scrolls into view. */
+.grok-history-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 12px 12px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.grok-history-more button {
+  border: none;
+  background: transparent;
+  color: #64748b;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.grok-history-more button:hover {
+  color: #374151;
 }
 
 .grok-history-item {

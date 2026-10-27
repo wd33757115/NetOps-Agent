@@ -29,26 +29,28 @@ interface ChatShellSidebarProps {
   onNavigate?: () => void
 }
 
-type HistoryGroup = 'today' | 'yesterday' | 'earlier'
-
-function groupLabel(group: HistoryGroup): string {
-  if (group === 'today') return '今天'
-  if (group === 'yesterday') return '昨天'
-  return '更早'
+/** When a conversation was last used; one that has no date yet was just created. */
+function lastUsed(conv: Conversation): number {
+  const raw = conv.updatedAt || conv.createdAt
+  const time = raw ? new Date(raw).getTime() : NaN
+  return Number.isNaN(time) ? Date.now() : time
 }
 
-function historyGroup(conv: Conversation): HistoryGroup {
-  const raw = conv.updatedAt || conv.createdAt
-  if (!raw) return 'earlier'
-  const date = new Date(raw)
-  const now = new Date()
+/** The heading a conversation is listed under: recent days by name, then months, then years. */
+function historyGroup(conv: Conversation, now = new Date()): string {
+  const date = new Date(lastUsed(conv))
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  const startOfYesterday = new Date(startOfToday)
-  startOfYesterday.setDate(startOfYesterday.getDate() - 1)
-
-  if (date >= startOfToday) return 'today'
-  if (date >= startOfYesterday) return 'yesterday'
-  return 'earlier'
+  const daysAgo = (days: number) => {
+    const start = new Date(startOfToday)
+    start.setDate(start.getDate() - days)
+    return start
+  }
+  if (date >= startOfToday) return '今天'
+  if (date >= daysAgo(1)) return '昨天'
+  if (date >= daysAgo(7)) return '前 7 天'
+  if (date >= daysAgo(30)) return '前 30 天'
+  if (date.getFullYear() === now.getFullYear()) return `${date.getMonth() + 1} 月`
+  return `${date.getFullYear()} 年`
 }
 
 function userInitials(username: string): string {
@@ -86,7 +88,13 @@ const ChatShellSidebar: React.FC<ChatShellSidebarProps> = ({ embedded = false, o
     loading,
     error,
     loadConversations,
+    hasMoreConversations,
+    loadingMoreConversations,
+    loadMoreConversations,
+    loadAllConversations,
   } = useChatStore()
+  const historyRef = useRef<HTMLDivElement>(null)
+  const moreRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (user?.id && workbench) void loadConversations()
@@ -109,17 +117,34 @@ const ChatShellSidebar: React.FC<ChatShellSidebarProps> = ({ embedded = false, o
     return conversations.filter((c) => c.title.toLowerCase().includes(q))
   }, [conversations, searchQuery])
 
+  // Newest first, each under the heading of when it was last used, in the order the headings first appear.
   const groupedHistory = useMemo(() => {
-    const groups: Record<HistoryGroup, Conversation[]> = {
-      today: [],
-      yesterday: [],
-      earlier: [],
+    const groups = new Map<string, Conversation[]>()
+    const now = new Date()
+    for (const conv of [...filteredConversations].sort((a, b) => lastUsed(b) - lastUsed(a))) {
+      const label = historyGroup(conv, now)
+      groups.set(label, [...(groups.get(label) || []), conv])
     }
-    for (const conv of filteredConversations) {
-      groups[historyGroup(conv)].push(conv)
-    }
-    return groups
+    return Array.from(groups)
   }, [filteredConversations])
+
+  // Scrolling near the end of the list brings in the next page of older conversations.
+  useEffect(() => {
+    const root = historyRef.current
+    const sentinel = moreRef.current
+    if (!root || !sentinel || !hasMoreConversations || searchQuery.trim()) return
+    const observer = new IntersectionObserver(
+      (entries) => { if (entries.some((entry) => entry.isIntersecting)) void loadMoreConversations() },
+      { root, rootMargin: '0px 0px 240px 0px' },
+    )
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [hasMoreConversations, loadMoreConversations, searchQuery, conversations.length, historyOpen])
+
+  // A search looks through the whole history, not only the pages already scrolled to.
+  useEffect(() => {
+    if (searchQuery.trim() && hasMoreConversations) void loadAllConversations()
+  }, [searchQuery, hasMoreConversations, loadAllConversations])
 
   useEffect(() => {
     if (!userMenuOpen) return
@@ -264,7 +289,7 @@ const ChatShellSidebar: React.FC<ChatShellSidebarProps> = ({ embedded = false, o
                 </div>
               )}
 
-              <div className="grok-history">
+              <div className="grok-history" ref={historyRef}>
                 {error && <div className="grok-history-error" role="alert">{error}<button type="button" onClick={() => void loadConversations()}>重试</button></div>}
                 {loading && conversations.length === 0 ? (
                   <div className="grok-history-loading">
@@ -273,12 +298,10 @@ const ChatShellSidebar: React.FC<ChatShellSidebarProps> = ({ embedded = false, o
                 ) : filteredConversations.length === 0 ? (
                   <p className="grok-history-empty">暂无对话</p>
                 ) : (
-                  (['today', 'yesterday', 'earlier'] as HistoryGroup[]).map((group) => {
-                    const items = groupedHistory[group]
-                    if (items.length === 0) return null
+                  groupedHistory.map(([group, items]) => {
                     return (
                       <div key={group} className="grok-history-group">
-                        <div className="grok-history-group-label">{groupLabel(group)}</div>
+                        <div className="grok-history-group-label">{group}</div>
                         {items.map((conv) => (
                           <div
                             key={conv.id}
@@ -287,6 +310,7 @@ const ChatShellSidebar: React.FC<ChatShellSidebarProps> = ({ embedded = false, o
                             <button
                               type="button"
                               className="grok-history-link"
+                              title={conv.title}
                               onClick={() => handleSelectConversation(conv)}
                             >
                               {conv.title}
@@ -312,6 +336,16 @@ const ChatShellSidebar: React.FC<ChatShellSidebarProps> = ({ embedded = false, o
                       </div>
                     )
                   })
+                )}
+                {hasMoreConversations && !searchQuery.trim() && (
+                  <div ref={moreRef} className="grok-history-more">
+                    {loadingMoreConversations ? <Spin size="small" /> : (
+                      <button type="button" onClick={() => void loadMoreConversations()}>加载更早的对话</button>
+                    )}
+                  </div>
+                )}
+                {searchQuery.trim() && loadingMoreConversations && (
+                  <div className="grok-history-more"><Spin size="small" /> 正在搜索全部对话…</div>
                 )}
               </div>
             </>
