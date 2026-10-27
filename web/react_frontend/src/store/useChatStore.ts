@@ -39,6 +39,12 @@ interface ChatStore {
   addMessage: (message: Message) => void
   createNewConversation: () => void
   loadConversations: () => Promise<void>
+  /** Older conversations arrive a page at a time, as the history list is scrolled. */
+  hasMoreConversations: boolean
+  loadingMoreConversations: boolean
+  loadMoreConversations: () => Promise<void>
+  /** Every conversation, so that a search covers the whole history and not only what was scrolled to. */
+  loadAllConversations: () => Promise<void>
   refreshConversationMeta: () => Promise<void>
   loadConversationDetail: (id: string) => Promise<void>
   updateConversationTitle: (id: string, title: string) => void
@@ -48,14 +54,50 @@ interface ChatStore {
 let chatEpoch = 0
 const detailInflight = new Map<string, Promise<void>>()
 
+// The server returns 20 conversations unless asked for more.
+const CONVERSATION_PAGE = 50
+// How many conversations the server has already sent; the next page starts there.
+let conversationOffset = 0
+
+type RemoteConversation = {
+  id: string
+  title: string
+  status?: string
+  summary?: string
+  created_at?: string
+  updated_at?: string
+  message_count?: number
+}
+
+const fromRemote = (c: RemoteConversation, existing?: Conversation): Conversation => {
+  const hasLocalMessages = (existing?.messages.length ?? 0) > 0
+  return {
+    id: c.id,
+    title: c.title,
+    messages: hasLocalMessages ? existing!.messages : [],
+    status: c.status,
+    summary: c.summary,
+    createdAt: c.created_at,
+    updatedAt: c.updated_at,
+    messageCount: c.message_count,
+    detailLoaded: hasLocalMessages || (c.message_count ?? 0) === 0 || existing?.detailLoaded,
+  }
+}
+
 export const useChatStore = create<ChatStore>((set, get) => ({
   reset: () => {
     chatEpoch++
     detailInflight.clear()
-    set({ currentConversationId: null, conversations: [], loading: false, detailLoadingId: null, error: null })
+    conversationOffset = 0
+    set({
+      currentConversationId: null, conversations: [], loading: false, detailLoadingId: null, error: null,
+      hasMoreConversations: false, loadingMoreConversations: false,
+    })
   },
   currentConversationId: null,
   conversations: [],
+  hasMoreConversations: false,
+  loadingMoreConversations: false,
   loading: false,
   detailLoadingId: null,
   error: null,
@@ -117,26 +159,13 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     set({ loading: true, error: null })
     try {
       const { conversationApi } = await import('../services/api')
-      const data = await conversationApi.getConversations()
+      const data = await conversationApi.getConversations({ limit: CONVERSATION_PAGE, offset: 0 })
       if (epoch !== chatEpoch) return
-      set((state) => {
-        const conversations: Conversation[] = data.map((c) => {
-          const existing = state.conversations.find((conv) => conv.id === c.id)
-          const hasLocalMessages = (existing?.messages.length ?? 0) > 0
-          return {
-            id: c.id,
-            title: c.title,
-            messages: hasLocalMessages ? existing!.messages : [],
-            status: c.status,
-            summary: c.summary,
-            createdAt: c.created_at,
-            updatedAt: c.updated_at,
-            messageCount: c.message_count,
-            detailLoaded: hasLocalMessages || (c.message_count ?? 0) === 0 || existing?.detailLoaded,
-          }
-        })
-        return { conversations }
-      })
+      conversationOffset = data.length
+      set((state) => ({
+        conversations: data.map((c) => fromRemote(c, state.conversations.find((conv) => conv.id === c.id))),
+        hasMoreConversations: data.length === CONVERSATION_PAGE,
+      }))
       if (data.length > 0 && !get().currentConversationId) {
         set({ currentConversationId: data[0].id })
       }
@@ -148,11 +177,45 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       if (epoch === chatEpoch) set({ loading: false })
     }
   },
+  loadMoreConversations: async () => {
+    const epoch = chatEpoch
+    const { loading, loadingMoreConversations, hasMoreConversations } = get()
+    if (loading || loadingMoreConversations || !hasMoreConversations) return
+    set({ loadingMoreConversations: true })
+    try {
+      const { conversationApi } = await import('../services/api')
+      // A conversation made since the first page shifts the server's order by one; ids already listed are skipped below.
+      const data = await conversationApi.getConversations({ limit: CONVERSATION_PAGE, offset: conversationOffset })
+      if (epoch !== chatEpoch) return
+      conversationOffset += data.length
+      set((state) => {
+        const known = new Set(state.conversations.map((conv) => conv.id))
+        return {
+          conversations: [...state.conversations, ...data.filter((c) => !known.has(c.id)).map((c) => fromRemote(c))],
+          hasMoreConversations: data.length === CONVERSATION_PAGE,
+        }
+      })
+    } catch (error) {
+      if (epoch !== chatEpoch) return
+      console.error('Failed to load more conversations:', error)
+      set({ error: '加载更早的对话失败' })
+    } finally {
+      if (epoch === chatEpoch) set({ loadingMoreConversations: false })
+    }
+  },
+  loadAllConversations: async () => {
+    // Bounded so that a server which keeps answering full pages cannot loop forever.
+    for (let page = 0; page < 200 && get().hasMoreConversations; page += 1) {
+      const before = get().conversations.length
+      await get().loadMoreConversations()
+      if (get().conversations.length === before) break
+    }
+  },
   refreshConversationMeta: async () => {
     const epoch = chatEpoch
     try {
       const { conversationApi } = await import('../services/api')
-      const data = await conversationApi.getConversations()
+      const data = await conversationApi.getConversations({ limit: CONVERSATION_PAGE, offset: 0 })
       if (epoch !== chatEpoch) return
       set((state) => ({
         conversations: state.conversations.map((conv) => {
