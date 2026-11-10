@@ -10,6 +10,12 @@ trees without knowing any vendor.
 
 Nothing is guessed: a code the mapping does not list, a value of the wrong form or a
 lookup that finds no record leaves the field out and is reported with the device's text.
+
+A device whose data spans several YANG modules (each its own XML namespace, augments
+included) names them in ``namespaces`` ({prefix: URI}); a path or leaf step written
+``prefix:name`` is in that module, and a step without a prefix is in its parent's, the
+way YANG and RFC 7951 name augmented nodes. The first step of a path without a prefix is
+in the mapping's ``namespace``.
 """
 
 from __future__ import annotations
@@ -28,10 +34,10 @@ from defusedxml import ElementTree
 
 MAPPINGS = Path(__file__).resolve().parent / "mappings"
 
-NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*")
+NAME = re.compile(r"(?:[A-Za-z_][A-Za-z0-9_.-]*:)?[A-Za-z_][A-Za-z0-9_.-]*")
 FIELD = re.compile(r"[a-z][a-z0-9-]*")
 RULE_KEYS = frozenset(
-    {"leaf", "codes", "convert", "lookup", "format", "when", "none", "default"}
+    {"leaf", "codes", "convert", "lookup", "format", "when", "none", "default", "list", "exists"}
 )
 
 
@@ -81,6 +87,15 @@ def _base64_hex(text):
         return None
 
 
+def _address_hex(text):
+    """An address the device writes as text, as the upper-case hex octets IEEE 802.1AB
+    management addresses are (``10.255.0.1`` → ``0AFF0001``)."""
+    try:
+        return ipaddress.ip_address(text).packed.hex().upper()
+    except ValueError:
+        return None
+
+
 def _prefix(text):
     try:
         return str(ipaddress.ip_network(text, strict=False))
@@ -96,6 +111,7 @@ CONVERTERS = {
     "address": _address,
     "prefix": _prefix,
     "base64-hex": _base64_hex,
+    "address-hex": _address_hex,
 }
 
 
@@ -109,6 +125,8 @@ class Rule:
     when: tuple[str, frozenset[str]] | None = None  # (leaf, its values for which it applies)
     none: frozenset[str] = frozenset()  # device texts that mean "no value"
     default: Any = None  # the value when the device gives none
+    many: bool = False  # a leaf-list: every value, in the device's order
+    exists: Any = None  # the value when the (possibly empty) element is present
 
 
 @dataclass(frozen=True)
@@ -130,10 +148,35 @@ class StandardMapping:
     platforms: tuple[str, ...] = ()
     id: str = ""
     sha256: str = ""
+    namespaces: Mapping[str, str] = field(default_factory=dict)  # {prefix: URI}
 
 
-def _leaf_path(text, where):
-    if not isinstance(text, str) or not all(NAME.fullmatch(p) for p in text.split("/")):
+def _split(step):
+    prefix, _, name = step.rpartition(":")
+    return prefix, name
+
+
+def _qualified(steps, uri, namespaces):
+    """Clark names ({URI}name) of path steps, starting in namespace ``uri``."""
+    found = []
+    for step in steps:
+        prefix, name = _split(step)
+        if prefix:
+            uri = namespaces[prefix]
+        found.append(f"{{{uri}}}{name}")
+    return found
+
+
+def _namespace(tag):
+    return tag[1:].partition("}")[0] if tag.startswith("{") else ""
+
+
+def _leaf_path(text, where, *, up=True):
+    """A path of steps; a leaf's may start with ``..`` steps (to an ancestor of its row)."""
+    steps = text.split("/") if isinstance(text, str) else [None]
+    while up and len(steps) > 1 and steps[0] == "..":
+        steps = steps[1:]
+    if not all(isinstance(p, str) and NAME.fullmatch(p) for p in steps):
         raise MappingError(f"{where}: not a leaf path: {text!r}")
     return text
 
@@ -189,7 +232,18 @@ def _rule(raw, where, earlier):
         when=when,
         none=frozenset(str(v) for v in none),
         default=raw.get("default"),
+        many=_flag(raw, "list", where),
+        exists=raw.get("exists"),
     )
+
+
+def _flag(raw, key, where):
+    value = raw.get(key, False)
+    if not isinstance(value, bool):
+        raise MappingError(f"{where}: {key} is true or false")
+    if value and (raw.get("format") is not None or raw.get("lookup") is not None):
+        raise MappingError(f"{where}: a list reads one leaf without format or lookup")
+    return value
 
 
 def load(raw: Mapping[str, Any], id: str = "", sha256: str = "") -> StandardMapping:
@@ -213,7 +267,7 @@ def load(raw: Mapping[str, Any], id: str = "", sha256: str = "") -> StandardMapp
                 raise MappingError(f"{name}: where names leaf and in")
             where = (_leaf_path(where["leaf"], name), frozenset(str(v) for v in where["in"]))
         paths = spec["path"] if isinstance(spec["path"], list) else [spec["path"]]
-        paths = tuple(tuple(_leaf_path(path, name).split("/")) for path in paths)
+        paths = tuple(tuple(_leaf_path(path, name, up=False).split("/")) for path in paths)
         fields = {}
         for leaf, rule in spec["fields"].items():
             if not FIELD.fullmatch(leaf):
@@ -227,6 +281,25 @@ def load(raw: Mapping[str, Any], id: str = "", sha256: str = "") -> StandardMapp
     platforms = raw.get("platforms") or []
     if not isinstance(platforms, list) or not all(isinstance(p, str) for p in platforms):
         raise MappingError("platforms must be a list of names")
+    namespaces = raw.get("namespaces") or {}
+    if not isinstance(namespaces, dict) or not all(
+        isinstance(k, str) and FIELD.fullmatch(k) and isinstance(v, str) and v
+        for k, v in namespaces.items()
+    ):
+        raise MappingError("namespaces maps prefixes to namespace URIs")
+    for table in tables:
+        steps = [step for path in table.paths for step in path]
+        steps += [
+            step
+            for rules in table.fields.values()
+            for rule in rules
+            for leaf in (*rule.leaves, *((rule.when[0],) if rule.when else ()))
+            for step in leaf.split("/")
+        ]
+        steps += [s for leaf in table.ignore or () for s in leaf.split("/")]
+        steps += table.where[0].split("/") if table.where else []
+        if unknown := sorted({_split(s)[0] for s in steps} - {""} - set(namespaces)):
+            raise MappingError(f"{table.name}: undeclared namespace prefix {unknown[0]!r}")
     return StandardMapping(
         str(raw.get("vendor", "")),
         str(raw["namespace"]),
@@ -234,6 +307,7 @@ def load(raw: Mapping[str, Any], id: str = "", sha256: str = "") -> StandardMapp
         tuple(platforms),
         id,
         sha256,
+        dict(namespaces),
     )
 
 
@@ -248,17 +322,48 @@ def shipped() -> dict[str, StandardMapping]:
     return found
 
 
+def _ancestor_leaves(table):
+    """Paths (from the top element) of the leaves a row reads above itself (``..``)."""
+    found = []
+    leaves = [leaf for rules in table.fields.values() for rule in rules for leaf in rule.leaves]
+    leaves += [rule.when[0] for rules in table.fields.values() for rule in rules if rule.when]
+    leaves += [table.where[0]] if table.where else []
+    for leaf in leaves:
+        steps = leaf.split("/")
+        ups = 0
+        while steps[ups] == "..":
+            ups += 1
+        if ups:
+            found += [path[:-ups] + tuple(steps[ups:]) for path in table.paths if len(path) > ups]
+    return found
+
+
 def subtree_filter(mapping: StandardMapping, table: Table) -> str:
-    """The subtree filter selecting a table's whole rows (each of its paths)."""
+    """The subtree filter selecting a table's whole rows (each of its paths), and the
+    leaves its rows read from their ancestors (a nested list's owner, e.g. its name)."""
     heads = {path[0] for path in table.paths}
     if len(heads) != 1:
         raise MappingError(f"{table.name}: its paths are under different top elements")
-    root = Element(next(iter(heads)), xmlns=mapping.namespace)
-    for path in table.paths:
-        node = root
-        for name in path[1:]:
-            child = next((c for c in node if c.tag == name), None)
-            node = child if child is not None else SubElement(node, name)
+    # Each element is written with its local name; one whose module differs from its
+    # parent's declares its namespace (the default namespace of its subtree).
+    head = next(iter(heads))
+    prefix, name = _split(head)
+    uri = mapping.namespaces[prefix] if prefix else mapping.namespace
+    root = Element(name, xmlns=uri)
+    for path in (*table.paths, *_ancestor_leaves(table)):
+        node, node_uri = root, uri
+        for step in path[1:]:
+            prefix, name = _split(step)
+            step_uri = mapping.namespaces[prefix] if prefix else node_uri
+            child = next(
+                (c for c in node if c.tag == name and c.get("_uri", node_uri) == step_uri), None
+            )
+            if child is None:
+                child = SubElement(node, name, **({"xmlns": step_uri} if step_uri != node_uri else {}))
+                child.set("_uri", step_uri)
+            node, node_uri = child, step_uri
+    for element in root.iter():
+        element.attrib.pop("_uri", None)
     return tostring(root, encoding="unicode")
 
 
@@ -282,50 +387,104 @@ def read(mapping: StandardMapping, fetch: Callable[[str], str], refused=()):
     return {"records": records, "problems": problems, "replies": replies, "failed": failed}
 
 
-def _find(roots, path, ns):
-    head, *rest = path
-    inner = "/".join(ns + name for name in rest)
+def _find(roots, path, mapping):
+    head, *rest = _qualified(path, mapping.namespace, mapping.namespaces)
+    inner = "/".join(rest)
     return [
         found
         for root in roots
-        for top in root.iter(ns + head)
+        for top in root.iter(head)
         for found in (top.findall(inner) if rest else [top])
     ]
 
 
-def _collected(roots, table, ns):
+def _collected(roots, table, mapping):
     """Whether a reply holds the table (its container, even with no rows)."""
-    return any(_find(roots, path[:-1], ns) for path in table.paths)
+    return any(_find(roots, path[:-1], mapping) for path in table.paths)
 
 
-def _rows(roots, table, ns):
-    return [row for path in table.paths for row in _find(roots, path, ns)]
+def _rows(roots, table, mapping):
+    return [row for path in table.paths for row in _find(roots, path, mapping)]
 
 
-def _text(element, leaf, ns):
-    node = element.find("/".join(ns + name for name in leaf.split("/")))
+def _text(element, leaf, mapping, parents):
+    """A leaf under a row; its steps start in the row's own namespace. A leading ``..``
+    steps up to the row's parent (a list nested in another list names its owner there)."""
+    steps = leaf.split("/")
+    while steps and steps[0] == "..":
+        element = parents.get(element)
+        if element is None:
+            return None
+        steps = steps[1:]
+    steps = _qualified(steps, _namespace(element.tag), mapping.namespaces)
+    node = element.find("/".join(steps))
     if node is None:
         return None
     return (node.text or "").strip()
 
 
-def _leaves(element, ns, prefix=""):
-    """{leaf path: text} of the non-empty leaves under a row element."""
+def _leaves(element, mapping, prefix=""):
+    """{leaf path: text} of the non-empty leaves under a row element, written as the
+    mapping writes them (``prefix:name`` where a child is in another module)."""
+    prefixes = {uri: name for name, uri in mapping.namespaces.items()}
+    parent = _namespace(element.tag)
     found = {}
     for child in element:
-        name = prefix + child.tag.removeprefix(ns)
+        uri, local = _namespace(child.tag), child.tag.rpartition("}")[2]
+        step = local if uri == parent else f"{prefixes.get(uri, '{' + uri + '}')}:{local}"
+        name = prefix + step
         if len(child):
-            found.update(_leaves(child, ns, name + "/"))
+            found.update(_leaves(child, mapping, name + "/"))
         elif (child.text or "").strip():
             found[name] = child.text.strip()
     return found
 
 
-def _value(rule, element, ns, indexes):
+def _node(element, leaf, mapping, parents, *, every=False):
+    """The element(s) a leaf path names under a row (``..`` steps up first)."""
+    steps = leaf.split("/")
+    while steps and steps[0] == "..":
+        element = parents.get(element)
+        if element is None:
+            return [] if every else None
+        steps = steps[1:]
+    path = "/".join(_qualified(steps, _namespace(element.tag), mapping.namespaces))
+    return element.findall(path) if every else element.find(path)
+
+
+def _item(rule, text):
+    """(value, problem) of one device text through a rule's conversion and codes."""
+    value = text
+    if rule.convert is not None:
+        value = CONVERTERS[rule.convert](text)
+        if value is None:
+            return None, ("invalid_value", text)
+    if rule.codes is not None:
+        if str(value) not in rule.codes:
+            return None, ("unmapped_code", text)
+        return rule.codes[str(value)], None
+    return value, None
+
+
+def _value(rule, element, mapping, indexes, parents):
     """(value, problem) for one field of a row; (None, None) when the device has none."""
-    if rule.when is not None and _text(element, rule.when[0], ns) not in rule.when[1]:
+    if rule.when is not None and _text(element, rule.when[0], mapping, parents) not in rule.when[1]:
         return None, None  # the field does not apply to this row
-    texts = [_text(element, leaf, ns) for leaf in rule.leaves]
+    if rule.exists is not None:
+        # A presence leaf or an empty choice case: its being there is the value.
+        return (rule.exists, None) if _node(element, rule.leaves[0], mapping, parents) is not None else (None, None)
+    if rule.many:
+        values = []
+        for node in _node(element, rule.leaves[0], mapping, parents, every=True):
+            text = (node.text or "").strip()
+            if not text or text in rule.none:
+                continue
+            value, problem = _item(rule, text)
+            if problem is not None:
+                return None, problem
+            values.append(value)
+        return (values or rule.default), None
+    texts = [_text(element, leaf, mapping, parents) for leaf in rule.leaves]
     if all(not text for text in texts) or "/".join(t or "" for t in texts) in rule.none:
         return rule.default, None  # an absent or empty leaf, or one meaning none
     if rule.format is not None:
@@ -377,11 +536,17 @@ def convert(mapping: StandardMapping, replies: Iterable[str] | Mapping[str, list
     else:
         shared = _parse(replies)
         roots_of = {table.name: shared for table in mapping.tables}
-    ns = f"{{{mapping.namespace}}}"
+    parents = {
+        child: parent
+        for roots in roots_of.values()
+        for root in roots
+        for parent in root.iter()
+        for child in parent
+    }
     found, problems, indexes = {}, [], {}
     for table in mapping.tables:
         roots = roots_of.get(table.name, [])
-        if not _collected(roots, table, ns):
+        if not _collected(roots, table, mapping):
             continue
         for rule in (rule for rules in table.fields.values() for rule in rules):
             if rule.lookup is not None and rule.lookup not in indexes:
@@ -394,15 +559,17 @@ def convert(mapping: StandardMapping, replies: Iterable[str] | Mapping[str, list
                     index[key] = value if index.get(key, value) == value else None
                 indexes[rule.lookup] = index
         records = []
-        rows = _rows(roots, table, ns)
+        rows = _rows(roots, table, mapping)
         if table.where is not None:
-            rows = [row for row in rows if _text(row, table.where[0], ns) in table.where[1]]
+            rows = [
+                row for row in rows if _text(row, table.where[0], mapping, parents) in table.where[1]
+            ]
         for number, element in enumerate(rows):
             record = {}
             for leaf, rules in table.fields.items():
                 value, problem = None, None
                 for rule in rules:
-                    value, problem = _value(rule, element, ns, indexes)
+                    value, problem = _value(rule, element, mapping, indexes, parents)
                     if value is not None or problem is not None:
                         break
                 if problem is not None:
@@ -426,7 +593,7 @@ def convert(mapping: StandardMapping, replies: Iterable[str] | Mapping[str, list
                 read |= {r.when[0] for rules in table.fields.values() for r in rules if r.when}
                 if table.where is not None:
                     read.add(table.where[0])
-                leaves = _leaves(element, ns)
+                leaves = _leaves(element, mapping)
                 unread = sorted(set(leaves) - read - table.ignore)
                 if unread:
                     record["unread"] = [f"{leaf}={leaves[leaf]}" for leaf in unread]

@@ -1,0 +1,9 @@
+<ns0:data xmlns:ns0="urn:ietf:params:xml:ns:netconf:base:1.0" xmlns:ns1="urn:huawei:yang:huawei-vlan">
+    <ns1:vlan>
+      <ns1:vlans>
+        <ns1:vlan>
+          <ns1:id>1</ns1:id>
+        </ns1:vlan>
+      </ns1:vlans>
+    </ns1:vlan>
+  </ns0:data>

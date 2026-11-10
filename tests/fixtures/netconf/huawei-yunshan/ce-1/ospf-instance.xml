@@ -1,0 +1,12 @@
+<ns0:data xmlns:ns0="urn:ietf:params:xml:ns:netconf:base:1.0" xmlns:ns1="urn:huawei:yang:huawei-network-instance">
+    <ns1:network-instance>
+      <ns1:instances>
+        <ns1:instance>
+          <ns1:name>_public_</ns1:name>
+        </ns1:instance>
+        <ns1:instance>
+          <ns1:name>_management_vpn_</ns1:name>
+        </ns1:instance>
+      </ns1:instances>
+    </ns1:network-instance>
+  </ns0:data>

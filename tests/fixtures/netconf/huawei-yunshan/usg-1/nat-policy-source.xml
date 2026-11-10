@@ -1,0 +1,17 @@
+<ns0:data xmlns:ns0="urn:ietf:params:xml:ns:netconf:base:1.0" xmlns:ns1="urn:huawei:yang:huawei-nat-policy">
+    <ns1:nat-policy>
+      <ns1:rules>
+        <ns1:rule>
+          <ns1:name>client-easy-ip</ns1:name>
+          <ns1:source-address>
+            <ns1:address-ipv4s>
+              <ns1:address-ipv4>
+                <ns1:ipv4>10.1.10.0</ns1:ipv4>
+                <ns1:mask>255.255.255.0</ns1:mask>
+              </ns1:address-ipv4>
+            </ns1:address-ipv4s>
+          </ns1:source-address>
+        </ns1:rule>
+      </ns1:rules>
+    </ns1:nat-policy>
+  </ns0:data>

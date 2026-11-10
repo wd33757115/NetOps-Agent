@@ -1,0 +1,13 @@
+2026-11-10 23:36:35.715 
+Proto: Protocol        Pre: Preference
+Route Flags: R - relay, D - download to fib, T - to vpn-instance, B - black hole route
+------------------------------------------------------------------------------
+Routing Table : _management_vpn_
+         Destinations : 4        Routes : 4         
+
+Destination/Mask    Proto   Pre  Cost        Flags NextHop                                  Interface
+
+   192.168.79.0/24  Direct  0    0             D   192.168.79.12                            MEth0/0/0
+  192.168.79.12/32  Direct  0    0             D   127.0.0.1                                MEth0/0/0
+ 192.168.79.255/32  Direct  0    0             D   127.0.0.1                                MEth0/0/0
+255.255.255.255/32  Direct  0    0             D   127.0.0.1                                InLoopBack0

@@ -1,0 +1,19 @@
+<ns0:data xmlns:ns0="urn:ietf:params:xml:ns:netconf:base:1.0" xmlns:ns1="urn:huawei:yang:huawei-vlan" xmlns:ns2="urn:huawei:yang:huawei-arp">
+    <ns1:vlan>
+      <ns1:vlans>
+        <ns1:vlan>
+          <ns1:id>1</ns1:id>
+          <ns1:type>common</ns1:type>
+          <ns1:unknown-multicast-discard>disable</ns1:unknown-multicast-discard>
+          <ns1:mac-learning>enable</ns1:mac-learning>
+          <ns1:transparent>
+            <ns1:protocol-transparent>disable</ns1:protocol-transparent>
+          </ns1:transparent>
+          <ns2:anti-attack-rate-limits>
+            <ns2:rate-limit-value>0</ns2:rate-limit-value>
+            <ns2:rate-limit-alarm-enable>false</ns2:rate-limit-alarm-enable>
+          </ns2:anti-attack-rate-limits>
+        </ns1:vlan>
+      </ns1:vlans>
+    </ns1:vlan>
+  </ns0:data>

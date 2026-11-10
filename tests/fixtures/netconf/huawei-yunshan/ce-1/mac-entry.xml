@@ -1,0 +1,20 @@
+<ns0:data xmlns:ns0="urn:ietf:params:xml:ns:netconf:base:1.0" xmlns:ns1="urn:huawei:yang:huawei-mac">
+    <ns1:mac>
+      <ns1:vlan-dynamic-macs>
+        <ns1:vlan-dynamic-mac>
+          <ns1:slot-id>1</ns1:slot-id>
+          <ns1:vlan-id>1</ns1:vlan-id>
+          <ns1:address>fac7-f460-0031</ns1:address>
+          <ns1:type>dynamic</ns1:type>
+          <ns1:out-interface-name>Eth-Trunk1</ns1:out-interface-name>
+        </ns1:vlan-dynamic-mac>
+        <ns1:vlan-dynamic-mac>
+          <ns1:slot-id>1</ns1:slot-id>
+          <ns1:vlan-id>1</ns1:vlan-id>
+          <ns1:address>fac7-f460-0032</ns1:address>
+          <ns1:type>dynamic</ns1:type>
+          <ns1:out-interface-name>Eth-Trunk1</ns1:out-interface-name>
+        </ns1:vlan-dynamic-mac>
+      </ns1:vlan-dynamic-macs>
+    </ns1:mac>
+  </ns0:data>

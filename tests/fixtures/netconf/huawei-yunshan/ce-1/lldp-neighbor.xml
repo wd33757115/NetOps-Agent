@@ -1,0 +1,199 @@
+<ns0:data xmlns:ns0="urn:ietf:params:xml:ns:netconf:base:1.0" xmlns:ns1="urn:huawei:yang:huawei-ifm" xmlns:ns2="urn:huawei:yang:huawei-lldp">
+    <ns1:ifm>
+      <ns1:interfaces>
+        <ns1:interface>
+          <ns1:name>NULL0</ns1:name>
+        </ns1:interface>
+        <ns1:interface>
+          <ns1:name>MEth0/0/0</ns1:name>
+          <ns2:lldp>
+            <ns2:session>
+              <ns2:neighbors>
+                <ns2:neighbor>
+                  <ns2:index>1</ns2:index>
+                  <ns2:chassis-id-sub-type>mac-address</ns2:chassis-id-sub-type>
+                  <ns2:chassis-id>fac7-f460-00a1</ns2:chassis-id>
+                  <ns2:port-id-sub-type>interface-name</ns2:port-id-sub-type>
+                  <ns2:port-id>GE1/0/2</ns2:port-id>
+                  <ns2:system-name>HUAWEI</ns2:system-name>
+                  <ns2:system-description>Huawei Switch
+Huawei YunShan OS
+Version 1.25.1.1 (S6700 V600R025C10SPC500)
+Copyright (C) 2021-2026 Huawei Technologies Co., Ltd.
+HUAWEI LSW
+</ns2:system-description>
+                  <ns2:system-capabilities-enabled>bridge router</ns2:system-capabilities-enabled>
+                  <ns2:system-capabilities-supported>bridge router</ns2:system-capabilities-supported>
+                  <ns2:expired-time>116</ns2:expired-time>
+                  <ns2:port-vlan-id>1</ns2:port-vlan-id>
+                  <ns2:auto-negotiation-supported>yes</ns2:auto-negotiation-supported>
+                  <ns2:auto-negotiation-enabled>no</ns2:auto-negotiation-enabled>
+                  <ns2:auto-negotiation-capability>0000</ns2:auto-negotiation-capability>
+                  <ns2:oper-mau-type>dot3-mau-type-1000-base-tfd</ns2:oper-mau-type>
+                  <ns2:link-aggregation-supported>yes</ns2:link-aggregation-supported>
+                  <ns2:link-aggregation-enabled>no</ns2:link-aggregation-enabled>
+                  <ns2:aggregation-port-id>0</ns2:aggregation-port-id>
+                  <ns2:maximum-frame-size>9216</ns2:maximum-frame-size>
+                  <ns2:discovered-time>2026-11-10T23:21:41Z</ns2:discovered-time>
+                  <ns2:management-addresss>
+                    <ns2:management-address>
+                      <ns2:type>mac</ns2:type>
+                      <ns2:value>fac7-f460-00a1</ns2:value>
+                      <ns2:length>7</ns2:length>
+                      <ns2:if-sub-type>unknown</ns2:if-sub-type>
+                      <ns2:if-id>0</ns2:if-id>
+                      <ns2:oid>1.3.6.1.2.1.17.1.1</ns2:oid>
+                    </ns2:management-address>
+                  </ns2:management-addresss>
+                  <ns2:protocol-vlans>
+                    <ns2:protocol-vlan>
+                      <ns2:id>0</ns2:id>
+                      <ns2:supported>no</ns2:supported>
+                      <ns2:enabled>no</ns2:enabled>
+                    </ns2:protocol-vlan>
+                  </ns2:protocol-vlans>
+                  <ns2:vlan-names>
+                    <ns2:vlan-name>
+                      <ns2:id>1</ns2:id>
+                      <ns2:value>VLAN1</ns2:value>
+                    </ns2:vlan-name>
+                  </ns2:vlan-names>
+                </ns2:neighbor>
+              </ns2:neighbors>
+            </ns2:session>
+          </ns2:lldp>
+        </ns1:interface>
+        <ns1:interface>
+          <ns1:name>GE1/0/1</ns1:name>
+          <ns2:lldp>
+            <ns2:session>
+              <ns2:neighbors>
+                <ns2:neighbor>
+                  <ns2:index>1</ns2:index>
+                  <ns2:chassis-id-sub-type>mac-address</ns2:chassis-id-sub-type>
+                  <ns2:chassis-id>fac7-f460-0031</ns2:chassis-id>
+                  <ns2:port-id-sub-type>interface-name</ns2:port-id-sub-type>
+                  <ns2:port-id>GE0/0/1</ns2:port-id>
+                  <ns2:system-name>USG-1</ns2:system-name>
+                  <ns2:system-description>Huawei YunShan OS
+Version 1.25.1.1 (USG V600R025C10SPC100)
+Copyright (C) 2021-2026 Huawei Technologies Co., Ltd.
+HUAWEI USG6306F
+</ns2:system-description>
+                  <ns2:system-capabilities-enabled>bridge router</ns2:system-capabilities-enabled>
+                  <ns2:system-capabilities-supported>bridge router</ns2:system-capabilities-supported>
+                  <ns2:expired-time>108</ns2:expired-time>
+                  <ns2:port-vlan-id>0</ns2:port-vlan-id>
+                  <ns2:auto-negotiation-supported>yes</ns2:auto-negotiation-supported>
+                  <ns2:auto-negotiation-enabled>yes</ns2:auto-negotiation-enabled>
+                  <ns2:auto-negotiation-capability>83a4(10baseTFD 100baseTXFD 100baseT2FD FdxPause FdxAPause 1000baseTFD)</ns2:auto-negotiation-capability>
+                  <ns2:oper-mau-type>dot3-mau-type-1000-base-xfd</ns2:oper-mau-type>
+                  <ns2:link-aggregation-supported>yes</ns2:link-aggregation-supported>
+                  <ns2:link-aggregation-enabled>yes</ns2:link-aggregation-enabled>
+                  <ns2:aggregation-port-id>1</ns2:aggregation-port-id>
+                  <ns2:maximum-frame-size>9216</ns2:maximum-frame-size>
+                  <ns2:discovered-time>2026-11-10T23:21:44Z</ns2:discovered-time>
+                  <ns2:management-addresss>
+                    <ns2:management-address>
+                      <ns2:type>ipv4</ns2:type>
+                      <ns2:value>10.255.0.2</ns2:value>
+                      <ns2:length>5</ns2:length>
+                      <ns2:if-sub-type>if-index</ns2:if-sub-type>
+                      <ns2:if-id>19</ns2:if-id>
+                      <ns2:oid>1.3.6.1.4.1.2011.5.25.41.1.2.1.1.1</ns2:oid>
+                    </ns2:management-address>
+                  </ns2:management-addresss>
+                  <ns2:protocol-vlans>
+                    <ns2:protocol-vlan>
+                      <ns2:id>0</ns2:id>
+                      <ns2:supported>no</ns2:supported>
+                      <ns2:enabled>no</ns2:enabled>
+                    </ns2:protocol-vlan>
+                  </ns2:protocol-vlans>
+                </ns2:neighbor>
+              </ns2:neighbors>
+            </ns2:session>
+          </ns2:lldp>
+        </ns1:interface>
+        <ns1:interface>
+          <ns1:name>GE1/0/2</ns1:name>
+          <ns2:lldp>
+            <ns2:session>
+              <ns2:neighbors>
+                <ns2:neighbor>
+                  <ns2:index>1</ns2:index>
+                  <ns2:chassis-id-sub-type>mac-address</ns2:chassis-id-sub-type>
+                  <ns2:chassis-id>fac7-f460-0031</ns2:chassis-id>
+                  <ns2:port-id-sub-type>interface-name</ns2:port-id-sub-type>
+                  <ns2:port-id>GE0/0/2</ns2:port-id>
+                  <ns2:system-name>USG-1</ns2:system-name>
+                  <ns2:system-description>Huawei YunShan OS
+Version 1.25.1.1 (USG V600R025C10SPC100)
+Copyright (C) 2021-2026 Huawei Technologies Co., Ltd.
+HUAWEI USG6306F
+</ns2:system-description>
+                  <ns2:system-capabilities-enabled>bridge router</ns2:system-capabilities-enabled>
+                  <ns2:system-capabilities-supported>bridge router</ns2:system-capabilities-supported>
+                  <ns2:expired-time>107</ns2:expired-time>
+                  <ns2:port-vlan-id>0</ns2:port-vlan-id>
+                  <ns2:auto-negotiation-supported>yes</ns2:auto-negotiation-supported>
+                  <ns2:auto-negotiation-enabled>yes</ns2:auto-negotiation-enabled>
+                  <ns2:auto-negotiation-capability>83a4(10baseTFD 100baseTXFD 100baseT2FD FdxPause FdxAPause 1000baseTFD)</ns2:auto-negotiation-capability>
+                  <ns2:oper-mau-type>dot3-mau-type-1000-base-xfd</ns2:oper-mau-type>
+                  <ns2:link-aggregation-supported>yes</ns2:link-aggregation-supported>
+                  <ns2:link-aggregation-enabled>yes</ns2:link-aggregation-enabled>
+                  <ns2:aggregation-port-id>1</ns2:aggregation-port-id>
+                  <ns2:maximum-frame-size>9216</ns2:maximum-frame-size>
+                  <ns2:discovered-time>2026-11-10T23:21:44Z</ns2:discovered-time>
+                  <ns2:management-addresss>
+                    <ns2:management-address>
+                      <ns2:type>ipv4</ns2:type>
+                      <ns2:value>10.255.0.2</ns2:value>
+                      <ns2:length>5</ns2:length>
+                      <ns2:if-sub-type>if-index</ns2:if-sub-type>
+                      <ns2:if-id>19</ns2:if-id>
+                      <ns2:oid>1.3.6.1.4.1.2011.5.25.41.1.2.1.1.1</ns2:oid>
+                    </ns2:management-address>
+                  </ns2:management-addresss>
+                  <ns2:protocol-vlans>
+                    <ns2:protocol-vlan>
+                      <ns2:id>0</ns2:id>
+                      <ns2:supported>no</ns2:supported>
+                      <ns2:enabled>no</ns2:enabled>
+                    </ns2:protocol-vlan>
+                  </ns2:protocol-vlans>
+                </ns2:neighbor>
+              </ns2:neighbors>
+            </ns2:session>
+          </ns2:lldp>
+        </ns1:interface>
+        <ns1:interface>
+          <ns1:name>GE1/0/3</ns1:name>
+        </ns1:interface>
+        <ns1:interface>
+          <ns1:name>GE1/0/4</ns1:name>
+        </ns1:interface>
+        <ns1:interface>
+          <ns1:name>GE1/0/5</ns1:name>
+        </ns1:interface>
+        <ns1:interface>
+          <ns1:name>GE1/0/6</ns1:name>
+        </ns1:interface>
+        <ns1:interface>
+          <ns1:name>GE1/0/7</ns1:name>
+        </ns1:interface>
+        <ns1:interface>
+          <ns1:name>GE1/0/8</ns1:name>
+        </ns1:interface>
+        <ns1:interface>
+          <ns1:name>GE1/0/9</ns1:name>
+        </ns1:interface>
+        <ns1:interface>
+          <ns1:name>GE1/0/10</ns1:name>
+        </ns1:interface>
+        <ns1:interface>
+          <ns1:name>Eth-Trunk1</ns1:name>
+        </ns1:interface>
+      </ns1:interfaces>
+    </ns1:ifm>
+  </ns0:data>

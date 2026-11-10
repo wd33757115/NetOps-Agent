@@ -1,0 +1,25 @@
+<ns0:data xmlns:ns0="urn:ietf:params:xml:ns:netconf:base:1.0" xmlns:ns1="urn:huawei:yang:huawei-arp">
+    <ns1:arp>
+      <ns1:query-entries>
+        <ns1:query-entry>
+          <ns1:ni-name>_management_vpn_</ns1:ni-name>
+          <ns1:ip-addr>192.168.79.13</ns1:ip-addr>
+          <ns1:mac-addr>fac7-f460-0060</ns1:mac-addr>
+          <ns1:style-type>interface-arp</ns1:style-type>
+          <ns1:if-name>MEth0/0/0</ns1:if-name>
+          <ns1:slot-id>0</ns1:slot-id>
+          <ns1:work-if-name>MEth0/0/0</ns1:work-if-name>
+        </ns1:query-entry>
+        <ns1:query-entry>
+          <ns1:ni-name>_management_vpn_</ns1:ni-name>
+          <ns1:ip-addr>192.168.79.1</ns1:ip-addr>
+          <ns1:mac-addr>0050-56c0-0008</ns1:mac-addr>
+          <ns1:expire-time>20</ns1:expire-time>
+          <ns1:style-type>dynamic-arp</ns1:style-type>
+          <ns1:if-name>MEth0/0/0</ns1:if-name>
+          <ns1:slot-id>0</ns1:slot-id>
+          <ns1:work-if-name>MEth0/0/0</ns1:work-if-name>
+        </ns1:query-entry>
+      </ns1:query-entries>
+    </ns1:arp>
+  </ns0:data>

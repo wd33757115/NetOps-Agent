@@ -93,6 +93,30 @@ ACL、NAT、策略路由的路径计算已经有了：ACL 和策略路由读标�
 
 ### B. 华为 NETCONF 到标准记录的映射
 
+**已完成（2026-11-11，netconf-api 0.12.0）。**
+
+- **映射文件**：`src/apps/netconf_api/backend/mappings/huawei_yunshan.yaml`，共 20 张表：
+  - 接口（带 VPN 实例、父接口、dot1q VLAN、所属聚合、安全域）、地址、ARP、路由（只取生效的）；
+  - OSPF 实例、区域、邻居；LLDP 邻居及管理地址；
+  - 聚合与成员、二层端口模式、VLAN 与成员、MAC 表；
+  - 安全域；NAT 策略规则及其源地址、目的地址。
+- **转换引擎**（`backend/standard.py`）新增四项，H3C 映射不受影响：
+  - 多命名空间：`namespaces` 加上 `prefix:name` 写法，无前缀的步沿用父节点的命名空间；
+  - 上溯：`../` 读祖先节点，生成过滤条件时自动带上祖先的叶子；
+  - `list: true`：读 leaf-list 的全部值；
+  - `exists: <值>`：空元素存在即取该值；
+  - 另有一个转换 `address-hex`。
+- **核对**：三台设备实读，没有报告任何问题。路由与同期 CLI 逐条一致（USG 20、AR 14、CE 9）；接口、ARP、LLDP、聚合、VLAN 与 CLI 对照一致。
+- **测试**：`tests/unit/test_netconf_huawei.py` 15 个，夹具在 `tests/fixtures/netconf/huawei-yunshan/`（三台的回包，以及同期 CLI 路由表）。
+- **NAT**：只映射了实测见过的动作，即源 NAT easy-ip（另含 no-nat、地址池名两个结构字段）。目的 NAT、服务条件没有映射：遇到时记录里没有动作，或在 `unread` 里列出，路径计算按"判断不了"处理。
+- **留给工作包 C 的三件事**：
+  1. 平台按设备厂商挑映射，厂商取自规则治理已发布的 CLI 实现，华为目前没有，所以华为映射还选不上。要让 NETCONF 采集不依赖 CLI 实现也能确定厂商。
+  2. 拓扑的接口树还没有用记录里的 `network-instance` 设置 `bind-ni-name`，管理口会被当作公网。
+  3. LLDP 树要求的 `dest-mac-address`、`time-mark` 华为不给。按第 4 节的约定推出并写明（华为默认是 nearest-bridge 代理），或者放进 `non_standard`。
+
+原来的步骤说明保留如下。
+
+
 - 设备宣告了标准模块且数据完整的：不写映射，只做 XML 到 RFC 7951 的转换和校验。看 `standard.py` 是否已经支持"直通"；不支持就加上，并用设备回包做测试。
 - 私有模块：写 `src/apps/netconf_api/backend/mappings/huawei_yunshan.yaml`。按转发路径需要的顺序：
   1. `interface`：名称、启用、运行状态、类型；子接口要带父接口和 dot1q VLAN（USG 的 `Eth-Trunk1.10`）；
@@ -209,3 +233,4 @@ ACL：目前三台设备都没有配。评测集要用时再加（见故障集 F
 |---|---|---|---|---|
 | 2026-11-11 | — | 方向修订（NAT、ACL 在范围内，往后放的只有安全策略和 CLI 模板）；测试和夹具取回；华为 CLI 模板写好但不登记 | 未测 | 未测 |
 | 2026-11-11 | A | 完成：三台开 NETCONF，模块清单、转发相关回包、16 个模块的 YANG 原文已取；无 IETF 数据模型，全部走华为私有模块 | 未测 | 未测 |
+| 2026-11-11 | B | 完成：华为映射 20 张表，引擎支持多命名空间、上溯、leaf-list、空元素；三台实读无问题，路由与 CLI 逐条一致 | 未测 | 未测 |

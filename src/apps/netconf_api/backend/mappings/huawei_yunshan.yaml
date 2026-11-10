@@ -1,0 +1,237 @@
+# Huawei YunShan OS NETCONF → standard tables (backend/standard.py). The devices announce
+# no IETF data model, so every table reads Huawei's own modules. Codes are those seen on
+# the eNSP Pro lab (AR6700, USG6306F, CE6800, YunShan OS 1.25.1.1, 2026-11-11) next to
+# the CLI; any other code is reported with the device's text, not guessed.
+#
+# Each Huawei module is its own namespace, augments included: a step written
+# "prefix:name" is in that module, a step without a prefix in its parent's. A list nested
+# in an interface (its addresses, LLDP neighbours, trunk members) names the interface
+# with "../" steps up to it.
+vendor: Huawei
+platforms: [vrp]
+namespace: urn:huawei:yang:huawei-ifm
+namespaces:
+  ip: urn:huawei:yang:huawei-ip
+  lldp: urn:huawei:yang:huawei-lldp
+  trunk: urn:huawei:yang:huawei-ifm-trunk
+  ethernet: urn:huawei:yang:huawei-ethernet
+  zone: urn:huawei:yang:huawei-security-zone
+  arp: urn:huawei:yang:huawei-arp
+  ni: urn:huawei:yang:huawei-network-instance
+  l3vpn: urn:huawei:yang:huawei-l3vpn
+  routing: urn:huawei:yang:huawei-routing
+  ospf: urn:huawei:yang:huawei-ospfv2
+  lacp: urn:huawei:yang:huawei-lacp
+  vlan: urn:huawei:yang:huawei-vlan
+  mac: urn:huawei:yang:huawei-mac
+  nat: urn:huawei:yang:huawei-nat-policy
+tables:
+  interface:  # ietf-interfaces (RFC 8343)
+    path: ifm/interfaces/interface
+    fields:
+      name: name
+      if-index: {leaf: index, convert: integer}
+      description: description
+      enabled: {leaf: admin-status, codes: {up: true}}  # all 44 interfaces of the lab "up"
+      oper-status: {leaf: dynamic/oper-status, codes: {up: up, down: down}}
+      phys-address: {leaf: dynamic/mac-address, convert: mac}
+      # RFC 8529 bind-ni-name. "_public_" is the global instance (the CLI's VPN "--").
+      network-instance: {leaf: vrf-name, none: [_public_], default: default}
+      # A sub-interface (class sub-interface) and the interface it is cut from.
+      parent-interface: parent-name
+      # "dot1q termination vid 10": the one VLAN a dot1q sub-interface terminates
+      # (ietf-if-vlan-encapsulation dot1q-vlan/outer-tag/vlan-id). A list or range of VLANs
+      # is not a single tag and is reported.
+      outer-vlan-id: {leaf: ethernet:ethernet/l3-sub-interface/dot1q-termination/dot1q-vlans/dot1q-vlans/vlan-list, convert: integer}
+      # The Eth-Trunk a member port is bundled in ("eth-trunk 1" on the port).
+      aggregate-interface: aggregation-name
+      # The security zone the interface is assigned to ("add interface" in the zone).
+      security-zone: zone:security-zone/zone
+
+  ipv4-address:  # ietf-ip (RFC 8344) interface/ipv4/address, the addresses in effect
+    path: ifm/interfaces/interface/ip:ipv4/state/addresses/address
+    fields:
+      interface: ../../../../name
+      ip: {leaf: ip, convert: address}
+      prefix-length: {leaf: mask, convert: netmask}
+
+  ipv4-neighbor:  # ietf-ip (RFC 8344) interface/ipv4/neighbor
+    path: arp:arp/query-entries/query-entry
+    # interface-arp is the device's own address on the interface (the CLI's type I), not
+    # a neighbour; dynamic-arp is the CLI's D. No other type was seen.
+    where: {leaf: style-type, in: [dynamic-arp]}
+    fields:
+      interface: if-name
+      ip: {leaf: ip-addr, convert: address}
+      link-layer-address: {leaf: mac-addr, convert: mac}
+      origin: {leaf: style-type, codes: {dynamic-arp: dynamic}}
+      network-instance: {leaf: ni-name, none: [_public_], default: default}
+
+  route:  # ietf-routing (RFC 8349) rib/routes/route, one row per next hop
+    path: ni:network-instance/instances/instance/l3vpn:afs/af/routing:routing/routing-manage/topologys/topology/routes/ipv4-unicast-routes/ipv4-unicast-route
+    # The table lists routes not in use too (flag "invalid", e.g. USG's OSPF route to its
+    # own connected 10.0.12.0/30); only active routes forward.
+    where: {leaf: active, in: ["true"]}
+    fields:
+      network-instance: {leaf: ../../../../../../../../../name, none: [_public_], default: default}
+      destination-prefix: {format: "{prefix}/{mask-length}", convert: prefix}
+      # Protocols of the lab's active routes; the CLI shows Direct and OSPF ("ospf 1").
+      source-protocol: {leaf: protocol-type, codes: {direct: ietf-routing:direct, ospf: ietf-ospf:ospfv2}}
+      route-preference: {leaf: preference, convert: integer}
+      next-hop-address: {leaf: nexthop, convert: address}
+      outgoing-interface: interface-name
+      # InLoopBack0 delivers to the device itself (its own addresses, next hop 127.0.0.1).
+      special-next-hop:
+        leaf: interface-name
+        when: {leaf: interface-name, in: [InLoopBack0]}
+        codes: {InLoopBack0: receive}
+      ospf-metric: {leaf: cost, convert: integer, when: {leaf: protocol-type, in: [ospf]}}
+      ospf-tag: {leaf: tag, convert: integer, when: {leaf: protocol-type, in: [ospf]}}
+
+  ospf-instance:  # ietf-ospf (RFC 9129) control-plane-protocol
+    path: ni:network-instance/instances/instance/ospf:ospfv2/sites/site
+    fields:
+      name: process-id
+      network-instance: {leaf: ../../../name, none: [_public_], default: default}
+      router-id: {leaf: router-id, convert: address}
+
+  ospf-area:
+    path: ni:network-instance/instances/instance/ospf:ospfv2/sites/site/areas/area
+    fields:
+      instance: ../../process-id
+      area-id: area-id
+
+  ospf-neighbor:
+    path: ni:network-instance/instances/instance/ospf:ospfv2/sites/site/neighbors/neighbor
+    fields:
+      instance: ../../process-id
+      area-id: area-id
+      interface: if-name
+      neighbor-router-id: {leaf: router-id, convert: address}
+      address: {leaf: ip-addr, convert: address}
+      state: {leaf: state, codes: {full: full}}  # CLI Full on AR and USG
+
+  lldp-neighbor:  # ieee802-dot1ab-lldp port/remote-systems-data
+    path: ifm/interfaces/interface/lldp:lldp/session/neighbors/neighbor
+    fields:
+      interface: ../../../../name
+      remote-index: {leaf: index, convert: integer}
+      chassis-id-subtype: {leaf: chassis-id-sub-type, codes: {mac-address: mac-address}}
+      chassis-id: {leaf: chassis-id, convert: ieee-mac, when: {leaf: chassis-id-sub-type, in: [mac-address]}}
+      port-id-subtype: {leaf: port-id-sub-type, codes: {interface-name: interface-name}}
+      port-id: {leaf: port-id, when: {leaf: port-id-sub-type, in: [interface-name]}}
+      port-desc: {leaf: port-description, none: ["--"]}
+      system-name: system-name
+      system-description: system-description
+
+  lldp-management-address:  # ieee802-dot1ab-lldp remote-systems-data/management-address
+    path: ifm/interfaces/interface/lldp:lldp/session/neighbors/neighbor/management-addresss/management-address
+    # IPv4 addresses only; S-3 (an unmanaged switch of the lab) advertises its MAC, which
+    # IEEE 802.1AB's address families here do not take as an IP management address.
+    where: {leaf: type, in: [ipv4]}
+    fields:
+      interface: ../../../../../../name
+      remote-index: {leaf: ../../index, convert: integer}
+      address-subtype: {leaf: type, codes: {ipv4: "ietf-routing:ipv4"}}
+      address: {leaf: value, convert: address-hex}
+      if-subtype: {leaf: if-sub-type, codes: {if-index: port-ref}}  # ifIndex is IEEE 802.1AB port-ref
+      if-id: {leaf: if-id, convert: integer}
+
+  # --- Layer 2: aggregation (IEEE 802.1AX), bridge ports, VLANs and the FDB (IEEE 802.1Q).
+  # Measured on USG and CE against "display eth-trunk", "display port vlan", "display
+  # vlan" and "display mac-address".
+  lag:  # an Eth-Trunk (ieee802-dot1ax aggregator)
+    path: ifm/interfaces/interface/trunk:trunk
+    fields:
+      name: ../name
+      # "mode lacp-static" (the CLI's Working Mode: Static) on both ends of the lab's trunk.
+      mode: {leaf: work-mode, codes: {static: lacp}}
+      min-links: {leaf: min-up-num, convert: integer}
+
+  lag-member:  # a port of an Eth-Trunk (ieee802-dot1ax aggregation-port)
+    path: ifm/interfaces/interface/trunk:trunk/members/member
+    fields:
+      aggregate-interface: ../../../name
+      name: name
+      oper-status: {leaf: status, codes: {up: up}}
+      # LACP: the CLI's Status column, Selected on all four ports of the lab.
+      selected: {leaf: lacp:lacp/port-negotiate-parameter/status, codes: {selected: true}}
+
+  bridge-port:  # a Layer 2 port's mode, PVID and trunk VLANs
+    path: ifm/interfaces/interface/ethernet:ethernet/main-interface/l2-attribute
+    fields:
+      name: ../../../name
+      link-type: {leaf: link-type, codes: {access: access, trunk: trunk}}
+      pvid: {leaf: pvid, convert: integer}
+      # As the device writes it ("1,10,20"); a trunk without the leaf passes no VLAN.
+      trunk-vlans: trunk-vlans
+
+  vlan:
+    path: vlan:vlan/vlans/vlan
+    fields:
+      vid: {leaf: id, convert: integer}
+      name: description
+
+  vlan-member:  # the ports of a VLAN and whether they carry it tagged
+    path: vlan:vlan/vlans/vlan/member-ports/member-port
+    fields:
+      vid: {leaf: ../../id, convert: integer}
+      interface: interface-name
+      tagged: {leaf: tag-mode, codes: {tag: true, untag: false}}
+
+  mac-entry:  # the FDB of each VLAN (dynamic entries)
+    path: mac:mac/vlan-dynamic-macs/vlan-dynamic-mac
+    fields:
+      vid: {leaf: vlan-id, convert: integer}
+      address: {leaf: address, convert: mac}
+      interface: out-interface-name
+      type: {leaf: type, codes: {dynamic: dynamic}}
+
+  # --- Security zones and NAT policy (USG, AR). The zone an interface is in is the
+  # interface table's security-zone. RFC 8512 has no zone: the zone conditions go to the
+  # query table's non-standard part.
+  security-zone:
+    path: zone:security-zone/zone-instances/zone-instance
+    fields:
+      name: name
+      id: {leaf: id, convert: integer}
+      priority: {leaf: priority, convert: integer}
+
+  nat-policy-rule:  # a NAT policy rule, in the device's match order
+    path: nat:nat-policy/rules/rule
+    # Every leaf the fields below do not read is listed as unread (a destination NAT, a
+    # service, an address set): such a rule is not evaluated as if it had no condition.
+    ignore:
+      - hit-count
+      - description
+      # Read by nat-policy-source and nat-policy-destination, one row per address.
+      - source-address/address-ipv4s/address-ipv4/ipv4
+      - source-address/address-ipv4s/address-ipv4/mask
+      - destination-address/address-ipv4s/address-ipv4/ipv4
+      - destination-address/address-ipv4s/address-ipv4/mask
+    fields:
+      name: name
+      enabled: {leaf: enable, codes: {"true": true, "false": false}}
+      nat-type: {leaf: nat-type, codes: {nat: nat}}
+      source-zone: {leaf: source-zone, list: true}
+      destination-zone: {leaf: destination-zone, list: true}
+      egress-interface: {leaf: egress-interface, list: true}
+      # The action is one case of a choice; only source NAT to the egress interface's
+      # address ("action source-nat easy-ip") was seen. A rule with another action has
+      # none here and is not evaluated.
+      action:
+        - {leaf: action/source-nat/easy-ip, exists: source-nat-easy-ip}
+        - {leaf: action/no-nat, exists: no-nat}
+      source-nat-pool: action/source-nat/address-group-name
+
+  nat-policy-source:  # a rule's source addresses (address and mask)
+    path: nat:nat-policy/rules/rule/source-address/address-ipv4s/address-ipv4
+    fields:
+      rule: ../../../name
+      prefix: {format: "{ipv4}/{mask}", convert: prefix}
+
+  nat-policy-destination:  # a rule's destination addresses
+    path: nat:nat-policy/rules/rule/destination-address/address-ipv4s/address-ipv4
+    fields:
+      rule: ../../../name
+      prefix: {format: "{ipv4}/{mask}", convert: prefix}
