@@ -64,6 +64,20 @@ ACL、NAT、策略路由的路径计算已经有了：ACL 和策略路由读标�
 
 ### A. 在实验网设备上开 NETCONF，摸清它宣告了什么
 
+**已完成（2026-11-11）。** 详细结论在本机 `.runtime/ensp/netconf/结论.md`，回包、能力列表、YANG 原文都在同一目录。要点：
+- 三台都已开 NETCONF（830 端口）。AR、USG 是逐行生效的单阶段配置，CE 要 `commit`。
+- **IETF 数据模型一个都没有**，只有 NETCONF 自身的模块。OpenConfig 只有一部分，且三台都没有 network-instance 和路由模块。路由、ARP、VPN 实例只能取华为私有模块，所以工作包 B 全部按华为私有模块写映射。
+- 来源已确认：
+  - `huawei-ifm` 一处给出接口、子接口的父接口和 dot1q VLAN、VPN 实例、地址、聚合成员及其 LACP 状态、LLDP 邻居、所在安全域；
+  - `huawei-network-instance` 下有路由表（含 `active`，未生效的路由也列出）和 OSPF；
+  - `huawei-arp` 的 `query-entries` 带 VPN 实例；
+  - `huawei-nat-policy` 的规则按匹配顺序，带区域条件；
+  - `huawei-security-zone` 给出区域编号和成员接口。
+- 华为的 NAT 和安全域模块作为映射的来源，不作为孪生的模型：输出仍按 RFC 8512 命名，区域条件和区域成员放进 `non_standard`。
+
+原来的步骤说明保留如下，供核对。
+
+
 1. 三台设备开 NETCONF over SSH（830 端口）。
    - 命令以设备的 `?` 帮助为准，大致是：`snetconf server enable`、`netconf` 视图下的 `protocol inbound ssh port 830`，SSH 用户的服务类型加上 snetconf。
    - YunShan 是两阶段配置，CE 要 `commit`。USG 是逐行生效的单阶段配置（2026-11-10 实测，提示符没有 `~`/`*`）。
@@ -194,3 +208,4 @@ ACL：目前三台设备都没有配。评测集要用时再加（见故障集 F
 | 日期 | 工作包 | 状态 | 孪生层 | AI 层 |
 |---|---|---|---|---|
 | 2026-11-11 | — | 方向修订（NAT、ACL 在范围内，往后放的只有安全策略和 CLI 模板）；测试和夹具取回；华为 CLI 模板写好但不登记 | 未测 | 未测 |
+| 2026-11-11 | A | 完成：三台开 NETCONF，模块清单、转发相关回包、16 个模块的 YANG 原文已取；无 IETF 数据模型，全部走华为私有模块 | 未测 | 未测 |
