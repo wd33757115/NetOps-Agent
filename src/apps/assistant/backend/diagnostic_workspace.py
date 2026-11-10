@@ -15,8 +15,8 @@ from src.platform.tools import registry
 
 from src.platform.authorization.client import authorize_worker
 
-from . import automation, evidence
-from .workspace import DocumentWorkspace
+from . import automation, docset_scope, evidence
+from .workspace import READING_SKILL, DocumentWorkspace
 
 RUN = "device_access__run"
 COMPARE = "device_access__compare_baseline"
@@ -82,13 +82,19 @@ class DiagnosticWorkspace(DocumentWorkspace):
         session's skill catalog and its ``skill`` tool loads one before the model acts.
         """
         self.automation, self.skills_dir = set(), None
-        if not tools or not automation.can_execute(authorize_worker(self.actor_id, "assistant")):
-            return []
-        skills = automation.chat_skills(self.actor_id)
-        workflows = automation.chat_workflows()
+        # How to read product doc sets: a skill every user gets, since it runs nothing.
+        reading = [READING_SKILL] if self.docset_catalog else []
+        executable = bool(tools) and automation.can_execute(
+            authorize_worker(self.actor_id, "assistant")
+        )
+        skills = automation.chat_skills(self.actor_id) if executable else []
+        workflows = automation.chat_workflows() if executable else []
+        if skills or workflows or reading:
+            self.skills_dir = automation.write_skill_catalog(
+                self.root.parent / "skills", skills, workflows, reading
+            )
         if not skills and not workflows:
             return []
-        self.skills_dir = automation.write_skill_catalog(self.root.parent / "skills", skills, workflows)
         offered = []
         for tool in tools:
             properties = tool["input_schema"]["properties"]
@@ -112,9 +118,40 @@ class DiagnosticWorkspace(DocumentWorkspace):
 
     def widen(self, result):
         with self.lock:
+            added = []
             for device in devices_in(result):
-                if device.get("platform") in PLATFORMS:
-                    self.scope.setdefault(device["address"], device["platform"])
+                if device.get("platform") in PLATFORMS and device["address"] not in self.scope:
+                    self.scope[device["address"]] = device["platform"]
+                    added.append(device["address"])
+            return added
+
+    def open_for_devices(self, addresses):
+        """Doc sets covering the devices a topology answer named: the version a device
+        runs when the library has it, else the newest. Titles of what was opened."""
+        if not self.docset_catalog or not addresses or len(self.mounted) >= docset_scope.LIMIT:
+            return []
+        opened = []
+        for device in docset_scope.inventory(addresses):
+            matches = [d for d in self.docset_catalog if docset_scope.for_device(device, d)]
+            running = (device.get("os_version") or "").replace(" ", "").casefold()
+            exact = [
+                d for d in matches
+                if (version := d["metadata"].get("software_version", "").casefold())
+                and running.startswith(version)
+            ]
+            newest = sorted(matches, key=lambda d: d["created_at"], reverse=True)
+            for docset in (exact or newest)[:1]:
+                if any(d["id"] == docset["id"] for d in self.mounted.values()):
+                    continue
+                if len(self.mounted) >= docset_scope.LIMIT:
+                    break
+                if not self.cache_ready(docset):
+                    continue  # Never build a cache inside a tool's time limit.
+                prefix = self.mount(docset, "device")
+                opened.append(f"{docset['title']}（目录 {prefix}）")
+        if opened:
+            self.write_docsets()
+        return opened
 
     def invoke(self, name, arguments):
         if name == ROWS:
@@ -124,7 +161,11 @@ class DiagnosticWorkspace(DocumentWorkspace):
         if name not in {RUN, COMPARE}:
             result = super().invoke(name, arguments)
             if name in SCOPE_TOOLS:
-                self.widen(result["data"])
+                opened = self.open_for_devices(self.widen(result["data"]))
+                if opened:
+                    result["notice"] += (
+                        "。已按路径上设备的型号展开产品文档集：" + "、".join(opened)
+                    )
             return result
         self.check()
         allowed = {"host", "commands", "purpose"} if name == RUN else {"hosts", "purpose"}

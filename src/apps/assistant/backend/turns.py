@@ -18,7 +18,7 @@ from src.platform.agent_runtime import timeline
 from src.platform.agent_runtime.base import AgentEvent, RunContext
 from src.platform.authorization.client import authority_session, authorize_worker
 
-from . import attachments, evidence, history, model_settings, progress, tool_outputs
+from . import attachments, docset_scope, evidence, history, model_settings, progress, tool_outputs
 from .diagnostic_workspace import DiagnosticWorkspace
 from .models import Turn
 from .repository import now, sessions
@@ -40,6 +40,10 @@ class Question(BaseModel):
     # Netdisk files uploaded with the question (attachments.upload).
     attachments: list[Annotated[str, Field(pattern=r"^file-[0-9a-f]{16}$")]] = Field(
         default_factory=list, max_length=attachments.MAX_PER_MESSAGE
+    )
+    # Product doc sets the user picked for this question (docset_scope adds more by rule).
+    docsets: list[Annotated[str, Field(pattern=r"^[0-9a-f]{32}$")]] = Field(
+        default_factory=list, max_length=docset_scope.LIMIT
     )
 
 
@@ -99,7 +103,7 @@ def begin(actor_id, conversation_id, body):
     signature = digest(
         json.dumps(
             {"conversation": conversation_id, "text": body.text, "filters": body.filters,
-             "attachments": body.attachments},
+             "attachments": body.attachments, "docsets": body.docsets},
             sort_keys=True,
             ensure_ascii=False,
         )
@@ -234,6 +238,17 @@ def earlier_evidence(rows):
     }
 
 
+def earlier_docsets(rows):
+    """Doc sets earlier answers in this conversation cited, most recent first."""
+    return list(dict.fromkeys(
+        reference["document_id"]
+        for row in reversed(rows)
+        if row["role"] == "assistant"
+        for reference in row["references"]
+        if reference.get("kind") == "docset_page"
+    ))
+
+
 def finish(actor_id, run_id, status, text, references, count, code=None):
     with sessions() as session:
         row = session.scalar(
@@ -317,7 +332,10 @@ async def _execute(actor_id, run, body, *, agent_runtime=None, on_event=None):
         if read(actor_id, run["id"])["status"] != "running":
             raise PermissionError("Turn no longer active")
 
-    tools = DiagnosticWorkspace(actor_id, filters=body.filters, check=check, run_id=run["id"])
+    tools = DiagnosticWorkspace(
+        actor_id, filters=body.filters, check=check, run_id=run["id"],
+        docsets=body.docsets, question=body.text,
+    )
     terminal, text, references, count, code = "failed", [], [], 0, "runtime_failed"
 
     async def monitor():
@@ -336,6 +354,7 @@ async def _execute(actor_id, run, body, *, agent_runtime=None, on_event=None):
     try:
         rows = await asyncio.to_thread(history.messages, actor_id, run["conversation_id"])
         tools.earlier_evidence = earlier_evidence(rows)
+        tools.earlier_docsets = earlier_docsets(rows)
         messages = []
         remaining = 16000
         for row in reversed(rows[-10:]):

@@ -210,15 +210,18 @@ def _workflow_body(flow):
     ]) + "\n"
 
 
-def write_skill_catalog(directory, skills, workflows):
-    """A DSH skill root for this turn: the Skills and Workflows this user may run."""
+def write_skill_catalog(directory, skills, workflows, reading=()):
+    """A DSH skill root for this turn: the Skills and Workflows this user may run, plus
+    reading skills (how to read product doc sets) that run nothing and serve every user."""
     directory = Path(directory)
     shutil.rmtree(directory, ignore_errors=True)
     directory.mkdir(parents=True)
+    for source in reading:
+        shutil.copytree(source, directory / Path(source).name)
     for skill in skills:
         _skill_file(directory, skill["name"], skill["description"], _skill_body(skill),
                     skill.get("when_to_use"))
-    taken = {skill["name"] for skill in skills}
+    taken = {skill["name"] for skill in skills} | {Path(source).name for source in reading}
     for flow in workflows:
         # A Workflow keeps its own name unless a Skill already has it.
         name = flow["name"] if flow["name"] not in taken else f"workflow-{flow['name']}"

@@ -38,11 +38,11 @@ ROOT = Path(__file__).resolve().parents[3]
 # Real characters per model request (the model window is 1M tokens). Thinking keeps
 # each round's reasoning in the history; 160k escaped characters stopped at round 9.
 MAX_CONTEXT_CHARACTERS = 400_000
-# Tools that log in to a device, run a Skill or start a Workflow get the live timeout,
-# not the 10 s query one.
+# Tools that log in to a device, run a Skill, start a Workflow or have a vision model read
+# a figure get the live timeout, not the 10 s query one.
 LIVE_TOOLS = frozenset({
     "device_access__run", "device_access__compare_baseline",
-    "assistant__run_skill", "assistant__start_workflow",
+    "assistant__run_skill", "assistant__start_workflow", "view_figure",
 })
 UNAVAILABLE = "Business query unavailable; do not infer absence or health"
 
@@ -207,6 +207,12 @@ class Bridge:
             calls = self.context.max_tool_calls
             if data["name"] not in self.allowed or (calls is not None and self.calls >= calls):
                 raise PermissionError("Tool budget or scope exceeded")
+            # The guard admits linked read-only directories; the workspace decides which.
+            authorize_path = getattr(self.catalog, "authorize_path", None)
+            if authorize_path is not None:
+                await asyncio.to_thread(
+                    authorize_path, data["name"], data.get("arguments") or {}
+                )
             self.calls += 1
             self.tool_starts[data["call_id"]] = time.monotonic()
             detail = await asyncio.to_thread(
@@ -587,7 +593,15 @@ mcp__netops__assistant__start_workflow；只是提问或咨询时不要执行。
 """
 
 
-def system_prompt(diagnostics=False, automation=False):
+DOCSETS = """## 产品文档集
+DOCSETS.md 列出资料库里的厂商产品文档集（命令、告警、日志、配置手册）和本轮已展开的目录。
+回答设备配置、命令用法、告警或日志问题时，先用 skill 工具加载 product-docs，按其中的查法检索。
+需要的文档集没有展开时，用 mcp__netops__open_docset 展开（每轮最多 3 个）。
+版本不明确时写明依据的版本。
+"""
+
+
+def system_prompt(diagnostics=False, automation=False, docsets=False):
     """Role and language first, then each kind of work under its own heading."""
     role = (
         "你是 NetOps 网络助手，服务网络工程师。所有思考、说明和回答都用中文。\n"
@@ -599,6 +613,8 @@ def system_prompt(diagnostics=False, automation=False):
         )
     )
     sections = [DIAGNOSIS, DOCS] if diagnostics else [DOCS]
+    if docsets:
+        sections.append(DOCSETS)
     if automation:
         sections.append(AUTOMATION)
     return "\n".join(
@@ -860,9 +876,13 @@ class DshRuntime:
                 NETOPS_DSH_CALLBACK=f"http://127.0.0.1:{port}",
                 NETOPS_DSH_TOOLS=json.dumps(sorted(bridge.allowed)),
                 NETOPS_DSH_SESSION_ID=session_id,
+                NETOPS_DSH_READ_ROOTS=json.dumps(
+                    [str(p) for p in getattr(bridge.catalog, "read_roots", list)()]
+                ),
                 DSH_SYSTEM_PROMPT=system_prompt(
                     getattr(bridge.catalog, "active_diagnostics", False),
                     bool(getattr(bridge.catalog, "automation", None)),
+                    docsets=bool(getattr(bridge.catalog, "docset_catalog", None)),
                 ),
             )
             from src.common.config import get_settings

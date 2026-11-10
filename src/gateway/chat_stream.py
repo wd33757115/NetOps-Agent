@@ -16,7 +16,7 @@ def prepare(request, user):
         raise HTTPException(422, "请用聊天输入框的附件按钮上传文件（存入网盘）")
     body = turns.Question(
         request_id=uuid4().hex, text=request.query, filters=request.metadata_filters or {},
-        attachments=request.attachments,
+        attachments=request.attachments, docsets=request.docsets,
     )
     conversation_id = request.thread_id or history.create(user.user_id)["id"]
     run, _ = turns.begin(user.user_id, conversation_id, body)

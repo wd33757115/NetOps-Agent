@@ -1,5 +1,25 @@
 # Assistant 知识问答应用
 
+0.13.0：问题文本选文档集时，系列号规则（6800 覆盖 68xx）只在问题没写厂商、或写的厂商与文档集一致时生效，
+H3C S6850 的问题不再选中华为 CE 68xx 文档集；完整型号名照常匹配。厂商别名表移到 materials 的 model_aliases。
+
+0.12.0：产品文档页面里的插图可以识读。工具 `view_figure`（page、figure）只接受本轮已读到图片所在行的页面，
+每轮最多 4 张，计入 75 秒的现场工具时限；识读由 materials 的视觉模型完成并按图片缓存。
+插图引用写作 `[<目录>/figures/<sha>.<扩展名>]`，记录为 `docset_figure`（保存识读文本及其 SHA-256），
+引用抽屉同时显示原图（`GET /conversations/{id}/citations/{citation}/figure`），回查核对图片仍属于该页修订。
+DSH 进程的 TEMP/TMP 指向本轮会话目录下的 `tmp`：终端安全软件会拒绝未签名的运行时写用户 %TEMP%，
+此时 grep/glob 启动 ripgrep 失败。
+
+0.11.0：问答读取资料管理的产品文档集（CHM）。每轮最多展开 3 个，按规则选出：
+提问时在输入框选择的、本会话之前引用过的、问题里提到的型号或版本（6800 系列号覆盖 68xx 型号）、
+本轮拓扑结果里设备的台账型号（优先设备正在运行的版本）。模型可再用 `open_docset` 展开 DOCSETS.md 列出的文档集。
+文档集修订由 materials 展开到 `.runtime/materials-docsets/<修订>/` 一次；每轮只在工作区建一个目录链接
+（Windows 目录联接、其他系统软链接），不复制、不硬链接。DSH 守卫额外允许缓存根目录的真实路径，
+每次 read/glob/grep 前由工作区核对路径属于本轮已展开的文档集。读法写在 materials 的 `product-docs` 技能里，
+有文档集时写进本轮技能目录（所有用户都有，它不执行任何操作）。
+引用格式 `[<目录>/pages/<路径>.md:L起-L止]`，记录为 `docset_page`，回查按修订从数据库取同一页正文核对；
+DOCSETS.md、README、TOC.md 和 index/ 只用于导航，不能引用。
+
 0.7.0：聊天文件工具增加可折叠的脱敏结果预览，并随步骤存入现有 progress JSON。
 按用户、聊天及资料/工具范围隔离 DSH 持久化会话，跨进程复用官方恢复接口。
 原生会话与逐轮 SDK 事件保存在 `.runtime/assistant-sessions/`，供服务器追踪；

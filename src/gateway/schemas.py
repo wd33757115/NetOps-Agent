@@ -29,6 +29,7 @@ class ChatRequest(BaseModel):
     metadata_filters: dict[str, Any] | None = Field(None, description="RAG元数据过滤条件")
     uploaded_file_path: str | None = Field(None, description="已上传的文件路径（用于策略生成等场景）")
     attachments: list[str] = Field(default_factory=list, max_length=5, description="随提问附带的网盘文件 ID（知识问答上传接口返回）")
+    docsets: list[str] = Field(default_factory=list, max_length=3, description="本次提问选择的产品文档集 ID（资料管理）")
     ticket_id: str | None = Field(None, description="工单编号（可选，用于防火墙策略生成等场景，格式如REQ2025051800001）")
     async_mode: bool = Field(default=True, description="是否异步执行耗时任务（返回 celery_task_id 后由客户端轮询 /api/v1/tasks/{task_id}）")
 

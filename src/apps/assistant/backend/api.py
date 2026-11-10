@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 from starlette.concurrency import run_in_threadpool
 
-from src.apps.materials.backend import import_service, library
+from src.apps.materials.backend import docsets, figure_reading, import_service, library
 from src.platform import files
 from src.platform.authorization.client import authorize_worker, require_app
 
@@ -18,6 +18,15 @@ user = require_app("assistant")
 @router.get("/documents")
 def documents(actor=Depends(user)):
     return library.documents()
+
+
+@router.get("/docsets")
+def available_docsets(actor=Depends(user)):
+    """Product doc sets a question can be limited to (picked in the chat input)."""
+    return [
+        {"id": d["id"], "title": d["title"], "metadata": d["metadata"], "pages": d["pages"]}
+        for d in docsets.catalog()
+    ]
 
 
 @router.get("/documents/{document_id}/revisions/{revision}/source")
@@ -147,22 +156,49 @@ def thinking(run_id: str, actor=Depends(user)):
     return turns.thinking(actor.user_id, run_id)
 
 
-@router.get("/conversations/{conversation_id}/citations/{citation_id}")
-def citation(conversation_id: str, citation_id: str, actor=Depends(user)):
-    for message in history.messages(actor.user_id, conversation_id):
+def cited(user_id, conversation_id, citation_id):
+    """A reference an answer in this conversation carried, or 404."""
+    for message in history.messages(user_id, conversation_id):
         for reference in message["references"]:
             if reference.get("id") == citation_id:
-                try:
-                    if reference.get("kind") == "business":
-                        for app_id in evidence.source_apps(reference):
-                            authorize_worker(actor.user_id, app_id)
-                        return evidence.validate(reference)
-                    if reference.get("kind") == "attachment":
-                        # The excerpt was kept with the answer; the file must still be readable.
-                        files.describe(actor, reference["file_id"])
-                        return reference
-                    library.LibraryReader().validate_citation(reference)
-                except ValueError as exc:
-                    raise HTTPException(409, "引用原始修订不可用") from exc
                 return reference
     raise HTTPException(404, "本会话未引用该片段")
+
+
+@router.get("/conversations/{conversation_id}/citations/{citation_id}/figure")
+def cited_figure(conversation_id: str, citation_id: str, actor=Depends(user)):
+    """The figure a figure citation was answered from, shown beside its reading."""
+    reference = cited(actor.user_id, conversation_id, citation_id)
+    if reference.get("kind") != "docset_figure":
+        raise HTTPException(404, "该引用不是插图")
+    try:
+        data, media_type = figure_reading.image(reference)
+    except ValueError as exc:
+        raise HTTPException(409, "引用原始修订不可用") from exc
+    return Response(data, media_type=media_type, headers={
+        "X-Content-Type-Options": "nosniff", "Cache-Control": "private, max-age=3600",
+    })
+
+
+@router.get("/conversations/{conversation_id}/citations/{citation_id}")
+def citation(conversation_id: str, citation_id: str, actor=Depends(user)):
+    reference = cited(actor.user_id, conversation_id, citation_id)
+    try:
+        if reference.get("kind") == "business":
+            for app_id in evidence.source_apps(reference):
+                authorize_worker(actor.user_id, app_id)
+            return evidence.validate(reference)
+        if reference.get("kind") == "docset_page":
+            docsets.validate_citation(reference)
+            return reference
+        if reference.get("kind") == "docset_figure":
+            figure_reading.validate_citation(reference)
+            return reference
+        if reference.get("kind") == "attachment":
+            # The excerpt was kept with the answer; the file must still be readable.
+            files.describe(actor, reference["file_id"])
+            return reference
+        library.LibraryReader().validate_citation(reference)
+    except ValueError as exc:
+        raise HTTPException(409, "引用原始修订不可用") from exc
+    return reference
