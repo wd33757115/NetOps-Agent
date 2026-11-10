@@ -1,19 +1,22 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { Alert, Button, Drawer, Empty, Input, List, Select, Space, Spin, Table, Tabs } from 'antd'
-import { ArrowLeftOutlined, BookOutlined, FileTextOutlined, FileWordOutlined, FolderOpenOutlined, PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons'
+import { ArrowLeftOutlined, BookOutlined, FileTextOutlined, FileWordOutlined, FolderOpenOutlined, PlusOutlined, ReadOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons'
+import { useNavigate } from 'react-router-dom'
 import { api } from '@netops/config/api'
 import WordImport, { type Target } from './WordImport'
 import BatchImport from './BatchImport'
+import DocsetImport from './DocsetImport'
 import DocumentActions from './DocumentActions'
 import RevisionCompare from './RevisionCompare'
 import './Page.css'
 
-interface Document extends Target { sections: number; has_original: boolean; created_at?: string; status: 'active' | 'inactive'; publication_scope?: string }
+interface Document extends Target { sections: number; has_original: boolean; created_at?: string; status: 'active' | 'inactive'; publication_scope?: string; kind?: 'document' | 'docset'; pages?: number | null }
 interface Revision { revision: string; title: string; created_at: string; sections: number; has_original: boolean }
 interface Section { section_id: string; title_path: string[] }
 const base = '/apps/materials'
 
 export default function Materials() {
+  const navigate = useNavigate()
   const [documents, setDocuments] = useState<Document[]>([])
   const [query, setQuery] = useState('')
   const [error, setError] = useState('')
@@ -61,6 +64,7 @@ export default function Materials() {
     return result.data.items
   }
   async function inspect(document: Document) {
+    if (document.kind === 'docset') { navigate(base + '/docsets/' + document.id); return }
     const request = ++readerRequest.current
     setReading(true)
     setFocusedId(document.id); setDetail(document); setRevision(document.revision); setExcerpt(''); setActiveSection(undefined); setNextExcerpt(null); setSections([]); setRevisions([]); setNextRevision(null); setNextSection(null); setError('')
@@ -110,14 +114,17 @@ export default function Materials() {
     } catch { if (request === readerRequest.current) setError('章节读取失败，请重试。') }
     finally { if (request === readerRequest.current) setReading(false) }
   }
-  const filtered = documents.filter(d => (status === 'all' || d.status === status) && (kind === 'all' || (kind === 'word' ? d.has_original : !d.has_original))
+  const filtered = documents.filter(d => (status === 'all' || d.status === status) && (kind === 'all' || (kind === 'docset' ? d.kind === 'docset' : kind === 'word' ? d.has_original && d.kind !== 'docset' : !d.has_original))
     && (!vendor || d.metadata.vendor === vendor)
     && [d.title, ...Object.values(d.metadata)].join(' ').toLowerCase().includes(query.trim().toLowerCase()))
   const focused = filtered.find(d => d.id === focusedId) || filtered[0]
-  const wordCount = documents.filter(d => d.has_original).length
+  const docsetCount = documents.filter(d => d.kind === 'docset').length
+  const wordCount = documents.filter(d => d.has_original).length - docsetCount
+  const docsetPages = documents.reduce((sum, d) => sum + (d.pages || 0), 0)
   const kinds = [{ id: 'all', title: '全部资料', icon: <FolderOpenOutlined />, count: documents.length },
     { id: 'word', title: '含 Word 原件', icon: <FileWordOutlined />, count: wordCount },
-    { id: 'text', title: '文本资料', icon: <FileTextOutlined />, count: documents.length - wordCount }]
+    { id: 'docset', title: '产品文档集', icon: <ReadOutlined />, count: docsetCount },
+    { id: 'text', title: '文本资料', icon: <FileTextOutlined />, count: documents.length - wordCount - docsetCount }]
   return <div className="materials-app">
     <header className="materials-toolbar"><a href="/workbench"><ArrowLeftOutlined /> 工作台</a><span>/</span><span>资料管理</span><a className="materials-chat-link" href="/chat">进入问答 →</a></header>
     <div className="materials-window">
@@ -127,15 +134,15 @@ export default function Materials() {
         <nav aria-label="资料分类">{kinds.map(item => <button key={item.id} aria-current={kind === item.id && !importing ? 'page' : undefined}
           onClick={() => { setKind(item.id); setImporting(false) }}>{item.icon}<span>{item.title}</span><small>{loading ? '—' : item.count}</small></button>)}</nav>
         <button className="materials-add" onClick={() => openImport()}><PlusOutlined /> 导入新资料</button>
-        <div className="materials-sidebar-note"><BookOutlined /><strong>发布后用于问答</strong><p>Agent 按需搜索已发布正文。原文件与历史修订保留供核对。</p></div>
+        <div className="materials-sidebar-note"><BookOutlined /><strong>发布后用于问答</strong><p>Word 与文本资料发布后，问答按需搜索正文；产品文档集按型号和版本展开后按页读取。原文件与历史修订保留供核对。</p></div>
       </aside>
       <main className="materials-main">
-      <div className="materials-heading"><div><span className="materials-eyebrow">{importing ? '导入与发布' : '资料工作区'}</span><h1>{importing ? (target ? '更新资料修订' : '导入资料') : '资料库'}</h1>
+      <div className="materials-heading"><div><span className="materials-eyebrow">{importing ? '导入与发布' : '资料工作区'}</span><h1>{importing ? (target ? (target.kind === 'docset' ? '更新文档集修订' : '更新资料修订') : '导入资料') : '资料库'}</h1>
         <p>{importing ? '预览正文后发布整个文件，问答按需读取片段。' : '管理手册、配置指南与操作规范，明确问答可用范围。'}</p></div>
         <div className="materials-heading-actions">{importing ? <Button onClick={() => setImporting(false)}>返回资料库</Button> : <><Button icon={<ReloadOutlined aria-hidden="true" />} loading={loading} onClick={() => void refresh().catch(() => setError('刷新资料失败。'))}>刷新</Button><Button type="primary" icon={<PlusOutlined aria-hidden="true" />} onClick={() => openImport()}>导入资料</Button></>}</div></div>
     {error && <Alert type="error" message={error} closable onClose={() => setError('')} style={{ marginBottom: 16 }} />}
     {!importing && <>
-      <div className="materials-overview"><span><b>{loading ? '—' : documents.length}</b> 份资料</span><span><b>{loading ? '—' : documents.reduce((sum, d) => sum + d.sections, 0)}</b> 个已发布章节</span><span>已停用 {documents.filter(d => d.status === 'inactive').length} 份 · 不进入新问答</span></div>
+      <div className="materials-overview"><span><b>{loading ? '—' : documents.length}</b> 份资料</span><span><b>{loading ? '—' : documents.reduce((sum, d) => sum + d.sections, 0)}</b> 个已发布章节</span>{docsetPages > 0 && <span><b>{docsetPages.toLocaleString('zh-CN')}</b> 个文档集页面</span>}<span>已停用 {documents.filter(d => d.status === 'inactive').length} 份 · 不进入新问答</span></div>
       <div className="materials-filters"><Input aria-label="查找资料" prefix={<SearchOutlined />} placeholder="搜索标题、产品或版本" allowClear value={query} onChange={e => setQuery(e.target.value)} />
         <Select aria-label="筛选资料状态" value={status} onChange={setStatus} options={[{ value: 'all', label: '全部状态' }, { value: 'active', label: '已发布' }, { value: 'inactive', label: '已停用' }]} />
         <Select aria-label="筛选厂商" placeholder="全部厂商" allowClear value={vendor} onChange={setVendor} options={[...new Set(documents.map(d => d.metadata.vendor).filter(Boolean))].map(v => ({ value: v, label: v }))} /><span>{filtered.length} 份结果</span></div>
@@ -144,21 +151,26 @@ export default function Materials() {
           rowClassName={d => d.id === focused?.id ? 'materials-row-selected' : ''}
           locale={{ emptyText: <Empty description={documents.length ? '没有匹配的资料，试试其他关键词或分类' : '尚无已发布资料，先导入一份手册'} /> }}
           columns={[
-            { title: '资料名称', key: 'title', render: (_, d) => <div className="materials-document"><span className="materials-file-icon">{d.has_original ? <FileWordOutlined /> : <FileTextOutlined />}</span><div><button onClick={() => void inspect(d)}>{d.title}</button><small>{[d.metadata.vendor, d.metadata.product, d.metadata.software_version].filter(Boolean).join(' · ') || '未填写产品信息'}</small></div></div> },
-            { title: '发布范围', width: 130, key: 'scope', render: (_, d) => <span className="materials-scope">{d.sections} 个章节<small>{d.status === 'inactive' ? '已停用' : d.publication_scope === 'legacy_selection' ? '旧版按章节发布' : '整份文件'}</small></span> },
+            { title: '资料名称', key: 'title', render: (_, d) => <div className="materials-document"><span className="materials-file-icon">{d.kind === 'docset' ? <ReadOutlined /> : d.has_original ? <FileWordOutlined /> : <FileTextOutlined />}</span><div><button onClick={() => void inspect(d)}>{d.title}</button><small>{[d.metadata.vendor, d.metadata.product, d.metadata.software_version].filter(Boolean).join(' · ') || '未填写产品信息'}</small></div></div> },
+            { title: '发布范围', width: 130, key: 'scope', render: (_, d) => d.kind === 'docset' ? <span className="materials-scope">{(d.pages || 0).toLocaleString('zh-CN')} 个页面<small>{d.status === 'inactive' ? '已停用' : '产品文档集'}</small></span> : <span className="materials-scope">{d.sections} 个章节<small>{d.status === 'inactive' ? '已停用' : d.publication_scope === 'legacy_selection' ? '旧版按章节发布' : '整份文件'}</small></span> },
             { title: '更新日期', width: 130, responsive: ['xl'], key: 'date', render: (_, d) => d.created_at ? new Date(d.created_at).toLocaleDateString('zh-CN') : '—' },
-            { title: '操作', width: 176, key: 'actions', render: (_, d) => <div className="materials-row-actions"><Button type="link" disabled={reading} onClick={() => void inspect(d)}>查看资料</Button><Button type="link" onClick={() => openImport(d)}>更新修订</Button></div> },
+            { title: '操作', width: 176, key: 'actions', render: (_, d) => <div className="materials-row-actions"><Button type="link" disabled={reading} onClick={() => void inspect(d)}>{d.kind === 'docset' ? '阅读' : '查看资料'}</Button><Button type="link" onClick={() => openImport(d)}>更新修订</Button></div> },
           ]} />
       </div><aside className="materials-inspector" aria-label="资料概况">
         <span className="materials-eyebrow">{focused ? '当前资料' : '发布说明'}</span><h2>{focused?.title || '让资料进入问答'}</h2>
-        {focused && <dl><div><dt>问答可读范围</dt><dd>{focused.status === 'inactive' ? '已停用，不进入新问答' : `${focused.sections} 个已发布章节`}</dd></div><div><dt>当前修订</dt><dd><code>{focused.revision.slice(0, 12)}</code></dd></div><div><dt>软件版本</dt><dd>{focused.metadata.software_version || '未填写'}</dd></div><div><dt>原文件</dt><dd>{focused.has_original ? '已保存，可在修订中下载' : '本资料来自文本导入'}</dd></div></dl>}
+        {focused && focused.kind === 'docset' && <dl><div><dt>问答可读范围</dt><dd>{focused.status === 'inactive' ? '已停用，不进入新问答' : '按问题里的型号、版本或提问时的选择读取'}</dd></div><div><dt>页面</dt><dd>{(focused.pages || 0).toLocaleString('zh-CN')} 个</dd></div><div><dt>软件版本</dt><dd>{focused.metadata.software_version || '未填写'}</dd></div><div><dt>适用型号与别名</dt><dd>{focused.metadata.models || '未填写'}</dd></div><div><dt>当前修订</dt><dd><code>{focused.revision.slice(0, 12)}</code></dd></div></dl>}
+        {focused && focused.kind !== 'docset' && <dl><div><dt>问答可读范围</dt><dd>{focused.status === 'inactive' ? '已停用，不进入新问答' : `${focused.sections} 个已发布章节`}</dd></div><div><dt>当前修订</dt><dd><code>{focused.revision.slice(0, 12)}</code></dd></div><div><dt>软件版本</dt><dd>{focused.metadata.software_version || '未填写'}</dd></div><div><dt>原文件</dt><dd>{focused.has_original ? '已保存，可在修订中下载' : '本资料来自文本导入'}</dd></div></dl>}
+        {focused?.kind === 'docset' && <Button type="primary" icon={<ReadOutlined aria-hidden="true" />} className="materials-read-docset" onClick={() => navigate(base + '/docsets/' + focused.id)}>阅读文档集</Button>}
         {focused && <DocumentActions key={focused.id + focused.revision + focused.status} document={focused} onChanged={refresh} />}
-        <div className="materials-scope-note"><BookOutlined /><strong>整份发布，按需阅读</strong><p>{focused?.publication_scope === 'legacy_selection' ? '这份资料来自旧版章节发布。重新上传原文件更新修订，即可发布全部正文；历史引用保持不变。' : '新导入文件发布全部可提取正文。图片、拓扑图等提取限制会在导入时提示；问答只读取所需片段。'}</p></div>
+        <div className="materials-scope-note"><BookOutlined /><strong>{focused?.kind === 'docset' ? '整份发布，按页阅读' : '整份发布，按需阅读'}</strong><p>{focused?.kind === 'docset' ? '文档集保留厂商目录和全部页面，图片原样保存；问答需要时由视觉模型识读组网图。' : focused?.publication_scope === 'legacy_selection' ? '这份资料来自旧版章节发布。重新上传原文件更新修订，即可发布全部正文；历史引用保持不变。' : '新导入文件发布全部可提取正文。图片、拓扑图等提取限制会在导入时提示；问答只读取所需片段。'}</p></div>
       </aside></div>
     </>}
-    {importing && <div className="materials-import"><Tabs items={[
+    {importing && <div className="materials-import"><Tabs items={target?.kind === 'docset' ? [
+        { key: 'chm', label: 'CHM 产品文档', children: <DocsetImport key={target.id} target={target} onPublished={refresh} /> },
+      ] : [
         { key: 'word', label: 'Word 文件', children: <WordImport key={target?.id || 'new'} target={target} onPublished={refresh} /> },
         ...(!target ? [{ key: 'batch', label: '批量导入', children: <BatchImport onPublished={refresh} /> }] : []),
+        ...(!target ? [{ key: 'chm', label: 'CHM 产品文档', children: <DocsetImport onPublished={refresh} /> }] : []),
         { key: 'text', label: '文本资料', children: <Space direction="vertical" style={{ width: '100%' }}>
           <Input aria-label="文本资料标题" value={title} maxLength={256} placeholder="资料标题" onChange={e => setTitle(e.target.value)} />
           <Input.TextArea aria-label="资料正文" rows={14} value={text} maxLength={2097152} placeholder="粘贴正文，保留章节标题" onChange={e => setText(e.target.value)} />

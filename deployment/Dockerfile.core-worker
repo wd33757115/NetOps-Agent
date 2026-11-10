@@ -11,10 +11,12 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV TZ=Asia/Shanghai
 
+# 7zip (7zz) unpacks CHM product documents for the materials App.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libpq-dev \
     curl \
+    7zip \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt /app/

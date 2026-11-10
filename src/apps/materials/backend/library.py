@@ -147,6 +147,10 @@ def documents(*, include_inactive=False):
                 "sections": len(r.sections_json),
                 "has_original": bool(r.source_json),
                 "status": d.status,
+                "kind": d.kind,
+                "pages": (r.source_json or {}).get("counts", {}).get("unique_pages")
+                if d.kind == "docset"
+                else None,
                 "publication_scope": (r.source_json or {}).get(
                     "publication_scope", "legacy_selection" if r.source_json else "whole_file"
                 ),

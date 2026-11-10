@@ -1,7 +1,7 @@
 # 资料管理
 
-完整业务包：资料维护 API、本地 Word 解析、原文件保存、不可变修订、前端页面及包内迁移。
-工作台通过 app.yaml 自动注册，应用 ID 为 materials，入口 /apps/materials。
+完整业务包：资料维护 API、本地 Word 解析、CHM 产品文档集导入与阅读、原文件保存、不可变修订、
+前端页面及包内迁移。工作台通过 app.yaml 自动注册，应用 ID 为 materials，入口 /apps/materials。
 本包不依赖 Assistant、DSH、Workflow 或模型服务。
 
 ## 使用边界
@@ -44,6 +44,11 @@
 - GET /documents/{id}/compare?before=…&after=…：分页返回章节增删改和元数据差异；正文用现有阅读 API 按需对照。
 - GET /documents/{id}/sections、/sections/{section_id}：指定 revision 的分页目录/正文。
 - GET /documents/{id}/revisions/{revision}/source：验证摘要后返回原 Word 附件，无公开对象存储链接。
+- POST /docsets/uploads、POST /docsets/imports：申请直传地址；上传完成后开始解析。
+- GET /docsets/imports、/docsets/imports/{job}：作业列表与核对预览；/pages、/titles、/figures 抽看解析结果。
+- POST /docsets/imports/{job}/publish、DELETE /docsets/imports/{job}：发布（新文档集或新修订）、取消。
+- GET /docsets/{id}/toc、/toc/locate、/pages、/figures/{sha}.{ext}、/search：按修订浏览目录、页面、图片与全文搜索。
+- POST /docsets/{id}/revisions/{revision}/source-link：原 CHM 的 5 分钟下载链接。
 
 原文件以 SHA-256 作为对象键。对象存储与数据库之间没有分布式事务；
 存储成功但数据库失败时可能留下未被引用的同摘要对象，不会发布不完整修订。
@@ -52,8 +57,49 @@
 网络结果不明时刷新列表核对，重试不会重复创建同一文件。
 停用/删除只影响后续问答的资料快照；已开始的问答保留当时的快照，已有引用可按修订查阅。
 
+## 产品文档集（CHM）
+
+厂商 CHM 产品文档（如 1 GB、2 万页的交换机文档）整份导入为一个「产品文档集」，不当作一份 Word：
+每个 HTML 页面一页，保留目录树，另生成命令、告警、日志索引。问答读取方式见 ../assistant/README.md 0.11.0。
+
+上传 → 后台解析 → 核对预览 → 发布，作业状态为 uploading → queued → running → ready →
+publishing → published，出错为 failed；待核对 7 天未发布为 expired，取消或停用应用为 cancelled。
+
+- 浏览器经 `/object-storage/` 预签名直传 MinIO（默认上限 4 GiB），请求里不解析文件。
+- 解析在 `app.materials` 队列执行：7-Zip 先列清单并核对限额，再只解出 HTML、目录和图片；
+  HTML 用标准库当文本解析，不执行脚本、不加载外部资源、不调用模型。
+- Linux 镜像使用 `7zz`；Windows 安装 7-Zip（默认路径可自动发现），或用 `MATERIALS_SEVENZIP` 指定。
+- 限额可用 `MATERIALS_DOCSET_<名称>` 覆盖，如 `MATERIALS_DOCSET_UPLOAD_BYTES`；超限时作业失败并写明哪一项。
+- 页面转为 Markdown：标题层级、编号步骤、表格行列、命令代码块、说明/注意框保留；图片原样保存，图中文字不提取。
+- 每页开头两行固定：第 1 行为目录位置，第 2 行为类型、特性和原页面路径。内容完全相同的页面只保留一份。
+- 发布与 Word 一致：核对缺失提示后整份发布；同一文件、同一厂商+产品+版本不重复发布，
+  同一版本的新文档在原文档集上更新修订。改标题和元数据会生成新修订，页面不变。
+
+问答缓存：发布或改元数据后，`app.materials.materialize_docset` 把该修订写到 `.runtime/materials-docsets/<修订>/`
+（`MATERIALS_DOCSET_CACHE` 可改位置，默认上限 20 GiB，按最近使用淘汰，缺失时首次使用再生成）。
+读法技能 `skills/product-docs/SKILL.md` 随本包发布，由问答复制进每轮技能目录，不登记为可执行技能。
+
+型号建议：发布预览和「编辑资料信息」在「适用型号与别名」下列出建议，点选后才写入，不产生新修订。来源一是文档集
+自己标题含「版本配套」页面里「设备名称 / 发布版本中的设备信息」两列的型号（样本 30 个），二是设备台账里
+同厂商、没有任何文档集写过的型号。接口：GET /docsets/{id}/model-suggestions、GET /docsets/imports/{job}/model-suggestions?vendor=。
+
+修订对比：阅读页「修订对比」选基准修订，按目录顺序列出新增、删除、正文变化的页面（按路径对齐、比正文 SHA-256，
+不含重复页和 README/TOC/索引）；点开看单页逐行差异（GET /docsets/{id}/compare/page?path=&before=&after=，最多 2000 行）。
+汇总沿用 GET /documents/{id}/compare 的返回结构。
+
+插图识读：问答需要时（不在导入时），`figure_reading` 把一张插图缩到长边 1600 px 的 PNG，交给视觉模型
+（默认 `deepseek-v4-flash-vision-exp`，`MATERIALS_FIGURE_MODEL` 可改）转写文字、连线和标注位置；
+先用低强度推理（45 秒），没有结果再关推理重试一次（20 秒）。结果按图片 SHA-256、模型和提示版本
+存在 app_materials_figure_readings，同一张图只识读一次。识读不是手册原文，引用时连同原图一起展示。
+
+存储：正文按 SHA-256 存在 app_materials_texts，修订的文件清单在 app_materials_docset_files，
+图片在 MinIO `apps/materials/figures/<sha>.<ext>`，原 CHM 在 `apps/materials/sources/<sha>.chm`。
+原 CHM 体积可达数 GB，不经接口转发：下载时发放 5 分钟有效的预签名链接，同样经 `/object-storage/`。
+
 ## 迁移和部署
 
+materials_0004 增加插图识读缓存表 app_materials_figure_readings。
+materials_0003 增加资料类型 kind（默认 document）和文档集的正文、文件、图片、导入作业四张表，只新增不改旧数据。
 materials_0002 增加状态和当前文件去重键，旧资料默认 active；已有重复记录保留 ID，不自动删除。
 materials_0001 创建 app_materials_documents / app_materials_revisions。
 若已有 Assistant 资料，逐字段复制全部旧修订，保留文档 ID、revision、原文字节及章节坐标。

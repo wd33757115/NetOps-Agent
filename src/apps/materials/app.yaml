@@ -1,16 +1,37 @@
 manifest_version: 1
 id: materials
 name: 资料管理
-version: 1.2.0
+version: 1.6.0
 platform_api: '>=1.0,<2.0'
 icon: document
 dependencies: {}
 backend:
   router: src.apps.materials.backend.api:router
+  task_modules: [src.apps.materials.backend.tasks]
+  task_names:
+    - app.materials.import_docset
+    - app.materials.publish_docset
+    - app.materials.reconcile_imports
+    - app.materials.materialize_docset
+  queue: app.materials
+  schedules:
+    - name: reconcile-imports
+      task: app.materials.reconcile_imports
+      seconds: 60
 frontend:
   entry: frontend/index.tsx
 database:
   mode: package
   migrations: migrations
-  head: materials_0002
-  tables: [app_materials_documents, app_materials_revisions]
+  head: materials_0004
+  tables:
+    - app_materials_documents
+    - app_materials_revisions
+    - app_materials_texts
+    - app_materials_docset_files
+    - app_materials_docset_figures
+    - app_materials_import_jobs
+    - app_materials_figure_readings
+lifecycle:
+  drain: src.apps.materials.backend.docsets:drain
+  pending: src.apps.materials.backend.docsets:pending

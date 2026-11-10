@@ -4,11 +4,11 @@ from collections import defaultdict
 from typing import Literal
 
 from fastapi import HTTPException
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 
 from . import library
-from .documents import Section, digest
+from .documents import FILTERS, Section, digest
 from .models import Document, Revision
 
 
@@ -25,6 +25,14 @@ class StatusChange(ExpectedDocument):
 class MetadataChange(library.ImportDocument):
     text: str = Field(default="", max_length=0, exclude=True)
     expected_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @field_validator("metadata")
+    @classmethod
+    def valid_metadata(cls, values):
+        # Doc sets also record their models; Word/text documents reject that key below.
+        if set(values) - FILTERS - {"models"} or any(len(v) > 1000 for v in values.values()):
+            raise ValueError("Unsupported metadata")
+        return values
 
 
 def change_status(document_id, expected, status):
@@ -48,6 +56,19 @@ def change_status(document_id, expected, status):
 def update_metadata(actor_id, document_id, body):
     with library.sessions() as session:
         document = session.get(Document, document_id)
+        kind = document.kind if document else None
+    if kind == "docset":
+        from . import docsets
+
+        try:
+            change = docsets.MetadataChange.model_validate(body.model_dump())
+        except ValueError as exc:
+            raise HTTPException(422, "资料信息无效") from exc
+        return docsets.update_metadata(actor_id, document_id, change)
+    if any(key not in FILTERS for key in body.metadata):
+        raise HTTPException(422, "Word 与文本资料没有适用型号字段")
+    with library.sessions() as session:
+        document = session.get(Document, document_id)
         if document is None or document.status == "deleted":
             raise HTTPException(404, "资料不存在或已删除")
         row = session.get(Revision, (document_id, document.current_revision))
@@ -69,6 +90,11 @@ def update_metadata(actor_id, document_id, body):
 
 def compare(document_id, before, after, offset=0, limit=50):
     with library.sessions() as session:
+        document = session.get(Document, document_id)
+        if document is not None and document.kind == "docset":
+            from . import docsets
+
+            return docsets.compare(document_id, before, after, offset, limit)
         old = session.get(Revision, (document_id, before))
         new = session.get(Revision, (document_id, after))
         if old is None or new is None:
