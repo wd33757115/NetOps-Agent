@@ -1,0 +1,83 @@
+------------------------------------------------
+Local Intf: Et0/3
+Local Intf service instance: -
+Chassis id: 7425.8ae4.1677
+Port id: GigabitEthernet3/0
+Port Description: to SPINE2 e0/3
+System Name: LEAF3
+
+System Description: 
+H3C Comware Platform Software, Software Version 7.1.064, Release 1362P12
+H3C VSR1000
+Copyright (c) 2004-2023 New H3C Technologies Co., Ltd. All rights reserved.
+
+Time remaining: 119 seconds
+System Capabilities: B,R
+Enabled Capabilities: B,R
+Management Addresses:
+    IP: 10.10.23.2
+Auto Negotiation - supported, enabled
+Physical media capabilities:
+    1000baseT(FD)
+    100base-TX(FD)
+    100base-TX(HD)
+    10base-T(FD)
+    10base-T(HD)
+Media Attachment Unit type: 30
+Vlan ID: - not advertised
+Peer Source MAC: 0cc3.0000.0002
+
+------------------------------------------------
+Local Intf: Et0/1
+Local Intf service instance: -
+Chassis id: aabb.cc00.0300
+Port id: Et0/2
+Port Description: to SPINE2 e0/1
+System Name: LEAF1.lab.local
+
+System Description: 
+Cisco IOS Software [IOSXE], Linux Software (X86_64BI_LINUX_L2-ADVENTERPRISEK9-M), Version 17.15.1, RELEASE SOFTWARE (fc4)
+Technical Support: http://www.cisco.com/techsupport
+Copyright (c) 1986-2024 by Cisco Systems, Inc.
+Compiled Sun 11-Aug-24 22:06 by mc
+
+Time remaining: 117 seconds
+System Capabilities: B,R
+Enabled Capabilities: B,R
+Management Addresses:
+    IP: 10.10.21.2
+Auto Negotiation - supported, enabled
+Physical media capabilities:
+    1000baseT(FD)
+Media Attachment Unit type - not advertised
+Vlan ID: - not advertised
+Peer Source MAC: aabb.cc00.0320
+
+------------------------------------------------
+Local Intf: Et0/2
+Local Intf service instance: -
+Chassis id: aabb.cc00.0400
+Port id: Et0/2
+Port Description: to SPINE2 e0/2
+System Name: LEAF2.lab.local
+
+System Description: 
+Cisco IOS Software [IOSXE], Linux Software (X86_64BI_LINUX_L2-ADVENTERPRISEK9-M), Version 17.15.1, RELEASE SOFTWARE (fc4)
+Technical Support: http://www.cisco.com/techsupport
+Copyright (c) 1986-2024 by Cisco Systems, Inc.
+Compiled Sun 11-Aug-24 22:06 by mc
+
+Time remaining: 118 seconds
+System Capabilities: B,R
+Enabled Capabilities: B,R
+Management Addresses:
+    IP: 10.10.22.2
+Auto Negotiation - supported, enabled
+Physical media capabilities:
+    1000baseT(FD)
+Media Attachment Unit type - not advertised
+Vlan ID: - not advertised
+Peer Source MAC: aabb.cc00.0420
+
+
+Total entries displayed: 3

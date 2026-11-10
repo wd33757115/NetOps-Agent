@@ -21,7 +21,10 @@ families:
     command_style: display
     cli: vrp
     global_instance: _public_
-    pattern: '^\s*(?:Huawei Versatile Routing Platform Software|VRP \(R\) software)\b'
+    # Collection templates are verified on YunShan OS (eNSP Pro: AR6700, USG6306F, CE6800,
+    # 1.25.1.1); AR and USG print only the YunShan line, CE the VRP line above it.
+    profile_requires: '\bYunShan OS\b'
+    pattern: '^\s*(?:Huawei Versatile Routing Platform Software|VRP \(R\) software|Huawei YunShan OS)\b'
   - id: iosxe
     vendor: Cisco
     profile_id: cisco-iosxe

@@ -1,0 +1,2 @@
+MAC Address      VLAN ID    State            Port/Nickname            Aging
+0050-7966-6804   100        Learned          GE3/0                    Y

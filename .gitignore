@@ -20,6 +20,30 @@
 !/scripts/
 !/deployment/
 !/docs/
+# Network twin: the topology tests with their fixtures, and the diagnosis evaluation set
+# (owner decision 2026-11-11). Other tests stay local.
+!/tests/
+/tests/*
+!/tests/__init__.py
+!/tests/topology-requirements.txt
+!/tests/fixtures/
+/tests/fixtures/*
+!/tests/fixtures/topology/
+!/tests/fixtures/netconf/
+!/tests/unit/
+/tests/unit/*
+!/tests/unit/conftest.py
+!/tests/unit/test_topology_*.py
+!/tests/unit/test_netconf_*.py
+!/tests/unit/test_platform_netconf.py
+!/tests/unit/test_device_access*.py
+!/tests/integration/
+/tests/integration/*
+!/tests/integration/__init__.py
+!/tests/integration/conftest.py
+!/tests/integration/test_topology_*.py
+!/tests/integration/test_device_access_*.py
+!/evals/
 
 # Local plans, review output and historical validation notes (keep on disk).
 
@@ -220,6 +244,11 @@ src/skills/shared/textfsm-templates/H3C/Comware7/*
 !src/skills/shared/textfsm-templates/H3C/Comware7/display_transceiver_diagnosis_interface_thresholds__1.0.0.textfsm
 !src/skills/shared/textfsm-templates/H3C/Comware7/display_interface_values__1.0.0.textfsm
 !src/skills/shared/textfsm-templates/H3C/Comware7/*__topology-*.textfsm
+!src/skills/shared/textfsm-templates/Huawei/
+src/skills/shared/textfsm-templates/Huawei/*
+!src/skills/shared/textfsm-templates/Huawei/YunShan/
+src/skills/shared/textfsm-templates/Huawei/YunShan/*
+!src/skills/shared/textfsm-templates/Huawei/YunShan/*__topology-*.textfsm
 src/skills/shared/outputs/*
 !src/skills/shared/outputs/.gitkeep
 

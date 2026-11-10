@@ -1,0 +1,26 @@
+Value Filldown VRF (\S+)
+Value Filldown NETWORK (\d+\.\d+\.\d+\.\d+)
+Value Filldown PREFIX_LENGTH (\d+)
+Value Required PROTOCOL (\S+)
+Value DISTANCE (\d+)
+Value METRIC (\d+)
+Value FLAG ([RDTB]*)
+Value NEXTHOP_IP (\d+\.\d+\.\d+\.\d+)
+Value NEXTHOP_IF (\S+)
+
+# One record per next hop (eNSP Pro AR6700, USG6306F and CE6800, YunShan OS 1.25.1.1).
+# An equal-cost next hop is a row without the destination. The public table names itself
+# "_public_" and leaves VRF empty; a VPN instance's table (the per-VRF command) names it.
+Start
+  ^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d(?:\.\d+)?\s*$$
+  ^Proto: Protocol\s+Pre: Preference\s*$$
+  ^Route Flags: .*$$
+  ^-+\s*$$
+  ^Routing Table\s*:\s*_public_\s*$$
+  ^Routing Table\s*:\s*${VRF}\s*$$
+  ^\s*Destinations\s*:\s*\d+\s+Routes\s*:\s*\d+\s*$$
+  ^Destination/Mask\s+Proto\s+Pre\s+Cost\s+Flags\s+NextHop\s+Interface\s*$$
+  ^\s*${NETWORK}/${PREFIX_LENGTH}\s+${PROTOCOL}\s+${DISTANCE}\s+${METRIC}\s+${FLAG}\s+${NEXTHOP_IP}\s+${NEXTHOP_IF}\s*$$ -> Record
+  ^\s+${PROTOCOL}\s+${DISTANCE}\s+${METRIC}\s+${FLAG}\s+${NEXTHOP_IP}\s+${NEXTHOP_IF}\s*$$ -> Record
+  ^\s*$$
+  ^. -> Error "unrecognized display ip routing-table line"

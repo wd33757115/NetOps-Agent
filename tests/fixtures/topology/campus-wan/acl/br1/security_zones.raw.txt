@@ -1,0 +1,22 @@
+display security-zone
+Name: Local
+Members: 
+  None
+
+Name: Trust
+Members: 
+  None
+
+Name: DMZ
+Members: 
+  None
+
+Name: Untrust
+Members: 
+  None
+
+Name: Management
+Members: 
+  None
+
+<BR1>

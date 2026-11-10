@@ -1,0 +1,18 @@
+display ip vpn-instance instance-name BLUE
+  VPN-Instance Name and Index : BLUE, 1
+  Route Distinguisher : 10.255.10.13:2
+  Interfaces : Vsi-interface20, Vsi-interface920
+  TTL mode: pipe
+   Diffserv-mode information: pipe be
+  Address-family IPv4:
+   Export VPN Targets :
+       65100:50020
+   Import VPN Targets :
+       65100:50020
+   Apply Label Type : Per-nexthop
+  Address-family EVPN:
+   Export VPN Targets :
+       65100:50020
+   Import VPN Targets :
+       65100:50020
+<LEAF3>

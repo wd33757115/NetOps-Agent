@@ -1,0 +1,9 @@
+*down: administratively down
+(s): spoofing  (l): loopback
+Interface          Physical Protocol IP address/Mask    VPN instance Description
+GE1/0              up       up       10.10.1.28/24      --           OOB-MGMT   
+GE2/0              up       up       10.20.23.2/30      --           to P e0/2  
+GE3/0              up       up       10.2.1.1/24        CUST-A       to A2 (C...
+GE4/0              up       up       10.99.1.1/24       SHARED       to S2 (S...
+GE5/0              down     down     --                 --           --         
+Loop0              up       up(s)    10.255.20.3/32     --           --         

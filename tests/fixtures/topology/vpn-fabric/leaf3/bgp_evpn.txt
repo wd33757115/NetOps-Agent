@@ -1,0 +1,9 @@
+ BGP local router ID: 10.255.10.13
+ Local AS number: 65100
+ Total number of peers: 2		  Peers in established state: 2
+
+  * - Dynamically created peer
+  Peer                    AS  MsgRcvd  MsgSent OutQ PrefRcv Up/Down  State
+
+  10.255.10.1          65100      163      154    0       5 02:02:57 Established
+  10.255.10.2          65100      162      142    0       5 02:02:57 Established

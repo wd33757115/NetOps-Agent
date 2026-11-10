@@ -1,0 +1,17 @@
+Value Required NAME (\S+)
+Value RD (\d+:\d+|\d+\.\d+\.\d+\.\d+:\d+)
+
+# One record per VPN instance (eNSP Pro AR6700, USG6306F and CE6800, YunShan OS 1.25.1.1).
+# The address-family column is not modeled.
+Start
+  ^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d(?:\.\d+)?\s*$$
+  ^\s*Total (?:IPv[46] )?VPN-Instances configured\s*:\s*\d+\s*$$
+  ^\s*VPN-Instance Name\s+RD\s+Address-family\s*$$ -> Instances
+  ^\s*$$
+  ^. -> Error "unrecognized display ip vpn-instance line"
+
+Instances
+  ^\s+${NAME}\s+${RD}\s+IPv\S+\s*$$ -> Record
+  ^\s+${NAME}\s+IPv\S+\s*$$ -> Record
+  ^\s*$$
+  ^. -> Error "unrecognized VPN instance row"

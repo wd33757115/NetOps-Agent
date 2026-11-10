@@ -1,0 +1,13 @@
+display ospf interface
+
+
+	 OSPF Process 1 with Router ID 10.255.0.2
+		 Interfaces 
+
+ Area: 0.0.0.0        
+ IP Address      Type      State    Cost  Pri   DR              BDR 
+ 10.0.24.1       Broadcast BDR      1     1     10.0.24.2       10.0.24.1
+ 10.0.23.1       Broadcast BDR      1     1     10.0.23.2       10.0.23.1
+ 10.0.12.2       Broadcast DR       1     1     10.0.12.2       10.0.12.1
+ 10.255.0.2      PTP       Loopback 0     1     0.0.0.0         0.0.0.0
+<BR2>

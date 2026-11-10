@@ -1,0 +1,2 @@
+show mpls ldp neighbor
+LEAF1#

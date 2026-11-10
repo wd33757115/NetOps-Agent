@@ -1,0 +1,4322 @@
+{
+  "schema_version": 1,
+  "batch": "20261004-233838",
+  "source": "GNS3 authorized lab capture",
+  "raw_format": "UTF-8 text saved by collector before CLI cleanup; original line endings",
+  "limitations": [
+    "Not an arbitrary-encoding wire capture",
+    "No initial login banner saved"
+  ],
+  "secret_scan": {
+    "literal_matches": 0,
+    "sensitive_config_matches": 0,
+    "scanner": "scripts/scan_sensitive_device_data.py + direct byte check"
+  },
+  "observations": [
+    {
+      "device": "spine1",
+      "host": "10.10.1.21",
+      "capability": "version",
+      "command": "show version",
+      "observed_at": "2026-10-04T15:38:39.360147+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine1/version.txt",
+          "sha256": "3fe4f25783e3e71f015aae6c17aa52210c904f26882e4703516a401922f588fb",
+          "bytes": 1497
+        },
+        "raw.txt": {
+          "path": "spine1/version.raw.txt",
+          "sha256": "733c37f2f3ae56a1dccbbf3a0321baae76239dbe4c09b30cd6b2dddd3a197386",
+          "bytes": 1555
+        }
+      }
+    },
+    {
+      "device": "spine1",
+      "host": "10.10.1.21",
+      "capability": "lldp_verbose",
+      "command": "show lldp neighbors detail",
+      "observed_at": "2026-10-04T15:38:39.514376+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine1/lldp_verbose.txt",
+          "sha256": "cb06258c3e3f327198b588345b21d151f19836ce9b1c40fb1aeef048326722b0",
+          "bytes": 2359
+        },
+        "raw.txt": {
+          "path": "spine1/lldp_verbose.raw.txt",
+          "sha256": "a5846a3f47da29e371b0e38fad4e28d1f1fa5e9b6a24d364fa64768158747fa0",
+          "bytes": 2479
+        }
+      }
+    },
+    {
+      "device": "spine1",
+      "host": "10.10.1.21",
+      "capability": "interfaces_description",
+      "command": "show interfaces description",
+      "observed_at": "2026-10-04T15:38:39.922691+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine1/interfaces_description.txt",
+          "sha256": "a7fcd52e9021fefb8f984a11a402f7eccb6abb58718c8dc131e6b1f8da019edf",
+          "bytes": 619
+        },
+        "raw.txt": {
+          "path": "spine1/interfaces_description.raw.txt",
+          "sha256": "06dffff8dbbc1cadc0b3fcf38e2ca9cf61d5a6bbbdbc70833723d6aeaf25762e",
+          "bytes": 665
+        }
+      }
+    },
+    {
+      "device": "spine1",
+      "host": "10.10.1.21",
+      "capability": "ip_interface",
+      "command": "show ip interface",
+      "observed_at": "2026-10-04T15:38:40.077432+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine1/ip_interface.txt",
+          "sha256": "572f1454c6eb4c6754bc4a64409e85c3eeaec9f27801035139df044756b35de2",
+          "bytes": 8175
+        },
+        "raw.txt": {
+          "path": "spine1/ip_interface.raw.txt",
+          "sha256": "918bdb8684bb556c809d40d7d1e18336066c56f2e3a57d9821ab4a53abd1799b",
+          "bytes": 8424
+        }
+      }
+    },
+    {
+      "device": "spine1",
+      "host": "10.10.1.21",
+      "capability": "arp",
+      "command": "show ip arp",
+      "observed_at": "2026-10-04T15:38:40.129011+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine1/arp.txt",
+          "sha256": "718473661ab5b2beb9b47bb4fdb893d87b326eec2d6481afb9dc2c618cd6afa5",
+          "bytes": 509
+        },
+        "raw.txt": {
+          "path": "spine1/arp.raw.txt",
+          "sha256": "b00c1a9970afeea4475ff9a0f54f0d10abe91fab0423e3c05dbb4a0968782d5d",
+          "bytes": 536
+        }
+      }
+    },
+    {
+      "device": "spine1",
+      "host": "10.10.1.21",
+      "capability": "routes",
+      "command": "show ip route",
+      "observed_at": "2026-10-04T15:38:40.793029+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine1/routes.txt",
+          "sha256": "abc958cc5b41fb6a7a1d420d6dc1337cac1d686df9f6134126d7304fd13a9594",
+          "bytes": 1794
+        },
+        "raw.txt": {
+          "path": "spine1/routes.raw.txt",
+          "sha256": "690875c890c89f39022fbef3b3706c3ee08ecbf09c4f3bc6a1a31d8d23cc9408",
+          "bytes": 1846
+        }
+      }
+    },
+    {
+      "device": "spine1",
+      "host": "10.10.1.21",
+      "capability": "vrfs",
+      "command": "show vrf",
+      "observed_at": "2026-10-04T15:38:40.946390+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine1/vrfs.txt",
+          "sha256": "aadef37423166e0ea70b2004c56babd933a55d5eeb71cc91d6df3f96b2a20a21",
+          "bytes": 155
+        },
+        "raw.txt": {
+          "path": "spine1/vrfs.raw.txt",
+          "sha256": "495f2d468db4d65526be5f26a1bc75dea10b498439fd6c4be385906d32549ddf",
+          "bytes": 174
+        }
+      }
+    },
+    {
+      "device": "spine1",
+      "host": "10.10.1.21",
+      "capability": "ospf",
+      "command": "show ip ospf neighbor",
+      "observed_at": "2026-10-04T15:38:41.099605+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine1/ospf.txt",
+          "sha256": "fc267757d1ab521b53b5baaec247dfe52c8df9962b4a47a802d6171de8375a1b",
+          "bytes": 310
+        },
+        "raw.txt": {
+          "path": "spine1/ospf.raw.txt",
+          "sha256": "2322a9fef26208ef58f8bb56e8307547cc4c7a242f1ae515a3659fdc744471ec",
+          "bytes": 346
+        }
+      }
+    },
+    {
+      "device": "spine1",
+      "host": "10.10.1.21",
+      "capability": "ospf_interfaces",
+      "command": "show ip ospf interface brief",
+      "observed_at": "2026-10-04T15:38:41.201853+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine1/ospf_interfaces.txt",
+          "sha256": "9f92175b2b1860abe758229b60b9639f2b52f04823a7bf6ed72fa6b5a442686a",
+          "bytes": 355
+        },
+        "raw.txt": {
+          "path": "spine1/ospf_interfaces.raw.txt",
+          "sha256": "4900afffad59d952c0f9990a393cd9c0696c2095f5037dfe22da74e2c15b0a24",
+          "bytes": 397
+        }
+      }
+    },
+    {
+      "device": "spine1",
+      "host": "10.10.1.21",
+      "capability": "ospf_process",
+      "command": "show ip ospf",
+      "observed_at": "2026-10-04T15:38:41.253274+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine1/ospf_process.txt",
+          "sha256": "6e5ba1f72c24487717a6d3077a200a17c0096cbae6f50235e00196d772b7e166",
+          "bytes": 2260
+        },
+        "raw.txt": {
+          "path": "spine1/ospf_process.raw.txt",
+          "sha256": "07a0cc892c20453ded09b4966644169411cec059bc7a6ead79fdc96ea99781ab",
+          "bytes": 2337
+        }
+      }
+    },
+    {
+      "device": "spine1",
+      "host": "10.10.1.21",
+      "capability": "bgp",
+      "command": "show ip bgp summary",
+      "observed_at": "2026-10-04T15:38:41.355006+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine1/bgp.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "spine1/bgp.raw.txt",
+          "sha256": "ddb1acd52f0eb67ca8e9574e25c2663d1044b98b3e2344b7d6e62adffceed86a",
+          "bytes": 28
+        }
+      }
+    },
+    {
+      "device": "spine1",
+      "host": "10.10.1.21",
+      "capability": "vrf_detail",
+      "command": "show vrf detail",
+      "observed_at": "2026-10-04T15:38:41.456965+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine1/vrf_detail.txt",
+          "sha256": "6995e37ed2fcfa84345ac42129b9af0389bdc12834ddaa98c80029e985f360db",
+          "bytes": 606
+        },
+        "raw.txt": {
+          "path": "spine1/vrf_detail.raw.txt",
+          "sha256": "3ed2fe70b78298d6adf134c57368d796dcfac305016179a1bd95c2486cce0ba3",
+          "bytes": 649
+        }
+      }
+    },
+    {
+      "device": "spine1",
+      "host": "10.10.1.21",
+      "capability": "bgp_vpnv4",
+      "command": "show bgp vpnv4 unicast all summary",
+      "observed_at": "2026-10-04T15:38:41.608957+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine1/bgp_vpnv4.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "spine1/bgp_vpnv4.raw.txt",
+          "sha256": "8c331d5fb11738b520b6d4fbba35b903ad61dacf9a052850c1aec20cae843798",
+          "bytes": 45
+        }
+      }
+    },
+    {
+      "device": "spine1",
+      "host": "10.10.1.21",
+      "capability": "bgp_evpn",
+      "command": "show bgp l2vpn evpn summary",
+      "observed_at": "2026-10-04T15:38:41.761088+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine1/bgp_evpn.txt",
+          "sha256": "be41b7792d1fd79b45f9fb68aaa79d1e2a1b490dd550b99d9c29115c68431967",
+          "bytes": 945
+        },
+        "raw.txt": {
+          "path": "spine1/bgp_evpn.raw.txt",
+          "sha256": "ae05851b9d24f00e9080423082724d3e3186a0b65855d89a4cee0805100e28b8",
+          "bytes": 997
+        }
+      }
+    },
+    {
+      "device": "spine1",
+      "host": "10.10.1.21",
+      "capability": "bgp_vpnv4_routes",
+      "command": "show bgp vpnv4 unicast all",
+      "observed_at": "2026-10-04T15:38:41.862522+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine1/bgp_vpnv4_routes.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "spine1/bgp_vpnv4_routes.raw.txt",
+          "sha256": "41736fbd83847dfc9e9bde91f12bc2de8e9b7f300cbf0e1ce6ccb4660f22ceb2",
+          "bytes": 37
+        }
+      }
+    },
+    {
+      "device": "spine1",
+      "host": "10.10.1.21",
+      "capability": "bgp_evpn_routes",
+      "command": "show bgp l2vpn evpn",
+      "observed_at": "2026-10-04T15:38:41.964672+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine1/bgp_evpn_routes.txt",
+          "sha256": "8f0b6ea7a87b0ee88e6efe7bf2f6be5ad31b426ece6ef22e8499ad435832ab68",
+          "bytes": 2598
+        },
+        "raw.txt": {
+          "path": "spine1/bgp_evpn_routes.raw.txt",
+          "sha256": "0d0fe158cd02f81d1b75e5940038341e5f9cc15061be582b54e5c81aac2033a5",
+          "bytes": 2673
+        }
+      }
+    },
+    {
+      "device": "spine1",
+      "host": "10.10.1.21",
+      "capability": "ldp",
+      "command": "show mpls ldp neighbor",
+      "observed_at": "2026-10-04T15:38:42.066094+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine1/ldp.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "spine1/ldp.raw.txt",
+          "sha256": "4a0da9b2a863dbf9738ee5521e2ecfd9290dac22287ec78c49103136660adb80",
+          "bytes": 31
+        }
+      }
+    },
+    {
+      "device": "spine1",
+      "host": "10.10.1.21",
+      "capability": "mpls_forwarding",
+      "command": "show mpls forwarding-table",
+      "observed_at": "2026-10-04T15:38:42.167891+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine1/mpls_forwarding.txt",
+          "sha256": "42af87b3ae83d2950a5a030372b2bc789cd060ec7a30e33d09efca33a91dfabc",
+          "bytes": 59
+        },
+        "raw.txt": {
+          "path": "spine1/mpls_forwarding.raw.txt",
+          "sha256": "b6d5cc03d516cd87d7580f7715ee1dc5c17e0d7c3b6f44913b9756c9bc759f96",
+          "bytes": 97
+        }
+      }
+    },
+    {
+      "device": "spine1",
+      "host": "10.10.1.21",
+      "capability": "nve_peers",
+      "command": "show nve peers",
+      "observed_at": "2026-10-04T15:38:42.219870+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine1/nve_peers.txt",
+          "sha256": "5a4874cdb2b7ceacd3d8ef5e8af2a0ab8aa59e1fd178bb31c631e48a331fd5d0",
+          "bytes": 181
+        },
+        "raw.txt": {
+          "path": "spine1/nve_peers.raw.txt",
+          "sha256": "5ac37dd6d0cf2dfa11a0d42ace0df0e7ad64e2001de164b5e02c5aee7862cd9e",
+          "bytes": 208
+        }
+      }
+    },
+    {
+      "device": "spine1",
+      "host": "10.10.1.21",
+      "capability": "nve_vni",
+      "command": "show nve vni",
+      "observed_at": "2026-10-04T15:38:42.271589+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine1/nve_vni.txt",
+          "sha256": "ce392e83c23e6d73555b230ee88eca4c6672857edbe1484f17e0bb330e4e9f81",
+          "bytes": 92
+        },
+        "raw.txt": {
+          "path": "spine1/nve_vni.raw.txt",
+          "sha256": "49d42e90a0770897d44fa64b70958a24b833fd4e595bd9d3793c875d752d3435",
+          "bytes": 114
+        }
+      }
+    },
+    {
+      "device": "spine1",
+      "host": "10.10.1.21",
+      "capability": "evpn_evi",
+      "command": "show l2vpn evpn evi detail",
+      "observed_at": "2026-10-04T15:38:42.474912+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine1/evpn_evi.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "spine1/evpn_evi.raw.txt",
+          "sha256": "bf90605d950d25e5b3e36844ed4f44443783408255d6d438f58125e9011a0567",
+          "bytes": 35
+        }
+      }
+    },
+    {
+      "device": "spine2",
+      "host": "10.10.1.22",
+      "capability": "version",
+      "command": "show version",
+      "observed_at": "2026-10-04T15:38:44.143353+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine2/version.txt",
+          "sha256": "f2af4e398946377bdd2e89c88d4021ffe2ee2da5c3135bf908cf1bc374e2ff14",
+          "bytes": 1497
+        },
+        "raw.txt": {
+          "path": "spine2/version.raw.txt",
+          "sha256": "7e9deabdc1c4f1ca0178dad246af1a1548057a522bb892233fd9b399b4d56ffb",
+          "bytes": 1555
+        }
+      }
+    },
+    {
+      "device": "spine2",
+      "host": "10.10.1.22",
+      "capability": "lldp_verbose",
+      "command": "show lldp neighbors detail",
+      "observed_at": "2026-10-04T15:38:44.297044+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine2/lldp_verbose.txt",
+          "sha256": "fe45b7b06d4fbc82b388e4c7b68bacf5d8daf2ddb2c0c8900053e251117d3404",
+          "bytes": 2362
+        },
+        "raw.txt": {
+          "path": "spine2/lldp_verbose.raw.txt",
+          "sha256": "185ec3cd93d013e7ae4b5deac830030baa35323e3233807f1a650d96938f0121",
+          "bytes": 2482
+        }
+      }
+    },
+    {
+      "device": "spine2",
+      "host": "10.10.1.22",
+      "capability": "interfaces_description",
+      "command": "show interfaces description",
+      "observed_at": "2026-10-04T15:38:44.654987+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine2/interfaces_description.txt",
+          "sha256": "1fd45cc7727fca0ce386d92758c5a0ddd4d7c182c2b0085444db789130a3b4c7",
+          "bytes": 619
+        },
+        "raw.txt": {
+          "path": "spine2/interfaces_description.raw.txt",
+          "sha256": "1a5fbc1c84e798200a71e2671c42beb2b713b16508b35c26af6051c4215dfe4f",
+          "bytes": 665
+        }
+      }
+    },
+    {
+      "device": "spine2",
+      "host": "10.10.1.22",
+      "capability": "ip_interface",
+      "command": "show ip interface",
+      "observed_at": "2026-10-04T15:38:44.809532+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine2/ip_interface.txt",
+          "sha256": "2647d1894be522ca5062d73872511c50e12907e3cdb144f228b27dceee6cfa50",
+          "bytes": 8175
+        },
+        "raw.txt": {
+          "path": "spine2/ip_interface.raw.txt",
+          "sha256": "07bffccdf69bda73183c9f05296af78461aa90044ab6b3b8dd48970528b918e4",
+          "bytes": 8424
+        }
+      }
+    },
+    {
+      "device": "spine2",
+      "host": "10.10.1.22",
+      "capability": "arp",
+      "command": "show ip arp",
+      "observed_at": "2026-10-04T15:38:44.861472+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine2/arp.txt",
+          "sha256": "00a72958a855781ebd7a723f11e133606fdddb6a6f722de384d2eb2717e9c79d",
+          "bytes": 509
+        },
+        "raw.txt": {
+          "path": "spine2/arp.raw.txt",
+          "sha256": "a57625213e4cd2975725ab779ca4ac4266143ae8c078bab3c7ac5714361c4d80",
+          "bytes": 536
+        }
+      }
+    },
+    {
+      "device": "spine2",
+      "host": "10.10.1.22",
+      "capability": "routes",
+      "command": "show ip route",
+      "observed_at": "2026-10-04T15:38:45.677240+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine2/routes.txt",
+          "sha256": "5588e93e43e7b9dba5d60ab230e0f6a9a859ba8e51d232dbf52935d94608c4f4",
+          "bytes": 1794
+        },
+        "raw.txt": {
+          "path": "spine2/routes.raw.txt",
+          "sha256": "fc96300f1e770b788edfd2559ac3a8a4321cfa3a1377eb52f3c9b640ef4e99c6",
+          "bytes": 1846
+        }
+      }
+    },
+    {
+      "device": "spine2",
+      "host": "10.10.1.22",
+      "capability": "vrfs",
+      "command": "show vrf",
+      "observed_at": "2026-10-04T15:38:45.830726+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine2/vrfs.txt",
+          "sha256": "aadef37423166e0ea70b2004c56babd933a55d5eeb71cc91d6df3f96b2a20a21",
+          "bytes": 155
+        },
+        "raw.txt": {
+          "path": "spine2/vrfs.raw.txt",
+          "sha256": "37a1343f6bf2400f651128b1f5823e7ff3fafe9c850257f0ea8b1e994b45a5c6",
+          "bytes": 174
+        }
+      }
+    },
+    {
+      "device": "spine2",
+      "host": "10.10.1.22",
+      "capability": "ospf",
+      "command": "show ip ospf neighbor",
+      "observed_at": "2026-10-04T15:38:45.984202+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine2/ospf.txt",
+          "sha256": "641fbfe56f96af78f09e2b86feb0884d0b4e293d95b042332cabf3cdbf7d56c9",
+          "bytes": 310
+        },
+        "raw.txt": {
+          "path": "spine2/ospf.raw.txt",
+          "sha256": "1600f5b4dc9d1f46d77524af7eb58e67fc5ee8170cd2fb8959de358b77047cf8",
+          "bytes": 346
+        }
+      }
+    },
+    {
+      "device": "spine2",
+      "host": "10.10.1.22",
+      "capability": "ospf_interfaces",
+      "command": "show ip ospf interface brief",
+      "observed_at": "2026-10-04T15:38:46.137160+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine2/ospf_interfaces.txt",
+          "sha256": "15afd4b88e7ffc168d18047283d9e3314c7174fc7ea0cd9db4689d8714f4697c",
+          "bytes": 355
+        },
+        "raw.txt": {
+          "path": "spine2/ospf_interfaces.raw.txt",
+          "sha256": "072847d430a68914e5495c90e6a00cd60a8c85706af23a6cc16a7cb8b6545ba9",
+          "bytes": 397
+        }
+      }
+    },
+    {
+      "device": "spine2",
+      "host": "10.10.1.22",
+      "capability": "ospf_process",
+      "command": "show ip ospf",
+      "observed_at": "2026-10-04T15:38:46.189076+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine2/ospf_process.txt",
+          "sha256": "84715993a1ac2615fac83d713e4a172577b307af2b15de6f062c3ed1106a9c4c",
+          "bytes": 2259
+        },
+        "raw.txt": {
+          "path": "spine2/ospf_process.raw.txt",
+          "sha256": "9167fbfb1bb12f47548524fc63020b89afff4085e2dd0975e5405c80bb878dd2",
+          "bytes": 2336
+        }
+      }
+    },
+    {
+      "device": "spine2",
+      "host": "10.10.1.22",
+      "capability": "bgp",
+      "command": "show ip bgp summary",
+      "observed_at": "2026-10-04T15:38:46.240981+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine2/bgp.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "spine2/bgp.raw.txt",
+          "sha256": "3f4e3ab056343ca6173b1ad5389246eff4c2fd5e67930bb7a44052ddb76e71af",
+          "bytes": 28
+        }
+      }
+    },
+    {
+      "device": "spine2",
+      "host": "10.10.1.22",
+      "capability": "vrf_detail",
+      "command": "show vrf detail",
+      "observed_at": "2026-10-04T15:38:46.342418+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine2/vrf_detail.txt",
+          "sha256": "6995e37ed2fcfa84345ac42129b9af0389bdc12834ddaa98c80029e985f360db",
+          "bytes": 606
+        },
+        "raw.txt": {
+          "path": "spine2/vrf_detail.raw.txt",
+          "sha256": "ac10edcc4360b5bfda24570682f0cf3288ed9ae7478096665596c6677c990641",
+          "bytes": 649
+        }
+      }
+    },
+    {
+      "device": "spine2",
+      "host": "10.10.1.22",
+      "capability": "bgp_vpnv4",
+      "command": "show bgp vpnv4 unicast all summary",
+      "observed_at": "2026-10-04T15:38:46.444481+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine2/bgp_vpnv4.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "spine2/bgp_vpnv4.raw.txt",
+          "sha256": "1abd8e05e02f34a66bbb974785cb3b116616b2978bc63febfffae8e268dad058",
+          "bytes": 45
+        }
+      }
+    },
+    {
+      "device": "spine2",
+      "host": "10.10.1.22",
+      "capability": "bgp_evpn",
+      "command": "show bgp l2vpn evpn summary",
+      "observed_at": "2026-10-04T15:38:46.596912+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine2/bgp_evpn.txt",
+          "sha256": "1d9cdf0dee1362a86f4566a0d1da35dac45a5d37be24b3f3e3a8ebee4932ad57",
+          "bytes": 945
+        },
+        "raw.txt": {
+          "path": "spine2/bgp_evpn.raw.txt",
+          "sha256": "58ca330e1dd49c2111988c65a21f505776809b2a2f2ff998a97697c6d0bfb34a",
+          "bytes": 997
+        }
+      }
+    },
+    {
+      "device": "spine2",
+      "host": "10.10.1.22",
+      "capability": "bgp_vpnv4_routes",
+      "command": "show bgp vpnv4 unicast all",
+      "observed_at": "2026-10-04T15:38:46.699162+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine2/bgp_vpnv4_routes.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "spine2/bgp_vpnv4_routes.raw.txt",
+          "sha256": "b753d68368af5e2fe9101873ca9ffb5a0f511716d7ab55f008b1a0b8480117b2",
+          "bytes": 37
+        }
+      }
+    },
+    {
+      "device": "spine2",
+      "host": "10.10.1.22",
+      "capability": "bgp_evpn_routes",
+      "command": "show bgp l2vpn evpn",
+      "observed_at": "2026-10-04T15:38:46.801663+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine2/bgp_evpn_routes.txt",
+          "sha256": "7e1410499f783c5617c6c1a20f9a918e614a8db1bc1e416e5cde99cadf354b50",
+          "bytes": 2598
+        },
+        "raw.txt": {
+          "path": "spine2/bgp_evpn_routes.raw.txt",
+          "sha256": "2a5db6f38d47012a7cebb22a1576bc40bbfee0df846378ab6fc9c20f46ce0aa1",
+          "bytes": 2673
+        }
+      }
+    },
+    {
+      "device": "spine2",
+      "host": "10.10.1.22",
+      "capability": "ldp",
+      "command": "show mpls ldp neighbor",
+      "observed_at": "2026-10-04T15:38:46.903512+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine2/ldp.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "spine2/ldp.raw.txt",
+          "sha256": "13d05c52205db27e42d6200a6403109e9d09c313e98283a770b51fa9d94859bc",
+          "bytes": 31
+        }
+      }
+    },
+    {
+      "device": "spine2",
+      "host": "10.10.1.22",
+      "capability": "mpls_forwarding",
+      "command": "show mpls forwarding-table",
+      "observed_at": "2026-10-04T15:38:47.005146+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine2/mpls_forwarding.txt",
+          "sha256": "42af87b3ae83d2950a5a030372b2bc789cd060ec7a30e33d09efca33a91dfabc",
+          "bytes": 59
+        },
+        "raw.txt": {
+          "path": "spine2/mpls_forwarding.raw.txt",
+          "sha256": "a36f9c3006bee80995ee26cb91cb87a7febfb026e2f0b5f1b86f39fafffac030",
+          "bytes": 97
+        }
+      }
+    },
+    {
+      "device": "spine2",
+      "host": "10.10.1.22",
+      "capability": "nve_peers",
+      "command": "show nve peers",
+      "observed_at": "2026-10-04T15:38:47.106729+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine2/nve_peers.txt",
+          "sha256": "5a4874cdb2b7ceacd3d8ef5e8af2a0ab8aa59e1fd178bb31c631e48a331fd5d0",
+          "bytes": 181
+        },
+        "raw.txt": {
+          "path": "spine2/nve_peers.raw.txt",
+          "sha256": "a2e96e799dc814e70a907850eaa5224f4f8d44197d9f02ab0498867ace1e50c0",
+          "bytes": 208
+        }
+      }
+    },
+    {
+      "device": "spine2",
+      "host": "10.10.1.22",
+      "capability": "nve_vni",
+      "command": "show nve vni",
+      "observed_at": "2026-10-04T15:38:47.209322+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine2/nve_vni.txt",
+          "sha256": "ce392e83c23e6d73555b230ee88eca4c6672857edbe1484f17e0bb330e4e9f81",
+          "bytes": 92
+        },
+        "raw.txt": {
+          "path": "spine2/nve_vni.raw.txt",
+          "sha256": "e0ad02dd007410e9f63b00536e004744feecab2f267a608b141fd2bee7d3eff1",
+          "bytes": 114
+        }
+      }
+    },
+    {
+      "device": "spine2",
+      "host": "10.10.1.22",
+      "capability": "evpn_evi",
+      "command": "show l2vpn evpn evi detail",
+      "observed_at": "2026-10-04T15:38:47.413123+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "spine2/evpn_evi.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "spine2/evpn_evi.raw.txt",
+          "sha256": "7bfcb984da6883b8add6f21fccbc463df6570309301fdb32c6bea1aa7c10720e",
+          "bytes": 35
+        }
+      }
+    },
+    {
+      "device": "leaf1",
+      "host": "10.10.1.23",
+      "capability": "version",
+      "command": "show version",
+      "observed_at": "2026-10-04T15:38:49.043673+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf1/version.txt",
+          "sha256": "952c643fe681fad130497916d5695a1d276feecd276849a46ffef3bf6d2e6230",
+          "bytes": 1503
+        },
+        "raw.txt": {
+          "path": "leaf1/version.raw.txt",
+          "sha256": "1250d6c9e08d5098a673a1233544cbebbf2631e03ec96149c968e3ef32bebfc5",
+          "bytes": 1560
+        }
+      }
+    },
+    {
+      "device": "leaf1",
+      "host": "10.10.1.23",
+      "capability": "lldp_verbose",
+      "command": "show lldp neighbors detail",
+      "observed_at": "2026-10-04T15:38:49.197448+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf1/lldp_verbose.txt",
+          "sha256": "4d8a6d3c1094bfb28980729bc74dc92db292509fbb18b467eb4a5bed11d69ee1",
+          "bytes": 1588
+        },
+        "raw.txt": {
+          "path": "leaf1/lldp_verbose.raw.txt",
+          "sha256": "bf7506e44a012f01ef8306c76061b6291a4eb88f999676772453d0d5c5b5c31f",
+          "bytes": 1676
+        }
+      }
+    },
+    {
+      "device": "leaf1",
+      "host": "10.10.1.23",
+      "capability": "interfaces_description",
+      "command": "show interfaces description",
+      "observed_at": "2026-10-04T15:38:49.455197+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf1/interfaces_description.txt",
+          "sha256": "371bb75a64208ab06063ad3b308ed5425b9147d519d3c7e5baf744532f945d52",
+          "bytes": 1174
+        },
+        "raw.txt": {
+          "path": "leaf1/interfaces_description.raw.txt",
+          "sha256": "f197aab55d81a508e83710927a0c9905198c9d06a0d0c6754f83e9707c7caa4e",
+          "bytes": 1229
+        }
+      }
+    },
+    {
+      "device": "leaf1",
+      "host": "10.10.1.23",
+      "capability": "ip_interface",
+      "command": "show ip interface",
+      "observed_at": "2026-10-04T15:38:49.609600+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf1/ip_interface.txt",
+          "sha256": "760725e7597bdc8da64f8a450ade05a5f66abd60414376e9743d310b19faa1f7",
+          "bytes": 9255
+        },
+        "raw.txt": {
+          "path": "leaf1/ip_interface.raw.txt",
+          "sha256": "5691002fc8979956d6121dd9978bdd359fada481a9ad883a731011ba78abeaea",
+          "bytes": 9534
+        }
+      }
+    },
+    {
+      "device": "leaf1",
+      "host": "10.10.1.23",
+      "capability": "arp",
+      "command": "show ip arp",
+      "observed_at": "2026-10-04T15:38:49.660858+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf1/arp.txt",
+          "sha256": "f579d80726a140f90002cab3982d3375bfb8e396357c8ce475b3f40730a32879",
+          "bytes": 363
+        },
+        "raw.txt": {
+          "path": "leaf1/arp.raw.txt",
+          "sha256": "4a475ba85427d21d9766cd558edc47d3b81e847b3ae2067469c8f29daa8f02a0",
+          "bytes": 387
+        }
+      }
+    },
+    {
+      "device": "leaf1",
+      "host": "10.10.1.23",
+      "capability": "mac",
+      "command": "show mac address-table",
+      "observed_at": "2026-10-04T15:38:49.764091+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf1/mac.txt",
+          "sha256": "2b38ae75cd0b744cbe4190aa0f09ddd33eb8415714586039b57d4fca9a682bb1",
+          "bytes": 247
+        },
+        "raw.txt": {
+          "path": "leaf1/mac.raw.txt",
+          "sha256": "60690b77b9db977cd9a0e682de47c36225fc8f65bce6e3405b98d7e5c47748ca",
+          "bytes": 284
+        }
+      }
+    },
+    {
+      "device": "leaf1",
+      "host": "10.10.1.23",
+      "capability": "vlan",
+      "command": "show vlan brief",
+      "observed_at": "2026-10-04T15:38:49.815843+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf1/vlan.txt",
+          "sha256": "1963eb07159f8e0782a7d5db3dcce2823b6878184e21b6cc2329329cab2beceb",
+          "bytes": 515
+        },
+        "raw.txt": {
+          "path": "leaf1/vlan.raw.txt",
+          "sha256": "898f696b6360e3d0d0b6cc315f9aac981bacda774ad79645bd2410182c40b4b8",
+          "bytes": 548
+        }
+      }
+    },
+    {
+      "device": "leaf1",
+      "host": "10.10.1.23",
+      "capability": "trunk",
+      "command": "show interfaces trunk",
+      "observed_at": "2026-10-04T15:38:49.867060+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf1/trunk.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "leaf1/trunk.raw.txt",
+          "sha256": "eb92a7cdc594a368376d3f8a06ca75011e30d88dfe73ee6bd6e5be1936e955e4",
+          "bytes": 29
+        }
+      }
+    },
+    {
+      "device": "leaf1",
+      "host": "10.10.1.23",
+      "capability": "switchport",
+      "command": "show interfaces switchport",
+      "observed_at": "2026-10-04T15:38:49.969995+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf1/switchport.txt",
+          "sha256": "11bd040ec87229fbe9bfd02423969daf4f51b8d3338fa21ca03abeb0a690bffe",
+          "bytes": 12322
+        },
+        "raw.txt": {
+          "path": "leaf1/switchport.raw.txt",
+          "sha256": "dc9483e0545f8e31a6a294708f37a55e6dd402afa41631c315fb709c6b76edf1",
+          "bytes": 12721
+        }
+      }
+    },
+    {
+      "device": "leaf1",
+      "host": "10.10.1.23",
+      "capability": "routes",
+      "command": "show ip route",
+      "observed_at": "2026-10-04T15:38:50.125143+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf1/routes.txt",
+          "sha256": "56a63ff5478d8da64c90d787b21a51c84012749598ab8cd367a46a06cc0eb336",
+          "bytes": 1892
+        },
+        "raw.txt": {
+          "path": "leaf1/routes.raw.txt",
+          "sha256": "8ace8a6512b873b9fb11b90fba9435e6043640d263f356b81db950968b707b8e",
+          "bytes": 1944
+        }
+      }
+    },
+    {
+      "device": "leaf1",
+      "host": "10.10.1.23",
+      "capability": "vrfs",
+      "command": "show vrf",
+      "observed_at": "2026-10-04T15:38:50.278749+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf1/vrfs.txt",
+          "sha256": "aadef37423166e0ea70b2004c56babd933a55d5eeb71cc91d6df3f96b2a20a21",
+          "bytes": 155
+        },
+        "raw.txt": {
+          "path": "leaf1/vrfs.raw.txt",
+          "sha256": "d601fb2480084720b727a4ea7e3c830458b96469b9db691de9ca4888c01eef80",
+          "bytes": 173
+        }
+      }
+    },
+    {
+      "device": "leaf1",
+      "host": "10.10.1.23",
+      "capability": "ospf",
+      "command": "show ip ospf neighbor",
+      "observed_at": "2026-10-04T15:38:50.381801+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf1/ospf.txt",
+          "sha256": "56522798643b16f6617235b073cf5853704022148b0b744482859e96ad3432c6",
+          "bytes": 232
+        },
+        "raw.txt": {
+          "path": "leaf1/ospf.raw.txt",
+          "sha256": "b8df625dc7367aec9ea9f714f82005e30baba520687b8b5b0c0f5ed285f99ba4",
+          "bytes": 266
+        }
+      }
+    },
+    {
+      "device": "leaf1",
+      "host": "10.10.1.23",
+      "capability": "ospf_interfaces",
+      "command": "show ip ospf interface brief",
+      "observed_at": "2026-10-04T15:38:50.433622+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf1/ospf_interfaces.txt",
+          "sha256": "88f65d3df4b200483b001acaf422d4348804d1c95e1f7da93cce5691aa837cf9",
+          "bytes": 285
+        },
+        "raw.txt": {
+          "path": "leaf1/ospf_interfaces.raw.txt",
+          "sha256": "7dd0330f20d3471c6f94e189494026f00b40b5fbe8ec58685f935ae100cd2ec4",
+          "bytes": 325
+        }
+      }
+    },
+    {
+      "device": "leaf1",
+      "host": "10.10.1.23",
+      "capability": "ospf_process",
+      "command": "show ip ospf",
+      "observed_at": "2026-10-04T15:38:50.485027+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf1/ospf_process.txt",
+          "sha256": "10cd1c165fbd76f3f22489a9237cd527fabc9ebbdcfcc36576df0e9733ed1520",
+          "bytes": 2088
+        },
+        "raw.txt": {
+          "path": "leaf1/ospf_process.raw.txt",
+          "sha256": "b254f46dc981b573a5adf20dfc590a6a2910ce25198b88740e96600d35fad6d6",
+          "bytes": 2160
+        }
+      }
+    },
+    {
+      "device": "leaf1",
+      "host": "10.10.1.23",
+      "capability": "bgp",
+      "command": "show ip bgp summary",
+      "observed_at": "2026-10-04T15:38:50.536114+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf1/bgp.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "leaf1/bgp.raw.txt",
+          "sha256": "cf66372057b5fab5328ded1efaf4271777162f3292fd2e3e2e97f82a4663b8d5",
+          "bytes": 27
+        }
+      }
+    },
+    {
+      "device": "leaf1",
+      "host": "10.10.1.23",
+      "capability": "vrf_detail",
+      "command": "show vrf detail",
+      "observed_at": "2026-10-04T15:38:50.587426+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf1/vrf_detail.txt",
+          "sha256": "6995e37ed2fcfa84345ac42129b9af0389bdc12834ddaa98c80029e985f360db",
+          "bytes": 606
+        },
+        "raw.txt": {
+          "path": "leaf1/vrf_detail.raw.txt",
+          "sha256": "f4159c5a50fc2d9e1654f1550a234db89e6e8de045a33628c56ec405137e6c7e",
+          "bytes": 648
+        }
+      }
+    },
+    {
+      "device": "leaf1",
+      "host": "10.10.1.23",
+      "capability": "bgp_vpnv4",
+      "command": "show bgp vpnv4 unicast all summary",
+      "observed_at": "2026-10-04T15:38:50.638679+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf1/bgp_vpnv4.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "leaf1/bgp_vpnv4.raw.txt",
+          "sha256": "8282b9d6631ded675d9cb21c2b824ad18be1a611fd0b3390731ab0a73dc05d28",
+          "bytes": 44
+        }
+      }
+    },
+    {
+      "device": "leaf1",
+      "host": "10.10.1.23",
+      "capability": "bgp_evpn",
+      "command": "show bgp l2vpn evpn summary",
+      "observed_at": "2026-10-04T15:38:50.740682+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf1/bgp_evpn.txt",
+          "sha256": "86178590e5d8295e4f7d2a5922dc814431669b1236eef6dcc29c52963d79cdd1",
+          "bytes": 900
+        },
+        "raw.txt": {
+          "path": "leaf1/bgp_evpn.raw.txt",
+          "sha256": "99663624488899e87c82664247ccbab67dc01a97a8d47496befec2bd0fbf0b68",
+          "bytes": 951
+        }
+      }
+    },
+    {
+      "device": "leaf1",
+      "host": "10.10.1.23",
+      "capability": "bgp_vpnv4_routes",
+      "command": "show bgp vpnv4 unicast all",
+      "observed_at": "2026-10-04T15:38:50.842592+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf1/bgp_vpnv4_routes.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "leaf1/bgp_vpnv4_routes.raw.txt",
+          "sha256": "3a59d66757b1e5f902c53c612cc2664a1a728b3ffa353d291200f9630dc53019",
+          "bytes": 36
+        }
+      }
+    },
+    {
+      "device": "leaf1",
+      "host": "10.10.1.23",
+      "capability": "bgp_evpn_routes",
+      "command": "show bgp l2vpn evpn",
+      "observed_at": "2026-10-04T15:38:50.894581+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf1/bgp_evpn_routes.txt",
+          "sha256": "ab5fa8578ee43dc9bcf83cdcf016703e6dc5bd3ebc02024557e6d405396b60bc",
+          "bytes": 1639
+        },
+        "raw.txt": {
+          "path": "leaf1/bgp_evpn_routes.raw.txt",
+          "sha256": "4a63a7fa47604ef2978089d6f446cdd819266079e4a13c7337e587b3dd8ce31d",
+          "bytes": 1695
+        }
+      }
+    },
+    {
+      "device": "leaf1",
+      "host": "10.10.1.23",
+      "capability": "ldp",
+      "command": "show mpls ldp neighbor",
+      "observed_at": "2026-10-04T15:38:50.996104+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf1/ldp.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "leaf1/ldp.raw.txt",
+          "sha256": "85046b5d43a29243f52892feef1fb4e38edbd579fcbcdab0ec48a32fbe989ef0",
+          "bytes": 30
+        }
+      }
+    },
+    {
+      "device": "leaf1",
+      "host": "10.10.1.23",
+      "capability": "mpls_forwarding",
+      "command": "show mpls forwarding-table",
+      "observed_at": "2026-10-04T15:38:51.097807+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf1/mpls_forwarding.txt",
+          "sha256": "42af87b3ae83d2950a5a030372b2bc789cd060ec7a30e33d09efca33a91dfabc",
+          "bytes": 59
+        },
+        "raw.txt": {
+          "path": "leaf1/mpls_forwarding.raw.txt",
+          "sha256": "314a09ee3b2f67c5a10410170149d08e103d76866ca84adaeba3e46d97e95ef4",
+          "bytes": 96
+        }
+      }
+    },
+    {
+      "device": "leaf1",
+      "host": "10.10.1.23",
+      "capability": "nve_peers",
+      "command": "show nve peers",
+      "observed_at": "2026-10-04T15:38:51.149433+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf1/nve_peers.txt",
+          "sha256": "5a57c2c25fa30d65e591431be86eccbe117bc877f260b413db231cd33b268d1d",
+          "bytes": 268
+        },
+        "raw.txt": {
+          "path": "leaf1/nve_peers.raw.txt",
+          "sha256": "e5659694e58230760755c0b046c0d03c566f4609a37f9cc31227c9a0ead6ff4e",
+          "bytes": 295
+        }
+      }
+    },
+    {
+      "device": "leaf1",
+      "host": "10.10.1.23",
+      "capability": "nve_vni",
+      "command": "show nve vni",
+      "observed_at": "2026-10-04T15:38:51.201587+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf1/nve_vni.txt",
+          "sha256": "c7f80c39b3d7f8b5d7779ae506756b803a8328a3a52d7115850ce9411f4fd38a",
+          "bytes": 184
+        },
+        "raw.txt": {
+          "path": "leaf1/nve_vni.raw.txt",
+          "sha256": "1e449fa4dbfe955732498da38ab19d77b14c74a7e4afd520070ea5c24ef80426",
+          "bytes": 206
+        }
+      }
+    },
+    {
+      "device": "leaf1",
+      "host": "10.10.1.23",
+      "capability": "nve_interface",
+      "command": "show nve interface nve1 detail",
+      "observed_at": "2026-10-04T15:38:51.253121+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf1/nve_interface.txt",
+          "sha256": "4d1ec1cfc58729a559c5ff7cb330483a5471e97fee98a6b971de88d1ed6a7347",
+          "bytes": 364
+        },
+        "raw.txt": {
+          "path": "leaf1/nve_interface.raw.txt",
+          "sha256": "8d1c7170ad76299f0a71d34a8bd7c9934c46af17bf464f89c4e2f977828bf1a1",
+          "bytes": 411
+        }
+      }
+    },
+    {
+      "device": "leaf1",
+      "host": "10.10.1.23",
+      "capability": "evpn_evi",
+      "command": "show l2vpn evpn evi detail",
+      "observed_at": "2026-10-04T15:38:51.304610+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf1/evpn_evi.txt",
+          "sha256": "bd67f6e0dcd70750d10f69431652142f7414a595ed6a0984b69b01027e24f80a",
+          "bytes": 989
+        },
+        "raw.txt": {
+          "path": "leaf1/evpn_evi.raw.txt",
+          "sha256": "ba7e23e5e6793c7445727f29fb90dfd8a93e8ff9ddcbf438267c8ed96baccaa3",
+          "bytes": 1057
+        }
+      }
+    },
+    {
+      "device": "leaf1",
+      "host": "10.10.1.23",
+      "capability": "evpn_mac",
+      "command": "show l2vpn evpn mac",
+      "observed_at": "2026-10-04T15:38:51.355779+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf1/evpn_mac.txt",
+          "sha256": "6fa0f7416800cff19b1bfe07d3e17332ffb5790db458dd42337b2ef40cef3ce7",
+          "bytes": 302
+        },
+        "raw.txt": {
+          "path": "leaf1/evpn_mac.raw.txt",
+          "sha256": "1767abcac76a216bace2f73026b35cf573731f3c1a28cf2b91041c2e11b45f9c",
+          "bytes": 335
+        }
+      }
+    },
+    {
+      "device": "leaf2",
+      "host": "10.10.1.24",
+      "capability": "version",
+      "command": "show version",
+      "observed_at": "2026-10-04T15:38:52.862664+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf2/version.txt",
+          "sha256": "05006ec495f5100244c817f0631eff08bbb1e24d7b4280fae40278f8d7007676",
+          "bytes": 1533
+        },
+        "raw.txt": {
+          "path": "leaf2/version.raw.txt",
+          "sha256": "d511e8e9580786d506ca65d3555c6c10f1bf47fd6b0d9d9c124d454e5d0427f7",
+          "bytes": 1591
+        }
+      }
+    },
+    {
+      "device": "leaf2",
+      "host": "10.10.1.24",
+      "capability": "lldp_verbose",
+      "command": "show lldp neighbors detail",
+      "observed_at": "2026-10-04T15:38:53.016525+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf2/lldp_verbose.txt",
+          "sha256": "327627634e13c3070646dd076db86850f1b824b1a0fdb3cf9b6cb7927207d7d8",
+          "bytes": 1588
+        },
+        "raw.txt": {
+          "path": "leaf2/lldp_verbose.raw.txt",
+          "sha256": "0c675d27393073b70937f01663373f952cab354ac952278db536173f862c48a1",
+          "bytes": 1676
+        }
+      }
+    },
+    {
+      "device": "leaf2",
+      "host": "10.10.1.24",
+      "capability": "interfaces_description",
+      "command": "show interfaces description",
+      "observed_at": "2026-10-04T15:38:53.324706+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf2/interfaces_description.txt",
+          "sha256": "adf7ee13551ca422ec0e6eae1aad2386aa15dea074687387c09ed1227a8776c5",
+          "bytes": 1308
+        },
+        "raw.txt": {
+          "path": "leaf2/interfaces_description.raw.txt",
+          "sha256": "2f0d7be117c0c48e902aadf2f1a5a4d8b351fada95c3b334379980e40a1be5f8",
+          "bytes": 1365
+        }
+      }
+    },
+    {
+      "device": "leaf2",
+      "host": "10.10.1.24",
+      "capability": "ip_interface",
+      "command": "show ip interface",
+      "observed_at": "2026-10-04T15:38:53.479127+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf2/ip_interface.txt",
+          "sha256": "01725ffc306810ec34d9c81f89750f3ad42f3766ba03c363609de2873cf660ca",
+          "bytes": 12325
+        },
+        "raw.txt": {
+          "path": "leaf2/ip_interface.raw.txt",
+          "sha256": "bb2ad8ebf271d90efccd70089583f2b0f6c6b2a8b9a11b3c78bfa7ee969a51ec",
+          "bytes": 12689
+        }
+      }
+    },
+    {
+      "device": "leaf2",
+      "host": "10.10.1.24",
+      "capability": "arp",
+      "command": "show ip arp",
+      "observed_at": "2026-10-04T15:38:53.530761+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf2/arp.txt",
+          "sha256": "42a3b544454411ae4c3caeaf582915eee47f02c2feb2a2cb0ec310fb312538d5",
+          "bytes": 363
+        },
+        "raw.txt": {
+          "path": "leaf2/arp.raw.txt",
+          "sha256": "9115832c7165fd10d0812ceb9c227091ea49766c6b26f3ee27d0957585f4cdb4",
+          "bytes": 387
+        }
+      }
+    },
+    {
+      "device": "leaf2",
+      "host": "10.10.1.24",
+      "capability": "mac",
+      "command": "show mac address-table",
+      "observed_at": "2026-10-04T15:38:53.633733+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf2/mac.txt",
+          "sha256": "27760bd29cda41dfdc483991c273e3f70ac738dfbba10a84fcfe6af73bb161f5",
+          "bytes": 291
+        },
+        "raw.txt": {
+          "path": "leaf2/mac.raw.txt",
+          "sha256": "b04a89bdd9d7f9497319d9068fa0e6701c504772bade6aed91ecefbe18d4c1f8",
+          "bytes": 329
+        }
+      }
+    },
+    {
+      "device": "leaf2",
+      "host": "10.10.1.24",
+      "capability": "vlan",
+      "command": "show vlan brief",
+      "observed_at": "2026-10-04T15:38:53.685140+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf2/vlan.txt",
+          "sha256": "d2592f3283b89f12ff49f099ddf8bd63c254cdf49f50e3bebee32d0a05d2a79a",
+          "bytes": 564
+        },
+        "raw.txt": {
+          "path": "leaf2/vlan.raw.txt",
+          "sha256": "d8eb7095f6ce8b612cac3adb32bbb34be71ae35fab2b436e4c01975a1698cf9e",
+          "bytes": 598
+        }
+      }
+    },
+    {
+      "device": "leaf2",
+      "host": "10.10.1.24",
+      "capability": "trunk",
+      "command": "show interfaces trunk",
+      "observed_at": "2026-10-04T15:38:53.787189+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf2/trunk.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "leaf2/trunk.raw.txt",
+          "sha256": "49363a2c392c84ad324c8862c0cd2dd7b2548ceedd2d55b8f03378e38aaf7e41",
+          "bytes": 29
+        }
+      }
+    },
+    {
+      "device": "leaf2",
+      "host": "10.10.1.24",
+      "capability": "switchport",
+      "command": "show interfaces switchport",
+      "observed_at": "2026-10-04T15:38:53.839403+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf2/switchport.txt",
+          "sha256": "fb2103bea3e179e4df5542a48cf93cbac7b96259973bdf7dc271c4ab4af7620c",
+          "bytes": 12323
+        },
+        "raw.txt": {
+          "path": "leaf2/switchport.raw.txt",
+          "sha256": "196c0970f13cdc3a24b255a97db15629159b7bb6fceed8cc1cba17f92460d7ef",
+          "bytes": 12722
+        }
+      }
+    },
+    {
+      "device": "leaf2",
+      "host": "10.10.1.24",
+      "capability": "routes",
+      "command": "show ip route",
+      "observed_at": "2026-10-04T15:38:54.045024+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf2/routes.txt",
+          "sha256": "fe5eb470ef8f3fa465e8730561973e0664b17a32e9d2aff254f7d722957be5b0",
+          "bytes": 1892
+        },
+        "raw.txt": {
+          "path": "leaf2/routes.raw.txt",
+          "sha256": "00df43c7af996950c2b1edba060e5f7f3e9ea2e0b41b7375f2d11c40853cadc1",
+          "bytes": 1944
+        }
+      }
+    },
+    {
+      "device": "leaf2",
+      "host": "10.10.1.24",
+      "capability": "vrfs",
+      "command": "show vrf",
+      "observed_at": "2026-10-04T15:38:54.149152+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf2/vrfs.txt",
+          "sha256": "4821230bc5566ca1c1584890eb95de8bbc359ab59b688e3b6314ec30dd462f67",
+          "bytes": 304
+        },
+        "raw.txt": {
+          "path": "leaf2/vrfs.raw.txt",
+          "sha256": "6bcb4767fdb41b8fd09d34e7b87e9087131a9a30d9c5e2dec83503d4f1cf1f02",
+          "bytes": 324
+        }
+      }
+    },
+    {
+      "device": "leaf2",
+      "host": "10.10.1.24",
+      "capability": "ospf",
+      "command": "show ip ospf neighbor",
+      "observed_at": "2026-10-04T15:38:54.302680+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf2/ospf.txt",
+          "sha256": "c5e2afa184ccb3aba4c52e38d8ad898487a23e1a954b21f315ac71316d57bc18",
+          "bytes": 232
+        },
+        "raw.txt": {
+          "path": "leaf2/ospf.raw.txt",
+          "sha256": "b45a35341477320c4d11be1082cacfed8f28e5bc80c095bee6dcdbb84fccdf4c",
+          "bytes": 266
+        }
+      }
+    },
+    {
+      "device": "leaf2",
+      "host": "10.10.1.24",
+      "capability": "ospf_interfaces",
+      "command": "show ip ospf interface brief",
+      "observed_at": "2026-10-04T15:38:54.355424+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf2/ospf_interfaces.txt",
+          "sha256": "a49ae8a0ff062c14ba86db3c15356cb60cfc37dc5b1e4b670603e7ffe61399a7",
+          "bytes": 285
+        },
+        "raw.txt": {
+          "path": "leaf2/ospf_interfaces.raw.txt",
+          "sha256": "b8d48d50fa1ae717826c248872e7dd70589cda152576c7d1764d960b5ea438fd",
+          "bytes": 325
+        }
+      }
+    },
+    {
+      "device": "leaf2",
+      "host": "10.10.1.24",
+      "capability": "ospf_process",
+      "command": "show ip ospf",
+      "observed_at": "2026-10-04T15:38:54.407605+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf2/ospf_process.txt",
+          "sha256": "abbd8b702da396980f76e078af26a367db0ec67b35c496260ed8a3b9af466a66",
+          "bytes": 2088
+        },
+        "raw.txt": {
+          "path": "leaf2/ospf_process.raw.txt",
+          "sha256": "90352ba2bc01d47964a34a21e106f9803077b1543d3dd551cd816a9e63d134a1",
+          "bytes": 2160
+        }
+      }
+    },
+    {
+      "device": "leaf2",
+      "host": "10.10.1.24",
+      "capability": "bgp",
+      "command": "show ip bgp summary",
+      "observed_at": "2026-10-04T15:38:54.459141+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf2/bgp.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "leaf2/bgp.raw.txt",
+          "sha256": "8f13d8ac7de59603183c0f956ea63cba977cb468b57d74cf7681fb69cb642d32",
+          "bytes": 27
+        }
+      }
+    },
+    {
+      "device": "leaf2",
+      "host": "10.10.1.24",
+      "capability": "vrf_detail",
+      "command": "show vrf detail",
+      "observed_at": "2026-10-04T15:38:54.511438+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf2/vrf_detail.txt",
+          "sha256": "d42965201a03e2394a446ad02dcd7b44a4e34b7a0379d38055dcfbb82fa6c6c5",
+          "bytes": 1449
+        },
+        "raw.txt": {
+          "path": "leaf2/vrf_detail.raw.txt",
+          "sha256": "b3cf4c7956cb329efd8d212c39d8e607de3ac1c6acadaf5a899f7b191f740b6d",
+          "bytes": 1515
+        }
+      }
+    },
+    {
+      "device": "leaf2",
+      "host": "10.10.1.24",
+      "capability": "bgp_vpnv4",
+      "command": "show bgp vpnv4 unicast all summary",
+      "observed_at": "2026-10-04T15:38:54.613407+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf2/bgp_vpnv4.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "leaf2/bgp_vpnv4.raw.txt",
+          "sha256": "766e12be404ef2a94c671a6925820509962e3469c5b2540547665b0cba933617",
+          "bytes": 42
+        }
+      }
+    },
+    {
+      "device": "leaf2",
+      "host": "10.10.1.24",
+      "capability": "bgp_evpn",
+      "command": "show bgp l2vpn evpn summary",
+      "observed_at": "2026-10-04T15:38:54.715226+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf2/bgp_evpn.txt",
+          "sha256": "1dd0a77c08f40932d4992f06509975d8bffc6a109febde5396f80dcda453df5a",
+          "bytes": 904
+        },
+        "raw.txt": {
+          "path": "leaf2/bgp_evpn.raw.txt",
+          "sha256": "fb6bba49277aabe6186c6f6f58bc97ea89cc0870a8086c68c6d9043312103f1a",
+          "bytes": 955
+        }
+      }
+    },
+    {
+      "device": "leaf2",
+      "host": "10.10.1.24",
+      "capability": "bgp_vpnv4_routes",
+      "command": "show bgp vpnv4 unicast all",
+      "observed_at": "2026-10-04T15:38:54.817339+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf2/bgp_vpnv4_routes.txt",
+          "sha256": "d9a26573cb08615af0e2caba9b75f35a911d38379026cc7df27671b32acb58b8",
+          "bytes": 906
+        },
+        "raw.txt": {
+          "path": "leaf2/bgp_vpnv4_routes.raw.txt",
+          "sha256": "1362122e45d1c153cdd1ce484add7ce85b096d2e2aaaf51f7b643dcdf81cbc16",
+          "bytes": 955
+        }
+      }
+    },
+    {
+      "device": "leaf2",
+      "host": "10.10.1.24",
+      "capability": "bgp_evpn_routes",
+      "command": "show bgp l2vpn evpn",
+      "observed_at": "2026-10-04T15:38:54.869243+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf2/bgp_evpn_routes.txt",
+          "sha256": "b4f94d2221836e8a2538643d0125062c44d01aa78f6cfc03bdb12c4e31959e7d",
+          "bytes": 1786
+        },
+        "raw.txt": {
+          "path": "leaf2/bgp_evpn_routes.raw.txt",
+          "sha256": "47424cbdf6fa4aad2a9e98af9efaf1dfe6f6441f4da2ab5e61b45224071fbfdd",
+          "bytes": 1844
+        }
+      }
+    },
+    {
+      "device": "leaf2",
+      "host": "10.10.1.24",
+      "capability": "ldp",
+      "command": "show mpls ldp neighbor",
+      "observed_at": "2026-10-04T15:38:54.970742+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf2/ldp.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "leaf2/ldp.raw.txt",
+          "sha256": "343d7d8fec2f1586c0bfb7d67fd59faf5e12bea170c8b43d35430f9a3ab37721",
+          "bytes": 30
+        }
+      }
+    },
+    {
+      "device": "leaf2",
+      "host": "10.10.1.24",
+      "capability": "mpls_forwarding",
+      "command": "show mpls forwarding-table",
+      "observed_at": "2026-10-04T15:38:55.072284+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf2/mpls_forwarding.txt",
+          "sha256": "934cca234c40791853ce7e18e1a90f31b5539e306225e167f0dce06fed2b6583",
+          "bytes": 268
+        },
+        "raw.txt": {
+          "path": "leaf2/mpls_forwarding.raw.txt",
+          "sha256": "96513a08069ce3eedaf10af0aba6c9bf91f291547dcf214d3b88af2f331bdfc7",
+          "bytes": 306
+        }
+      }
+    },
+    {
+      "device": "leaf2",
+      "host": "10.10.1.24",
+      "capability": "nve_peers",
+      "command": "show nve peers",
+      "observed_at": "2026-10-04T15:38:55.123596+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf2/nve_peers.txt",
+          "sha256": "4a37102c2d3481e02797f11ee7391d045c1d40a1a398f86778f797298843862c",
+          "bytes": 268
+        },
+        "raw.txt": {
+          "path": "leaf2/nve_peers.raw.txt",
+          "sha256": "dbe109b1fd637f05b699e9878fac1f823896c973d91bddcaab5a436b83e2cb6d",
+          "bytes": 295
+        }
+      }
+    },
+    {
+      "device": "leaf2",
+      "host": "10.10.1.24",
+      "capability": "nve_vni",
+      "command": "show nve vni",
+      "observed_at": "2026-10-04T15:38:55.175110+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf2/nve_vni.txt",
+          "sha256": "ae132f158e427dc9eb7acae3e95fdd2d03452cc4eae13367899843da0cb4690b",
+          "bytes": 276
+        },
+        "raw.txt": {
+          "path": "leaf2/nve_vni.raw.txt",
+          "sha256": "df42956d1a55baa1affc7acbad26b58d5eec0ed85541510be65f91e2a863862b",
+          "bytes": 299
+        }
+      }
+    },
+    {
+      "device": "leaf2",
+      "host": "10.10.1.24",
+      "capability": "nve_interface",
+      "command": "show nve interface nve1 detail",
+      "observed_at": "2026-10-04T15:38:55.278025+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf2/nve_interface.txt",
+          "sha256": "7080b45c518f0a7a5ff45caaf86bb65b0cdf0a668e9a55e024479a2911095dc7",
+          "bytes": 364
+        },
+        "raw.txt": {
+          "path": "leaf2/nve_interface.raw.txt",
+          "sha256": "b64777c447687d152c9ef2b8836c06afa6c8d23b5c7591faeb53e01274a0194c",
+          "bytes": 411
+        }
+      }
+    },
+    {
+      "device": "leaf2",
+      "host": "10.10.1.24",
+      "capability": "evpn_evi",
+      "command": "show l2vpn evpn evi detail",
+      "observed_at": "2026-10-04T15:38:55.380352+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf2/evpn_evi.txt",
+          "sha256": "d10138cec4dd70318c38ac0387d86bf758484f1f6a8dff1c9b5d018ba5cd082f",
+          "bytes": 1016
+        },
+        "raw.txt": {
+          "path": "leaf2/evpn_evi.raw.txt",
+          "sha256": "edb0a8f5a77f488f856e126ecd0fdcd9d5e1d782fe8ec8ef6b9d424e0f41ca2a",
+          "bytes": 1084
+        }
+      }
+    },
+    {
+      "device": "leaf2",
+      "host": "10.10.1.24",
+      "capability": "evpn_mac",
+      "command": "show l2vpn evpn mac",
+      "observed_at": "2026-10-04T15:38:55.432067+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf2/evpn_mac.txt",
+          "sha256": "10f0e7c363e630df6a2aac623c14b47a6063f46f4673c5866c1cac776351eb78",
+          "bytes": 226
+        },
+        "raw.txt": {
+          "path": "leaf2/evpn_mac.raw.txt",
+          "sha256": "ffd1de0a0198bc7f3a345e3f13e2c75b47c909648ea2f0024fb2483057d41da3",
+          "bytes": 258
+        }
+      }
+    },
+    {
+      "device": "leaf2",
+      "host": "10.10.1.24",
+      "capability": "routes_vrf_BLUE",
+      "command": "show ip route vrf BLUE",
+      "observed_at": "2026-10-04T15:38:56.296764+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf2/routes_vrf_BLUE.txt",
+          "sha256": "1e1d37d3af4e831b008c4c32aa0b2b00b76bec3dd77d5b335014287dbee55b65",
+          "bytes": 1298
+        },
+        "raw.txt": {
+          "path": "leaf2/routes_vrf_BLUE.raw.txt",
+          "sha256": "67d07ba29a834c76bfeea75ba739168d8227ecbfdcb09e9df14d2138ab4f3024",
+          "bytes": 1353
+        }
+      }
+    },
+    {
+      "device": "leaf2",
+      "host": "10.10.1.24",
+      "capability": "arp_vrf_BLUE",
+      "command": "show ip arp vrf BLUE",
+      "observed_at": "2026-10-04T15:38:56.399149+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf2/arp_vrf_BLUE.txt",
+          "sha256": "ced343ce8b397661c6be9cabd6dbaf9c8dd5c4b0cdc6878312cc7518e91de8b8",
+          "bytes": 208
+        },
+        "raw.txt": {
+          "path": "leaf2/arp_vrf_BLUE.raw.txt",
+          "sha256": "d79d1dd4455e5d942634dfce6a8661a5e3720eaa10713225f43b1fdebe400692",
+          "bytes": 239
+        }
+      }
+    },
+    {
+      "device": "leaf3",
+      "host": "10.10.1.25",
+      "capability": "version",
+      "command": "display version",
+      "observed_at": "2026-10-04T15:38:59.721215+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf3/version.txt",
+          "sha256": "a9b3de879db6bd78d15515cadd36ae926bf99c368499c101ab522ffa63ba9c06",
+          "bytes": 849
+        },
+        "raw.txt": {
+          "path": "leaf3/version.raw.txt",
+          "sha256": "0477781a569c8e69daf623026d5fa4092ad3de80a605ecd726ec790093094e12",
+          "bytes": 917
+        }
+      }
+    },
+    {
+      "device": "leaf3",
+      "host": "10.10.1.25",
+      "capability": "lldp_local",
+      "command": "display lldp local-information",
+      "observed_at": "2026-10-04T15:38:59.825582+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf3/lldp_local.txt",
+          "sha256": "ea96964cece31521f3ee5cb1f4a9c801972cb3d3a1a6238084780df8f6027346",
+          "bytes": 7315
+        },
+        "raw.txt": {
+          "path": "leaf3/lldp_local.raw.txt",
+          "sha256": "9ad2d4e40e20c59856de3f1c582a2d44db85c2ff7c457f2d64d6697c374de245",
+          "bytes": 7726
+        }
+      }
+    },
+    {
+      "device": "leaf3",
+      "host": "10.10.1.25",
+      "capability": "lldp_verbose",
+      "command": "display lldp neighbor-information verbose",
+      "observed_at": "2026-10-04T15:38:59.876958+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf3/lldp_verbose.txt",
+          "sha256": "5330cf431f3d811d85443d7ee61281ecdd29f9b42cfba984b97910b8ce5bdbe7",
+          "bytes": 2029
+        },
+        "raw.txt": {
+          "path": "leaf3/lldp_verbose.raw.txt",
+          "sha256": "0d304748ac64d63b76d44ba25ea091b14358c3ae557c51f1f1e4a7cc99a89213",
+          "bytes": 2181
+        }
+      }
+    },
+    {
+      "device": "leaf3",
+      "host": "10.10.1.25",
+      "capability": "interfaces",
+      "command": "display interface brief",
+      "observed_at": "2026-10-04T15:38:59.979953+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf3/interfaces.txt",
+          "sha256": "11663397b0756056d56c76490de63e0ff7286df6f467c68d95d354f6fafeb8b6",
+          "bytes": 949
+        },
+        "raw.txt": {
+          "path": "leaf3/interfaces.raw.txt",
+          "sha256": "d2c974ef4dc25e2ef68f978ef8cff56944f190355865b2edc84e17e306786acc",
+          "bytes": 1019
+        }
+      }
+    },
+    {
+      "device": "leaf3",
+      "host": "10.10.1.25",
+      "capability": "ip_interfaces",
+      "command": "display ip interface brief",
+      "observed_at": "2026-10-04T15:39:00.031511+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf3/ip_interfaces.txt",
+          "sha256": "86abc2bbb6582c4707a35edb733f517dc4dd3e8c857371f5d3acb5e20797e579",
+          "bytes": 949
+        },
+        "raw.txt": {
+          "path": "leaf3/ip_interfaces.raw.txt",
+          "sha256": "25959102e3e6ad09525fbd479d091071e14b678d030f7bed18cca55cbdf0bbb4",
+          "bytes": 1011
+        }
+      }
+    },
+    {
+      "device": "leaf3",
+      "host": "10.10.1.25",
+      "capability": "arp",
+      "command": "display arp verbose",
+      "observed_at": "2026-10-04T15:39:00.083434+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf3/arp.txt",
+          "sha256": "84738cf65b09ff493e3ab92244f27e7b694b8dd8ab1568761d058a9046495a34",
+          "bytes": 2779
+        },
+        "raw.txt": {
+          "path": "leaf3/arp.raw.txt",
+          "sha256": "421fd49060948ef03fef4875802bbc191537a4521d14a0cdef63c5704f124aa7",
+          "bytes": 2965
+        }
+      }
+    },
+    {
+      "device": "leaf3",
+      "host": "10.10.1.25",
+      "capability": "mac",
+      "command": "display mac-address",
+      "observed_at": "2026-10-04T15:39:00.135103+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf3/mac.txt",
+          "sha256": "fc80afd7881968c2e86946c085ee09f6e443bfc16cae0beb700ee35db9a2e2c1",
+          "bytes": 76
+        },
+        "raw.txt": {
+          "path": "leaf3/mac.raw.txt",
+          "sha256": "35082f411a9b7426e1efbf2a746b90a9e14a88e21db088c2deea9664883590c0",
+          "bytes": 107
+        }
+      }
+    },
+    {
+      "device": "leaf3",
+      "host": "10.10.1.25",
+      "capability": "routes",
+      "command": "display ip routing-table",
+      "observed_at": "2026-10-04T15:39:00.341438+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf3/routes.txt",
+          "sha256": "9e2534c8fd750c361fc578f3d37749f419f6e51d620c638bfb231409eb1b56ae",
+          "bytes": 1873
+        },
+        "raw.txt": {
+          "path": "leaf3/routes.raw.txt",
+          "sha256": "b0c060778e9bc21aa1bdd39211c5ab45451af6faf5627e54e6c3eb58a5f2d119",
+          "bytes": 1970
+        }
+      }
+    },
+    {
+      "device": "leaf3",
+      "host": "10.10.1.25",
+      "capability": "vrfs",
+      "command": "display ip vpn-instance",
+      "observed_at": "2026-10-04T15:39:00.392753+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf3/vrfs.txt",
+          "sha256": "94ffe15d8b2fea449d4b036ed3939907dc312b0618bda73e7a80f667f56a2f2a",
+          "bytes": 251
+        },
+        "raw.txt": {
+          "path": "leaf3/vrfs.raw.txt",
+          "sha256": "bf9c7b14b5b3d3d2e5bd3dbf5a0ed85b6b21a1763f91436cdb90e3ea71172c9f",
+          "bytes": 294
+        }
+      }
+    },
+    {
+      "device": "leaf3",
+      "host": "10.10.1.25",
+      "capability": "ospf",
+      "command": "display ospf peer",
+      "observed_at": "2026-10-04T15:39:00.547144+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf3/ospf.txt",
+          "sha256": "76743ca5461ed8c0678dcba62391da68b10e6a65dcbf6f501d15447aed3662d6",
+          "bytes": 331
+        },
+        "raw.txt": {
+          "path": "leaf3/ospf.raw.txt",
+          "sha256": "3354cc29d2257fa2ab4936c80ec65029bde1cfb5e3d36a420f68a586f84b5bae",
+          "bytes": 375
+        }
+      }
+    },
+    {
+      "device": "leaf3",
+      "host": "10.10.1.25",
+      "capability": "ospf_interfaces",
+      "command": "display ospf interface",
+      "observed_at": "2026-10-04T15:39:00.599132+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf3/ospf_interfaces.txt",
+          "sha256": "5890bb8fdf17f4abe077fe7f7debcce84630be5b21a700272b954d3982220db9",
+          "bytes": 369
+        },
+        "raw.txt": {
+          "path": "leaf3/ospf_interfaces.raw.txt",
+          "sha256": "e7288c3001d114112fbe868bf4b50375f5af456332a892bfff274d63ac04d9a8",
+          "bytes": 423
+        }
+      }
+    },
+    {
+      "device": "leaf3",
+      "host": "10.10.1.25",
+      "capability": "ospf_interfaces_verbose",
+      "command": "display ospf interface verbose",
+      "observed_at": "2026-10-04T15:39:00.650714+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf3/ospf_interfaces_verbose.txt",
+          "sha256": "432947e1527688727d228a221ab773defd595b481b4bebf2b53fb1fd11d1aa76",
+          "bytes": 1053
+        },
+        "raw.txt": {
+          "path": "leaf3/ospf_interfaces_verbose.raw.txt",
+          "sha256": "d19f7ef6a7cf08b04182c83c16b9202bcbf7efa6c10a626fb14e5ee2e1e3544c",
+          "bytes": 1159
+        }
+      }
+    },
+    {
+      "device": "leaf3",
+      "host": "10.10.1.25",
+      "capability": "ospf_process",
+      "command": "display ospf",
+      "observed_at": "2026-10-04T15:39:00.703035+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf3/ospf_process.txt",
+          "sha256": "3ff272569b9034456904daa965384c364f210114f5f7d42077a3f76861f3cb7c",
+          "bytes": 2190
+        },
+        "raw.txt": {
+          "path": "leaf3/ospf_process.raw.txt",
+          "sha256": "32de809bddcd32a9c047a09208e256ad5364550af4acd76cc13fe1961c67ca4c",
+          "bytes": 2343
+        }
+      }
+    },
+    {
+      "device": "leaf3",
+      "host": "10.10.1.25",
+      "capability": "bgp",
+      "command": "display bgp peer ipv4",
+      "observed_at": "2026-10-04T15:39:00.754262+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf3/bgp.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "leaf3/bgp.raw.txt",
+          "sha256": "9aa5f2fb0bdd1fd0b522bb20917e0a43fdd54d7c3dec4268c24aff5b45fff6c2",
+          "bytes": 31
+        }
+      }
+    },
+    {
+      "device": "leaf3",
+      "host": "10.10.1.25",
+      "capability": "bgp_vpnv4",
+      "command": "display bgp peer vpnv4",
+      "observed_at": "2026-10-04T15:39:00.805825+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf3/bgp_vpnv4.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "leaf3/bgp_vpnv4.raw.txt",
+          "sha256": "bea626d6a4ecce635cf29e83fccca0ede2dfe8354f0b10d953114644757418ab",
+          "bytes": 32
+        }
+      }
+    },
+    {
+      "device": "leaf3",
+      "host": "10.10.1.25",
+      "capability": "bgp_evpn",
+      "command": "display bgp peer l2vpn evpn",
+      "observed_at": "2026-10-04T15:39:00.857449+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf3/bgp_evpn.txt",
+          "sha256": "30b646c0be345fe75f0e4f851c20d29fe1e49c72e9c708f87106b30b93cfcfd5",
+          "bytes": 388
+        },
+        "raw.txt": {
+          "path": "leaf3/bgp_evpn.raw.txt",
+          "sha256": "1deeb934dac6d5e79af4adc29be13059acc39694cc01a1418ada5398bd397b76",
+          "bytes": 446
+        }
+      }
+    },
+    {
+      "device": "leaf3",
+      "host": "10.10.1.25",
+      "capability": "bgp_vpnv4_routes",
+      "command": "display bgp routing-table vpnv4",
+      "observed_at": "2026-10-04T15:39:00.909259+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf3/bgp_vpnv4_routes.txt",
+          "sha256": "eb4494b0fceb279e213968a434bac6fa68666abe8c64efee82172d8bdca1971b",
+          "bytes": 630
+        },
+        "raw.txt": {
+          "path": "leaf3/bgp_vpnv4_routes.raw.txt",
+          "sha256": "ea4ea5182ae1ec6ed83b69ff1973ba11fe3f4650b805685896b8cc3657ad04c1",
+          "bytes": 702
+        }
+      }
+    },
+    {
+      "device": "leaf3",
+      "host": "10.10.1.25",
+      "capability": "bgp_evpn_routes",
+      "command": "display bgp l2vpn evpn",
+      "observed_at": "2026-10-04T15:39:00.960822+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf3/bgp_evpn_routes.txt",
+          "sha256": "cdd76bd363117b6848f690f02f4b3d3b60c04ec2b726fe14a829b332768b2348",
+          "bytes": 3174
+        },
+        "raw.txt": {
+          "path": "leaf3/bgp_evpn_routes.raw.txt",
+          "sha256": "5b32e2039914c446d02977c712fc3c061451d51592c8d33f2b0b07463d6fc247",
+          "bytes": 3361
+        }
+      }
+    },
+    {
+      "device": "leaf3",
+      "host": "10.10.1.25",
+      "capability": "ldp",
+      "command": "display mpls ldp peer",
+      "observed_at": "2026-10-04T15:39:01.012465+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf3/ldp.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "leaf3/ldp.raw.txt",
+          "sha256": "b4a96e7beb79e76bec62de5a96102d9c53678a8f730f63b80e5d0d17c601b259",
+          "bytes": 31
+        }
+      }
+    },
+    {
+      "device": "leaf3",
+      "host": "10.10.1.25",
+      "capability": "mpls_lsp",
+      "command": "display mpls lsp",
+      "observed_at": "2026-10-04T15:39:01.064167+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf3/mpls_lsp.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "leaf3/mpls_lsp.raw.txt",
+          "sha256": "4f647bc331310d991f431bcb5b40899efdbc5ebbbf274f2a2846f755feabd0a1",
+          "bytes": 26
+        }
+      }
+    },
+    {
+      "device": "leaf3",
+      "host": "10.10.1.25",
+      "capability": "vxlan_tunnels",
+      "command": "display vxlan tunnel",
+      "observed_at": "2026-10-04T15:39:01.115551+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf3/vxlan_tunnels.txt",
+          "sha256": "4ddbdb68657221ba3b61867c90654af41ccc2dc45a5b4bb65f4edaf5b162b131",
+          "bytes": 354
+        },
+        "raw.txt": {
+          "path": "leaf3/vxlan_tunnels.raw.txt",
+          "sha256": "f87113d0054efe0c411e34826e9a1d437ad1569a9a5254b148d3e343433e8ab6",
+          "bytes": 402
+        }
+      }
+    },
+    {
+      "device": "leaf3",
+      "host": "10.10.1.25",
+      "capability": "vsi",
+      "command": "display l2vpn vsi verbose",
+      "observed_at": "2026-10-04T15:39:01.167584+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf3/vsi.txt",
+          "sha256": "8704b7ef64adbbb39b1adea3c086c66e6fb79aacd209aa198f62266cbb4e1345",
+          "bytes": 2184
+        },
+        "raw.txt": {
+          "path": "leaf3/vsi.raw.txt",
+          "sha256": "47f197d6109d8fab00d047e2cdb89ebdb9994b551cd8af030c134d181008427a",
+          "bytes": 2351
+        }
+      }
+    },
+    {
+      "device": "leaf3",
+      "host": "10.10.1.25",
+      "capability": "evpn_instances",
+      "command": "display evpn instance verbose",
+      "observed_at": "2026-10-04T15:39:01.219494+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf3/evpn_instances.txt",
+          "sha256": "bebe7244d291de40811e151f2560be91f8cd6aa2ff8d328735a7b5fa908b3d20",
+          "bytes": 609
+        },
+        "raw.txt": {
+          "path": "leaf3/evpn_instances.raw.txt",
+          "sha256": "1cdadad8c748480854c4554758231a10dcc18f36e6f3d6fbd7a9a2de8da9766a",
+          "bytes": 689
+        }
+      }
+    },
+    {
+      "device": "leaf3",
+      "host": "10.10.1.25",
+      "capability": "evpn_imet",
+      "command": "display evpn auto-discovery imet",
+      "observed_at": "2026-10-04T15:39:01.270680+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf3/evpn_imet.txt",
+          "sha256": "5ec0dc4dc397c2cb8aff0c50b8115954335950e7e6bb96d71aecee86bb8760be",
+          "bytes": 212
+        },
+        "raw.txt": {
+          "path": "leaf3/evpn_imet.raw.txt",
+          "sha256": "d1a5fca2bc800962a6acfd766d91c493bd9f7f4f9561cc0b9d7316091d3e3880",
+          "bytes": 264
+        }
+      }
+    },
+    {
+      "device": "leaf3",
+      "host": "10.10.1.25",
+      "capability": "tunnel_interfaces",
+      "command": "display interface tunnel",
+      "observed_at": "2026-10-04T15:39:01.322456+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf3/tunnel_interfaces.txt",
+          "sha256": "089cfad201211ef4768f903bcee2f434e56c6d8338d1a2f67df74278fab135d1",
+          "bytes": 1421
+        },
+        "raw.txt": {
+          "path": "leaf3/tunnel_interfaces.raw.txt",
+          "sha256": "af14d5b122a77ba1e3c8f7e57a753e2cd5b7aeb847ddc44f1e19ffc40adbdcc0",
+          "bytes": 1528
+        }
+      }
+    },
+    {
+      "device": "leaf3",
+      "host": "10.10.1.25",
+      "capability": "evpn_mac",
+      "command": "display evpn route mac",
+      "observed_at": "2026-10-04T15:39:01.373906+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf3/evpn_mac.txt",
+          "sha256": "d8963a0cab389537cff6f305ea45312f11f0b710517c5c880b6fb7edfdc9c0a8",
+          "bytes": 677
+        },
+        "raw.txt": {
+          "path": "leaf3/evpn_mac.raw.txt",
+          "sha256": "fb8a7ecf85e63ddaea7ab214a99a2a1645e571de5bb13c62432bf72027641feb",
+          "bytes": 767
+        }
+      }
+    },
+    {
+      "device": "leaf3",
+      "host": "10.10.1.25",
+      "capability": "vrf_BLUE",
+      "command": "display ip vpn-instance instance-name BLUE",
+      "observed_at": "2026-10-04T15:39:02.042576+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf3/vrf_BLUE.txt",
+          "sha256": "8acd5383defb1077773404f081116cf85e6b2cb72238ac0431b7a2055d5b6af7",
+          "bytes": 435
+        },
+        "raw.txt": {
+          "path": "leaf3/vrf_BLUE.raw.txt",
+          "sha256": "de4b628beba3fc178decbcf99a5b7819a1a74f641c2a452ce695c015d92d0241",
+          "bytes": 519
+        }
+      }
+    },
+    {
+      "device": "leaf3",
+      "host": "10.10.1.25",
+      "capability": "routes_vrf_BLUE",
+      "command": "display ip routing-table vpn-instance BLUE",
+      "observed_at": "2026-10-04T15:39:02.094189+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf3/routes_vrf_BLUE.txt",
+          "sha256": "14f4410c394461225451cf2ab6d749416cb9766ff951840ad897731b8a7416dd",
+          "bytes": 894
+        },
+        "raw.txt": {
+          "path": "leaf3/routes_vrf_BLUE.raw.txt",
+          "sha256": "2e8357615ad43fd3de1dbafbe6582ef34631126fb60d90457837cacf4547ff9c",
+          "bytes": 979
+        }
+      }
+    },
+    {
+      "device": "leaf3",
+      "host": "10.10.1.25",
+      "capability": "arp_vrf_BLUE",
+      "command": "display arp vpn-instance BLUE",
+      "observed_at": "2026-10-04T15:39:02.145357+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "leaf3/arp_vrf_BLUE.txt",
+          "sha256": "f4dce7d0d4bcc7aec9c42cd166ae780729b368e6f86d96d31b57bab2fd853c48",
+          "bytes": 357
+        },
+        "raw.txt": {
+          "path": "leaf3/arp_vrf_BLUE.raw.txt",
+          "sha256": "7e2e57c4c50962d4416a4b77e8f2134be055ef2052d7a00c79363744dc361f5b",
+          "bytes": 406
+        }
+      }
+    },
+    {
+      "device": "pe1",
+      "host": "10.10.1.26",
+      "capability": "version",
+      "command": "show version",
+      "observed_at": "2026-10-04T15:39:02.837119+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe1/version.txt",
+          "sha256": "850b675a39dccfa4725bbb39da054185639c7b5b9bc51b50eeeb8033a3dbc31f",
+          "bytes": 1494
+        },
+        "raw.txt": {
+          "path": "pe1/version.raw.txt",
+          "sha256": "8e28cacf8a9e04661b3e0a0e639def4b89f1e14f3fdf46150a1ad0a478eca981",
+          "bytes": 1549
+        }
+      }
+    },
+    {
+      "device": "pe1",
+      "host": "10.10.1.26",
+      "capability": "lldp_verbose",
+      "command": "show lldp neighbors detail",
+      "observed_at": "2026-10-04T15:39:02.940222+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe1/lldp_verbose.txt",
+          "sha256": "7597848d4916e7dcb9690e25afc6c20ae69a627a8882e93fbe384685ecced4a3",
+          "bytes": 800
+        },
+        "raw.txt": {
+          "path": "pe1/lldp_verbose.raw.txt",
+          "sha256": "b41ed92d0d58276c9294bd4e701d0727563c794797d72cbe59d13c51e8faaa36",
+          "bytes": 861
+        }
+      }
+    },
+    {
+      "device": "pe1",
+      "host": "10.10.1.26",
+      "capability": "interfaces_description",
+      "command": "show interfaces description",
+      "observed_at": "2026-10-04T15:39:03.247472+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe1/interfaces_description.txt",
+          "sha256": "791fe2d5332e19e79f6150317709b6ae65dfdc9dc0948409628c8aa72f98a393",
+          "bytes": 630
+        },
+        "raw.txt": {
+          "path": "pe1/interfaces_description.raw.txt",
+          "sha256": "efe950f378e41b1bd3eef59446b2ce66751edc70ea2b5ca8e5b1f96c860df4a3",
+          "bytes": 673
+        }
+      }
+    },
+    {
+      "device": "pe1",
+      "host": "10.10.1.26",
+      "capability": "ip_interface",
+      "command": "show ip interface",
+      "observed_at": "2026-10-04T15:39:03.351233+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe1/ip_interface.txt",
+          "sha256": "8975c22e8df7501b10fbcfd44c039b11bf9fee027c248e42aa922127338a0fae",
+          "bytes": 8157
+        },
+        "raw.txt": {
+          "path": "pe1/ip_interface.raw.txt",
+          "sha256": "3c1e0af57e7693d393d60b99877177248b522944bb995b13fc86fe879dde6dd6",
+          "bytes": 8403
+        }
+      }
+    },
+    {
+      "device": "pe1",
+      "host": "10.10.1.26",
+      "capability": "arp",
+      "command": "show ip arp",
+      "observed_at": "2026-10-04T15:39:03.402541+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe1/arp.txt",
+          "sha256": "c27ef27c9b9ba37057c80d90a444e9265473089c44c2bd1bba294a8b9a470035",
+          "bytes": 217
+        },
+        "raw.txt": {
+          "path": "pe1/arp.raw.txt",
+          "sha256": "3152a5b5206e64ecc709b8535a998fd95fec0b05217d9552de81c133f52de461",
+          "bytes": 237
+        }
+      }
+    },
+    {
+      "device": "pe1",
+      "host": "10.10.1.26",
+      "capability": "routes",
+      "command": "show ip route",
+      "observed_at": "2026-10-04T15:39:04.116655+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe1/routes.txt",
+          "sha256": "ccac4b1ee077b007c34e74900a5c7a4a1517994e9d9e8448abe96e804c05d82e",
+          "bytes": 1276
+        },
+        "raw.txt": {
+          "path": "pe1/routes.raw.txt",
+          "sha256": "2caaa129ac65a01ba00f4982f90826f9850e2d6eb6d923f5a68013a9b2a2ef8d",
+          "bytes": 1317
+        }
+      }
+    },
+    {
+      "device": "pe1",
+      "host": "10.10.1.26",
+      "capability": "vrfs",
+      "command": "show vrf",
+      "observed_at": "2026-10-04T15:39:04.270123+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe1/vrfs.txt",
+          "sha256": "e6db0807cda89a1adf5397b841938fd429d3641d46a3f9b42c122b2745b574c6",
+          "bytes": 305
+        },
+        "raw.txt": {
+          "path": "pe1/vrfs.raw.txt",
+          "sha256": "af414b8e96d3438e46d46144d5a69665c44158d469b95a18a1d577e40ed9c071",
+          "bytes": 323
+        }
+      }
+    },
+    {
+      "device": "pe1",
+      "host": "10.10.1.26",
+      "capability": "ospf",
+      "command": "show ip ospf neighbor",
+      "observed_at": "2026-10-04T15:39:04.373810+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe1/ospf.txt",
+          "sha256": "07ad268cfd0eb7378681dfac2922a33fa9e8f1f48c69b4e3840bf2937bc21059",
+          "bytes": 154
+        },
+        "raw.txt": {
+          "path": "pe1/ospf.raw.txt",
+          "sha256": "845d5b960e5e370b6c8b2424e808ca47288277d9d200dd8469d0905afb3ab74f",
+          "bytes": 185
+        }
+      }
+    },
+    {
+      "device": "pe1",
+      "host": "10.10.1.26",
+      "capability": "ospf_interfaces",
+      "command": "show ip ospf interface brief",
+      "observed_at": "2026-10-04T15:39:04.425244+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe1/ospf_interfaces.txt",
+          "sha256": "ebd4b55d14ebe1ae524688b4e49a02e910961d7ee9f008a5833cb7791e21ce1e",
+          "bytes": 215
+        },
+        "raw.txt": {
+          "path": "pe1/ospf_interfaces.raw.txt",
+          "sha256": "957db0d0883f03509dab75a90015df6094d848aa347ffb4655d26474835c6912",
+          "bytes": 252
+        }
+      }
+    },
+    {
+      "device": "pe1",
+      "host": "10.10.1.26",
+      "capability": "ospf_process",
+      "command": "show ip ospf",
+      "observed_at": "2026-10-04T15:39:04.476859+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe1/ospf_process.txt",
+          "sha256": "b9a6251efed567f1572a5e4210ba2e002c7718798c0c7e76a107f7083aba550c",
+          "bytes": 2259
+        },
+        "raw.txt": {
+          "path": "pe1/ospf_process.raw.txt",
+          "sha256": "54a3d3f4e1eae017b3a5cedd4aba7b4b5ed738a8e810efd3eb815783045a66f3",
+          "bytes": 2333
+        }
+      }
+    },
+    {
+      "device": "pe1",
+      "host": "10.10.1.26",
+      "capability": "bgp",
+      "command": "show ip bgp summary",
+      "observed_at": "2026-10-04T15:39:04.578675+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe1/bgp.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "pe1/bgp.raw.txt",
+          "sha256": "e8ea18a0abc263ea2c1fadf73e34348c2d23629aa6c942c0eabc7df447bb77db",
+          "bytes": 25
+        }
+      }
+    },
+    {
+      "device": "pe1",
+      "host": "10.10.1.26",
+      "capability": "vrf_detail",
+      "command": "show vrf detail",
+      "observed_at": "2026-10-04T15:39:04.680469+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe1/vrf_detail.txt",
+          "sha256": "b5762f3bcd84b0c8a939b6f858c81c12d54cd1b85ca16a16d244fa1814336cad",
+          "bytes": 1949
+        },
+        "raw.txt": {
+          "path": "pe1/vrf_detail.raw.txt",
+          "sha256": "89d0455e30a557af2a1becef2f3d1522646cfc54c5f46188f84395eb2f14c2b7",
+          "bytes": 2029
+        }
+      }
+    },
+    {
+      "device": "pe1",
+      "host": "10.10.1.26",
+      "capability": "bgp_vpnv4",
+      "command": "show bgp vpnv4 unicast all summary",
+      "observed_at": "2026-10-04T15:39:04.832880+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe1/bgp_vpnv4.txt",
+          "sha256": "d6dd6ab2ac5ea319283501eb329751f3419ac7a42590eaee9bedbfbe2a8a6cc9",
+          "bytes": 765
+        },
+        "raw.txt": {
+          "path": "pe1/bgp_vpnv4.raw.txt",
+          "sha256": "e8936ab57123d13fba8510b41b2d84c0b19f499267d76779c5b0237afc1691a2",
+          "bytes": 819
+        }
+      }
+    },
+    {
+      "device": "pe1",
+      "host": "10.10.1.26",
+      "capability": "bgp_evpn",
+      "command": "show bgp l2vpn evpn summary",
+      "observed_at": "2026-10-04T15:39:04.934474+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe1/bgp_evpn.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "pe1/bgp_evpn.raw.txt",
+          "sha256": "d292212376a5d7090ab5a2622a322d2dbca1eb2629b7a7cf80f20d2822d5f75c",
+          "bytes": 33
+        }
+      }
+    },
+    {
+      "device": "pe1",
+      "host": "10.10.1.26",
+      "capability": "bgp_vpnv4_routes",
+      "command": "show bgp vpnv4 unicast all",
+      "observed_at": "2026-10-04T15:39:05.036922+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe1/bgp_vpnv4_routes.txt",
+          "sha256": "f5718f8fbad94e767c80b7e20bda45372b18981a429cd87e52a7c45d28215969",
+          "bytes": 1072
+        },
+        "raw.txt": {
+          "path": "pe1/bgp_vpnv4_routes.raw.txt",
+          "sha256": "d1a290ead0a7630c3cecfb5c2d4d718f077057dde15359acf1ac98ba96f71440",
+          "bytes": 1123
+        }
+      }
+    },
+    {
+      "device": "pe1",
+      "host": "10.10.1.26",
+      "capability": "bgp_evpn_routes",
+      "command": "show bgp l2vpn evpn",
+      "observed_at": "2026-10-04T15:39:05.088507+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe1/bgp_evpn_routes.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "pe1/bgp_evpn_routes.raw.txt",
+          "sha256": "4bc24d4c7d6be224d2b2b09512b711e8c4ae52ee53344728272a3d15351c157f",
+          "bytes": 25
+        }
+      }
+    },
+    {
+      "device": "pe1",
+      "host": "10.10.1.26",
+      "capability": "ldp",
+      "command": "show mpls ldp neighbor",
+      "observed_at": "2026-10-04T15:39:05.190546+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe1/ldp.txt",
+          "sha256": "2c15af8bf477d8cba8c5dd6acc28d700bf35a38eb16cbbacb8cc0a4175773a34",
+          "bytes": 353
+        },
+        "raw.txt": {
+          "path": "pe1/ldp.raw.txt",
+          "sha256": "5a0d1ab659092137b92dfec4fc626fd5a89a5a99d43892da01e8826fa9237995",
+          "bytes": 389
+        }
+      }
+    },
+    {
+      "device": "pe1",
+      "host": "10.10.1.26",
+      "capability": "mpls_forwarding",
+      "command": "show mpls forwarding-table",
+      "observed_at": "2026-10-04T15:39:05.292945+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe1/mpls_forwarding.txt",
+          "sha256": "5ba49c22fe62e4bc501e9b01088c515de0b2ff6eba8829ca2a355823cfb73437",
+          "bytes": 527
+        },
+        "raw.txt": {
+          "path": "pe1/mpls_forwarding.raw.txt",
+          "sha256": "90b773dd07ce86d15ccf5f28850393e25a54b15ae0734e8682db828a8624e243",
+          "bytes": 566
+        }
+      }
+    },
+    {
+      "device": "pe1",
+      "host": "10.10.1.26",
+      "capability": "nve_peers",
+      "command": "show nve peers",
+      "observed_at": "2026-10-04T15:39:05.344111+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe1/nve_peers.txt",
+          "sha256": "5a4874cdb2b7ceacd3d8ef5e8af2a0ab8aa59e1fd178bb31c631e48a331fd5d0",
+          "bytes": 181
+        },
+        "raw.txt": {
+          "path": "pe1/nve_peers.raw.txt",
+          "sha256": "d560cdb7d13ae75cd3effcac1cc5cc7bc071035368ddbe74bf4254adb109e0cd",
+          "bytes": 205
+        }
+      }
+    },
+    {
+      "device": "pe1",
+      "host": "10.10.1.26",
+      "capability": "nve_vni",
+      "command": "show nve vni",
+      "observed_at": "2026-10-04T15:39:05.395725+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe1/nve_vni.txt",
+          "sha256": "ce392e83c23e6d73555b230ee88eca4c6672857edbe1484f17e0bb330e4e9f81",
+          "bytes": 92
+        },
+        "raw.txt": {
+          "path": "pe1/nve_vni.raw.txt",
+          "sha256": "e18a3163e932b0c8815a3fe061af68de81ba5fd7c1edf5d1e067a282bf5544cf",
+          "bytes": 111
+        }
+      }
+    },
+    {
+      "device": "pe1",
+      "host": "10.10.1.26",
+      "capability": "evpn_evi",
+      "command": "show l2vpn evpn evi detail",
+      "observed_at": "2026-10-04T15:39:05.599439+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe1/evpn_evi.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "pe1/evpn_evi.raw.txt",
+          "sha256": "3be2693e946afe54d7177c351d64ef9eda9bbb41842c1f5dfca606cd0c9f3ad1",
+          "bytes": 32
+        }
+      }
+    },
+    {
+      "device": "pe1",
+      "host": "10.10.1.26",
+      "capability": "routes_vrf_CUST-A",
+      "command": "show ip route vrf CUST-A",
+      "observed_at": "2026-10-04T15:39:05.904980+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe1/routes_vrf_CUST-A.txt",
+          "sha256": "04a49b7798e6d45ee185029e2d26d2d2d13af40f526134ab9586e09905c04684",
+          "bytes": 1136
+        },
+        "raw.txt": {
+          "path": "pe1/routes_vrf_CUST-A.raw.txt",
+          "sha256": "a653284672f1de87795a2b98338d90af0e921480f9981001b405364df956533d",
+          "bytes": 1189
+        }
+      }
+    },
+    {
+      "device": "pe1",
+      "host": "10.10.1.26",
+      "capability": "arp_vrf_CUST-A",
+      "command": "show ip arp vrf CUST-A",
+      "observed_at": "2026-10-04T15:39:06.007652+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe1/arp_vrf_CUST-A.txt",
+          "sha256": "4325d2d2a82340127ca322820bbe7522ce086fddb1164ebb57bc46c8cbd37d4f",
+          "bytes": 217
+        },
+        "raw.txt": {
+          "path": "pe1/arp_vrf_CUST-A.raw.txt",
+          "sha256": "d418cb2c446cdcbe70a303d6a23f71e84d42dacd51dd292728eaec53c950710c",
+          "bytes": 248
+        }
+      }
+    },
+    {
+      "device": "pe1",
+      "host": "10.10.1.26",
+      "capability": "routes_vrf_CUST-B",
+      "command": "show ip route vrf CUST-B",
+      "observed_at": "2026-10-04T15:39:06.109580+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe1/routes_vrf_CUST-B.txt",
+          "sha256": "56b6444ee8eb47090ccb62e52d214f169c6af098b78a240a5d3ce4b1e3ea969a",
+          "bytes": 1025
+        },
+        "raw.txt": {
+          "path": "pe1/routes_vrf_CUST-B.raw.txt",
+          "sha256": "0e3d325ca0b13ea0a0ebffc7ef04e84b0a76a409c50e168865c196267563eae9",
+          "bytes": 1076
+        }
+      }
+    },
+    {
+      "device": "pe1",
+      "host": "10.10.1.26",
+      "capability": "arp_vrf_CUST-B",
+      "command": "show ip arp vrf CUST-B",
+      "observed_at": "2026-10-04T15:39:06.211472+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe1/arp_vrf_CUST-B.txt",
+          "sha256": "4cfcd17d0a9fb3bdca875f3322eb7cef74c07014d042625acdf8ce285aba2e0f",
+          "bytes": 217
+        },
+        "raw.txt": {
+          "path": "pe1/arp_vrf_CUST-B.raw.txt",
+          "sha256": "d8ea1d933c78891f76e7d5fc41b2ff55e09ad69936b66587507487d059eb5747",
+          "bytes": 248
+        }
+      }
+    },
+    {
+      "device": "p",
+      "host": "10.10.1.27",
+      "capability": "version",
+      "command": "show version",
+      "observed_at": "2026-10-04T15:39:07.269396+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "p/version.txt",
+          "sha256": "5ed277cbb37efcfec776e8172c6ad8a410e4b9d0e408adc57022dc375056faa7",
+          "bytes": 1492
+        },
+        "raw.txt": {
+          "path": "p/version.raw.txt",
+          "sha256": "9bc16e552c7a5fb43ef1f9d24eacb084e0f8b8c22fd4db64cb0c65d97c82be7b",
+          "bytes": 1545
+        }
+      }
+    },
+    {
+      "device": "p",
+      "host": "10.10.1.27",
+      "capability": "lldp_verbose",
+      "command": "show lldp neighbors detail",
+      "observed_at": "2026-10-04T15:39:07.423576+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "p/lldp_verbose.txt",
+          "sha256": "20c2ccb2d0867d8aa3027895613415f6f110e15424b26d7109157c8d7268cc28",
+          "bytes": 1549
+        },
+        "raw.txt": {
+          "path": "p/lldp_verbose.raw.txt",
+          "sha256": "35cfc9c43a4e5d35db663e06f67e691c39f8c9023cc5d814b01802eafb4e86eb",
+          "bytes": 1637
+        }
+      }
+    },
+    {
+      "device": "p",
+      "host": "10.10.1.27",
+      "capability": "interfaces_description",
+      "command": "show interfaces description",
+      "observed_at": "2026-10-04T15:39:07.730819+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "p/interfaces_description.txt",
+          "sha256": "8848dd6c8e276507fc2c6295fea8bbff780b37e1b02440d7019cd44b851a660a",
+          "bytes": 602
+        },
+        "raw.txt": {
+          "path": "p/interfaces_description.raw.txt",
+          "sha256": "1121c574379b4ebcced05644fb8f45432376f4428e18248dd4a264fc706b7e45",
+          "bytes": 643
+        }
+      }
+    },
+    {
+      "device": "p",
+      "host": "10.10.1.27",
+      "capability": "ip_interface",
+      "command": "show ip interface",
+      "observed_at": "2026-10-04T15:39:07.885461+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "p/ip_interface.txt",
+          "sha256": "8240a66b58fbdb12d8d733f0de4db6c897ecad02abad3379beb8a156c2b8b8a1",
+          "bytes": 6737
+        },
+        "raw.txt": {
+          "path": "p/ip_interface.raw.txt",
+          "sha256": "edeecac6a704a2971239cd391cb9f6befe6f9f63b94ce2c1ccea3347cf851899",
+          "bytes": 6940
+        }
+      }
+    },
+    {
+      "device": "p",
+      "host": "10.10.1.27",
+      "capability": "arp",
+      "command": "show ip arp",
+      "observed_at": "2026-10-04T15:39:07.987317+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "p/arp.txt",
+          "sha256": "5cf9c0e9b8c242fe1abf7546ee5b78c03d817a7c97725e49d0f71a352644a3ae",
+          "bytes": 363
+        },
+        "raw.txt": {
+          "path": "p/arp.raw.txt",
+          "sha256": "27611927f7e26f36c405d21d5a5094cafd9f183ce084e320dc3e661b22e6020b",
+          "bytes": 383
+        }
+      }
+    },
+    {
+      "device": "p",
+      "host": "10.10.1.27",
+      "capability": "routes",
+      "command": "show ip route",
+      "observed_at": "2026-10-04T15:39:08.550867+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "p/routes.txt",
+          "sha256": "a69663b62e29eefc5cd4e598f68b7d1582246c949db9c42428d1cce1df0d19f9",
+          "bytes": 1322
+        },
+        "raw.txt": {
+          "path": "p/routes.raw.txt",
+          "sha256": "938add0c6fe08ad3563f9d88b2c1bd82002e20b7057a8a65c5f3d0f0b5216aa6",
+          "bytes": 1362
+        }
+      }
+    },
+    {
+      "device": "p",
+      "host": "10.10.1.27",
+      "capability": "vrfs",
+      "command": "show vrf",
+      "observed_at": "2026-10-04T15:39:08.704914+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "p/vrfs.txt",
+          "sha256": "aadef37423166e0ea70b2004c56babd933a55d5eeb71cc91d6df3f96b2a20a21",
+          "bytes": 155
+        },
+        "raw.txt": {
+          "path": "p/vrfs.raw.txt",
+          "sha256": "9453caa97ffdb08fc2836d0d304c327c6e13d88a95fe119ac1f2dad5aaf05a03",
+          "bytes": 169
+        }
+      }
+    },
+    {
+      "device": "p",
+      "host": "10.10.1.27",
+      "capability": "ospf",
+      "command": "show ip ospf neighbor",
+      "observed_at": "2026-10-04T15:39:08.858507+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "p/ospf.txt",
+          "sha256": "b9bf754b8f4270c8302459596f0949f5c91938452f36fa6648ae5e8ba0c43e9a",
+          "bytes": 232
+        },
+        "raw.txt": {
+          "path": "p/ospf.raw.txt",
+          "sha256": "43581b042b753cfa97d19cf82f5c51fea1a1eea6697c9f3436c9e25ec5dc73b6",
+          "bytes": 262
+        }
+      }
+    },
+    {
+      "device": "p",
+      "host": "10.10.1.27",
+      "capability": "ospf_interfaces",
+      "command": "show ip ospf interface brief",
+      "observed_at": "2026-10-04T15:39:08.960951+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "p/ospf_interfaces.txt",
+          "sha256": "a45c7e0e4c21f2c1c59169a9af9cee3bb8670bc6cfb2a3dceac1ac333a0f05b0",
+          "bytes": 285
+        },
+        "raw.txt": {
+          "path": "p/ospf_interfaces.raw.txt",
+          "sha256": "1dbd176146b38faec92d208936a72ff4a094c9be6c852952986fac4e5076faf3",
+          "bytes": 321
+        }
+      }
+    },
+    {
+      "device": "p",
+      "host": "10.10.1.27",
+      "capability": "ospf_process",
+      "command": "show ip ospf",
+      "observed_at": "2026-10-04T15:39:09.012832+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "p/ospf_process.txt",
+          "sha256": "63a48e95af96ffa6e7d87219bf0fd6de61cec62154b75b2ad78bd3bf6ed96d0c",
+          "bytes": 2259
+        },
+        "raw.txt": {
+          "path": "p/ospf_process.raw.txt",
+          "sha256": "2e76e3677837bd22da71a2516544be9a7e5c28a52cc9bfb67ecb5b2dd68c66ee",
+          "bytes": 2331
+        }
+      }
+    },
+    {
+      "device": "p",
+      "host": "10.10.1.27",
+      "capability": "bgp",
+      "command": "show ip bgp summary",
+      "observed_at": "2026-10-04T15:39:09.064425+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "p/bgp.txt",
+          "sha256": "65624da4b7a7892cdbb8de619f14c2759e84c490bf9cf7021b7faa8d2588c19c",
+          "bytes": 17
+        },
+        "raw.txt": {
+          "path": "p/bgp.raw.txt",
+          "sha256": "85d4ff295ac5228b741a251abaa1578a4864d56a0522a0c8b51f74c8dc7cc4a7",
+          "bytes": 43
+        }
+      }
+    },
+    {
+      "device": "p",
+      "host": "10.10.1.27",
+      "capability": "vrf_detail",
+      "command": "show vrf detail",
+      "observed_at": "2026-10-04T15:39:09.115911+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "p/vrf_detail.txt",
+          "sha256": "6995e37ed2fcfa84345ac42129b9af0389bdc12834ddaa98c80029e985f360db",
+          "bytes": 606
+        },
+        "raw.txt": {
+          "path": "p/vrf_detail.raw.txt",
+          "sha256": "382fc4e5c1d8299ab6f916b7a9b98b22936d5a8f5a60cb98fc2e75f216249ce5",
+          "bytes": 644
+        }
+      }
+    },
+    {
+      "device": "p",
+      "host": "10.10.1.27",
+      "capability": "bgp_vpnv4",
+      "command": "show bgp vpnv4 unicast all summary",
+      "observed_at": "2026-10-04T15:39:09.217933+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "p/bgp_vpnv4.txt",
+          "sha256": "65624da4b7a7892cdbb8de619f14c2759e84c490bf9cf7021b7faa8d2588c19c",
+          "bytes": 17
+        },
+        "raw.txt": {
+          "path": "p/bgp_vpnv4.raw.txt",
+          "sha256": "f470bb4bd94f46e462c63f951788b6a702b0ad5bf4f11eb7bb8c0e4fb2de6632",
+          "bytes": 58
+        }
+      }
+    },
+    {
+      "device": "p",
+      "host": "10.10.1.27",
+      "capability": "bgp_evpn",
+      "command": "show bgp l2vpn evpn summary",
+      "observed_at": "2026-10-04T15:39:09.319819+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "p/bgp_evpn.txt",
+          "sha256": "65624da4b7a7892cdbb8de619f14c2759e84c490bf9cf7021b7faa8d2588c19c",
+          "bytes": 17
+        },
+        "raw.txt": {
+          "path": "p/bgp_evpn.raw.txt",
+          "sha256": "cbfc7a85354d83843232f87c54e2fd20b8b0302a545fdab8e0389395b3c648cc",
+          "bytes": 51
+        }
+      }
+    },
+    {
+      "device": "p",
+      "host": "10.10.1.27",
+      "capability": "bgp_vpnv4_routes",
+      "command": "show bgp vpnv4 unicast all",
+      "observed_at": "2026-10-04T15:39:09.422374+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "p/bgp_vpnv4_routes.txt",
+          "sha256": "65624da4b7a7892cdbb8de619f14c2759e84c490bf9cf7021b7faa8d2588c19c",
+          "bytes": 17
+        },
+        "raw.txt": {
+          "path": "p/bgp_vpnv4_routes.raw.txt",
+          "sha256": "eb5c9981ba7e814de586c6c9740983fd123aad5ad8cee5900069a8bbad025cc7",
+          "bytes": 50
+        }
+      }
+    },
+    {
+      "device": "p",
+      "host": "10.10.1.27",
+      "capability": "bgp_evpn_routes",
+      "command": "show bgp l2vpn evpn",
+      "observed_at": "2026-10-04T15:39:09.523978+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "p/bgp_evpn_routes.txt",
+          "sha256": "65624da4b7a7892cdbb8de619f14c2759e84c490bf9cf7021b7faa8d2588c19c",
+          "bytes": 17
+        },
+        "raw.txt": {
+          "path": "p/bgp_evpn_routes.raw.txt",
+          "sha256": "2a92aa4c49c68deaccddb7b191fb451749149fcbc0f33eb36fdd9d6e4588692a",
+          "bytes": 43
+        }
+      }
+    },
+    {
+      "device": "p",
+      "host": "10.10.1.27",
+      "capability": "ldp",
+      "command": "show mpls ldp neighbor",
+      "observed_at": "2026-10-04T15:39:09.626570+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "p/ldp.txt",
+          "sha256": "a5f013a0ffe79a1c4bede740a0ff3f91d31a6f6400980ebda5dbac04f6fae2a8",
+          "bytes": 674
+        },
+        "raw.txt": {
+          "path": "p/ldp.raw.txt",
+          "sha256": "a8cd7096b09be58ce6cd72e535528a44f4dccefb7f1e2283aea9462b3df6d0b7",
+          "bytes": 716
+        }
+      }
+    },
+    {
+      "device": "p",
+      "host": "10.10.1.27",
+      "capability": "mpls_forwarding",
+      "command": "show mpls forwarding-table",
+      "observed_at": "2026-10-04T15:39:09.678085+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "p/mpls_forwarding.txt",
+          "sha256": "0068a8d85a4bca8655ebf4a4fdb5c7741dba4e795574d0475300438d7ffe8f05",
+          "bytes": 308
+        },
+        "raw.txt": {
+          "path": "p/mpls_forwarding.raw.txt",
+          "sha256": "76a1c95c47e1f5ddc81005d830be6f9159a2f600e98991717e106e85420d6fca",
+          "bytes": 342
+        }
+      }
+    },
+    {
+      "device": "p",
+      "host": "10.10.1.27",
+      "capability": "nve_peers",
+      "command": "show nve peers",
+      "observed_at": "2026-10-04T15:39:09.729130+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "p/nve_peers.txt",
+          "sha256": "5a4874cdb2b7ceacd3d8ef5e8af2a0ab8aa59e1fd178bb31c631e48a331fd5d0",
+          "bytes": 181
+        },
+        "raw.txt": {
+          "path": "p/nve_peers.raw.txt",
+          "sha256": "acdc638a9904f80d0e99474410c20d1f10c689a4ecab1d216159731e092f63b0",
+          "bytes": 203
+        }
+      }
+    },
+    {
+      "device": "p",
+      "host": "10.10.1.27",
+      "capability": "nve_vni",
+      "command": "show nve vni",
+      "observed_at": "2026-10-04T15:39:09.781296+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "p/nve_vni.txt",
+          "sha256": "ce392e83c23e6d73555b230ee88eca4c6672857edbe1484f17e0bb330e4e9f81",
+          "bytes": 92
+        },
+        "raw.txt": {
+          "path": "p/nve_vni.raw.txt",
+          "sha256": "de5cf562ebeab0c105b614d29bc9de2ae2b78bbc1213fbece3657ba7940ad7bb",
+          "bytes": 109
+        }
+      }
+    },
+    {
+      "device": "p",
+      "host": "10.10.1.27",
+      "capability": "evpn_evi",
+      "command": "show l2vpn evpn evi detail",
+      "observed_at": "2026-10-04T15:39:09.984779+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "p/evpn_evi.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "p/evpn_evi.raw.txt",
+          "sha256": "14638de442be17b92b493908ed386d9b581d01ebc242b19592476feadce3b1b2",
+          "bytes": 30
+        }
+      }
+    },
+    {
+      "device": "pe2",
+      "host": "10.10.1.28",
+      "capability": "version",
+      "command": "display version",
+      "observed_at": "2026-10-04T15:39:14.295611+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe2/version.txt",
+          "sha256": "a9b3de879db6bd78d15515cadd36ae926bf99c368499c101ab522ffa63ba9c06",
+          "bytes": 849
+        },
+        "raw.txt": {
+          "path": "pe2/version.raw.txt",
+          "sha256": "99c61c8e2eead543371b05368b913e57f73770fc1ccf4463804b5587397fcbca",
+          "bytes": 915
+        }
+      }
+    },
+    {
+      "device": "pe2",
+      "host": "10.10.1.28",
+      "capability": "lldp_local",
+      "command": "display lldp local-information",
+      "observed_at": "2026-10-04T15:39:14.399648+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe2/lldp_local.txt",
+          "sha256": "9466c550877fe271d3eed8fa364e4ee2b34fbc024108c813a639e39d5923e282",
+          "bytes": 5658
+        },
+        "raw.txt": {
+          "path": "pe2/lldp_local.raw.txt",
+          "sha256": "8962a92eb7576dfb1f219fb41126da1594e97b97fbc4a1f26056890c3c93124d",
+          "bytes": 5985
+        }
+      }
+    },
+    {
+      "device": "pe2",
+      "host": "10.10.1.28",
+      "capability": "lldp_verbose",
+      "command": "display lldp neighbor-information verbose",
+      "observed_at": "2026-10-04T15:39:14.451339+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe2/lldp_verbose.txt",
+          "sha256": "d6b77b33251cdc3eb15536d0ea7a50641829fcdd24bbd791a6dfca5b9e7a26ce",
+          "bytes": 1007
+        },
+        "raw.txt": {
+          "path": "pe2/lldp_verbose.raw.txt",
+          "sha256": "cc20f9812a18a48bd479e74843312a57485a3048e5e1ce881bd04018fa6bfdc8",
+          "bytes": 1107
+        }
+      }
+    },
+    {
+      "device": "pe2",
+      "host": "10.10.1.28",
+      "capability": "interfaces",
+      "command": "display interface brief",
+      "observed_at": "2026-10-04T15:39:14.554545+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe2/interfaces.txt",
+          "sha256": "5d49bdf8112e9e3145748400faf6ea0a947a486114ccc09f91f12300825b16c7",
+          "bytes": 730
+        },
+        "raw.txt": {
+          "path": "pe2/interfaces.raw.txt",
+          "sha256": "6d6b91e2834e44392e87db7491685e4a2fed2b4ad5119a819304117dad4c8ad0",
+          "bytes": 790
+        }
+      }
+    },
+    {
+      "device": "pe2",
+      "host": "10.10.1.28",
+      "capability": "ip_interfaces",
+      "command": "display ip interface brief",
+      "observed_at": "2026-10-04T15:39:14.605749+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe2/ip_interfaces.txt",
+          "sha256": "f2c4f29516cc85000473af3da03a8aedd738d6adef58645ee5619bc354bdcf7c",
+          "bytes": 625
+        },
+        "raw.txt": {
+          "path": "pe2/ip_interfaces.raw.txt",
+          "sha256": "51fdb9de2a1c3db8ab25b0d705f46cb0239470ca57d61507a89394329509804a",
+          "bytes": 677
+        }
+      }
+    },
+    {
+      "device": "pe2",
+      "host": "10.10.1.28",
+      "capability": "arp",
+      "command": "display arp verbose",
+      "observed_at": "2026-10-04T15:39:14.657175+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe2/arp.txt",
+          "sha256": "0e24d1f8605c741022411df2a898db3d2bcdcac2b50c0464db53e7d7a7e53eab",
+          "bytes": 2271
+        },
+        "raw.txt": {
+          "path": "pe2/arp.raw.txt",
+          "sha256": "de240f8b728205a89929dc13e0aec0a7149f353fe265809cc491ab4e99318ae4",
+          "bytes": 2429
+        }
+      }
+    },
+    {
+      "device": "pe2",
+      "host": "10.10.1.28",
+      "capability": "mac",
+      "command": "display mac-address",
+      "observed_at": "2026-10-04T15:39:14.708797+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe2/mac.txt",
+          "sha256": "fc80afd7881968c2e86946c085ee09f6e443bfc16cae0beb700ee35db9a2e2c1",
+          "bytes": 76
+        },
+        "raw.txt": {
+          "path": "pe2/mac.raw.txt",
+          "sha256": "3974a292412acde851ce3872771f872fc0db332c3d85c0f3266a21454e445f9d",
+          "bytes": 105
+        }
+      }
+    },
+    {
+      "device": "pe2",
+      "host": "10.10.1.28",
+      "capability": "routes",
+      "command": "display ip routing-table",
+      "observed_at": "2026-10-04T15:39:14.915606+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe2/routes.txt",
+          "sha256": "6cd5e27875948b9de544ea89e6657da8a881127f90d86a39291d086b7519f180",
+          "bytes": 1221
+        },
+        "raw.txt": {
+          "path": "pe2/routes.raw.txt",
+          "sha256": "1cce08b7a740f8ae42b1c246e31bf0c535b04be2ffee6961280f36bbf7fa3295",
+          "bytes": 1296
+        }
+      }
+    },
+    {
+      "device": "pe2",
+      "host": "10.10.1.28",
+      "capability": "vrfs",
+      "command": "display ip vpn-instance",
+      "observed_at": "2026-10-04T15:39:14.967073+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe2/vrfs.txt",
+          "sha256": "cb30c9f2302c89e71dd23b7ecd1aa682596cef8cc0ef941a77cbdc8e7a1dfef1",
+          "bytes": 328
+        },
+        "raw.txt": {
+          "path": "pe2/vrfs.raw.txt",
+          "sha256": "bdb88a2915a76b0de1e962883f42aa984bff18f1925ce600170c65678960008e",
+          "bytes": 371
+        }
+      }
+    },
+    {
+      "device": "pe2",
+      "host": "10.10.1.28",
+      "capability": "ospf",
+      "command": "display ospf peer",
+      "observed_at": "2026-10-04T15:39:15.121566+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe2/ospf.txt",
+          "sha256": "30ac6d1cd7d37cb5937f5ca5e6b904480c5c23d883ffc49b8e4458108ef8091f",
+          "bytes": 258
+        },
+        "raw.txt": {
+          "path": "pe2/ospf.raw.txt",
+          "sha256": "f4cfa016c8223d4a1eeb38e5c3cebe173ca7358c4d099d1411a9895c5d359fb8",
+          "bytes": 298
+        }
+      }
+    },
+    {
+      "device": "pe2",
+      "host": "10.10.1.28",
+      "capability": "ospf_interfaces",
+      "command": "display ospf interface",
+      "observed_at": "2026-10-04T15:39:15.173955+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe2/ospf_interfaces.txt",
+          "sha256": "987b0dec7c605b15449007d0c14dc142e3d3a2b4b5b310eb57aca08a05511065",
+          "bytes": 296
+        },
+        "raw.txt": {
+          "path": "pe2/ospf_interfaces.raw.txt",
+          "sha256": "3b0acce61ee0e091e36a3fa5c81e0ca7b1ddce985063fc6fb5970dbb8dd08df3",
+          "bytes": 346
+        }
+      }
+    },
+    {
+      "device": "pe2",
+      "host": "10.10.1.28",
+      "capability": "ospf_interfaces_verbose",
+      "command": "display ospf interface verbose",
+      "observed_at": "2026-10-04T15:39:15.225304+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe2/ospf_interfaces_verbose.txt",
+          "sha256": "cb9c4fd8e2bf79f53f852c64f774e6bcfc3874d6c5cb365dd11bcbd55a490cde",
+          "bytes": 721
+        },
+        "raw.txt": {
+          "path": "pe2/ospf_interfaces_verbose.raw.txt",
+          "sha256": "20657b056c131530827b6b8bcb145da1413785654ba738b5427e0d6a5a881cdb",
+          "bytes": 807
+        }
+      }
+    },
+    {
+      "device": "pe2",
+      "host": "10.10.1.28",
+      "capability": "ospf_process",
+      "command": "display ospf",
+      "observed_at": "2026-10-04T15:39:15.276667+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe2/ospf_process.txt",
+          "sha256": "97ace765a160987adaede5849e0a1f94cf76a7e479cc65b03dc6fb0d620d6559",
+          "bytes": 1858
+        },
+        "raw.txt": {
+          "path": "pe2/ospf_process.raw.txt",
+          "sha256": "bd331e9c8cfa09741e1c33c70b2c367b53e25979744142fe0cdb8299d28978a3",
+          "bytes": 1991
+        }
+      }
+    },
+    {
+      "device": "pe2",
+      "host": "10.10.1.28",
+      "capability": "bgp",
+      "command": "display bgp peer ipv4",
+      "observed_at": "2026-10-04T15:39:15.328278+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe2/bgp.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "pe2/bgp.raw.txt",
+          "sha256": "b04ee2f61461bceaa283bf0f681d143da5f7da9c287b9e821c2f531e8c6468fa",
+          "bytes": 29
+        }
+      }
+    },
+    {
+      "device": "pe2",
+      "host": "10.10.1.28",
+      "capability": "bgp_vpnv4",
+      "command": "display bgp peer vpnv4",
+      "observed_at": "2026-10-04T15:39:15.380232+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe2/bgp_vpnv4.txt",
+          "sha256": "5132406ce5a932d06b2efb461bf401ba688537124111d73ceb46bcf0317675aa",
+          "bytes": 306
+        },
+        "raw.txt": {
+          "path": "pe2/bgp_vpnv4.raw.txt",
+          "sha256": "8a2e878975ffa8c22bfd3c042f3401b6c1e0c4fe78ac7ec6a8867bc9b182d361",
+          "bytes": 355
+        }
+      }
+    },
+    {
+      "device": "pe2",
+      "host": "10.10.1.28",
+      "capability": "bgp_evpn",
+      "command": "display bgp peer l2vpn evpn",
+      "observed_at": "2026-10-04T15:39:15.431874+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe2/bgp_evpn.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "pe2/bgp_evpn.raw.txt",
+          "sha256": "039305d87f56d62291cd9d1db9219f62252586c68fbadd4487cf41d4dbe10f9d",
+          "bytes": 35
+        }
+      }
+    },
+    {
+      "device": "pe2",
+      "host": "10.10.1.28",
+      "capability": "bgp_vpnv4_routes",
+      "command": "display bgp routing-table vpnv4",
+      "observed_at": "2026-10-04T15:39:15.484107+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe2/bgp_vpnv4_routes.txt",
+          "sha256": "2557b59d8826dfcb06603563507280be12a49bd7688b7801934f0ff5d572e8f2",
+          "bytes": 1529
+        },
+        "raw.txt": {
+          "path": "pe2/bgp_vpnv4_routes.raw.txt",
+          "sha256": "609e81deded589eb4883b76106286e0efd4337417cca84d5ecf01e4fb3fec58a",
+          "bytes": 1643
+        }
+      }
+    },
+    {
+      "device": "pe2",
+      "host": "10.10.1.28",
+      "capability": "bgp_evpn_routes",
+      "command": "display bgp l2vpn evpn",
+      "observed_at": "2026-10-04T15:39:15.535399+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe2/bgp_evpn_routes.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "pe2/bgp_evpn_routes.raw.txt",
+          "sha256": "c0fa0327e5a81f05473ed8ce5b939bf26f3d773647232acefdd290de54c1e8ae",
+          "bytes": 30
+        }
+      }
+    },
+    {
+      "device": "pe2",
+      "host": "10.10.1.28",
+      "capability": "ldp",
+      "command": "display mpls ldp peer",
+      "observed_at": "2026-10-04T15:39:15.586637+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe2/ldp.txt",
+          "sha256": "780c65dc0eb1cef3cd3dfa5909c634ad7e07eef83e55296806fdfe650377bf2a",
+          "bytes": 190
+        },
+        "raw.txt": {
+          "path": "pe2/ldp.raw.txt",
+          "sha256": "da5940a5ef72375d62990bb7327fd6c1bf9977469665cdb100df7a22b7fbaf88",
+          "bytes": 227
+        }
+      }
+    },
+    {
+      "device": "pe2",
+      "host": "10.10.1.28",
+      "capability": "mpls_lsp",
+      "command": "display mpls lsp",
+      "observed_at": "2026-10-04T15:39:15.638116+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe2/mpls_lsp.txt",
+          "sha256": "28ecb3d4788b1be44d5ad83faac5c7aac215e059d74e9a2a4cb550c22c4e59ea",
+          "bytes": 567
+        },
+        "raw.txt": {
+          "path": "pe2/mpls_lsp.raw.txt",
+          "sha256": "30e9499f66f3eea057e970484f8275ad81ce3515bc1d1dba9819afca5933bc6b",
+          "bytes": 605
+        }
+      }
+    },
+    {
+      "device": "pe2",
+      "host": "10.10.1.28",
+      "capability": "vxlan_tunnels",
+      "command": "display vxlan tunnel",
+      "observed_at": "2026-10-04T15:39:15.689566+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe2/vxlan_tunnels.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "pe2/vxlan_tunnels.raw.txt",
+          "sha256": "7f9e5c98eee10dda0dd3840b026f12ab7526b3ae65499433a5253aeabaa108cf",
+          "bytes": 28
+        }
+      }
+    },
+    {
+      "device": "pe2",
+      "host": "10.10.1.28",
+      "capability": "vsi",
+      "command": "display l2vpn vsi verbose",
+      "observed_at": "2026-10-04T15:39:15.741081+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe2/vsi.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "pe2/vsi.raw.txt",
+          "sha256": "886d6742b9bfc3c1def1d542524ea464517c258f6b06c6b7a540e14f3aaeff3a",
+          "bytes": 33
+        }
+      }
+    },
+    {
+      "device": "pe2",
+      "host": "10.10.1.28",
+      "capability": "evpn_instances",
+      "command": "display evpn instance verbose",
+      "observed_at": "2026-10-04T15:39:15.792546+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe2/evpn_instances.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "pe2/evpn_instances.raw.txt",
+          "sha256": "9df514643319d20eee9d66de939ff16d72e773152c63409d3c92c4f8466de7ef",
+          "bytes": 37
+        }
+      }
+    },
+    {
+      "device": "pe2",
+      "host": "10.10.1.28",
+      "capability": "evpn_imet",
+      "command": "display evpn auto-discovery imet",
+      "observed_at": "2026-10-04T15:39:15.843794+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe2/evpn_imet.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "pe2/evpn_imet.raw.txt",
+          "sha256": "0bfb0b9ed17148cc0faacd363a27cfe87eaf6b2d2317fd68aa5ced2744ad4bf1",
+          "bytes": 40
+        }
+      }
+    },
+    {
+      "device": "pe2",
+      "host": "10.10.1.28",
+      "capability": "tunnel_interfaces",
+      "command": "display interface tunnel",
+      "observed_at": "2026-10-04T15:39:15.895804+00:00",
+      "transport_status": "rejected_by_device",
+      "expected_status": "unsupported",
+      "files": {
+        "txt": {
+          "path": "pe2/tunnel_interfaces.txt",
+          "sha256": "a4f2344f7d11684a84bf15ad8bb8b1c841235948990ca07444b4ceebff156156",
+          "bytes": 67
+        },
+        "raw.txt": {
+          "path": "pe2/tunnel_interfaces.raw.txt",
+          "sha256": "9c46e799d0da09d9ccb734f27a461d7a2260eae5ae9c3da17a59e6ce753dae3c",
+          "bytes": 103
+        }
+      }
+    },
+    {
+      "device": "pe2",
+      "host": "10.10.1.28",
+      "capability": "evpn_mac",
+      "command": "display evpn route mac",
+      "observed_at": "2026-10-04T15:39:15.947852+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe2/evpn_mac.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "pe2/evpn_mac.raw.txt",
+          "sha256": "adf0e703735c36a34c24b47adc5914feb299c03a9d87ed9fe52fc29042293a20",
+          "bytes": 30
+        }
+      }
+    },
+    {
+      "device": "pe2",
+      "host": "10.10.1.28",
+      "capability": "vrf_CUST-A",
+      "command": "display ip vpn-instance instance-name CUST-A",
+      "observed_at": "2026-10-04T15:39:16.152487+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe2/vrf_CUST-A.txt",
+          "sha256": "6cec11d6bf4b3a774594a40cef9ef829403373db1cbf009233af4d014a0dc3b9",
+          "bytes": 800
+        },
+        "raw.txt": {
+          "path": "pe2/vrf_CUST-A.raw.txt",
+          "sha256": "541a60bd79455b52884fb6f891af53787f034594cb17b3c9782631b08e92c6c1",
+          "bytes": 916
+        }
+      }
+    },
+    {
+      "device": "pe2",
+      "host": "10.10.1.28",
+      "capability": "routes_vrf_CUST-A",
+      "command": "display ip routing-table vpn-instance CUST-A",
+      "observed_at": "2026-10-04T15:39:16.204669+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe2/routes_vrf_CUST-A.txt",
+          "sha256": "f85abb34c7d46c9c82ce4e592e542a8de83e87b5d1b8e4144a9e7d78dcf62198",
+          "bytes": 959
+        },
+        "raw.txt": {
+          "path": "pe2/routes_vrf_CUST-A.raw.txt",
+          "sha256": "208242ebd39b58fce1fedc5bb6933a1eb17ca462d339aafb544134fe81c20a7a",
+          "bytes": 1046
+        }
+      }
+    },
+    {
+      "device": "pe2",
+      "host": "10.10.1.28",
+      "capability": "arp_vrf_CUST-A",
+      "command": "display arp vpn-instance CUST-A",
+      "observed_at": "2026-10-04T15:39:16.255760+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe2/arp_vrf_CUST-A.txt",
+          "sha256": "1e124272bbe28f3cadaf741d7cc129040f1ae5b64128e53315bea696de244359",
+          "bytes": 238
+        },
+        "raw.txt": {
+          "path": "pe2/arp_vrf_CUST-A.raw.txt",
+          "sha256": "e527bc3cca104f5825ee21feaa396e7f3bd8193210f798438f5d310467deed83",
+          "bytes": 283
+        }
+      }
+    },
+    {
+      "device": "pe2",
+      "host": "10.10.1.28",
+      "capability": "vrf_SHARED",
+      "command": "display ip vpn-instance instance-name SHARED",
+      "observed_at": "2026-10-04T15:39:16.462141+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe2/vrf_SHARED.txt",
+          "sha256": "470d90a0ca9e460227391c44dac4a174457d7d4628c210e8a33611d5239a06bc",
+          "bytes": 805
+        },
+        "raw.txt": {
+          "path": "pe2/vrf_SHARED.raw.txt",
+          "sha256": "39157e514b7c2ad1efcfc1c78d994c980ce11710b84c79a4070f03f02b0aee38",
+          "bytes": 921
+        }
+      }
+    },
+    {
+      "device": "pe2",
+      "host": "10.10.1.28",
+      "capability": "routes_vrf_SHARED",
+      "command": "display ip routing-table vpn-instance SHARED",
+      "observed_at": "2026-10-04T15:39:16.513741+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe2/routes_vrf_SHARED.txt",
+          "sha256": "9ebb49faadf00f3a2346f69aa6db1b24898e6db8937b406a97d3286e786aa420",
+          "bytes": 959
+        },
+        "raw.txt": {
+          "path": "pe2/routes_vrf_SHARED.raw.txt",
+          "sha256": "ff727096ebea1bf001ae54d2d86d6059255734264cf477383fa0db734c1aabd1",
+          "bytes": 1046
+        }
+      }
+    },
+    {
+      "device": "pe2",
+      "host": "10.10.1.28",
+      "capability": "arp_vrf_SHARED",
+      "command": "display arp vpn-instance SHARED",
+      "observed_at": "2026-10-04T15:39:16.565636+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "pe2/arp_vrf_SHARED.txt",
+          "sha256": "ef93629893ee1d6d82c96de68ff531e765915e658b72bf086d70cbe1aea1e024",
+          "bytes": 238
+        },
+        "raw.txt": {
+          "path": "pe2/arp_vrf_SHARED.raw.txt",
+          "sha256": "13636ea767244ff0f5b01a9348f7c7e5900c7d4cbf2374e7101cf58ddee32339",
+          "bytes": 283
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,1781 @@
+{
+  "schema_version": 1,
+  "batch": "20261005-003643",
+  "source": "GNS3 authorized lab capture",
+  "raw_format": "UTF-8 text saved by collector before CLI cleanup; original line endings",
+  "limitations": [
+    "Not an arbitrary-encoding wire capture",
+    "No initial login banner saved"
+  ],
+  "secret_scan": {
+    "literal_matches": 0,
+    "sensitive_config_matches": 0,
+    "scanner": "scripts/scan_sensitive_device_data.py + direct byte check"
+  },
+  "observations": [
+    {
+      "device": "br1",
+      "host": "10.10.1.11",
+      "capability": "version",
+      "command": "display version",
+      "observed_at": "2026-10-04T16:36:47.218345+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "br1/version.txt",
+          "sha256": "0e7a0d026d183dccdb3b513dbc8b5f1f3d3da3f3e354b8f2b68fde787a7c9259",
+          "bytes": 849
+        },
+        "raw.txt": {
+          "path": "br1/version.raw.txt",
+          "sha256": "0aa9b19c3793f69269f863939a3a8bfed55187551040ae6cfd8d7b66f8b701b6",
+          "bytes": 915
+        }
+      }
+    },
+    {
+      "device": "br1",
+      "host": "10.10.1.11",
+      "capability": "lldp_local",
+      "command": "display lldp local-information",
+      "observed_at": "2026-10-04T16:36:47.323257+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "br1/lldp_local.txt",
+          "sha256": "5cccad18a567a8aebfb73e71227ddd1ef13d3d6ae49472ffa2f430322d8e75ae",
+          "bytes": 7245
+        },
+        "raw.txt": {
+          "path": "br1/lldp_local.raw.txt",
+          "sha256": "1426f24318cf0918460da580f0b237784e5c6b263c267eb9746c872cd9f8dea9",
+          "bytes": 7654
+        }
+      }
+    },
+    {
+      "device": "br1",
+      "host": "10.10.1.11",
+      "capability": "lldp_verbose",
+      "command": "display lldp neighbor-information verbose",
+      "observed_at": "2026-10-04T16:36:47.375051+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "br1/lldp_verbose.txt",
+          "sha256": "efba17e88610742800f76eaccc7b37214e69930010f059bddabbe20880003e4d",
+          "bytes": 3455
+        },
+        "raw.txt": {
+          "path": "br1/lldp_verbose.raw.txt",
+          "sha256": "4d082ed5aa3f40ec394dd2c7ad560e13abf613f74f11e71df0896f2edbc64cf1",
+          "bytes": 3677
+        }
+      }
+    },
+    {
+      "device": "br1",
+      "host": "10.10.1.11",
+      "capability": "interfaces",
+      "command": "display interface brief",
+      "observed_at": "2026-10-04T16:36:47.478061+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "br1/interfaces.txt",
+          "sha256": "022bd7aff442b15a658116643f99bbb65f0607c5f600547d5fd4ccb3a4471125",
+          "bytes": 726
+        },
+        "raw.txt": {
+          "path": "br1/interfaces.raw.txt",
+          "sha256": "fad34d51631e5bf16587afdcbb6eb51da1cffc4cf57f6ff7861b089039915a16",
+          "bytes": 786
+        }
+      }
+    },
+    {
+      "device": "br1",
+      "host": "10.10.1.11",
+      "capability": "ip_interfaces",
+      "command": "display ip interface brief",
+      "observed_at": "2026-10-04T16:36:47.529324+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "br1/ip_interfaces.txt",
+          "sha256": "54c8402dd24b70b43d6b23cfd9fc5e03513531a90c82a976fa4545ee9377819f",
+          "bytes": 625
+        },
+        "raw.txt": {
+          "path": "br1/ip_interfaces.raw.txt",
+          "sha256": "db746d83df597d71dbec97a5aac1daae326e5937aaf9c9375f03966b1c05012c",
+          "bytes": 677
+        }
+      }
+    },
+    {
+      "device": "br1",
+      "host": "10.10.1.11",
+      "capability": "arp",
+      "command": "display arp verbose",
+      "observed_at": "2026-10-04T16:36:47.580988+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "br1/arp.txt",
+          "sha256": "4bc25e242e30ae3c999643464c3835e9647e80f9c1d515a4059488b28290736e",
+          "bytes": 2717
+        },
+        "raw.txt": {
+          "path": "br1/arp.raw.txt",
+          "sha256": "5446bd9ba203c01b58454eff4365b65f82cbe2728d48caac0cbfa6deaa77f001",
+          "bytes": 2901
+        }
+      }
+    },
+    {
+      "device": "br1",
+      "host": "10.10.1.11",
+      "capability": "mac",
+      "command": "display mac-address",
+      "observed_at": "2026-10-04T16:36:47.632422+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "br1/mac.txt",
+          "sha256": "fc80afd7881968c2e86946c085ee09f6e443bfc16cae0beb700ee35db9a2e2c1",
+          "bytes": 76
+        },
+        "raw.txt": {
+          "path": "br1/mac.raw.txt",
+          "sha256": "578c8dcf3cfad13a5240d9eebcb9894d2c021a14b2b0a7d1f0cea731d7b4d046",
+          "bytes": 105
+        }
+      }
+    },
+    {
+      "device": "br1",
+      "host": "10.10.1.11",
+      "capability": "lag",
+      "command": "display link-aggregation verbose",
+      "observed_at": "2026-10-04T16:36:47.788647+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "br1/lag.txt",
+          "sha256": "b20de526eaaec99a5a8d55b8c31c2dd723ba02bded16017e7bb1db1caa976337",
+          "bytes": 34
+        },
+        "raw.txt": {
+          "path": "br1/lag.raw.txt",
+          "sha256": "01fe2fe957091af69fe79bbd12c9c101deb379852e4eb41a4fa98f743b4f9843",
+          "bytes": 76
+        }
+      }
+    },
+    {
+      "device": "br1",
+      "host": "10.10.1.11",
+      "capability": "routes",
+      "command": "display ip routing-table",
+      "observed_at": "2026-10-04T16:36:47.840555+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "br1/routes.txt",
+          "sha256": "64e931703aa28feb6df212f0b8aa883749d7f3064a88d632a3c83d2e750b088d",
+          "bytes": 3179
+        },
+        "raw.txt": {
+          "path": "br1/routes.raw.txt",
+          "sha256": "ee63f42e8730e5f9653b58e4d25118cf956a02a336c7bca4fca76a7e88d09eca",
+          "bytes": 3314
+        }
+      }
+    },
+    {
+      "device": "br1",
+      "host": "10.10.1.11",
+      "capability": "vrrp",
+      "command": "display vrrp verbose",
+      "observed_at": "2026-10-04T16:36:47.995451+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "br1/vrrp.txt",
+          "sha256": "62f1eaf5da8e535f8ec304464d902d06659e64504d7c061ef82841fa69482660",
+          "bytes": 614
+        },
+        "raw.txt": {
+          "path": "br1/vrrp.raw.txt",
+          "sha256": "dca4c1f9d35bcad2ed8bc46b71757d43a4434f4f95953388687c6b64145ab8c7",
+          "bytes": 671
+        }
+      }
+    },
+    {
+      "device": "br2",
+      "host": "10.10.1.12",
+      "capability": "version",
+      "command": "display version",
+      "observed_at": "2026-10-04T16:36:52.349603+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "br2/version.txt",
+          "sha256": "0e7a0d026d183dccdb3b513dbc8b5f1f3d3da3f3e354b8f2b68fde787a7c9259",
+          "bytes": 849
+        },
+        "raw.txt": {
+          "path": "br2/version.raw.txt",
+          "sha256": "66c7c6f9acfc72d41094d89aeadf21673587f0051e9d89274794597b05feebb1",
+          "bytes": 915
+        }
+      }
+    },
+    {
+      "device": "br2",
+      "host": "10.10.1.12",
+      "capability": "lldp_local",
+      "command": "display lldp local-information",
+      "observed_at": "2026-10-04T16:36:52.454685+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "br2/lldp_local.txt",
+          "sha256": "0d1bc7a27b141186f9b6e5acf5445a135137b2b8e40cce1793406e0b41a459c7",
+          "bytes": 7245
+        },
+        "raw.txt": {
+          "path": "br2/lldp_local.raw.txt",
+          "sha256": "12a146dfd5046fe2945db6062aaabbdb323f1c1bd95a7ffe842ab77e0a19ce95",
+          "bytes": 7654
+        }
+      }
+    },
+    {
+      "device": "br2",
+      "host": "10.10.1.12",
+      "capability": "lldp_verbose",
+      "command": "display lldp neighbor-information verbose",
+      "observed_at": "2026-10-04T16:36:52.506519+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "br2/lldp_verbose.txt",
+          "sha256": "063dbed2b27fddb06516f01a73e2231bd08d675dd0e94223445e7c5a89065744",
+          "bytes": 3455
+        },
+        "raw.txt": {
+          "path": "br2/lldp_verbose.raw.txt",
+          "sha256": "049b5f0e8c733fbb41dd1a2626a0fed5e37c3bbefecea4216d03a0ae4ea40300",
+          "bytes": 3677
+        }
+      }
+    },
+    {
+      "device": "br2",
+      "host": "10.10.1.12",
+      "capability": "interfaces",
+      "command": "display interface brief",
+      "observed_at": "2026-10-04T16:36:52.609571+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "br2/interfaces.txt",
+          "sha256": "c2cfa0691d00d3234ee71e91c6cd4b9811dd95cc2abf5b30463fe9ba4f29ed42",
+          "bytes": 726
+        },
+        "raw.txt": {
+          "path": "br2/interfaces.raw.txt",
+          "sha256": "e6b6b8bc88c8b6fd1792b5d30d69dbce0c6adac7b0a134a5f770df0deebcb115",
+          "bytes": 786
+        }
+      }
+    },
+    {
+      "device": "br2",
+      "host": "10.10.1.12",
+      "capability": "ip_interfaces",
+      "command": "display ip interface brief",
+      "observed_at": "2026-10-04T16:36:52.661336+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "br2/ip_interfaces.txt",
+          "sha256": "522285b5eb72f4038dfe561eee49e89e325a13f9127ed4dae0b743d1f5753b73",
+          "bytes": 625
+        },
+        "raw.txt": {
+          "path": "br2/ip_interfaces.raw.txt",
+          "sha256": "a447ef54b7298b3fdcc184c7d3c969b8fdb7cb51bf2ac75dc429b36cbcc51b77",
+          "bytes": 677
+        }
+      }
+    },
+    {
+      "device": "br2",
+      "host": "10.10.1.12",
+      "capability": "arp",
+      "command": "display arp verbose",
+      "observed_at": "2026-10-04T16:36:52.713350+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "br2/arp.txt",
+          "sha256": "9885c85da42fa19683db04022a8523eaf623232bc5dc27f031fe5abf8c6cc3b3",
+          "bytes": 3170
+        },
+        "raw.txt": {
+          "path": "br2/arp.raw.txt",
+          "sha256": "cf29e1c36b358767500306273058d35c7d2b765bf2bf94ae74a1df7ce9139e83",
+          "bytes": 3380
+        }
+      }
+    },
+    {
+      "device": "br2",
+      "host": "10.10.1.12",
+      "capability": "mac",
+      "command": "display mac-address",
+      "observed_at": "2026-10-04T16:36:52.764909+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "br2/mac.txt",
+          "sha256": "fc80afd7881968c2e86946c085ee09f6e443bfc16cae0beb700ee35db9a2e2c1",
+          "bytes": 76
+        },
+        "raw.txt": {
+          "path": "br2/mac.raw.txt",
+          "sha256": "4a353b1fd0e7757485f276de4667869d5bc6f3ed8f31341c1e64c6c080428b5e",
+          "bytes": 105
+        }
+      }
+    },
+    {
+      "device": "br2",
+      "host": "10.10.1.12",
+      "capability": "lag",
+      "command": "display link-aggregation verbose",
+      "observed_at": "2026-10-04T16:36:52.920662+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "br2/lag.txt",
+          "sha256": "b20de526eaaec99a5a8d55b8c31c2dd723ba02bded16017e7bb1db1caa976337",
+          "bytes": 34
+        },
+        "raw.txt": {
+          "path": "br2/lag.raw.txt",
+          "sha256": "3220b279a67cea20bbf7c0c3d88ce3eb3fa3e49f138a673fc43e514cd0798568",
+          "bytes": 76
+        }
+      }
+    },
+    {
+      "device": "br2",
+      "host": "10.10.1.12",
+      "capability": "routes",
+      "command": "display ip routing-table",
+      "observed_at": "2026-10-04T16:36:52.972158+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "br2/routes.txt",
+          "sha256": "7cb147772f1bc198d084392a2ad6a555bf94f0635c9a6877fa81de456dfb5f6e",
+          "bytes": 3112
+        },
+        "raw.txt": {
+          "path": "br2/routes.raw.txt",
+          "sha256": "11ce5f9039bd20e986478a57c3e4262c57e9ee372eb9b0929f6011d4cb977984",
+          "bytes": 3245
+        }
+      }
+    },
+    {
+      "device": "br2",
+      "host": "10.10.1.12",
+      "capability": "vrrp",
+      "command": "display vrrp verbose",
+      "observed_at": "2026-10-04T16:36:53.126569+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "br2/vrrp.txt",
+          "sha256": "77e0da9e689054b1df3e7aa44ee98513f629f90ce56bbfd65e0bab9521198dfe",
+          "bytes": 649
+        },
+        "raw.txt": {
+          "path": "br2/vrrp.raw.txt",
+          "sha256": "eece9912fc92b55270c6898d1a842b55acfb6aa610db147c8c1a8bb32368c613",
+          "bytes": 708
+        }
+      }
+    },
+    {
+      "device": "core1",
+      "host": "10.10.1.13",
+      "capability": "version",
+      "command": "show version",
+      "observed_at": "2026-10-04T16:36:54.751900+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "core1/version.txt",
+          "sha256": "5e5f1130223889247fc6422f489ddcf4728194aa8564ec77c8b211fdffb44fa4",
+          "bytes": 1487
+        },
+        "raw.txt": {
+          "path": "core1/version.raw.txt",
+          "sha256": "7fbe33b2e8b6e2daa2c3e1dc9fbbe76a026c57f75e353915c25096da4334b553",
+          "bytes": 1544
+        }
+      }
+    },
+    {
+      "device": "core1",
+      "host": "10.10.1.13",
+      "capability": "lldp_verbose",
+      "command": "show lldp neighbors detail",
+      "observed_at": "2026-10-04T16:36:54.907182+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "core1/lldp_verbose.txt",
+          "sha256": "8cf09cce03089cac6e9a736cdd9e2db185d75ff03c7494d7ffd02587f3877e88",
+          "bytes": 3882
+        },
+        "raw.txt": {
+          "path": "core1/lldp_verbose.raw.txt",
+          "sha256": "1856cd5d03a11f86aaf956cca3fc071a33de59eef621cd25daec789e5cdd80c1",
+          "bytes": 4055
+        }
+      }
+    },
+    {
+      "device": "core1",
+      "host": "10.10.1.13",
+      "capability": "interfaces_description",
+      "command": "show interfaces description",
+      "observed_at": "2026-10-04T16:36:55.263321+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "core1/interfaces_description.txt",
+          "sha256": "6b03cfe0e5b836688551c62b443b3ff61539878d70c8e7ce668ddcfd8957eba5",
+          "bytes": 642
+        },
+        "raw.txt": {
+          "path": "core1/interfaces_description.raw.txt",
+          "sha256": "8e9985a6da692f9bd80062b2dbc5118e7c7f8f60dda6eaea7078014a5830febc",
+          "bytes": 687
+        }
+      }
+    },
+    {
+      "device": "core1",
+      "host": "10.10.1.13",
+      "capability": "ip_interface",
+      "command": "show ip interface",
+      "observed_at": "2026-10-04T16:36:55.368287+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "core1/ip_interface.txt",
+          "sha256": "d5b4362c7712550abbc246cea07d405c6f399c7ea24713034f775057c5e25abd",
+          "bytes": 11125
+        },
+        "raw.txt": {
+          "path": "core1/ip_interface.raw.txt",
+          "sha256": "b29d461ea6f38b4a8d497fbe6f5e21a236a8e2a4cc440d6ced46615e8ba061d3",
+          "bytes": 11455
+        }
+      }
+    },
+    {
+      "device": "core1",
+      "host": "10.10.1.13",
+      "capability": "arp",
+      "command": "show ip arp",
+      "observed_at": "2026-10-04T16:36:55.419808+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "core1/arp.txt",
+          "sha256": "5bf28ccd89c342c8b310c5b9536979d16cbe7f93ba044e7b62b36107397edc0c",
+          "bytes": 801
+        },
+        "raw.txt": {
+          "path": "core1/arp.raw.txt",
+          "sha256": "0d9937ddd440aa03abfbe8a6b5985bb317b0687cd8852e182d2aad63058eff31",
+          "bytes": 831
+        }
+      }
+    },
+    {
+      "device": "core1",
+      "host": "10.10.1.13",
+      "capability": "mac",
+      "command": "show mac address-table",
+      "observed_at": "2026-10-04T16:36:55.572740+00:00",
+      "transport_status": "rejected_by_device",
+      "expected_status": "unsupported",
+      "files": {
+        "txt": {
+          "path": "core1/mac.txt",
+          "sha256": "8ba033276091e8dfdf49548a0399ef7fcd94554d4507dc6a5fe5f4dcfec69219",
+          "bytes": 56
+        },
+        "raw.txt": {
+          "path": "core1/mac.raw.txt",
+          "sha256": "008f8ab73319fce60d37707480aaa4c50e7ddced43c250424c837d93b5b7f2bc",
+          "bytes": 90
+        }
+      }
+    },
+    {
+      "device": "core1",
+      "host": "10.10.1.13",
+      "capability": "routes",
+      "command": "show ip route",
+      "observed_at": "2026-10-04T16:36:55.981886+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "core1/routes.txt",
+          "sha256": "b19c37be819e4788d149d0715c12d064788010e79bc92dbcbf9a07e12819eb1b",
+          "bytes": 3022
+        },
+        "raw.txt": {
+          "path": "core1/routes.raw.txt",
+          "sha256": "09bc1465cdd74a60b22bf2633b5565408597a14006780f37007fc831e43c32c0",
+          "bytes": 3093
+        }
+      }
+    },
+    {
+      "device": "core1",
+      "host": "10.10.1.13",
+      "capability": "vrrp",
+      "command": "show vrrp",
+      "observed_at": "2026-10-04T16:36:56.186487+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "core1/vrrp.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "core1/vrrp.raw.txt",
+          "sha256": "db23e6da14ce77359fb49d2c5f369bba0504f5a622aa6517681e4ce3283955b2",
+          "bytes": 17
+        }
+      }
+    },
+    {
+      "device": "core2",
+      "host": "10.10.1.14",
+      "capability": "version",
+      "command": "show version",
+      "observed_at": "2026-10-04T16:36:58.375660+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "core2/version.txt",
+          "sha256": "a32a518631c2b2a0fbfb8192858ca461c9b54d38502fc9085ab88338850079dc",
+          "bytes": 1487
+        },
+        "raw.txt": {
+          "path": "core2/version.raw.txt",
+          "sha256": "49759e3bf13a24a5a0bee0c1c082bc99df7ebe0a3b49f2e25fe42bb0e49238c4",
+          "bytes": 1544
+        }
+      }
+    },
+    {
+      "device": "core2",
+      "host": "10.10.1.14",
+      "capability": "lldp_verbose",
+      "command": "show lldp neighbors detail",
+      "observed_at": "2026-10-04T16:36:58.530379+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "core2/lldp_verbose.txt",
+          "sha256": "54dff8b55b3b9c47fd82c85eded3892712e16f465c89eb2a7b4ac46e2dcb9e09",
+          "bytes": 3882
+        },
+        "raw.txt": {
+          "path": "core2/lldp_verbose.raw.txt",
+          "sha256": "00335399ea28374cb0033bfbfc9ea6cffbb018986f168bb4290f9e2606f33f8c",
+          "bytes": 4055
+        }
+      }
+    },
+    {
+      "device": "core2",
+      "host": "10.10.1.14",
+      "capability": "interfaces_description",
+      "command": "show interfaces description",
+      "observed_at": "2026-10-04T16:36:58.888083+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "core2/interfaces_description.txt",
+          "sha256": "a08345ff95e0ac64a9498f62ab8475737982e3fc3d692ce1b3e3de3de25c4f9d",
+          "bytes": 642
+        },
+        "raw.txt": {
+          "path": "core2/interfaces_description.raw.txt",
+          "sha256": "ed0b9e7cb36a933ce6f8a1b333fa9ac8351ed5110c81944890644d92fb8b36a0",
+          "bytes": 687
+        }
+      }
+    },
+    {
+      "device": "core2",
+      "host": "10.10.1.14",
+      "capability": "ip_interface",
+      "command": "show ip interface",
+      "observed_at": "2026-10-04T16:36:59.042796+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "core2/ip_interface.txt",
+          "sha256": "91629f57022ed81dfcf61eaebfb734a984a618e8f358e3e50ef229793d1bb735",
+          "bytes": 11125
+        },
+        "raw.txt": {
+          "path": "core2/ip_interface.raw.txt",
+          "sha256": "80fd8fb0502201403ecc6ad73ecd382dec04835016d142572db7d312ef753960",
+          "bytes": 11455
+        }
+      }
+    },
+    {
+      "device": "core2",
+      "host": "10.10.1.14",
+      "capability": "arp",
+      "command": "show ip arp",
+      "observed_at": "2026-10-04T16:36:59.094489+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "core2/arp.txt",
+          "sha256": "5009155d50133e92651f5ee8359fa1119af2838c658d74881a961797a34371cf",
+          "bytes": 801
+        },
+        "raw.txt": {
+          "path": "core2/arp.raw.txt",
+          "sha256": "4babe9dfe5b6152b2720e452ad54c061cda18f5f8b94fb29c7d0b17b4997d4ff",
+          "bytes": 831
+        }
+      }
+    },
+    {
+      "device": "core2",
+      "host": "10.10.1.14",
+      "capability": "mac",
+      "command": "show mac address-table",
+      "observed_at": "2026-10-04T16:36:59.298365+00:00",
+      "transport_status": "rejected_by_device",
+      "expected_status": "unsupported",
+      "files": {
+        "txt": {
+          "path": "core2/mac.txt",
+          "sha256": "8ba033276091e8dfdf49548a0399ef7fcd94554d4507dc6a5fe5f4dcfec69219",
+          "bytes": 56
+        },
+        "raw.txt": {
+          "path": "core2/mac.raw.txt",
+          "sha256": "9d67f7866af9b921fcc5a9cb9776ca7f14b379912480fbb0f44823e9622c0e3f",
+          "bytes": 90
+        }
+      }
+    },
+    {
+      "device": "core2",
+      "host": "10.10.1.14",
+      "capability": "routes",
+      "command": "show ip route",
+      "observed_at": "2026-10-04T16:36:59.759586+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "core2/routes.txt",
+          "sha256": "36a8f1c697a3bf198aad525b93fef36fe5f3cc96b876f892fa7c5fc8cb3c6f26",
+          "bytes": 3022
+        },
+        "raw.txt": {
+          "path": "core2/routes.raw.txt",
+          "sha256": "19fdec00daeb0bfe6ede4db84440c62f40358b094f8de2e3ef8e66e7100bd727",
+          "bytes": 3093
+        }
+      }
+    },
+    {
+      "device": "core2",
+      "host": "10.10.1.14",
+      "capability": "vrrp",
+      "command": "show vrrp",
+      "observed_at": "2026-10-04T16:36:59.963913+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "core2/vrrp.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "core2/vrrp.raw.txt",
+          "sha256": "a5a1ec01ecdc4110bcbe15596fc973661ef89660aeea80cc7609c5fc0a123ff1",
+          "bytes": 17
+        }
+      }
+    },
+    {
+      "device": "dist1",
+      "host": "10.10.1.15",
+      "capability": "version",
+      "command": "show version",
+      "observed_at": "2026-10-04T16:37:02.265637+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "dist1/version.txt",
+          "sha256": "0c81eb8d9ca5dd9be3e5371bbd56768bb4d5d1b0ad23f4326846235977bb6469",
+          "bytes": 1524
+        },
+        "raw.txt": {
+          "path": "dist1/version.raw.txt",
+          "sha256": "e330620b0aef99b939fa5595b21cdce1b7777d5af96bfab653d86adc0cf60ea8",
+          "bytes": 1582
+        }
+      }
+    },
+    {
+      "device": "dist1",
+      "host": "10.10.1.15",
+      "capability": "lldp_verbose",
+      "command": "show lldp neighbors detail",
+      "observed_at": "2026-10-04T16:37:02.420156+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "dist1/lldp_verbose.txt",
+          "sha256": "9d7af86a710460fcb017c78777840217a3769b49e3131e2d216c84f651468ae6",
+          "bytes": 4674
+        },
+        "raw.txt": {
+          "path": "dist1/lldp_verbose.raw.txt",
+          "sha256": "1910ccec5c0325baa31478c1d7f8d49300a0e99591bf1dc8dc8f7846fcdca107",
+          "bytes": 4866
+        }
+      }
+    },
+    {
+      "device": "dist1",
+      "host": "10.10.1.15",
+      "capability": "interfaces_description",
+      "command": "show interfaces description",
+      "observed_at": "2026-10-04T16:37:02.778641+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "dist1/interfaces_description.txt",
+          "sha256": "644b82d7110e2dfeed443df9599a854f4a9623066ac7494cf42f3c59a000e062",
+          "bytes": 1313
+        },
+        "raw.txt": {
+          "path": "dist1/interfaces_description.raw.txt",
+          "sha256": "a0c4674ac1c156a952f2903faaa46f6e15723c73df3fe34653da7cd303f49c8c",
+          "bytes": 1369
+        }
+      }
+    },
+    {
+      "device": "dist1",
+      "host": "10.10.1.15",
+      "capability": "ip_interface",
+      "command": "show ip interface",
+      "observed_at": "2026-10-04T16:37:02.883862+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "dist1/ip_interface.txt",
+          "sha256": "64b30d34eb143a95724ad07c7f18a0c380fbe3e09881ab4311edccf64834f943",
+          "bytes": 11191
+        },
+        "raw.txt": {
+          "path": "dist1/ip_interface.raw.txt",
+          "sha256": "fc617ab83a8cec6af84405505fed7972ba05db589b2d3d5f45e86ab609241799",
+          "bytes": 11517
+        }
+      }
+    },
+    {
+      "device": "dist1",
+      "host": "10.10.1.15",
+      "capability": "arp",
+      "command": "show ip arp",
+      "observed_at": "2026-10-04T16:37:02.935402+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "dist1/arp.txt",
+          "sha256": "099d86e26f01b0c9933a6f79ac1490e9ce33bc810945780d008666ecfdb887a9",
+          "bytes": 839
+        },
+        "raw.txt": {
+          "path": "dist1/arp.raw.txt",
+          "sha256": "c501a585c1b79c6c7c4916bd8cafbb3101e5a82cb20568fc4c2629c7936d27c9",
+          "bytes": 870
+        }
+      }
+    },
+    {
+      "device": "dist1",
+      "host": "10.10.1.15",
+      "capability": "mac",
+      "command": "show mac address-table",
+      "observed_at": "2026-10-04T16:37:03.138752+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "dist1/mac.txt",
+          "sha256": "ebf128ba8d8be25e5045a74add3a3a77612c560d4521d760051d64cc22d36712",
+          "bytes": 589
+        },
+        "raw.txt": {
+          "path": "dist1/mac.raw.txt",
+          "sha256": "76335179ff5abb071186da5b31dd76bb08d6e1aed7d675be8c3fe81ac45e9aa5",
+          "bytes": 634
+        }
+      }
+    },
+    {
+      "device": "dist1",
+      "host": "10.10.1.15",
+      "capability": "vlan",
+      "command": "show vlan brief",
+      "observed_at": "2026-10-04T16:37:03.190320+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "dist1/vlan.txt",
+          "sha256": "9485aafbb686075beb6bd0a907f245c6bdf7ac174b3c725002a6e426c7f2551d",
+          "bytes": 538
+        },
+        "raw.txt": {
+          "path": "dist1/vlan.raw.txt",
+          "sha256": "13599331126a33937543aabb7c3bdf52625af35846f8f8a6d7a96f0409b99592",
+          "bytes": 572
+        }
+      }
+    },
+    {
+      "device": "dist1",
+      "host": "10.10.1.15",
+      "capability": "trunk",
+      "command": "show interfaces trunk",
+      "observed_at": "2026-10-04T16:37:03.292083+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "dist1/trunk.txt",
+          "sha256": "ec17efbcdc36698739350899796f8da34d885aed32718d2f8b8bc0ca167f4262",
+          "bytes": 625
+        },
+        "raw.txt": {
+          "path": "dist1/trunk.raw.txt",
+          "sha256": "4386869172ba09941a6ff48f98291bcefa92437749d2d1e3e3ea50b69f43ba84",
+          "bytes": 675
+        }
+      }
+    },
+    {
+      "device": "dist1",
+      "host": "10.10.1.15",
+      "capability": "lag",
+      "command": "show etherchannel summary",
+      "observed_at": "2026-10-04T16:37:03.496168+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "dist1/lag.txt",
+          "sha256": "791cddfff3429b58d5c938dc47db98fd2766a9b217f6e9311754d8e101d003ba",
+          "bytes": 657
+        },
+        "raw.txt": {
+          "path": "dist1/lag.raw.txt",
+          "sha256": "55af587dea6a2f6d6fa4c157fc95d4bb8927d724073fc49a126c5b268ae66caa",
+          "bytes": 712
+        }
+      }
+    },
+    {
+      "device": "dist1",
+      "host": "10.10.1.15",
+      "capability": "stp",
+      "command": "show spanning-tree",
+      "observed_at": "2026-10-04T16:37:03.548080+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "dist1/stp.txt",
+          "sha256": "d15a77e08850143e2b141021d96242e72c2c3830b0bb3a713aa06a2fd48451ed",
+          "bytes": 1486
+        },
+        "raw.txt": {
+          "path": "dist1/stp.raw.txt",
+          "sha256": "8971a67e7d3d63cdc87fd79f2d5af23e395400723b25156909403a19723313df",
+          "bytes": 1556
+        }
+      }
+    },
+    {
+      "device": "dist1",
+      "host": "10.10.1.15",
+      "capability": "routes",
+      "command": "show ip route",
+      "observed_at": "2026-10-04T16:37:03.599508+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "dist1/routes.txt",
+          "sha256": "c6189f24d0d16335ced1b3c0a4d9ecf43abda249271ce99b930d2b478372946b",
+          "bytes": 2959
+        },
+        "raw.txt": {
+          "path": "dist1/routes.raw.txt",
+          "sha256": "7934a6f3437bd3422dfb17734a340327abd4c9d2c6aa584501c5f8acce64cae0",
+          "bytes": 3029
+        }
+      }
+    },
+    {
+      "device": "dist1",
+      "host": "10.10.1.15",
+      "capability": "vrrp",
+      "command": "show vrrp",
+      "observed_at": "2026-10-04T16:37:03.754228+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "dist1/vrrp.txt",
+          "sha256": "b8bcabd20915d66c5e7bb8000485a5140d7bfcb963256e75d19c1d00db8233e0",
+          "bytes": 700
+        },
+        "raw.txt": {
+          "path": "dist1/vrrp.raw.txt",
+          "sha256": "fa7ab75d07f6bd198e6e881efefc2c89728dddd67a6f03ff0f3720087593e984",
+          "bytes": 742
+        }
+      }
+    },
+    {
+      "device": "dist2",
+      "host": "10.10.1.16",
+      "capability": "version",
+      "command": "show version",
+      "observed_at": "2026-10-04T16:37:05.877791+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "dist2/version.txt",
+          "sha256": "88790acc0be7b3dbb561d8ca68e47354ee86183d15c4b74a98e07d8d5b14738f",
+          "bytes": 1524
+        },
+        "raw.txt": {
+          "path": "dist2/version.raw.txt",
+          "sha256": "215d3ba4927ce40bd648111fa04c72bf69d490b2c5906f7472f0929ac813bebe",
+          "bytes": 1582
+        }
+      }
+    },
+    {
+      "device": "dist2",
+      "host": "10.10.1.16",
+      "capability": "lldp_verbose",
+      "command": "show lldp neighbors detail",
+      "observed_at": "2026-10-04T16:37:06.031156+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "dist2/lldp_verbose.txt",
+          "sha256": "ed60941d30feca1985337561477673b43717c692d47f1489e47931740b9d74c5",
+          "bytes": 4674
+        },
+        "raw.txt": {
+          "path": "dist2/lldp_verbose.raw.txt",
+          "sha256": "da292d8ac465aed80491f4fc01584c10ee5cd99cf345d88fd16693b35a029fd7",
+          "bytes": 4866
+        }
+      }
+    },
+    {
+      "device": "dist2",
+      "host": "10.10.1.16",
+      "capability": "interfaces_description",
+      "command": "show interfaces description",
+      "observed_at": "2026-10-04T16:37:06.389448+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "dist2/interfaces_description.txt",
+          "sha256": "5ea579c0784772a978b58e2f03aa85b48df2e5608fb7f3016f5cfccf036a814b",
+          "bytes": 1313
+        },
+        "raw.txt": {
+          "path": "dist2/interfaces_description.raw.txt",
+          "sha256": "708df66f696320b9dac95a491e06056daecb1531c14c82c631a365f7287743e5",
+          "bytes": 1369
+        }
+      }
+    },
+    {
+      "device": "dist2",
+      "host": "10.10.1.16",
+      "capability": "ip_interface",
+      "command": "show ip interface",
+      "observed_at": "2026-10-04T16:37:06.493540+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "dist2/ip_interface.txt",
+          "sha256": "2e9e4c22f1d304200ad7827621a30722131609ab8efafe34c5e3a3c4958c5070",
+          "bytes": 11191
+        },
+        "raw.txt": {
+          "path": "dist2/ip_interface.raw.txt",
+          "sha256": "808bf941f39101ab98f3a001197e6163f426fe12a2a8b6b89f87059221dcb8e0",
+          "bytes": 11517
+        }
+      }
+    },
+    {
+      "device": "dist2",
+      "host": "10.10.1.16",
+      "capability": "arp",
+      "command": "show ip arp",
+      "observed_at": "2026-10-04T16:37:06.545221+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "dist2/arp.txt",
+          "sha256": "0682d225f363f6f69bf84d589ec3b886fb6733ab76a461ed121e9253c30af0b6",
+          "bytes": 771
+        },
+        "raw.txt": {
+          "path": "dist2/arp.raw.txt",
+          "sha256": "46f11e929debc7bed45bcda77816555e90fb1a7628045936ecb3bc64bb7e7315",
+          "bytes": 801
+        }
+      }
+    },
+    {
+      "device": "dist2",
+      "host": "10.10.1.16",
+      "capability": "mac",
+      "command": "show mac address-table",
+      "observed_at": "2026-10-04T16:37:06.698550+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "dist2/mac.txt",
+          "sha256": "8146cd13b7eb5260b5a6227457e9b67f9b0dabb0cded694e0fdc787490ef37d0",
+          "bytes": 587
+        },
+        "raw.txt": {
+          "path": "dist2/mac.raw.txt",
+          "sha256": "5bf7881b115833e87cec4807c4ccedc5a6dd71dc2ce43e392d45b161da5e45b8",
+          "bytes": 632
+        }
+      }
+    },
+    {
+      "device": "dist2",
+      "host": "10.10.1.16",
+      "capability": "vlan",
+      "command": "show vlan brief",
+      "observed_at": "2026-10-04T16:37:06.800206+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "dist2/vlan.txt",
+          "sha256": "9485aafbb686075beb6bd0a907f245c6bdf7ac174b3c725002a6e426c7f2551d",
+          "bytes": 538
+        },
+        "raw.txt": {
+          "path": "dist2/vlan.raw.txt",
+          "sha256": "3b72fe8c6dd7781eb5c1bda3639b16f8f9a85008844878fe77bbfb7bbbcb174a",
+          "bytes": 572
+        }
+      }
+    },
+    {
+      "device": "dist2",
+      "host": "10.10.1.16",
+      "capability": "trunk",
+      "command": "show interfaces trunk",
+      "observed_at": "2026-10-04T16:37:06.851575+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "dist2/trunk.txt",
+          "sha256": "ec17efbcdc36698739350899796f8da34d885aed32718d2f8b8bc0ca167f4262",
+          "bytes": 625
+        },
+        "raw.txt": {
+          "path": "dist2/trunk.raw.txt",
+          "sha256": "58b386428319b60fcfcfb7e06a37eebf8ca2d22ddecd96370d9e2a095ddd570e",
+          "bytes": 675
+        }
+      }
+    },
+    {
+      "device": "dist2",
+      "host": "10.10.1.16",
+      "capability": "lag",
+      "command": "show etherchannel summary",
+      "observed_at": "2026-10-04T16:37:07.055279+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "dist2/lag.txt",
+          "sha256": "791cddfff3429b58d5c938dc47db98fd2766a9b217f6e9311754d8e101d003ba",
+          "bytes": 657
+        },
+        "raw.txt": {
+          "path": "dist2/lag.raw.txt",
+          "sha256": "ac94b7240cd6050cbd2275a8b35bc63f9cc8c0d6899b2df99c45ad40fa24cf17",
+          "bytes": 712
+        }
+      }
+    },
+    {
+      "device": "dist2",
+      "host": "10.10.1.16",
+      "capability": "stp",
+      "command": "show spanning-tree",
+      "observed_at": "2026-10-04T16:37:07.158877+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "dist2/stp.txt",
+          "sha256": "bb7dee9e2596bce094a7fef38ecbc22bad60172819a5411dc7508c42c55551cc",
+          "bytes": 1486
+        },
+        "raw.txt": {
+          "path": "dist2/stp.raw.txt",
+          "sha256": "04786ac55530839eb318ac5228c4243284970c3bfebda95ba9b0ee53c8eec12d",
+          "bytes": 1556
+        }
+      }
+    },
+    {
+      "device": "dist2",
+      "host": "10.10.1.16",
+      "capability": "routes",
+      "command": "show ip route",
+      "observed_at": "2026-10-04T16:37:07.210733+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "dist2/routes.txt",
+          "sha256": "e0acbc4f987917be7587711f74ff56f82f6aa3c3867884bc4cb7bb60d9ba1823",
+          "bytes": 2959
+        },
+        "raw.txt": {
+          "path": "dist2/routes.raw.txt",
+          "sha256": "938bff88339e7c666042b381a6c841ba746fe29f977506f25a0d94c1478fb768",
+          "bytes": 3029
+        }
+      }
+    },
+    {
+      "device": "dist2",
+      "host": "10.10.1.16",
+      "capability": "vrrp",
+      "command": "show vrrp",
+      "observed_at": "2026-10-04T16:37:07.415441+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "dist2/vrrp.txt",
+          "sha256": "f3859bffd11153187546d2ceae2389b50d94494ac6b3f6fc3281ba1af471b2f4",
+          "bytes": 700
+        },
+        "raw.txt": {
+          "path": "dist2/vrrp.raw.txt",
+          "sha256": "8ef782dfa76d2f63c28afb84bd345af455479741aebb1726aefc56f8f9dd96f0",
+          "bytes": 742
+        }
+      }
+    },
+    {
+      "device": "acc1",
+      "host": "10.10.1.17",
+      "capability": "version",
+      "command": "show version",
+      "observed_at": "2026-10-04T16:37:09.490625+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "acc1/version.txt",
+          "sha256": "9c9b0796a019f5d3f812e296b2e42e40b1caca554727a39f5f85ba097ddb4251",
+          "bytes": 1493
+        },
+        "raw.txt": {
+          "path": "acc1/version.raw.txt",
+          "sha256": "57f02ba24b820da89eab6f14fdafd5fe6499f5015de669111a4940b81233c8f0",
+          "bytes": 1549
+        }
+      }
+    },
+    {
+      "device": "acc1",
+      "host": "10.10.1.17",
+      "capability": "lldp_verbose",
+      "command": "show lldp neighbors detail",
+      "observed_at": "2026-10-04T16:37:09.646019+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "acc1/lldp_verbose.txt",
+          "sha256": "6277ae21968d6b35f0d547bbc08fb92035c17aae2ab2fe779a4781981784e6c7",
+          "bytes": 1574
+        },
+        "raw.txt": {
+          "path": "acc1/lldp_verbose.raw.txt",
+          "sha256": "d9cf33d497f9cae750e0ea5ba1318278fdd5033eafe0724f63905c071ab5fb62",
+          "bytes": 1663
+        }
+      }
+    },
+    {
+      "device": "acc1",
+      "host": "10.10.1.17",
+      "capability": "interfaces_description",
+      "command": "show interfaces description",
+      "observed_at": "2026-10-04T16:37:09.953768+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "acc1/interfaces_description.txt",
+          "sha256": "da0a207adb1548b7535be91be399fab18396bf92c9f185e3334846017111b7cc",
+          "bytes": 1003
+        },
+        "raw.txt": {
+          "path": "acc1/interfaces_description.raw.txt",
+          "sha256": "3d7d1934a7ee4e21d0d87f34ee83d189ad4cb081f9362013e4d3c5a8d727cd5f",
+          "bytes": 1054
+        }
+      }
+    },
+    {
+      "device": "acc1",
+      "host": "10.10.1.17",
+      "capability": "ip_interface",
+      "command": "show ip interface",
+      "observed_at": "2026-10-04T16:37:10.108976+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "acc1/ip_interface.txt",
+          "sha256": "dacdb53b4232df05fa143dd322b1616719eb2bee0eba106c4b56279f5e8c1334",
+          "bytes": 3470
+        },
+        "raw.txt": {
+          "path": "acc1/ip_interface.raw.txt",
+          "sha256": "e2b124a94e69df967978c3747598a7e7c4ce2140cd9e1082e5309eb56c2b2226",
+          "bytes": 3582
+        }
+      }
+    },
+    {
+      "device": "acc1",
+      "host": "10.10.1.17",
+      "capability": "arp",
+      "command": "show ip arp",
+      "observed_at": "2026-10-04T16:37:10.160043+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "acc1/arp.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "acc1/arp.raw.txt",
+          "sha256": "d3ef7dcbd49636fbe031fedf9e377312102b5675aa9ec19543603a3c4b9d104e",
+          "bytes": 18
+        }
+      }
+    },
+    {
+      "device": "acc1",
+      "host": "10.10.1.17",
+      "capability": "mac",
+      "command": "show mac address-table",
+      "observed_at": "2026-10-04T16:37:10.313825+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "acc1/mac.txt",
+          "sha256": "b0456946554ebb35dabc7c137b4e859c4d61f7d782f65127101df0c2e1f54624",
+          "bytes": 732
+        },
+        "raw.txt": {
+          "path": "acc1/mac.raw.txt",
+          "sha256": "b0b099de9bcb03bde3ad8379ebd3f3dce9f84ff0983d5424c4c839bd8ad3418b",
+          "bytes": 779
+        }
+      }
+    },
+    {
+      "device": "acc1",
+      "host": "10.10.1.17",
+      "capability": "vlan",
+      "command": "show vlan brief",
+      "observed_at": "2026-10-04T16:37:10.415815+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "acc1/vlan.txt",
+          "sha256": "1a3863248446784cc70cf63b5afb3f2a2269640f48f0ee0f967656858ddda56b",
+          "bytes": 562
+        },
+        "raw.txt": {
+          "path": "acc1/vlan.raw.txt",
+          "sha256": "ffa699c8a038377c559a849e6497f5207a5240386d58b3d782c41aac8ddcc8e4",
+          "bytes": 595
+        }
+      }
+    },
+    {
+      "device": "acc1",
+      "host": "10.10.1.17",
+      "capability": "trunk",
+      "command": "show interfaces trunk",
+      "observed_at": "2026-10-04T16:37:10.517420+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "acc1/trunk.txt",
+          "sha256": "7ae35e283dd8b4c44095161e7db022af8e6d48279d4d4d17c2e0567e1ced49f5",
+          "bytes": 493
+        },
+        "raw.txt": {
+          "path": "acc1/trunk.raw.txt",
+          "sha256": "89e344776c6406104591e85085d3ac0d77f575889399eee8a090f93881da64c7",
+          "bytes": 538
+        }
+      }
+    },
+    {
+      "device": "acc1",
+      "host": "10.10.1.17",
+      "capability": "lag",
+      "command": "show etherchannel summary",
+      "observed_at": "2026-10-04T16:37:10.721635+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "acc1/lag.txt",
+          "sha256": "7da9f7555c4ef888f124950d08dd74b9a4c9c8053ba07bb34a2b1724ab77971f",
+          "bytes": 589
+        },
+        "raw.txt": {
+          "path": "acc1/lag.raw.txt",
+          "sha256": "664238ebf7b7f648b3767526925998bca4d9f3a60a4fb8d8e12dce60031fc7be",
+          "bytes": 642
+        }
+      }
+    },
+    {
+      "device": "acc1",
+      "host": "10.10.1.17",
+      "capability": "stp",
+      "command": "show spanning-tree",
+      "observed_at": "2026-10-04T16:37:10.774647+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "acc1/stp.txt",
+          "sha256": "68f7ccf2740e3ba14987b3860f48ecbf5cf521c06222fec5a2b21d320d392010",
+          "bytes": 1529
+        },
+        "raw.txt": {
+          "path": "acc1/stp.raw.txt",
+          "sha256": "9ccd83391d18deec7b0608404b58bb8daab6948f37185903d16e3470c5436cf4",
+          "bytes": 1599
+        }
+      }
+    },
+    {
+      "device": "acc1",
+      "host": "10.10.1.17",
+      "capability": "routes",
+      "command": "show ip route",
+      "observed_at": "2026-10-04T16:37:10.826258+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "acc1/routes.txt",
+          "sha256": "b9be99dd8cb24389689eee91470296ca5922b0c214cc1a25b750337ac647a0cc",
+          "bytes": 831
+        },
+        "raw.txt": {
+          "path": "acc1/routes.raw.txt",
+          "sha256": "154d5a82d0f55cd78e0607dcda6d7ba4df717b4c281e78bcf71b16bd0f799d85",
+          "bytes": 867
+        }
+      }
+    },
+    {
+      "device": "acc1",
+      "host": "10.10.1.17",
+      "capability": "vrrp",
+      "command": "show vrrp",
+      "observed_at": "2026-10-04T16:37:10.980651+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "acc1/vrrp.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "acc1/vrrp.raw.txt",
+          "sha256": "c13119a061ab107c253b8cb6d7e40ae501e08138123eef63d2a120fa97d67ca1",
+          "bytes": 16
+        }
+      }
+    },
+    {
+      "device": "acc2",
+      "host": "10.10.1.18",
+      "capability": "version",
+      "command": "show version",
+      "observed_at": "2026-10-04T16:37:13.204488+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "acc2/version.txt",
+          "sha256": "a26d6c004959b6426dc0d745e19a8f8fb84aa54fee4854fb8d3da33cc6362448",
+          "bytes": 1493
+        },
+        "raw.txt": {
+          "path": "acc2/version.raw.txt",
+          "sha256": "c7d51b47f6fc00a444ecca8a711621c9e4d328cacbf69822be1b17e8c23dd65e",
+          "bytes": 1549
+        }
+      }
+    },
+    {
+      "device": "acc2",
+      "host": "10.10.1.18",
+      "capability": "lldp_verbose",
+      "command": "show lldp neighbors detail",
+      "observed_at": "2026-10-04T16:37:13.309364+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "acc2/lldp_verbose.txt",
+          "sha256": "015bdb7b4c3f5d2605f972f302462f473c6a2c6a18ec141e67397dc6181b5e95",
+          "bytes": 1574
+        },
+        "raw.txt": {
+          "path": "acc2/lldp_verbose.raw.txt",
+          "sha256": "f9af571faaf4d3eb31eed6ebedc49ff7bdfab77c01c07bee335d3d01fd5eb8d7",
+          "bytes": 1663
+        }
+      }
+    },
+    {
+      "device": "acc2",
+      "host": "10.10.1.18",
+      "capability": "interfaces_description",
+      "command": "show interfaces description",
+      "observed_at": "2026-10-04T16:37:13.617351+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "acc2/interfaces_description.txt",
+          "sha256": "40c40546af4a4520caec308279ebec280f189292c5de9bb47f5e79514caf2a7b",
+          "bytes": 1019
+        },
+        "raw.txt": {
+          "path": "acc2/interfaces_description.raw.txt",
+          "sha256": "d62eeeac1834ae306fe28143a391f2ba79b4b6bbf5fc36ef7f3bda3f52c0d88e",
+          "bytes": 1070
+        }
+      }
+    },
+    {
+      "device": "acc2",
+      "host": "10.10.1.18",
+      "capability": "ip_interface",
+      "command": "show ip interface",
+      "observed_at": "2026-10-04T16:37:13.721954+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "acc2/ip_interface.txt",
+          "sha256": "9bbda3a47a0b08098627357b197974a5186074812eed24523731b906b36facf0",
+          "bytes": 3470
+        },
+        "raw.txt": {
+          "path": "acc2/ip_interface.raw.txt",
+          "sha256": "ab083d9d1a2fe34bf7b79caeeb64572087732f2ffddbe0e506e6ef5f1a13adcc",
+          "bytes": 3582
+        }
+      }
+    },
+    {
+      "device": "acc2",
+      "host": "10.10.1.18",
+      "capability": "arp",
+      "command": "show ip arp",
+      "observed_at": "2026-10-04T16:37:13.773586+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "acc2/arp.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "acc2/arp.raw.txt",
+          "sha256": "916342157876a3be89a20242dacac629e55f59eb106bfa113f7a0abccf7fb286",
+          "bytes": 18
+        }
+      }
+    },
+    {
+      "device": "acc2",
+      "host": "10.10.1.18",
+      "capability": "mac",
+      "command": "show mac address-table",
+      "observed_at": "2026-10-04T16:37:13.926892+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "acc2/mac.txt",
+          "sha256": "86bacb6dd58c007e691c95d020f058ffbe67ffb1605a1f5afa6c803e4dd71f39",
+          "bytes": 688
+        },
+        "raw.txt": {
+          "path": "acc2/mac.raw.txt",
+          "sha256": "ab418c0181591e053ab42a9c3c276911efcef061df1ea81b58c5cb972bae44fe",
+          "bytes": 734
+        }
+      }
+    },
+    {
+      "device": "acc2",
+      "host": "10.10.1.18",
+      "capability": "vlan",
+      "command": "show vlan brief",
+      "observed_at": "2026-10-04T16:37:14.028919+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "acc2/vlan.txt",
+          "sha256": "dbe7c046775969f6bb391f3ecdc08ccacf823d24c2c21eb961cbc6db0a7fba6d",
+          "bytes": 557
+        },
+        "raw.txt": {
+          "path": "acc2/vlan.raw.txt",
+          "sha256": "938923c4f93fc0fe0d53771b2f493f33ccfc3062e162a2ec2339c6cb49e1324d",
+          "bytes": 590
+        }
+      }
+    },
+    {
+      "device": "acc2",
+      "host": "10.10.1.18",
+      "capability": "trunk",
+      "command": "show interfaces trunk",
+      "observed_at": "2026-10-04T16:37:14.130956+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "acc2/trunk.txt",
+          "sha256": "cf983d2933612b9f3fd3fb9b7a4a88492e8f800681878722799a497e762bef7d",
+          "bytes": 619
+        },
+        "raw.txt": {
+          "path": "acc2/trunk.raw.txt",
+          "sha256": "d32b4b31b6f98567dfa2b2d3c54f6f636c97d41a546052e57ed7d52695668ab7",
+          "bytes": 668
+        }
+      }
+    },
+    {
+      "device": "acc2",
+      "host": "10.10.1.18",
+      "capability": "lag",
+      "command": "show etherchannel summary",
+      "observed_at": "2026-10-04T16:37:14.284912+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "acc2/lag.txt",
+          "sha256": "7da9f7555c4ef888f124950d08dd74b9a4c9c8053ba07bb34a2b1724ab77971f",
+          "bytes": 589
+        },
+        "raw.txt": {
+          "path": "acc2/lag.raw.txt",
+          "sha256": "eba236eea4d52fc2ecb94e17fc41c1cb608a01ca181d369161b8c838b44049f4",
+          "bytes": 642
+        }
+      }
+    },
+    {
+      "device": "acc2",
+      "host": "10.10.1.18",
+      "capability": "stp",
+      "command": "show spanning-tree",
+      "observed_at": "2026-10-04T16:37:14.337961+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "acc2/stp.txt",
+          "sha256": "e2d88dd6a6bf23332c7444b0480b1e34efd8e53eee2cbc0062248cd7b19385fa",
+          "bytes": 1577
+        },
+        "raw.txt": {
+          "path": "acc2/stp.raw.txt",
+          "sha256": "ff8241e23f284f5150a6d8c577734f5217b667fb9ba039c27c25becf30491027",
+          "bytes": 1648
+        }
+      }
+    },
+    {
+      "device": "acc2",
+      "host": "10.10.1.18",
+      "capability": "routes",
+      "command": "show ip route",
+      "observed_at": "2026-10-04T16:37:14.389386+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "acc2/routes.txt",
+          "sha256": "b9be99dd8cb24389689eee91470296ca5922b0c214cc1a25b750337ac647a0cc",
+          "bytes": 831
+        },
+        "raw.txt": {
+          "path": "acc2/routes.raw.txt",
+          "sha256": "b4e9ab1b0fd660d7f5bc168b618f343add4bab32d12d29c4d50cce6ba1eea5a5",
+          "bytes": 867
+        }
+      }
+    },
+    {
+      "device": "acc2",
+      "host": "10.10.1.18",
+      "capability": "vrrp",
+      "command": "show vrrp",
+      "observed_at": "2026-10-04T16:37:14.544337+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "acc2/vrrp.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "acc2/vrrp.raw.txt",
+          "sha256": "a1177c87fe779b4815bb060429d21c71b1737fcd618242717642f714c6eee561",
+          "bytes": 16
+        }
+      }
+    }
+  ]
+}

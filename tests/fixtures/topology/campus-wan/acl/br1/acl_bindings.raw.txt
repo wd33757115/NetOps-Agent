@@ -1,0 +1,7 @@
+display packet-filter interface
+Interface: GigabitEthernet2/0
+ Outbound policy:
+  IPv4 ACL 3990
+  IPv4 default action: Permit
+
+<BR1>

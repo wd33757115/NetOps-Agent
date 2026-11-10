@@ -1,0 +1,23 @@
+{
+  "devices": {
+    "vsr-1": {
+      "hostname": "H3C", "serial": "0cd25bc50000e49826062710", "chassis_mac": "7425-8ae3-ee8e",
+      "management": "10.10.1.1", "route_count": 18, "peer": "vsr-2", "vlan": 200,
+      "remote_management_by_port": {"GigabitEthernet1/0": "10.10.1.2", "GigabitEthernet2/0": "2.2.2.1"},
+      "endpoint_ip": "192.168.1.2", "endpoint_mac": "0050-7966-6805"
+    },
+    "vsr-2": {
+      "hostname": "H3C", "serial": "0c2257e90000d40e26062710", "chassis_mac": "7425-8ae4-1252",
+      "management": "10.10.1.2", "route_count": 19, "peer": "vsr-1", "vlan": 100,
+      "remote_management_by_port": {"GigabitEthernet1/0": "10.10.1.1", "GigabitEthernet2/0": "2.2.2.2"},
+      "endpoint_ip": "1.1.1.2", "endpoint_mac": "0050-7966-6804"
+    }
+  },
+  "lab_wiring": {
+    "provenance": "roadmap section 11.0 lab configuration; not inferred from CLI alone",
+    "shared_segment": ["vsr-1:GigabitEthernet1/0", "vsr-2:GigabitEthernet1/0", "10.10.1.254"],
+    "direct_link": ["vsr-1:GigabitEthernet2/0", "vsr-2:GigabitEthernet2/0"],
+    "unmanaged_switches": ["Switch1", "Switch2"],
+    "endpoint_attachment_confidence": "medium"
+  }
+}

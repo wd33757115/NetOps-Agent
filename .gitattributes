@@ -34,3 +34,6 @@ Makefile text eol=lf
 # Frozen YANG resources are checked against SHA-256 digests of their LF bytes;
 # upstream modules keep their original trailing spaces.
 src/apps/topology/resources/yang/*.yang text eol=lf whitespace=-blank-at-eol
+
+# CLI fixtures preserve captured CR CR LF and exact byte hashes on every OS.
+tests/fixtures/topology/**/*.txt -text whitespace=-blank-at-eol

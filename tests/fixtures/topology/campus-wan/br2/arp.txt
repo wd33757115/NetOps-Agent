@@ -1,0 +1,90 @@
+IP address          : 10.0.23.2                 MAC address    : aabb-cc00-0220
+Type                : Dynamic                   Aging          : 19 min
+Interface           : GE4/0                     SVLAN/CVLAN    : --/--
+VPN instance        : --
+Link ID             : --
+VXLAN ID            : --
+VSI name            : --
+VSI interface       : --
+MPLS PW ID          : --
+MPLS peer PE address: --
+Nickname            : 0x0000
+Description         : --
+
+IP address          : 10.0.24.2                 MAC address    : aabb-cc00-0310
+Type                : Dynamic                   Aging          : 19 min
+Interface           : GE3/0                     SVLAN/CVLAN    : --/--
+VPN instance        : --
+Link ID             : --
+VXLAN ID            : --
+VSI name            : --
+VSI interface       : --
+MPLS PW ID          : --
+MPLS peer PE address: --
+Nickname            : 0x0000
+Description         : --
+
+IP address          : 100.64.2.1                MAC address    : aabb-cc00-0120
+Type                : Dynamic                   Aging          : 19 min
+Interface           : GE2/0                     SVLAN/CVLAN    : --/--
+VPN instance        : --
+Link ID             : --
+VXLAN ID            : --
+VSI name            : --
+VSI interface       : --
+MPLS PW ID          : --
+MPLS peer PE address: --
+Nickname            : 0x0000
+Description         : --
+
+IP address          : 10.10.1.10                MAC address    : 0000-5e00-0101
+Type                : Dynamic                   Aging          : 19 min
+Interface           : GE1/0                     SVLAN/CVLAN    : --/--
+VPN instance        : --
+Link ID             : --
+VXLAN ID            : --
+VSI name            : --
+VSI interface       : --
+MPLS PW ID          : --
+MPLS peer PE address: --
+Nickname            : 0x0000
+Description         : --
+
+IP address          : 10.10.1.11                MAC address    : 0cb1-0000-0000
+Type                : Dynamic                   Aging          : 20 min
+Interface           : GE1/0                     SVLAN/CVLAN    : --/--
+VPN instance        : --
+Link ID             : --
+VXLAN ID            : --
+VSI name            : --
+VSI interface       : --
+MPLS PW ID          : --
+MPLS peer PE address: --
+Nickname            : 0x0000
+Description         : --
+
+IP address          : 10.10.1.254               MAC address    : 0015-5d01-0314
+Type                : Dynamic                   Aging          : 20 min
+Interface           : GE1/0                     SVLAN/CVLAN    : --/--
+VPN instance        : --
+Link ID             : --
+VXLAN ID            : --
+VSI name            : --
+VSI interface       : --
+MPLS PW ID          : --
+MPLS peer PE address: --
+Nickname            : 0x0000
+Description         : --
+
+IP address          : 10.0.12.1                 MAC address    : 0cb1-0000-0004
+Type                : Dynamic                   Aging          : 19 min
+Interface           : GE5/0                     SVLAN/CVLAN    : --/--
+VPN instance        : --
+Link ID             : --
+VXLAN ID            : --
+VSI name            : --
+VSI interface       : --
+MPLS PW ID          : --
+MPLS peer PE address: --
+Nickname            : 0x0000
+Description         : --

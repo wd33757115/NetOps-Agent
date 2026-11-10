@@ -1,0 +1,15 @@
+Value Filldown ZONE (\S+)
+Value Required INTERFACE (\S+)
+
+# One record per interface of a security zone (eNSP Pro USG6306F, YunShan OS 1.25.1.1).
+# A zone name starts at the line's first column; its interfaces are indented under
+# "interface of the zone is (n):". A zone without interfaces gives no record.
+Start
+  ^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d(?:\.\d+)?\s*$$
+  ^${ZONE}\s*$$
+  ^\s+priority is \d+\s*$$
+  ^\s+interface of the zone is \(\d+\):\s*$$
+  ^\s{2,}${INTERFACE}\s*$$ -> Record
+  ^#\s*$$
+  ^\s*$$
+  ^. -> Error "unrecognized display zone line"

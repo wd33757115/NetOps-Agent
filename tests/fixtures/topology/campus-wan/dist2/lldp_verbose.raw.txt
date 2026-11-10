@@ -1,0 +1,159 @@
+show lldp neighbors detail
+------------------------------------------------
+Local Intf: Et0/1
+Local Intf service instance: -
+Chassis id: aabb.cc00.0300
+Port id: Et1/0
+Port Description: to DIST2 e0/1
+System Name: CORE2.lab.local
+
+System Description: 
+Cisco IOS Software [IOSXE], Linux Software (X86_64BI_LINUX-ADVENTERPRISEK9-M), Version 17.15.1, RELEASE SOFTWARE (fc4)
+Technical Support: http://www.cisco.com/techsupport
+Copyright (c) 1986-2024 by Cisco Systems, Inc.
+Compiled Sun 11-Aug-24 22:07 by mcpre
+
+Time remaining: 105 seconds
+System Capabilities: B,R
+Enabled Capabilities: R
+Management Addresses:
+    IP: 10.0.46.1
+Auto Negotiation - not supported
+Physical media capabilities - not advertised
+Media Attachment Unit type - not advertised
+Vlan ID: - not advertised
+Peer Source MAC: aabb.cc00.0301
+
+------------------------------------------------
+Local Intf: Et0/2
+Local Intf service instance: -
+Chassis id: aabb.cc00.0200
+Port id: Et1/1
+Port Description: to DIST2 e0/2
+System Name: CORE1.lab.local
+
+System Description: 
+Cisco IOS Software [IOSXE], Linux Software (X86_64BI_LINUX-ADVENTERPRISEK9-M), Version 17.15.1, RELEASE SOFTWARE (fc4)
+Technical Support: http://www.cisco.com/techsupport
+Copyright (c) 1986-2024 by Cisco Systems, Inc.
+Compiled Sun 11-Aug-24 22:07 by mcpre
+
+Time remaining: 105 seconds
+System Capabilities: B,R
+Enabled Capabilities: R
+Management Addresses:
+    IP: 10.0.36.1
+Auto Negotiation - not supported
+Physical media capabilities - not advertised
+Media Attachment Unit type - not advertised
+Vlan ID: - not advertised
+Peer Source MAC: aabb.cc00.0211
+
+------------------------------------------------
+Local Intf: Et1/0
+Local Intf service instance: -
+Chassis id: aabb.cc00.0400
+Port id: Et1/0
+Port Description: to DIST2 e1/0
+System Name: DIST1.lab.local
+
+System Description: 
+Cisco IOS Software [IOSXE], Linux Software (X86_64BI_LINUX_L2-ADVENTERPRISEK9-M), Version 17.15.1, RELEASE SOFTWARE (fc4)
+Technical Support: http://www.cisco.com/techsupport
+Copyright (c) 1986-2024 by Cisco Systems, Inc.
+Compiled Sun 11-Aug-24 22:06 by mc
+
+Time remaining: 110 seconds
+System Capabilities: B,R
+Enabled Capabilities: B,R
+Management Addresses:
+    IP: 10.10.1.15
+Auto Negotiation - supported, enabled
+Physical media capabilities:
+    1000baseT(FD)
+Media Attachment Unit type - not advertised
+Vlan ID: 1
+Peer Source MAC: aabb.cc00.0401
+
+------------------------------------------------
+Local Intf: Et2/1
+Local Intf service instance: -
+Chassis id: aabb.cc00.0600
+Port id: Et0/2
+Port Description: to DIST2 e2/1
+System Name: ACC1.lab.local
+
+System Description: 
+Cisco IOS Software [IOSXE], Linux Software (X86_64BI_LINUX_L2-ADVENTERPRISEK9-M), Version 17.15.1, RELEASE SOFTWARE (fc4)
+Technical Support: http://www.cisco.com/techsupport
+Copyright (c) 1986-2024 by Cisco Systems, Inc.
+Compiled Sun 11-Aug-24 22:06 by mc
+
+Time remaining: 110 seconds
+System Capabilities: B,R
+Enabled Capabilities: B,R
+Management Addresses:
+    IP: 10.10.1.17
+Auto Negotiation - supported, enabled
+Physical media capabilities:
+    1000baseT(FD)
+Media Attachment Unit type - not advertised
+Vlan ID: 1
+Peer Source MAC: aabb.cc00.0620
+
+------------------------------------------------
+Local Intf: Et1/1
+Local Intf service instance: -
+Chassis id: aabb.cc00.0400
+Port id: Et1/1
+Port Description: to DIST2 e1/1
+System Name: DIST1.lab.local
+
+System Description: 
+Cisco IOS Software [IOSXE], Linux Software (X86_64BI_LINUX_L2-ADVENTERPRISEK9-M), Version 17.15.1, RELEASE SOFTWARE (fc4)
+Technical Support: http://www.cisco.com/techsupport
+Copyright (c) 1986-2024 by Cisco Systems, Inc.
+Compiled Sun 11-Aug-24 22:06 by mc
+
+Time remaining: 110 seconds
+System Capabilities: B,R
+Enabled Capabilities: B,R
+Management Addresses:
+    IP: 10.10.1.15
+Auto Negotiation - supported, enabled
+Physical media capabilities:
+    1000baseT(FD)
+Media Attachment Unit type - not advertised
+Vlan ID: 1
+Peer Source MAC: aabb.cc00.0411
+
+------------------------------------------------
+Local Intf: Et2/0
+Local Intf service instance: -
+Chassis id: aabb.cc00.0700
+Port id: Et0/1
+Port Description: to DIST2 e2/0
+System Name: ACC2.lab.local
+
+System Description: 
+Cisco IOS Software [IOSXE], Linux Software (X86_64BI_LINUX_L2-ADVENTERPRISEK9-M), Version 17.15.1, RELEASE SOFTWARE (fc4)
+Technical Support: http://www.cisco.com/techsupport
+Copyright (c) 1986-2024 by Cisco Systems, Inc.
+Compiled Sun 11-Aug-24 22:06 by mc
+
+Time remaining: 110 seconds
+System Capabilities: B,R
+Enabled Capabilities: B,R
+Management Addresses:
+    IP: 10.10.1.18
+Auto Negotiation - supported, enabled
+Physical media capabilities:
+    1000baseT(FD)
+Media Attachment Unit type - not advertised
+Vlan ID: 1
+Peer Source MAC: aabb.cc00.0710
+
+
+Total entries displayed: 6
+
+DIST2#

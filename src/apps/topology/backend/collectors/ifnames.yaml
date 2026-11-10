@@ -37,7 +37,15 @@ dialects:
   vrp:
     - {canonical: "GigabitEthernet", kind: "ethernet", aliases: ["GigabitEthernet", "GE"]}
     - {canonical: "XGigabitEthernet", kind: "ethernet", aliases: ["XGigabitEthernet", "XGE"]}
+    # YunShan prints these as they are (10GE1/0/1); there is no longer form.
+    - {canonical: "10GE", kind: "ethernet", aliases: ["10GE"]}
+    - {canonical: "25GE", kind: "ethernet", aliases: ["25GE"]}
+    - {canonical: "40GE", kind: "ethernet", aliases: ["40GE"]}
+    - {canonical: "100GE", kind: "ethernet", aliases: ["100GE"]}
     - {canonical: "Eth-Trunk", kind: "lag", aliases: ["Eth-Trunk"]}
     - {canonical: "Vlanif", kind: "vlanif", aliases: ["Vlanif"]}
     - {canonical: "LoopBack", kind: "loopback", aliases: ["LoopBack"]}
+    - {canonical: "InLoopBack", kind: "loopback", aliases: ["InLoopBack"]}
+    - {canonical: "MEth", kind: "mgmt", aliases: ["MEth"]}
     - {canonical: "NULL", kind: "null", aliases: ["NULL"]}
+    - {canonical: "Tunnel", kind: "tunnel", aliases: ["Tunnel"]}

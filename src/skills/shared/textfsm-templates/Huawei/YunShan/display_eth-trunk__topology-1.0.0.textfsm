@@ -1,0 +1,28 @@
+Value Required INTERFACE (Eth-Trunk\d+)
+Value GROUP (\d+)
+Value PROTOCOL (\S+)
+Value List MEMBERS ([A-Za-z][\w/.-]*\d)
+Value List MEMBER_FLAGS (\S+)
+Value List BUNDLED ([A-Za-z][\w/.-]*\d)
+
+# One record per Eth-Trunk in LACP mode (eNSP Pro USG6306F and CE6800, YunShan OS
+# 1.25.1.1): its local ports with their LACP status; a Selected port is bundled (read
+# twice through a lookahead). The flags after a port name ((h), (r)) are not modeled; the
+# partner rows (a priority where the status is) are skipped. A manual (NORMAL) trunk
+# prints another table, not verified yet.
+Start
+  ^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d(?:\.\d+)?\s*$$
+  ^Eth-Trunk\d+'s state -> Continue.Record
+  ^${INTERFACE}'s state information is:\s*$$
+  ^\((?:h|r)\):.*$$
+  ^(?:Local|Partner):\s*$$
+  ^LAG ID:.*Working Mode:\s*NORMAL.* -> Error "manual Eth-Trunk format not verified"
+  ^LAG ID:\s*${GROUP}\s+Working Mode:\s*${PROTOCOL}\s*$$
+  ^(?:Preempt Delay|System Priority|Least Active-linknumber|Operating Status|Timeout Period|PortKeyMode|Hash Arithmetic):.*$$
+  ^-+\s*$$
+  ^ActorPortName\s+(?:Status\s+PortType|SysPri\s+SystemID).*$$
+  ^(?=${BUNDLED}(?:\([a-z]+\))?\s+Selected\s)${MEMBERS}(?:\([a-z]+\))?\s+${MEMBER_FLAGS}\s+\S+\s+\d+\s+\d+\s+\d+\s+\d+\s+\d+\s*$$
+  ^${MEMBERS}(?:\([a-z]+\))?\s+${MEMBER_FLAGS}\s+\S+\s+\d+\s+\d+\s+\d+\s+\d+\s+\d+\s*$$
+  ^\S+\s+\d+\s+[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}\s+\d+\s+\d+\s+\d+\s+\d+\s*$$
+  ^\s*$$
+  ^. -> Error "unrecognized display eth-trunk line"

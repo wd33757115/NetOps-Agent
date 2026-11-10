@@ -1,0 +1,76 @@
+ BGP local router ID is 10.255.10.13 
+ Status codes: * - valid, > - best, d - dampened, h - history,
+               s - suppressed, S - stale, i - internal, e - external,
+               a - additional-path
+               Origin: i - IGP, e - EGP, ? - incomplete
+
+ Total number of routes from all PEs: 10
+
+ Route distinguisher: 10.255.10.11:10
+ Total number of routes: 6
+
+     Network            NextHop         MED        LocPrf     PrefVal Path/Ogn
+
+* >i [2][0][48][0050-7966-680c][0][0.0.0.0]/104
+                        10.255.10.11    0          100        0       ?
+*  i                    10.255.10.11    0          100        0       ?
+* >i [2][0][48][0050-7966-680c][32][192.168.10.11]/136
+                        10.255.10.11    0          100        0       ?
+*  i                    10.255.10.11    0          100        0       ?
+* >i [3][0][32][10.255.10.11]/80
+                        10.255.10.11    0          100        0       ?
+*  i                    10.255.10.11    0          100        0       ?
+
+ Route distinguisher: 10.255.10.12:2
+ Total number of routes: 2
+
+     Network            NextHop         MED        LocPrf     PrefVal Path/Ogn
+
+* >i [5][0][24][192.168.10.0]/80
+                        10.255.10.12    0          100        0       ?
+*  i                    10.255.10.12    0          100        0       ?
+
+ Route distinguisher: 10.255.10.12:20
+ Total number of routes: 2
+
+     Network            NextHop         MED        LocPrf     PrefVal Path/Ogn
+
+* >i [2][0][48][0050-7966-680f][32][192.168.10.12]/136
+                        10.255.10.12    0          100        0       ?
+*  i                    10.255.10.12    0          100        0       ?
+
+ Route distinguisher: 10.255.10.13:2(BLUE)
+ Total number of routes: 3
+
+     Network            NextHop         MED        LocPrf     PrefVal Path/Ogn
+
+* >i [2][0][48][0050-7966-680f][32][192.168.10.12]/136
+                        10.255.10.12    0          100        0       ?
+* >  [5][0][24][192.168.20.0]/80
+                        127.0.0.1       0                     32768   ?
+* >  [5][0][32][192.168.20.1]/80
+                        127.0.0.1       0                     32768   ?
+
+ Route distinguisher: 10.255.10.13:10
+ Total number of routes: 2
+
+     Network            NextHop         MED        LocPrf     PrefVal Path/Ogn
+
+* >  [2][0][48][0050-7966-680e][0][0.0.0.0]/104
+                        0.0.0.0         0          100        32768   i
+* >  [3][0][32][10.255.10.13]/80
+                        0.0.0.0         0          100        32768   i
+
+ Route distinguisher: 10.255.10.13:21
+ Total number of routes: 4
+
+     Network            NextHop         MED        LocPrf     PrefVal Path/Ogn
+
+* >  [2][0][48][0050-7966-6809][0][0.0.0.0]/104
+                        0.0.0.0         0          100        32768   i
+* >  [2][0][48][0050-7966-6809][32][192.168.20.14]/136
+                        0.0.0.0         0          100        32768   i
+* >  [2][0][48][7425-8ae4-1677][32][192.168.20.1]/136
+                        0.0.0.0         0          100        32768   i
+* >  [3][0][32][10.255.10.13]/80
+                        0.0.0.0         0          100        32768   i

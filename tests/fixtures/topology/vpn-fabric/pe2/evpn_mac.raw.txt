@@ -1,0 +1,2 @@
+display evpn route mac
+<PE2>

@@ -1,0 +1,2 @@
+show vrrp
+CORE1#

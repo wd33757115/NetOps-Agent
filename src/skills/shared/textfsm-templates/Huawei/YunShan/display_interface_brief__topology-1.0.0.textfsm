@@ -1,0 +1,22 @@
+Value Required INTERFACE (\S+)
+Value LINK (up|down|\*down|\^down|up\(s\)|down\(\w+\))
+Value PROTOCOL (\S+)
+
+# One record per interface (eNSP Pro AR6700, USG6306F and CE6800, YunShan OS 1.25.1.1);
+# the members of an Eth-Trunk are listed indented under it.
+# The PHY column reports an administrative shutdown itself (*down). Utilisation and error
+# columns are not modeled.
+Start
+  ^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d(?:\.\d+)?\s*$$
+  ^PHY: Physical\s*$$
+  ^[*^]down: .*$$
+  ^\(\w+\): .*$$
+  ^InUti/OutUti: .*$$
+  ^Interface\s+PHY\s+Protocol\s+InUti\s+OutUti\s+inErrors\s+outErrors\s*$$ -> Interfaces
+  ^\s*$$
+  ^. -> Error "unrecognized display interface brief line"
+
+Interfaces
+  ^\s*${INTERFACE}\s+${LINK}\s+${PROTOCOL}\s+\S+\s+\S+\s+\d+\s+\d+\s*$$ -> Record
+  ^\s*$$
+  ^. -> Error "unrecognized interface row"

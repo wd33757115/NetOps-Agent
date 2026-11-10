@@ -1,0 +1,521 @@
+{
+  "schema_version": 1,
+  "batch": "20261003-014006",
+  "source": "GNS3 authorized lab capture",
+  "raw_format": "UTF-8 text saved by collector before CLI cleanup; original line endings",
+  "limitations": [
+    "Not an arbitrary-encoding wire capture",
+    "No initial login banner saved"
+  ],
+  "secret_scan": {
+    "literal_matches": 0,
+    "sensitive_config_matches": 0,
+    "scanner": "scripts/scan_sensitive_device_data.py + direct byte check"
+  },
+  "observations": [
+    {
+      "device": "br1",
+      "host": "10.10.1.11",
+      "capability": "interfaces",
+      "command": "display interface brief",
+      "observed_at": "2026-10-03T01:40:10.302006+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "br1/interfaces.txt",
+          "sha256": "022bd7aff442b15a658116643f99bbb65f0607c5f600547d5fd4ccb3a4471125",
+          "bytes": 726
+        },
+        "raw.txt": {
+          "path": "br1/interfaces.raw.txt",
+          "sha256": "fad34d51631e5bf16587afdcbb6eb51da1cffc4cf57f6ff7861b089039915a16",
+          "bytes": 786
+        }
+      }
+    },
+    {
+      "device": "br1",
+      "host": "10.10.1.11",
+      "capability": "vlan",
+      "command": "display vlan brief",
+      "observed_at": "2026-10-03T01:40:10.354661+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "br1/vlan.txt",
+          "sha256": "0d81f12c690b33864b93d6603da38c9e7196ebba58411a727ce35b714e8da6fb",
+          "bytes": 207
+        },
+        "raw.txt": {
+          "path": "br1/vlan.raw.txt",
+          "sha256": "06f7d3bb7480c5130fe782875e78e2bc6666bd5340c01510a5d69e06b355a1c0",
+          "bytes": 245
+        }
+      }
+    },
+    {
+      "device": "br1",
+      "host": "10.10.1.11",
+      "capability": "trunk",
+      "command": "display port trunk",
+      "observed_at": "2026-10-03T01:40:10.406408+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "br1/trunk.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "br1/trunk.raw.txt",
+          "sha256": "03c4478cda531bd94f8fbb529322d8d829fb59cbe569bfa0baa0f656be3799ec",
+          "bytes": 26
+        }
+      }
+    },
+    {
+      "device": "br2",
+      "host": "10.10.1.12",
+      "capability": "interfaces",
+      "command": "display interface brief",
+      "observed_at": "2026-10-03T01:40:13.742458+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "br2/interfaces.txt",
+          "sha256": "c2cfa0691d00d3234ee71e91c6cd4b9811dd95cc2abf5b30463fe9ba4f29ed42",
+          "bytes": 726
+        },
+        "raw.txt": {
+          "path": "br2/interfaces.raw.txt",
+          "sha256": "e6b6b8bc88c8b6fd1792b5d30d69dbce0c6adac7b0a134a5f770df0deebcb115",
+          "bytes": 786
+        }
+      }
+    },
+    {
+      "device": "br2",
+      "host": "10.10.1.12",
+      "capability": "vlan",
+      "command": "display vlan brief",
+      "observed_at": "2026-10-03T01:40:13.793944+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "br2/vlan.txt",
+          "sha256": "0d81f12c690b33864b93d6603da38c9e7196ebba58411a727ce35b714e8da6fb",
+          "bytes": 207
+        },
+        "raw.txt": {
+          "path": "br2/vlan.raw.txt",
+          "sha256": "445eccc3ca30d40f6d549ee305a31aaecdcada25e6e639f781e3be93ddcda037",
+          "bytes": 245
+        }
+      }
+    },
+    {
+      "device": "br2",
+      "host": "10.10.1.12",
+      "capability": "trunk",
+      "command": "display port trunk",
+      "observed_at": "2026-10-03T01:40:13.846653+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "br2/trunk.txt",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "bytes": 1
+        },
+        "raw.txt": {
+          "path": "br2/trunk.raw.txt",
+          "sha256": "a73bdb1579395580751a8a70cd329b63b5226dc78d8d2457596f6a011da9f68c",
+          "bytes": 26
+        }
+      }
+    },
+    {
+      "device": "core1",
+      "host": "10.10.1.13",
+      "capability": "switchport",
+      "command": "show interfaces switchport",
+      "observed_at": "2026-10-03T01:40:14.608932+00:00",
+      "transport_status": "rejected_by_device",
+      "expected_status": "unsupported",
+      "files": {
+        "txt": {
+          "path": "core1/switchport.txt",
+          "sha256": "f2269c49d91e86ffd7ec58f65f1f75bfd2887a397b3917228f368e3382482282",
+          "bytes": 65
+        },
+        "raw.txt": {
+          "path": "core1/switchport.raw.txt",
+          "sha256": "557bf14ab7e932d8ef99168bb17077319f1a5de2a3316c2ddd7e0d65e8751466",
+          "bytes": 103
+        }
+      }
+    },
+    {
+      "device": "core1",
+      "host": "10.10.1.13",
+      "capability": "vlan",
+      "command": "show vlan brief",
+      "observed_at": "2026-10-03T01:40:14.713034+00:00",
+      "transport_status": "rejected_by_device",
+      "expected_status": "unsupported",
+      "files": {
+        "txt": {
+          "path": "core1/vlan.txt",
+          "sha256": "c20109717e2ad41d4cd87562957786774c999b27c11a293303d3a0d223edfbc6",
+          "bytes": 57
+        },
+        "raw.txt": {
+          "path": "core1/vlan.raw.txt",
+          "sha256": "7989578d1a182eda025c6a970c349fba36244ac864a2d215d32a93332f25b3f2",
+          "bytes": 84
+        }
+      }
+    },
+    {
+      "device": "core1",
+      "host": "10.10.1.13",
+      "capability": "trunk",
+      "command": "show interfaces trunk",
+      "observed_at": "2026-10-03T01:40:14.815919+00:00",
+      "transport_status": "rejected_by_device",
+      "expected_status": "unsupported",
+      "files": {
+        "txt": {
+          "path": "core1/trunk.txt",
+          "sha256": "f2269c49d91e86ffd7ec58f65f1f75bfd2887a397b3917228f368e3382482282",
+          "bytes": 65
+        },
+        "raw.txt": {
+          "path": "core1/trunk.raw.txt",
+          "sha256": "1b4afe35d342c2a37fd40597715681c39080c0d2ee69b53693abd5a2852bafae",
+          "bytes": 98
+        }
+      }
+    },
+    {
+      "device": "core2",
+      "host": "10.10.1.14",
+      "capability": "switchport",
+      "command": "show interfaces switchport",
+      "observed_at": "2026-10-03T01:40:15.474362+00:00",
+      "transport_status": "rejected_by_device",
+      "expected_status": "unsupported",
+      "files": {
+        "txt": {
+          "path": "core2/switchport.txt",
+          "sha256": "f2269c49d91e86ffd7ec58f65f1f75bfd2887a397b3917228f368e3382482282",
+          "bytes": 65
+        },
+        "raw.txt": {
+          "path": "core2/switchport.raw.txt",
+          "sha256": "879d884b0b8ce5017c127ba25509574fe20661009b0d0ed09b2fc0bfd34c21cc",
+          "bytes": 103
+        }
+      }
+    },
+    {
+      "device": "core2",
+      "host": "10.10.1.14",
+      "capability": "vlan",
+      "command": "show vlan brief",
+      "observed_at": "2026-10-03T01:40:15.527005+00:00",
+      "transport_status": "rejected_by_device",
+      "expected_status": "unsupported",
+      "files": {
+        "txt": {
+          "path": "core2/vlan.txt",
+          "sha256": "c20109717e2ad41d4cd87562957786774c999b27c11a293303d3a0d223edfbc6",
+          "bytes": 57
+        },
+        "raw.txt": {
+          "path": "core2/vlan.raw.txt",
+          "sha256": "4de97c66f518b45ddb829c14bc9259d047d552a0798f6fccc2b8564065fc373e",
+          "bytes": 84
+        }
+      }
+    },
+    {
+      "device": "core2",
+      "host": "10.10.1.14",
+      "capability": "trunk",
+      "command": "show interfaces trunk",
+      "observed_at": "2026-10-03T01:40:15.578360+00:00",
+      "transport_status": "rejected_by_device",
+      "expected_status": "unsupported",
+      "files": {
+        "txt": {
+          "path": "core2/trunk.txt",
+          "sha256": "f2269c49d91e86ffd7ec58f65f1f75bfd2887a397b3917228f368e3382482282",
+          "bytes": 65
+        },
+        "raw.txt": {
+          "path": "core2/trunk.raw.txt",
+          "sha256": "fd0955340909c1d47e90eebeae486ffc2578d49c4621860528eaa52e26b2b060",
+          "bytes": 98
+        }
+      }
+    },
+    {
+      "device": "dist1",
+      "host": "10.10.1.15",
+      "capability": "switchport",
+      "command": "show interfaces switchport",
+      "observed_at": "2026-10-03T01:40:16.388904+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "dist1/switchport.txt",
+          "sha256": "d5f089575230db22a242a3aa146140fc68e59b59b912adc99e604a9394e9e38c",
+          "bytes": 12708
+        },
+        "raw.txt": {
+          "path": "dist1/switchport.raw.txt",
+          "sha256": "0b3f490c3f103c52c9826f485ccf2ee7627e808c82ef3d1712d95e4a71eadd98",
+          "bytes": 13124
+        }
+      }
+    },
+    {
+      "device": "dist1",
+      "host": "10.10.1.15",
+      "capability": "vlan",
+      "command": "show vlan brief",
+      "observed_at": "2026-10-03T01:40:16.441940+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "dist1/vlan.txt",
+          "sha256": "9485aafbb686075beb6bd0a907f245c6bdf7ac174b3c725002a6e426c7f2551d",
+          "bytes": 538
+        },
+        "raw.txt": {
+          "path": "dist1/vlan.raw.txt",
+          "sha256": "13599331126a33937543aabb7c3bdf52625af35846f8f8a6d7a96f0409b99592",
+          "bytes": 572
+        }
+      }
+    },
+    {
+      "device": "dist1",
+      "host": "10.10.1.15",
+      "capability": "trunk",
+      "command": "show interfaces trunk",
+      "observed_at": "2026-10-03T01:40:16.544136+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "dist1/trunk.txt",
+          "sha256": "ec17efbcdc36698739350899796f8da34d885aed32718d2f8b8bc0ca167f4262",
+          "bytes": 625
+        },
+        "raw.txt": {
+          "path": "dist1/trunk.raw.txt",
+          "sha256": "4386869172ba09941a6ff48f98291bcefa92437749d2d1e3e3ea50b69f43ba84",
+          "bytes": 675
+        }
+      }
+    },
+    {
+      "device": "dist2",
+      "host": "10.10.1.16",
+      "capability": "switchport",
+      "command": "show interfaces switchport",
+      "observed_at": "2026-10-03T01:40:17.301202+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "dist2/switchport.txt",
+          "sha256": "d5f089575230db22a242a3aa146140fc68e59b59b912adc99e604a9394e9e38c",
+          "bytes": 12708
+        },
+        "raw.txt": {
+          "path": "dist2/switchport.raw.txt",
+          "sha256": "781f4afbd3fdb197d29597ed4c1f244772a3a8d0f9addfc30ee7e37a3201beb1",
+          "bytes": 13124
+        }
+      }
+    },
+    {
+      "device": "dist2",
+      "host": "10.10.1.16",
+      "capability": "vlan",
+      "command": "show vlan brief",
+      "observed_at": "2026-10-03T01:40:17.354294+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "dist2/vlan.txt",
+          "sha256": "9485aafbb686075beb6bd0a907f245c6bdf7ac174b3c725002a6e426c7f2551d",
+          "bytes": 538
+        },
+        "raw.txt": {
+          "path": "dist2/vlan.raw.txt",
+          "sha256": "3b72fe8c6dd7781eb5c1bda3639b16f8f9a85008844878fe77bbfb7bbbcb174a",
+          "bytes": 572
+        }
+      }
+    },
+    {
+      "device": "dist2",
+      "host": "10.10.1.16",
+      "capability": "trunk",
+      "command": "show interfaces trunk",
+      "observed_at": "2026-10-03T01:40:17.406147+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "dist2/trunk.txt",
+          "sha256": "ec17efbcdc36698739350899796f8da34d885aed32718d2f8b8bc0ca167f4262",
+          "bytes": 625
+        },
+        "raw.txt": {
+          "path": "dist2/trunk.raw.txt",
+          "sha256": "58b386428319b60fcfcfb7e06a37eebf8ca2d22ddecd96370d9e2a095ddd570e",
+          "bytes": 675
+        }
+      }
+    },
+    {
+      "device": "acc1",
+      "host": "10.10.1.17",
+      "capability": "switchport",
+      "command": "show interfaces switchport",
+      "observed_at": "2026-10-03T01:44:31.333317+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "acc1/switchport.txt",
+          "sha256": "a9c9e6b428750757dea452c4fbac744f607edceeef6cbcb27a81833928bc2db1",
+          "bytes": 13617
+        },
+        "raw.txt": {
+          "path": "acc1/switchport.raw.txt",
+          "sha256": "367ca5ee227178af3351b871ebcc6d3faeaedc655d869d2daa37b528562f1101",
+          "bytes": 14060
+        }
+      }
+    },
+    {
+      "device": "acc1",
+      "host": "10.10.1.17",
+      "capability": "vlan",
+      "command": "show vlan brief",
+      "observed_at": "2026-10-03T01:44:31.435323+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "acc1/vlan.txt",
+          "sha256": "1a3863248446784cc70cf63b5afb3f2a2269640f48f0ee0f967656858ddda56b",
+          "bytes": 562
+        },
+        "raw.txt": {
+          "path": "acc1/vlan.raw.txt",
+          "sha256": "ffa699c8a038377c559a849e6497f5207a5240386d58b3d782c41aac8ddcc8e4",
+          "bytes": 595
+        }
+      }
+    },
+    {
+      "device": "acc1",
+      "host": "10.10.1.17",
+      "capability": "trunk",
+      "command": "show interfaces trunk",
+      "observed_at": "2026-10-03T01:44:31.488360+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "acc1/trunk.txt",
+          "sha256": "7ae35e283dd8b4c44095161e7db022af8e6d48279d4d4d17c2e0567e1ced49f5",
+          "bytes": 493
+        },
+        "raw.txt": {
+          "path": "acc1/trunk.raw.txt",
+          "sha256": "89e344776c6406104591e85085d3ac0d77f575889399eee8a090f93881da64c7",
+          "bytes": 538
+        }
+      }
+    },
+    {
+      "device": "acc2",
+      "host": "10.10.1.18",
+      "capability": "switchport",
+      "command": "show interfaces switchport",
+      "observed_at": "2026-10-03T01:44:32.528057+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "acc2/switchport.txt",
+          "sha256": "de0b9be7558b4714e3e1da6b6fb8e263c9174f1439729baa765798909ac2c370",
+          "bytes": 13596
+        },
+        "raw.txt": {
+          "path": "acc2/switchport.raw.txt",
+          "sha256": "863bde41600e0fbdfd583f27f980f281743824f25d121a4e5bf74012b90cde21",
+          "bytes": 14039
+        }
+      }
+    },
+    {
+      "device": "acc2",
+      "host": "10.10.1.18",
+      "capability": "vlan",
+      "command": "show vlan brief",
+      "observed_at": "2026-10-03T01:44:32.630495+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "acc2/vlan.txt",
+          "sha256": "dbe7c046775969f6bb391f3ecdc08ccacf823d24c2c21eb961cbc6db0a7fba6d",
+          "bytes": 557
+        },
+        "raw.txt": {
+          "path": "acc2/vlan.raw.txt",
+          "sha256": "938923c4f93fc0fe0d53771b2f493f33ccfc3062e162a2ec2339c6cb49e1324d",
+          "bytes": 590
+        }
+      }
+    },
+    {
+      "device": "acc2",
+      "host": "10.10.1.18",
+      "capability": "trunk",
+      "command": "show interfaces trunk",
+      "observed_at": "2026-10-03T01:44:32.732214+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "acc2/trunk.txt",
+          "sha256": "cf983d2933612b9f3fd3fb9b7a4a88492e8f800681878722799a497e762bef7d",
+          "bytes": 619
+        },
+        "raw.txt": {
+          "path": "acc2/trunk.raw.txt",
+          "sha256": "d32b4b31b6f98567dfa2b2d3c54f6f636c97d41a546052e57ed7d52695668ab7",
+          "bytes": 668
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+show ip nat statistics
+Total active translations: 0 (0 static, 0 dynamic; 0 extended)
+Outside interfaces:
+  Ethernet0/1, Ethernet0/2
+Inside interfaces: 
+  Ethernet1/0, Ethernet1/1
+Hits: 0  Misses: 0
+CEF Translated packets: 0, CEF Punted packets: 0
+ Reserved port setting disabled provisioned no
+ Dynamic overload mapping configured: 1
+Expired translations: 0
+Dynamic mappings:
+-- Inside Source
+[Id: 1] access-list NAT-TEST interface Ethernet0/1 refcount 0
+nat-limit statistics:
+ max entry: max allowed 0, used 0, missed 0
+CORE1#

@@ -1,0 +1,18 @@
+show mpls ldp neighbor
+    Peer LDP Ident: 10.255.20.1:0; Local LDP Ident 10.255.20.2:0
+	TCP connection: 10.255.20.1.646 - 10.255.20.2.31114
+	State: Oper; Msgs sent/rcvd: 150/152; Downstream
+	Up time: 02:05:42
+	LDP discovery sources:
+	  Ethernet0/1, Src IP addr: 10.20.12.1
+        Addresses bound to peer LDP Ident:
+          10.20.12.1      10.255.20.1     
+    Peer LDP Ident: 10.255.20.3:0; Local LDP Ident 10.255.20.2:0
+	TCP connection: 10.255.20.3.40261 - 10.255.20.2.646
+	State: Oper; Msgs sent/rcvd: 568/495; Downstream
+	Up time: 02:02:25
+	LDP discovery sources:
+	  Ethernet0/2, Src IP addr: 10.20.23.2
+        Addresses bound to peer LDP Ident:
+          10.20.23.2      10.255.20.3     
+P#

@@ -1,0 +1,2 @@
+display evpn auto-discovery imet
+<PE2>

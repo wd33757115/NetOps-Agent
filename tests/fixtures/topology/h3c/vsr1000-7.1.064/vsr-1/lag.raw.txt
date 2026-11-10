@@ -1,0 +1,3 @@
+display link-aggregation verbose
+No link aggregation group exists.
+<H3C>

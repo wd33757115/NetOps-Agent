@@ -1,0 +1,17 @@
+display bgp routing-table vpnv4
+
+ BGP local router ID is 10.255.10.13 
+ Status codes: * - valid, > - best, d - dampened, h - history,
+               s - suppressed, S - stale, i - internal, e - external,
+               a - additional-path
+               Origin: i - IGP, e - EGP, ? - incomplete
+
+ Route distinguisher: 10.255.10.13:2(BLUE)
+ Total number of routes: 3
+
+     Network            NextHop         MED        LocPrf     PrefVal Path/Ogn
+
+* >i 192.168.10.0       10.255.10.12    0          100        0       ?
+* >  192.168.20.0       192.168.20.1    0                     32768   ?
+* >  192.168.20.1/32    127.0.0.1       0                     32768   ?
+<LEAF3>

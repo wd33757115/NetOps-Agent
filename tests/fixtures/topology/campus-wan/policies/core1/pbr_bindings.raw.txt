@@ -1,0 +1,4 @@
+show ip policy
+Interface      Route map
+Ethernet1/0    PBR-TEST
+CORE1#

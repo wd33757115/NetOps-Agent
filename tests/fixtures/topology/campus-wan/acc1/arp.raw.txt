@@ -1,0 +1,2 @@
+show ip arp
+ACC1#

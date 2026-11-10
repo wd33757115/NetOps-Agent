@@ -1,0 +1,122 @@
+{
+  "schema_version": 1,
+  "batch": "20261005-105546",
+  "source": "GNS3 authorized lab capture",
+  "raw_format": "UTF-8 text saved by collector before CLI cleanup; original line endings",
+  "limitations": [
+    "Not an arbitrary-encoding wire capture",
+    "No initial login banner saved"
+  ],
+  "secret_scan": {
+    "literal_matches": 0,
+    "sensitive_config_matches": 0,
+    "scanner": "scripts/scan_sensitive_device_data.py + direct byte check"
+  },
+  "observations": [
+    {
+      "device": "br1",
+      "host": "10.10.1.11",
+      "capability": "acl_rules",
+      "command": "display acl all",
+      "observed_at": "2026-10-05T02:55:51.438067+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "br1/acl_rules.txt",
+          "sha256": "c8c167611793d56aa4d5d8f4a09bc37b78cb66e6cf113ddcbb05d617ecb43e6c",
+          "bytes": 142
+        },
+        "raw.txt": {
+          "path": "br1/acl_rules.raw.txt",
+          "sha256": "77c038fd5f15566fc16d7ca0f08041e130d8acc60f36d05c712a939e54d4784f",
+          "bytes": 174
+        }
+      }
+    },
+    {
+      "device": "br1",
+      "host": "10.10.1.11",
+      "capability": "acl_bindings",
+      "command": "display packet-filter interface",
+      "observed_at": "2026-10-05T02:55:51.489712+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "br1/acl_bindings.txt",
+          "sha256": "429c2d5eacaaf981a73e2528380eb6e896f0811ada665b5fcdb48da1e684b29b",
+          "bytes": 94
+        },
+        "raw.txt": {
+          "path": "br1/acl_bindings.raw.txt",
+          "sha256": "514d2389f5f2e2eb9eb75f77201ddf70bc69486dcb32951910545824dcd324f1",
+          "bytes": 144
+        }
+      }
+    },
+    {
+      "device": "br1",
+      "host": "10.10.1.11",
+      "capability": "security_zones",
+      "command": "display security-zone",
+      "observed_at": "2026-10-05T02:55:51.541273+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "br1/security_zones.txt",
+          "sha256": "241d6d5e3853c35a384900b6447f0fbb2655bcc6d7ad5d7a4e26604182a74805",
+          "bytes": 154
+        },
+        "raw.txt": {
+          "path": "br1/security_zones.raw.txt",
+          "sha256": "337c2e2a0cff84bcf933b2f3e285991c8a60f1dca736d6bda5a618f14f37bd89",
+          "bytes": 224
+        }
+      }
+    },
+    {
+      "device": "dist1",
+      "host": "10.10.1.15",
+      "capability": "acl_rules",
+      "command": "show ip access-lists",
+      "observed_at": "2026-10-05T02:55:54.711308+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "dist1/acl_rules.txt",
+          "sha256": "aaa6859b272382b9ff15b7d4dd7e1642e4c29fe1eb847bc15ec734b6527ffe08",
+          "bytes": 384
+        },
+        "raw.txt": {
+          "path": "dist1/acl_rules.raw.txt",
+          "sha256": "851aaa8a11f51c565bc5f96f13381eba14b9f8a708b2e6e4268467c58af6b4ca",
+          "bytes": 421
+        }
+      }
+    },
+    {
+      "device": "dist1",
+      "host": "10.10.1.15",
+      "capability": "acl_bindings",
+      "command": "show ip interface",
+      "observed_at": "2026-10-05T02:55:54.763449+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "dist1/acl_bindings.txt",
+          "sha256": "d95d230354ea15753ca5fecb3fa71ee2d34e77c4fe42fa6ac9d5905079a0e186",
+          "bytes": 11202
+        },
+        "raw.txt": {
+          "path": "dist1/acl_bindings.raw.txt",
+          "sha256": "2906af529ba2cf1fe1395f4cab70d5de39e7db3eb4479becd3889a745d77e700",
+          "bytes": 11528
+        }
+      }
+    }
+  ]
+}

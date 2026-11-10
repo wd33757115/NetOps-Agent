@@ -1,0 +1,605 @@
+{
+  "schema_version": 1,
+  "batch": "20261005-002043",
+  "source": "GNS3 authorized lab capture",
+  "raw_format": "UTF-8 text saved by collector before CLI cleanup; original line endings",
+  "limitations": [
+    "Not an arbitrary-encoding wire capture",
+    "No initial login banner saved"
+  ],
+  "secret_scan": {
+    "literal_matches": 0,
+    "sensitive_config_matches": 0,
+    "scanner": "scripts/scan_sensitive_device_data.py + direct byte check"
+  },
+  "observations": [
+    {
+      "device": "vsr-1",
+      "host": "10.10.1.1",
+      "capability": "version",
+      "command": "display version",
+      "observed_at": "2026-10-04T16:20:46.999487+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "vsr-1/version.txt",
+          "sha256": "d060e71c5a43ada9baa41ec79255d8a1373f50a31df4e4f494497400944e2b9b",
+          "bytes": 850
+        },
+        "raw.txt": {
+          "path": "vsr-1/version.raw.txt",
+          "sha256": "9ebd2eee9f321de0058545d571bfa71dce30749056ae0b2df9da9444f0007874",
+          "bytes": 916
+        }
+      }
+    },
+    {
+      "device": "vsr-1",
+      "host": "10.10.1.1",
+      "capability": "inventory",
+      "command": "display device manuinfo",
+      "observed_at": "2026-10-04T16:20:47.051606+00:00",
+      "transport_status": "ok",
+      "expected_status": "unsupported",
+      "files": {
+        "txt": {
+          "path": "vsr-1/inventory.txt",
+          "sha256": "1146f4a18dfaf13db8186bef539d23da2a2280f82bcb0f30bb8f0ab62a231711",
+          "bytes": 435
+        },
+        "raw.txt": {
+          "path": "vsr-1/inventory.raw.txt",
+          "sha256": "2bd28639539b76f09bacb748c25b8c99aa152fb0b61d885ecef0c71841f76f50",
+          "bytes": 488
+        }
+      }
+    },
+    {
+      "device": "vsr-1",
+      "host": "10.10.1.1",
+      "capability": "lldp_local",
+      "command": "display lldp local-information",
+      "observed_at": "2026-10-04T16:20:47.103269+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "vsr-1/lldp_local.txt",
+          "sha256": "b7fac85699e5e91f2960573bf2e6463c4efb367812f8ed077fc505a6d269cf3e",
+          "bytes": 5902
+        },
+        "raw.txt": {
+          "path": "vsr-1/lldp_local.raw.txt",
+          "sha256": "5d7adfdec8147628421d5846775f1671a99693852bd502f20a88d5070d6ab67f",
+          "bytes": 6241
+        }
+      }
+    },
+    {
+      "device": "vsr-1",
+      "host": "10.10.1.1",
+      "capability": "lldp_verbose",
+      "command": "display lldp neighbor-information verbose",
+      "observed_at": "2026-10-04T16:20:47.155133+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "vsr-1/lldp_verbose.txt",
+          "sha256": "18bc054f149043b9d330eda9abd373543a42d961db78babbc7cbb8c9e03aee76",
+          "bytes": 2897
+        },
+        "raw.txt": {
+          "path": "vsr-1/lldp_verbose.raw.txt",
+          "sha256": "2f18d6fbe5da17083dba04ee74ddc746ab8f250cd74f4b9c2af5d6e830deabb4",
+          "bytes": 3091
+        }
+      }
+    },
+    {
+      "device": "vsr-1",
+      "host": "10.10.1.1",
+      "capability": "lldp_list",
+      "command": "display lldp neighbor-information list",
+      "observed_at": "2026-10-04T16:20:47.206932+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "vsr-1/lldp_list.txt",
+          "sha256": "92410c84abbf79c110151765272995b14818c6d2aa948bbb3e3d13d7de2a588e",
+          "bytes": 375
+        },
+        "raw.txt": {
+          "path": "vsr-1/lldp_list.raw.txt",
+          "sha256": "c5c5e91d346d333031eedddd7ff79750417ddefc4bca3d64ecd2ecea926c733b",
+          "bytes": 433
+        }
+      }
+    },
+    {
+      "device": "vsr-1",
+      "host": "10.10.1.1",
+      "capability": "interfaces",
+      "command": "display interface brief",
+      "observed_at": "2026-10-04T16:20:47.258543+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "vsr-1/interfaces.txt",
+          "sha256": "acfcd73dce9f96a868c5397c24366f6a9f25b75715e5d1ead14b2812f0caef6b",
+          "bytes": 1002
+        },
+        "raw.txt": {
+          "path": "vsr-1/interfaces.raw.txt",
+          "sha256": "0d3c9fae22ad7f1aeb68f5b5c6e6338902c2fc1608e2bb6d27c2ee1984ec75b4",
+          "bytes": 1078
+        }
+      }
+    },
+    {
+      "device": "vsr-1",
+      "host": "10.10.1.1",
+      "capability": "ip_interfaces",
+      "command": "display ip interface brief",
+      "observed_at": "2026-10-04T16:20:47.309910+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "vsr-1/ip_interfaces.txt",
+          "sha256": "ff69f3afa73e00fa675d04ddf5e57b3f49fbc84ee1d9fc9f796a1d0db99d68a1",
+          "bytes": 625
+        },
+        "raw.txt": {
+          "path": "vsr-1/ip_interfaces.raw.txt",
+          "sha256": "9b26327273b959f19689676df3984a5c45f397097e87d89ae6e834ce105319fe",
+          "bytes": 677
+        }
+      }
+    },
+    {
+      "device": "vsr-1",
+      "host": "10.10.1.1",
+      "capability": "arp",
+      "command": "display arp verbose",
+      "observed_at": "2026-10-04T16:20:47.361754+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "vsr-1/arp.txt",
+          "sha256": "f0b48059b760f467be1fc3ca6eee9af29652c53b477d82a1008706c01c6137fa",
+          "bytes": 1810
+        },
+        "raw.txt": {
+          "path": "vsr-1/arp.raw.txt",
+          "sha256": "bd4e80f7776aa4bb2141b83a3eb25ae73b6dcde5cdcca061c40c780eb694996b",
+          "bytes": 1942
+        }
+      }
+    },
+    {
+      "device": "vsr-1",
+      "host": "10.10.1.1",
+      "capability": "mac",
+      "command": "display mac-address",
+      "observed_at": "2026-10-04T16:20:47.412949+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "vsr-1/mac.txt",
+          "sha256": "d9551c628a7ee78483631e38f5c8f4c6696259c68bbf220126f27ef344f97eef",
+          "bytes": 148
+        },
+        "raw.txt": {
+          "path": "vsr-1/mac.raw.txt",
+          "sha256": "d82d6bd6eabb3b76e63b41ca41efb6fc8916971bbb1ea3dc3865bbf0b9f7a856",
+          "bytes": 179
+        }
+      }
+    },
+    {
+      "device": "vsr-1",
+      "host": "10.10.1.1",
+      "capability": "vlan",
+      "command": "display vlan brief",
+      "observed_at": "2026-10-04T16:20:47.464980+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "vsr-1/vlan.txt",
+          "sha256": "7fb3f810087c35861f66fd66629dd6ef8742b158b7ed1ff82e5b92f8b48d7f6b",
+          "bytes": 258
+        },
+        "raw.txt": {
+          "path": "vsr-1/vlan.raw.txt",
+          "sha256": "fa959ffe3780f7d0db3578ace036c3bd7e8e522013a959f716fc6acf6de7a1da",
+          "bytes": 298
+        }
+      }
+    },
+    {
+      "device": "vsr-1",
+      "host": "10.10.1.1",
+      "capability": "lag",
+      "command": "display link-aggregation verbose",
+      "observed_at": "2026-10-04T16:20:47.568107+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "vsr-1/lag.txt",
+          "sha256": "b20de526eaaec99a5a8d55b8c31c2dd723ba02bded16017e7bb1db1caa976337",
+          "bytes": 34
+        },
+        "raw.txt": {
+          "path": "vsr-1/lag.raw.txt",
+          "sha256": "7dc5a80e4d8a52f9930d934166d1bc24c070d8eb44a5a3d9079e911757f01e9f",
+          "bytes": 76
+        }
+      }
+    },
+    {
+      "device": "vsr-1",
+      "host": "10.10.1.1",
+      "capability": "routes",
+      "command": "display ip routing-table",
+      "observed_at": "2026-10-04T16:20:47.619716+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "vsr-1/routes.txt",
+          "sha256": "0ba230917834169a8ad8395bd69f911bcff9167aa87caa2507c72964465da227",
+          "bytes": 1292
+        },
+        "raw.txt": {
+          "path": "vsr-1/routes.raw.txt",
+          "sha256": "49b87e502ae2cf0597d2faccacb22f399383016a94b452f40e23742c1a02b360",
+          "bytes": 1369
+        }
+      }
+    },
+    {
+      "device": "vsr-1",
+      "host": "10.10.1.1",
+      "capability": "vrfs",
+      "command": "display ip vpn-instance",
+      "observed_at": "2026-10-04T16:20:47.671188+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "vsr-1/vrfs.txt",
+          "sha256": "c6d63fdbd2797276cb43fb773dc0cdd49f53d4501b5a74d13c2fe8956d79d0b0",
+          "bytes": 105
+        },
+        "raw.txt": {
+          "path": "vsr-1/vrfs.raw.txt",
+          "sha256": "1e40e0b63840cc7cab76cdb308d204f73ce4181d5cad1ce3d9b3cc465ddfca23",
+          "bytes": 142
+        }
+      }
+    },
+    {
+      "device": "vsr-1",
+      "host": "10.10.1.1",
+      "capability": "irf",
+      "command": "display irf",
+      "observed_at": "2026-10-04T16:20:47.722918+00:00",
+      "transport_status": "rejected_by_device",
+      "expected_status": "unsupported",
+      "files": {
+        "txt": {
+          "path": "vsr-1/irf.txt",
+          "sha256": "7fa3a3630d5314c85b22e84510b919e13cfe5f7404c238f5963349e17498d379",
+          "bytes": 64
+        },
+        "raw.txt": {
+          "path": "vsr-1/irf.raw.txt",
+          "sha256": "c28dfdccbdba82fb6ea5a2fc732c3b736bedabe93dca0de4cc287578bdaf1d21",
+          "bytes": 87
+        }
+      }
+    },
+    {
+      "device": "vsr-2",
+      "host": "10.10.1.2",
+      "capability": "version",
+      "command": "display version",
+      "observed_at": "2026-10-04T16:20:52.063349+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "vsr-2/version.txt",
+          "sha256": "d060e71c5a43ada9baa41ec79255d8a1373f50a31df4e4f494497400944e2b9b",
+          "bytes": 850
+        },
+        "raw.txt": {
+          "path": "vsr-2/version.raw.txt",
+          "sha256": "9ebd2eee9f321de0058545d571bfa71dce30749056ae0b2df9da9444f0007874",
+          "bytes": 916
+        }
+      }
+    },
+    {
+      "device": "vsr-2",
+      "host": "10.10.1.2",
+      "capability": "inventory",
+      "command": "display device manuinfo",
+      "observed_at": "2026-10-04T16:20:52.115582+00:00",
+      "transport_status": "ok",
+      "expected_status": "unsupported",
+      "files": {
+        "txt": {
+          "path": "vsr-2/inventory.txt",
+          "sha256": "1146f4a18dfaf13db8186bef539d23da2a2280f82bcb0f30bb8f0ab62a231711",
+          "bytes": 435
+        },
+        "raw.txt": {
+          "path": "vsr-2/inventory.raw.txt",
+          "sha256": "2bd28639539b76f09bacb748c25b8c99aa152fb0b61d885ecef0c71841f76f50",
+          "bytes": 488
+        }
+      }
+    },
+    {
+      "device": "vsr-2",
+      "host": "10.10.1.2",
+      "capability": "lldp_local",
+      "command": "display lldp local-information",
+      "observed_at": "2026-10-04T16:20:52.167579+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "vsr-2/lldp_local.txt",
+          "sha256": "7ceb691b3fb5398ec626f6a274d7831f37f7229181c8b15c17852bd96ac5f16a",
+          "bytes": 5890
+        },
+        "raw.txt": {
+          "path": "vsr-2/lldp_local.raw.txt",
+          "sha256": "ecc81d77fba9e0dbbf1463aa3243c16a7f85fd47fdce6ef48d04282a721115db",
+          "bytes": 6229
+        }
+      }
+    },
+    {
+      "device": "vsr-2",
+      "host": "10.10.1.2",
+      "capability": "lldp_verbose",
+      "command": "display lldp neighbor-information verbose",
+      "observed_at": "2026-10-04T16:20:52.219254+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "vsr-2/lldp_verbose.txt",
+          "sha256": "5c6ea01416102db7bbe45019e9bedb88d00e1f8b99ac19a73cd0bb815e70ca43",
+          "bytes": 2897
+        },
+        "raw.txt": {
+          "path": "vsr-2/lldp_verbose.raw.txt",
+          "sha256": "87fcfd706b47148a4cf37ef23607727578c6212cbfbc61c19a35544debb76b50",
+          "bytes": 3091
+        }
+      }
+    },
+    {
+      "device": "vsr-2",
+      "host": "10.10.1.2",
+      "capability": "lldp_list",
+      "command": "display lldp neighbor-information list",
+      "observed_at": "2026-10-04T16:20:52.270428+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "vsr-2/lldp_list.txt",
+          "sha256": "30e7a1a0cc8dce6ff955189a2590e254b51412e5ad84307d312b9fdcf6eb072b",
+          "bytes": 375
+        },
+        "raw.txt": {
+          "path": "vsr-2/lldp_list.raw.txt",
+          "sha256": "7cbb8e82fbcf8280a525ac29c1047fa16ab00010e98b797119f3ba4fc0d80940",
+          "bytes": 433
+        }
+      }
+    },
+    {
+      "device": "vsr-2",
+      "host": "10.10.1.2",
+      "capability": "interfaces",
+      "command": "display interface brief",
+      "observed_at": "2026-10-04T16:20:52.322488+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "vsr-2/interfaces.txt",
+          "sha256": "0129bb890f1f216eb9eed378f766f5c3e49c5d9a9df2525aa44e063827302fa2",
+          "bytes": 1002
+        },
+        "raw.txt": {
+          "path": "vsr-2/interfaces.raw.txt",
+          "sha256": "84833278b7f682985032113232d1b39ac08edf179579d70c42057065d9ac18ef",
+          "bytes": 1078
+        }
+      }
+    },
+    {
+      "device": "vsr-2",
+      "host": "10.10.1.2",
+      "capability": "ip_interfaces",
+      "command": "display ip interface brief",
+      "observed_at": "2026-10-04T16:20:52.373870+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "vsr-2/ip_interfaces.txt",
+          "sha256": "47bd82bf31e08c86f32e02970c0d671a7f4561c507e2e752fb894a7814d96dff",
+          "bytes": 625
+        },
+        "raw.txt": {
+          "path": "vsr-2/ip_interfaces.raw.txt",
+          "sha256": "0b9e6f3aba802a51a140946ed64dd904ca61f8873bcb68fe7745bc1947c869ba",
+          "bytes": 677
+        }
+      }
+    },
+    {
+      "device": "vsr-2",
+      "host": "10.10.1.2",
+      "capability": "arp",
+      "command": "display arp verbose",
+      "observed_at": "2026-10-04T16:20:52.425590+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "vsr-2/arp.txt",
+          "sha256": "36b860779382f96245500c25935330391f95f4f898722f2ae0b88fbcfd59cecb",
+          "bytes": 1810
+        },
+        "raw.txt": {
+          "path": "vsr-2/arp.raw.txt",
+          "sha256": "d3c17229d4a14512549662320749c8146428e9c17530bdd9791f826392c79701",
+          "bytes": 1942
+        }
+      }
+    },
+    {
+      "device": "vsr-2",
+      "host": "10.10.1.2",
+      "capability": "mac",
+      "command": "display mac-address",
+      "observed_at": "2026-10-04T16:20:52.476914+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "vsr-2/mac.txt",
+          "sha256": "25a74060f21429a91b04fd6dca10f1b3bfa9f324ceab1b33390f6d804623b5b5",
+          "bytes": 148
+        },
+        "raw.txt": {
+          "path": "vsr-2/mac.raw.txt",
+          "sha256": "445863e9f3c315ca484491f9fb3652bc9aaa01a5aae58c4c89eaa10be7e7fb3c",
+          "bytes": 179
+        }
+      }
+    },
+    {
+      "device": "vsr-2",
+      "host": "10.10.1.2",
+      "capability": "vlan",
+      "command": "display vlan brief",
+      "observed_at": "2026-10-04T16:20:52.529141+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "vsr-2/vlan.txt",
+          "sha256": "309a445207ff4482d5ba1efeb3b0899410546ef0f470c41337f5775cd68b1b0a",
+          "bytes": 258
+        },
+        "raw.txt": {
+          "path": "vsr-2/vlan.raw.txt",
+          "sha256": "31c5e86507f529a414a0156ee574f37c6ddce98c0bf1fd942561dc657bd2dc10",
+          "bytes": 298
+        }
+      }
+    },
+    {
+      "device": "vsr-2",
+      "host": "10.10.1.2",
+      "capability": "lag",
+      "command": "display link-aggregation verbose",
+      "observed_at": "2026-10-04T16:20:52.632138+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "vsr-2/lag.txt",
+          "sha256": "b20de526eaaec99a5a8d55b8c31c2dd723ba02bded16017e7bb1db1caa976337",
+          "bytes": 34
+        },
+        "raw.txt": {
+          "path": "vsr-2/lag.raw.txt",
+          "sha256": "7dc5a80e4d8a52f9930d934166d1bc24c070d8eb44a5a3d9079e911757f01e9f",
+          "bytes": 76
+        }
+      }
+    },
+    {
+      "device": "vsr-2",
+      "host": "10.10.1.2",
+      "capability": "routes",
+      "command": "display ip routing-table",
+      "observed_at": "2026-10-04T16:20:52.684037+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "vsr-2/routes.txt",
+          "sha256": "8ab15c85b27de52bf783a2aa69a390f7ff704183ec4841509846dc7d1540f6cf",
+          "bytes": 1357
+        },
+        "raw.txt": {
+          "path": "vsr-2/routes.raw.txt",
+          "sha256": "106276f3414975a41629456511fcd2312942f21c0794b7f0b7ca30fd68679a41",
+          "bytes": 1436
+        }
+      }
+    },
+    {
+      "device": "vsr-2",
+      "host": "10.10.1.2",
+      "capability": "vrfs",
+      "command": "display ip vpn-instance",
+      "observed_at": "2026-10-04T16:20:52.735278+00:00",
+      "transport_status": "ok",
+      "expected_status": "complete",
+      "files": {
+        "txt": {
+          "path": "vsr-2/vrfs.txt",
+          "sha256": "c6d63fdbd2797276cb43fb773dc0cdd49f53d4501b5a74d13c2fe8956d79d0b0",
+          "bytes": 105
+        },
+        "raw.txt": {
+          "path": "vsr-2/vrfs.raw.txt",
+          "sha256": "1e40e0b63840cc7cab76cdb308d204f73ce4181d5cad1ce3d9b3cc465ddfca23",
+          "bytes": 142
+        }
+      }
+    },
+    {
+      "device": "vsr-2",
+      "host": "10.10.1.2",
+      "capability": "irf",
+      "command": "display irf",
+      "observed_at": "2026-10-04T16:20:52.787728+00:00",
+      "transport_status": "rejected_by_device",
+      "expected_status": "unsupported",
+      "files": {
+        "txt": {
+          "path": "vsr-2/irf.txt",
+          "sha256": "7fa3a3630d5314c85b22e84510b919e13cfe5f7404c238f5963349e17498d379",
+          "bytes": 64
+        },
+        "raw.txt": {
+          "path": "vsr-2/irf.raw.txt",
+          "sha256": "c28dfdccbdba82fb6ea5a2fc732c3b736bedabe93dca0de4cc287578bdaf1d21",
+          "bytes": 87
+        }
+      }
+    }
+  ]
+}

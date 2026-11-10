@@ -1,0 +1,20 @@
+Value Required MAC_ADDRESS ([0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4})
+Value Required VLAN_ID (\d+)
+Value PORT (\S+)
+Value TYPE (\S+)
+
+# One record per MAC entry learned in a VLAN (eNSP Pro CE6800, YunShan OS 1.25.1.1).
+# The VLAN/VSI/BD column reads "10/-/-"; an entry in a VSI or bridge domain is not
+# verified yet and is refused. The age is not modeled.
+Start
+  ^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d(?:\.\d+)?\s*$$
+  ^Flags: .*$$
+  ^\s+# - forwarding logical interface.*$$
+  ^\s+on the interface\.\s*$$
+  ^BD\s+: bridge-domain.*$$
+  ^-+\s*$$
+  ^MAC Address\s+VLAN/VSI/BD\s+Learned-From\s+Type\s+Age\s*$$
+  ^${MAC_ADDRESS}\*?\s+${VLAN_ID}/-/-\s+${PORT}\s+${TYPE}(?:\s+\d+|\s+-)?\s*$$ -> Record
+  ^Total items:\s*\d+\s*$$
+  ^\s*$$
+  ^. -> Error "unrecognized display mac-address line"

@@ -1,0 +1,29 @@
+Value Filldown PROCESS (\d+)
+Value Filldown ROUTER_ID (\d+\.\d+\.\d+\.\d+)
+Value Filldown AREA (\d+\.\d+\.\d+\.\d+)
+Value Filldown INTERFACE (\S+)
+Value Required NEIGHBOR_ID (\d+\.\d+\.\d+\.\d+)
+Value ADDRESS (\d+\.\d+\.\d+\.\d+)
+Value STATE (\S+)
+Value PRIORITY (\d+)
+Value ROLE (\S*)
+Value DEAD_TIME (\d+)
+
+# One record per OSPF neighbour (eNSP Pro AR6700 and USG6306F, YunShan OS 1.25.1.1):
+# process, router ID, area and local interface from the block headers. Huawei prints the
+# segment's DR and BDR, not the neighbour's role, so ROLE stays empty.
+Start
+  ^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d(?:\.\d+)?\s*$$
+  ^\(M\) Indicates MADJ neighbor\s*$$
+  ^\s*OSPF Process -> Continue.Record
+  ^\s*OSPF Process\s+${PROCESS}\s+with Router ID\s+${ROUTER_ID}\s*$$
+  ^\s*Area -> Continue.Record
+  ^\s*Area\s+${AREA}\s+interface\s+\S+\s+\(${INTERFACE}\)'s neighbors\s*$$
+  ^\s*Router ID: -> Continue.Record
+  ^\s*Router ID:\s*${NEIGHBOR_ID}\s+Address\s*:\s*${ADDRESS}\s*$$
+  ^\s*State\s*:\s*${STATE}\s+Mode\s*:.*Priority:\s*${PRIORITY}\s*$$
+  ^\s*DR\s*:.*$$
+  ^\s*Dead timer due \(in seconds\)\s*:\s*${DEAD_TIME}\s*$$
+  ^\s*(?:Retrans timer interval|Neighbor up time|Neighbor up time stamp|Authentication Sequence)\s*:.*$$
+  ^\s*$$
+  ^. -> Error "unrecognized display ospf peer line"

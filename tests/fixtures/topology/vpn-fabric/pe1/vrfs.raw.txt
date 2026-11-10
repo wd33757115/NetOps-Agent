@@ -1,0 +1,6 @@
+show vrf
+  Name                             Default RD            Protocols   Interfaces
+  CUST-A                           65200:1               ipv4        Et1/0
+  CUST-B                           65200:2               ipv4        Et1/1
+  MGMT                             <not set>             ipv4        Et0/0
+PE1#

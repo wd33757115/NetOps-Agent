@@ -1,0 +1,10 @@
+show running-config | include ip nat
+ ip nat outside
+ ip nat inside
+ ip nat inside
+ip nat pool P1 10.99.0.1 10.99.0.6 netmask 255.255.255.248
+ip nat inside source static 172.16.20.12 10.99.1.12
+ip nat inside source list NAT-P pool P1
+ip nat inside source list NAT-T interface Ethernet0/1 overload
+ip nat inside source static tcp 172.16.10.15 80 interface Ethernet0/1 8081
+CORE1#

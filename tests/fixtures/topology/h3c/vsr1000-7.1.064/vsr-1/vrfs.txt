@@ -1,0 +1,3 @@
+  Total VPN-Instances configured : 0
+  License limit : Y
+  Max VPN instances permitted by license : 8191

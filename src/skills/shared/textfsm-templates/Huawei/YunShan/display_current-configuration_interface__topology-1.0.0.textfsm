@@ -1,0 +1,19 @@
+Value Required INTERFACE (\S+)
+Value VRF (\S+)
+Value List ADDRESSES (\S+ \d+\.\d+\.\d+\.\d+)
+
+# Interface addresses and their VPN instance, from the interface configuration (eNSP Pro
+# AR6700, USG6306F and CE6800, YunShan OS 1.25.1.1). "display ip interface brief" cuts a
+# long VPN-instance name short ("_management..."), so the configuration is read instead.
+# Each address is "address mask" (sub: a secondary). Other lines are not modeled.
+Start
+  ^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d(?:\.\d+)?\s*$$
+  ^interface\s+${INTERFACE}\s*$$
+  ^\s+ip binding vpn-instance\s+${VRF}\s*$$
+  ^\s+ip address\s+${ADDRESSES}(?:\s+sub)?\s*$$
+  ^\s+ip address\s+(?:unnumbered|dhcp-alloc).* -> Error "address form not verified"
+  ^#\s*$$ -> Record
+  ^return\s*$$ -> Record
+  ^\s+\S.*$$
+  ^\s*$$
+  ^. -> Error "unrecognized interface configuration line"

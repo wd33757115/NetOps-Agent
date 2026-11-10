@@ -1,0 +1,1 @@
+MAC Address      VLAN ID    State            Port/Nickname            Aging

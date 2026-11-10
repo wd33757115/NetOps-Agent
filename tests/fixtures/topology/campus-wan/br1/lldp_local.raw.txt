@@ -1,0 +1,187 @@
+display lldp local-information
+Global LLDP local-information:
+ Chassis ID          : 7425-8ae4-03f3
+ System name         : BR1
+ System description  : 
+   H3C Comware Platform Software, Software Version 7.1.064, Release 1362P12
+   H3C VSR1000
+   Copyright (c) 2004-2023 New H3C Technologies Co., Ltd. All rights reserved.
+ System capabilities supported : Bridge, Router, Customer Bridge, Service Bridge
+ System capabilities enabled   : Bridge, Router, Customer Bridge
+
+ MED information:
+ Device class               : Connectivity device
+ MED inventory information of master board:
+ HardwareRev                : Unknown
+ FirmwareRev                : 1.18
+ SoftwareRev                : 7.1.064 Release 1362P12
+ SerialNum                  : 0cb1000000009e6126100215
+ Manufacturer name          : H3C
+ Model name                 : VSR1000
+ Asset tracking identifier  : Unknown
+
+LLDP local-information of port 33[GigabitEthernet2/0]:
+ Port ID type        : Interface name
+ Port ID             : GigabitEthernet2/0
+ Port description    : to ISP e0/1
+ LLDP agent nearest-bridge management address:
+ Management address type           : IPv4
+ Management address                : 100.64.1.2
+ Management address interface type : IfIndex
+ Management address interface ID   : 33
+ Management address OID            : 0
+ LLDP agent nearest-nontpmr management address:
+ Management address type           : IPv4
+ Management address                : 100.64.1.2
+ Management address interface type : IfIndex
+ Management address interface ID   : 33
+ Management address OID            : 0
+ LLDP agent nearest-customer management address:
+ Management address type           : IPv4
+ Management address                : 100.64.1.2
+ Management address interface type : IfIndex
+ Management address interface ID   : 33
+ Management address OID            : 0
+ Link aggregation supported : Yes
+ Link aggregation enabled   : No
+ Aggregation port ID        : 0
+ Auto-negotiation supported : Yes
+ Auto-negotiation enabled   : Yes
+ OperMau                    : Speed(1000)/Duplex(Full)
+ Power port class           : PD
+ PSE power supported        : No
+ PSE power enabled          : No
+ PSE pairs control ability  : No
+ Power pairs                : Signal
+ Port power classification  : Class 0
+ Maximum frame size         : 16384
+ Transmit Tw                : 0 us 
+ Receive Tw                 : 0 us 
+ Fallback Tw                : 0 us 
+ Echo Transmit Tw           : 0 us 
+ Echo Receive Tw            : 0 us 
+
+LLDP local-information of port 49[GigabitEthernet3/0]:
+ Port ID type        : Interface name
+ Port ID             : GigabitEthernet3/0
+ Port description    : to CORE1 e0/1
+ LLDP agent nearest-bridge management address:
+ Management address type           : IPv4
+ Management address                : 10.0.13.1
+ Management address interface type : IfIndex
+ Management address interface ID   : 49
+ Management address OID            : 0
+ LLDP agent nearest-nontpmr management address:
+ Management address type           : IPv4
+ Management address                : 10.0.13.1
+ Management address interface type : IfIndex
+ Management address interface ID   : 49
+ Management address OID            : 0
+ LLDP agent nearest-customer management address:
+ Management address type           : IPv4
+ Management address                : 10.0.13.1
+ Management address interface type : IfIndex
+ Management address interface ID   : 49
+ Management address OID            : 0
+ Link aggregation supported : Yes
+ Link aggregation enabled   : No
+ Aggregation port ID        : 0
+ Auto-negotiation supported : Yes
+ Auto-negotiation enabled   : Yes
+ OperMau                    : Speed(1000)/Duplex(Full)
+ Power port class           : PD
+ PSE power supported        : No
+ PSE power enabled          : No
+ PSE pairs control ability  : No
+ Power pairs                : Signal
+ Port power classification  : Class 0
+ Maximum frame size         : 16384
+ Transmit Tw                : 0 us 
+ Receive Tw                 : 0 us 
+ Fallback Tw                : 0 us 
+ Echo Transmit Tw           : 0 us 
+ Echo Receive Tw            : 0 us 
+
+LLDP local-information of port 65[GigabitEthernet4/0]:
+ Port ID type        : Interface name
+ Port ID             : GigabitEthernet4/0
+ Port description    : to CORE2 e0/2
+ LLDP agent nearest-bridge management address:
+ Management address type           : IPv4
+ Management address                : 10.0.14.1
+ Management address interface type : IfIndex
+ Management address interface ID   : 65
+ Management address OID            : 0
+ LLDP agent nearest-nontpmr management address:
+ Management address type           : IPv4
+ Management address                : 10.0.14.1
+ Management address interface type : IfIndex
+ Management address interface ID   : 65
+ Management address OID            : 0
+ LLDP agent nearest-customer management address:
+ Management address type           : IPv4
+ Management address                : 10.0.14.1
+ Management address interface type : IfIndex
+ Management address interface ID   : 65
+ Management address OID            : 0
+ Link aggregation supported : Yes
+ Link aggregation enabled   : No
+ Aggregation port ID        : 0
+ Auto-negotiation supported : Yes
+ Auto-negotiation enabled   : Yes
+ OperMau                    : Speed(1000)/Duplex(Full)
+ Power port class           : PD
+ PSE power supported        : No
+ PSE power enabled          : No
+ PSE pairs control ability  : No
+ Power pairs                : Signal
+ Port power classification  : Class 0
+ Maximum frame size         : 16384
+ Transmit Tw                : 0 us 
+ Receive Tw                 : 0 us 
+ Fallback Tw                : 0 us 
+ Echo Transmit Tw           : 0 us 
+ Echo Receive Tw            : 0 us 
+
+LLDP local-information of port 81[GigabitEthernet5/0]:
+ Port ID type        : Interface name
+ Port ID             : GigabitEthernet5/0
+ Port description    : to BR2 GE5/0
+ LLDP agent nearest-bridge management address:
+ Management address type           : IPv4
+ Management address                : 10.0.12.1
+ Management address interface type : IfIndex
+ Management address interface ID   : 81
+ Management address OID            : 0
+ LLDP agent nearest-nontpmr management address:
+ Management address type           : IPv4
+ Management address                : 10.0.12.1
+ Management address interface type : IfIndex
+ Management address interface ID   : 81
+ Management address OID            : 0
+ LLDP agent nearest-customer management address:
+ Management address type           : IPv4
+ Management address                : 10.0.12.1
+ Management address interface type : IfIndex
+ Management address interface ID   : 81
+ Management address OID            : 0
+ Link aggregation supported : Yes
+ Link aggregation enabled   : No
+ Aggregation port ID        : 0
+ Auto-negotiation supported : Yes
+ Auto-negotiation enabled   : Yes
+ OperMau                    : Speed(1000)/Duplex(Full)
+ Power port class           : PD
+ PSE power supported        : No
+ PSE power enabled          : No
+ PSE pairs control ability  : No
+ Power pairs                : Signal
+ Port power classification  : Class 0
+ Maximum frame size         : 16384
+ Transmit Tw                : 0 us 
+ Receive Tw                 : 0 us 
+ Fallback Tw                : 0 us 
+ Echo Transmit Tw           : 0 us 
+ Echo Receive Tw            : 0 us 
+
+<BR1>

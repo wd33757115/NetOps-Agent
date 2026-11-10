@@ -1,0 +1,29 @@
+Flags: D - Dynamic   B - BGP      L - Local active
+       G - Gateway   S - Static   M - Mapping        I - Invalid
+       E - Multihoming ES sync    F - Leaf
+
+VSI name: RED
+ MAC address    : 0050-7966-680e
+  Link ID/Name  : 0x0
+  Flags         : DL
+  Encap         : VXLAN
+  Next hop      : -
+  Color         : -
+  Color-Only    : -
+
+ MAC address    : 0050-7966-680c
+  Link ID/Name  : -
+  Flags         : B
+  Encap         : 
+  Next hop      : 10.255.10.11
+  Color         : -
+  Color-Only    : -
+
+VSI name: BLUE-20
+ MAC address    : 0050-7966-6809
+  Link ID/Name  : 0x0
+  Flags         : DL
+  Encap         : VXLAN
+  Next hop      : -
+  Color         : -
+  Color-Only    : -

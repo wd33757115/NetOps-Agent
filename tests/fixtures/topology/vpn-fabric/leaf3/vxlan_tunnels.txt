@@ -1,0 +1,9 @@
+Total number of VXLANs: 3
+
+VXLAN ID: 10010, VSI name: RED, Total tunnels: 1 (1 up, 0 down, 0 defect, 0 blocked)
+  Tunnel name          Link ID    State    Type        Flood Proxy  Split horizon
+  Tunnel0              0x5000000  UP       Auto        Disabled     Enabled
+
+VXLAN ID: 10021, VSI name: BLUE-20
+
+VXLAN ID: 50020, VSI name: Auto_L3VNI50020_920

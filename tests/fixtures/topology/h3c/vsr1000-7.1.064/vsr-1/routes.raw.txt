@@ -1,0 +1,24 @@
+display ip routing-table
+
+Destinations : 18	Routes : 18
+
+Destination/Mask   Proto   Pre Cost        NextHop         Interface
+0.0.0.0/32         Direct  0   0           127.0.0.1       InLoop0
+1.1.1.0/24         O_INTRA 10  2           2.2.2.1         GE2/0
+2.2.2.0/24         Direct  0   0           2.2.2.2         GE2/0
+2.2.2.2/32         Direct  0   0           127.0.0.1       InLoop0
+2.2.2.255/32       Direct  0   0           2.2.2.2         GE2/0
+4.4.4.4/32         Direct  0   0           127.0.0.1       InLoop0
+10.10.1.0/24       Direct  0   0           10.10.1.1       GE1/0
+10.10.1.1/32       Direct  0   0           127.0.0.1       InLoop0
+10.10.1.255/32     Direct  0   0           10.10.1.1       GE1/0
+127.0.0.0/8        Direct  0   0           127.0.0.1       InLoop0
+127.0.0.1/32       Direct  0   0           127.0.0.1       InLoop0
+127.255.255.255/32 Direct  0   0           127.0.0.1       InLoop0
+192.168.1.0/24     Direct  0   0           192.168.1.1     Vlan200
+192.168.1.1/32     Direct  0   0           127.0.0.1       InLoop0
+192.168.1.255/32   Direct  0   0           192.168.1.1     Vlan200
+224.0.0.0/4        Direct  0   0           0.0.0.0         NULL0
+224.0.0.0/24       Direct  0   0           0.0.0.0         NULL0
+255.255.255.255/32 Direct  0   0           127.0.0.1       InLoop0
+<H3C>

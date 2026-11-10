@@ -1,0 +1,2 @@
+# Additional validator for the frozen IETF export acceptance test.
+yangson==1.6.3

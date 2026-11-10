@@ -1,0 +1,52 @@
+display lldp neighbor-information verbose
+LLDP neighbor-information of port 33[GigabitEthernet2/0]:
+LLDP agent nearest-bridge:
+ LLDP neighbor index : 1
+ Update time         : 0 days, 0 hours, 2 minutes, 56 seconds
+ Chassis type        : MAC address
+ Chassis ID          : aabb-cc00-0100
+ Port ID type        : Interface name
+ Port ID             : Et0/3
+ Time to live        : 120
+ Port description    : to LEAF3 GE2/0
+ System name         : SPINE1.lab.local
+ System description  : 
+   Cisco IOS Software [IOSXE], Linux Software (X86_64BI_LINUX-ADVENTERPRISEK9-M)
+   , Version 17.15.1, RELEASE SOFTWARE (fc4)
+   Technical Support: http://www.cisco.com/techsupport
+   Copyright (c) 1986-2024 by Cisco Systems, Inc.
+   Compiled Sun 11-Aug-24 22:07 by mcpre
+ System capabilities supported : Bridge, Router
+ System capabilities enabled   : Router
+ Management address type           : IPv4
+ Management address                : 10.10.13.1
+ Management address interface type : IfIndex
+ Management address interface ID   : 4
+ Management address OID            : 0
+
+LLDP neighbor-information of port 49[GigabitEthernet3/0]:
+LLDP agent nearest-bridge:
+ LLDP neighbor index : 1
+ Update time         : 0 days, 0 hours, 2 minutes, 57 seconds
+ Chassis type        : MAC address
+ Chassis ID          : aabb-cc00-0200
+ Port ID type        : Interface name
+ Port ID             : Et0/3
+ Time to live        : 120
+ Port description    : to LEAF3 GE3/0
+ System name         : SPINE2.lab.local
+ System description  : 
+   Cisco IOS Software [IOSXE], Linux Software (X86_64BI_LINUX-ADVENTERPRISEK9-M)
+   , Version 17.15.1, RELEASE SOFTWARE (fc4)
+   Technical Support: http://www.cisco.com/techsupport
+   Copyright (c) 1986-2024 by Cisco Systems, Inc.
+   Compiled Sun 11-Aug-24 22:07 by mcpre
+ System capabilities supported : Bridge, Router
+ System capabilities enabled   : Router
+ Management address type           : IPv4
+ Management address                : 10.10.23.1
+ Management address interface type : IfIndex
+ Management address interface ID   : 4
+ Management address OID            : 0
+
+<LEAF3>

@@ -1,0 +1,4 @@
+show mpls forwarding-table
+no MPLS apps enabled or MPLS not enabled on any interfaces
+
+SPINE2#

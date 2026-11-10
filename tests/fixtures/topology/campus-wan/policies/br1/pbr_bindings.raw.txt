@@ -1,0 +1,4 @@
+display ip policy-based-route setup
+Policy name              Type     Interface 
+PBR-TEST                 Forward  GigabitEthernet3/0
+<BR1>

@@ -1,0 +1,35 @@
+show l2vpn evpn evi detail
+EVPN instance:       10 (VLAN Based)
+  RD:                10.255.10.11:10 (auto)
+  Import-RTs:        65100:10010 65100:10 
+  Export-RTs:        65100:10010 65100:10 
+  Per-EVI Label:     none
+  State:             Established
+  Replication Type:  Ingress (global)
+  Encapsulation:     vxlan
+  IP Local Learn:    Enabled (global)
+  Adv. Def. Gateway: Disabled (global)
+  Re-originate RT5:  Disabled
+  Adv. Multicast:    Disabled (global)
+  AR Flood Suppress: Enabled (global)
+  Vlan:              10
+    Protected:       False
+    Ethernet-Tag:    0
+    State:           Established
+    Flood Suppress:  Attached
+    Core If:         
+    Access If:       
+    NVE If:          nve1
+    RMAC:            0000.0000.0000
+    Core Vlan:       0
+    L2 VNI:          10010
+    L3 VNI:          0
+    VTEP IP:         10.255.10.11
+    Pseudoports:
+      Ethernet1/0 service instance 10
+        Routes: 1 MAC, 1 MAC/IP
+    Peers:
+      10.255.10.13
+        Routes: 1 MAC, 0 MAC/IP, 1 IMET, 0 EAD
+
+LEAF1#

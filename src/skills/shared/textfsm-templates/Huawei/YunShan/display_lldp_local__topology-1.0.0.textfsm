@@ -1,0 +1,32 @@
+Value CHASSIS_ID (\S+)
+Value SYSTEM_NAME (.*?)
+Value List SYSTEM_DESCRIPTION (.*?)
+
+# The local LLDP identity, from the "System information" section (eNSP Pro AR6700,
+# USG6306F and CE6800, YunShan OS 1.25.1.1); one record. The system description goes on
+# over unindented lines until a blank one. The management address is global, not a
+# port's, and is not modeled; later sections are not read.
+Start
+  ^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d(?:\.\d+)?\s*$$
+  ^System information\s*$$ -> System
+  ^\s*$$
+  ^. -> Error "unrecognized display lldp local line"
+
+System
+  ^-+\s*$$
+  ^Chassis type\s*:.*$$
+  ^Chassis ID\s*:\s*${CHASSIS_ID}\s*$$
+  ^System name\s*:\s*${SYSTEM_NAME}\s*$$
+  ^System description\s*:\s*${SYSTEM_DESCRIPTION}\s*$$ -> Description
+  ^System capabilities (?:supported|enabled)\s*:.*$$
+  ^LLDP Up time\s*:.*$$
+  ^System configuration\s*$$ -> Done
+  ^\s*$$
+  ^. -> Error "unrecognized LLDP system line"
+
+Description
+  ^\s*$$ -> System
+  ^${SYSTEM_DESCRIPTION}\s*$$
+
+Done
+  ^.*$$

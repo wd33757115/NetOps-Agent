@@ -1,0 +1,12 @@
+Value OS_VERSION (.+?)
+Value MODEL (\S+)
+
+# The identity lines of "display version" (eNSP Pro AR6700, USG6306F and CE6800, YunShan
+# OS 1.25.1.1); one record. AR and USG print "Version" on a line of its own, CE after
+# "YunShan OS,". The uptime line names the model as far as the device knows it (an AR
+# says only "AR"). Other lines carry nothing modeled.
+Start
+  ^.*?\bYunShan OS,\s+Version\s+${OS_VERSION}\s*$$
+  ^Version\s+${OS_VERSION}\s*$$
+  ^\s*HUAWEI\s+${MODEL}\s+uptime is\b.*$$
+  ^.*$$

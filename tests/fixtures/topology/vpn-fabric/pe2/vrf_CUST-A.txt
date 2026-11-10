@@ -1,0 +1,32 @@
+  VPN-Instance Name and Index : CUST-A, 1
+  Route Distinguisher : 65200:11
+  Interfaces : GigabitEthernet3/0
+  TTL mode: pipe
+   Diffserv-mode information: pipe be
+  Address-family IPv4:
+   Export VPN Targets :
+       65200:1
+   Import VPN Targets :
+       65200:1 65200:99
+   Apply Label Type : Per-nexthop
+  Address-family IPv6:
+   Export VPN Targets :
+       65200:1
+   Import VPN Targets :
+       65200:1 65200:99
+   Apply Label Type : Per-nexthop
+  Address-family IPv4 Flowspec:
+   Export VPN Targets :
+       65200:1
+   Import VPN Targets :
+       65200:1 65200:99
+  Address-family IPv6 Flowspec:
+   Export VPN Targets :
+       65200:1
+   Import VPN Targets :
+       65200:1 65200:99
+  Address-family EVPN:
+   Export VPN Targets :
+       65200:1
+   Import VPN Targets :
+       65200:1 65200:99

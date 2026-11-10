@@ -1,0 +1,27 @@
+Value Required IP_ADDRESS (\d+\.\d+\.\d+\.\d+)
+Value MAC_ADDRESS ([0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4})
+Value AGE (\d+)
+Value TYPE (D|S)
+Value VLAN_ID (\d+)
+Value INTERFACE (\S+)
+Value VRF (\S+)
+
+# One record per neighbour entry of every instance (eNSP Pro AR6700, USG6306F and CE6800,
+# YunShan OS 1.25.1.1). EXP(M) is in minutes. An "I" (interface) entry is the device's own
+# address, not a neighbour, and is skipped. TYPE/VLAN reads "D/10" for an entry learned on
+# a VLAN; an empty VPN-INSTANCE column is the public instance.
+Start
+  ^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d(?:\.\d+)?\s*$$
+  ^ARP Entry Types:.*$$
+  ^EXP: Expire-time.*$$
+  ^IP ADDRESS\s+MAC ADDRESS\s+EXP\(M\)\s+TYPE/VLAN\s+INTERFACE\s+VPN-INSTANCE\s*$$
+  # The AR prints EXPIRE(M) and TYPE apart, the type followed by its slot ("D-0").
+  ^IP ADDRESS\s+MAC ADDRESS\s+EXPIRE\(M\)\s+TYPE\s+INTERFACE\s+VPN-INSTANCE\s*$$
+  ^\s+VLAN/CEVLAN\s*$$
+  ^-+\s*$$
+  ^\S+\s+\S+\s+I(?:\s+-)?\s+\S+.*$$
+  ^${IP_ADDRESS}\s+${MAC_ADDRESS}\s+(?:${AGE}\s+)?${TYPE}(?:/${VLAN_ID}|-\d+)?\s+${INTERFACE}(?:\s+${VRF})?\s*$$ -> Record
+  ^Total:\d+.*$$
+  ^Redirect:\d+\s*$$
+  ^\s*$$
+  ^. -> Error "unrecognized display arp line"

@@ -1,0 +1,2 @@
+Policy name              Type     Interface 
+PBR-TEST                 Forward  GigabitEthernet3/0

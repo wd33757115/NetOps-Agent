@@ -1,0 +1,2 @@
+display l2vpn vsi verbose
+<PE2>
