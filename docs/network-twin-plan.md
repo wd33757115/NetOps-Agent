@@ -15,17 +15,16 @@
 
 ## 2. 本轮方向（负责人 2026-11-11）
 
-1. **只建模影响转发路径的东西。** 接口和状态、地址、ARP、二层（VLAN、聚合、MAC、子接口封装）、VPN 实例、路由表、策略路由、路由协议邻接（作为路由来源的证据）。
-2. **NETCONF 优先。** 先做 NETCONF 采集，以及 NETCONF 数据到标准树的映射，然后让路径计算接入标准树。
+1. **只建模影响转发路径的东西。** 接口和状态、地址、ARP、二层（VLAN、聚合、MAC、子接口封装）、VPN 实例、路由表、策略路由、**ACL**（丢包）、**NAT**（改地址，决定回程怎么回），以及路由协议邻接（作为路由来源的证据）。
+2. **NETCONF 优先。** 先做 NETCONF 采集和 NETCONF 数据到标准树的映射，NAT 模型同期做，然后让路径计算接入标准树。
 3. **往后放的：**
    - CLI 的 TextFSM 模板；
-   - NAT 模型；
-   - 防火墙安全策略模型。策略的影响由人或助手登录设备查看，不进孪生的路径计算。
+   - 防火墙安全策略模型（按区域的 security-policy）。它的影响由人或助手登录设备查看，不进孪生的路径计算。
 4. **查询表可以带标准树放不下的事实。** 标准树继续作为命名依据和导出格式，查询表里放不下的部分放在 `non_standard` 下并写明来源，不再因为标准树放不下就把结论降为"判断不了"。
 
 明确不做：控制面仿真（"断一条链路后流量怎么走"）；M6 的 TE、SR、光、多播等领域。
 
-已有的 ACL 计算、NAT 计算、策略路由计算保持现状，不再扩展。
+ACL、NAT、策略路由的路径计算已经有了：ACL 和策略路由读标准树，NAT 读事实。本轮要让 NAT 也走标准树，并且三者都接上 NETCONF 来源。
 
 ## 3. 不变的原则
 
@@ -88,7 +87,9 @@
   4. `route`：公网和各 VPN 实例，每个下一跳一行；协议代码逐个对照 CLI 的 `display ip routing-table` 确认；
   5. `lldp-neighbor`；
   6. 二层：VLAN 与端口成员、端口模式和 PVID、聚合与成员状态、MAC 表。转换层目前没有这些表，表名按对应 IEEE 模型的列表名起（802.1Q bridge 的 VLAN 和 FDB、802.1AX 的聚合）。标准树放不下的（如 M3 记录过的"桥名或键缺证据"）按第 4 节放进 `non_standard`；
-  7. `ospf-*`：邻居作为 OSPF 路由的证据。
+  7. `ospf-*`：邻居作为 OSPF 路由的证据；
+  8. `acl-*`：ACL 规则和接口绑定（AR 的 `traffic-filter`、CE 的 ACL），表名和字段照 H3C 映射里已有的 `acl-*` 表；
+  9. NAT：USG 的 `nat-policy` 规则（源区域、目的区域、源地址、目的地址、服务、动作）、地址池（`nat address-group`）、静态映射（`nat server`）；AR 的接口 NAT（`nat outbound`）。转换层目前没有 NAT 表，表名按 RFC 8512 的列表起。
 - 设备给的代码，映射里没列的，原样报告，不猜。CLI 的输出可以拿来对照代码的含义；样本在 `.runtime/ensp/capture/`，每台设备一个目录。
 - 测试：回包放进 `tests/fixtures/netconf/huawei-yunshan/`（先确认里面没有口令或密文），每张表一个用例，覆盖代码不认识、查表落空、表为空三种情况。现有 H3C 的测试见 `tests/unit/test_netconf_standard.py`、`test_netconf_api_mapping.py`。
 
@@ -96,21 +97,24 @@
 
 ### C. 标准树与路径计算接入
 
-1. **建树**：`standard_trees.py` 补二层：VLAN、端口成员、聚合、FDB，以及子接口封装。可选模型有 `ietf-if-extensions` 和 `ietf-if-vlan-encapsulation`（草案，固定版本采用）。放不下的进 `non_standard`。用钉住的模块校验。
-2. **查询表**：给二层和子接口各出一张查询表（做法同 `route_table.py`、`acl_table.py`：只从树和 `non_standard` 取，字段用标准节点名）。
-3. **路径计算**：目前只有路由、接口、地址、ARP、LLDP 是从标准记录取的。把二层转发（`l2_forwarding.py`）也改为读查询表，让路径能回答：
-   - 网关子接口的 VLAN 在下联聚合上放不放行；
-   - 聚合成员有几个在工作；
-   - 终端的 MAC 学在哪个端口。
-   
-   原来走 CLI 事实的设备（思科、H3C 的 CLI 采集）行为不能变：用现有夹具测试守住，改前改后同一份样本的路径结论一致。
+1. **建树**：
+   - `standard_trees.py` 补二层：VLAN、端口成员、聚合、FDB，以及子接口封装。可选模型有 `ietf-if-extensions` 和 `ietf-if-vlan-encapsulation`（草案，固定版本采用）。
+   - NAT 导出 RFC 8512（`ietf-nat`，模块已在 `src/apps/topology/resources/yang/`）。设备不打印的编号键（实例号、策略号、池号、映射条目序号）按设备列出的顺序推出，在 metadata 的 `derived_keys` 写明是推出的，做法同已有的 RIB 名、ACL 端口集名、PBR sequence-id。`nat-policy` 的源区域、目的区域在 RFC 8512 里没有位置，放进 `non_standard`，由 `display zone` 的区域成员换算成接口。现有的 `nat_section` 只覆盖 H3C 的部分情况，要扩展。
+   - ACL：已经走 RFC 8519 + RFC 9899 的树。时间段、分片、不连续通配符按第 4 节放进 `non_standard`，恢复成能判定。
+   - 放不下的都进 `non_standard`，用钉住的模块校验。
+2. **查询表**：二层、子接口、NAT 各出一张查询表（做法同 `route_table.py`、`acl_table.py`：只从树和 `non_standard` 取，字段用标准节点名）。
+3. **路径计算**：目前路由、接口、地址、ARP、LLDP、ACL、策略路由已从标准记录或树取，NAT 和二层还读事实。
+   - 二层转发（`l2_forwarding.py`）改为读查询表，让路径能回答：网关子接口的 VLAN 在下联聚合上放不放行；聚合成员有几个在工作；终端的 MAC 学在哪个端口。
+   - NAT（`model/nat.py`）改为读 NAT 查询表。按区域的 NAT 策略在每一跳上：入接口确定源区域，查路由确定出接口和目的区域，再匹配规则。目的 NAT、源 NAT 与路由的先后，要在实验网用命中次数实测，写成家族数据。回程按去程的转换还原（现有做法）。
+   - 原来走 CLI 事实的设备（思科、H3C 的 CLI 采集）行为不能变：用现有夹具测试守住，改前改后同一份样本的路径结论一致。
 4. **设备识别与采集**：YunShan 已能识别（`collectors/signatures.yaml`）。NETCONF 采集要能在没有 CLI 采集档案、没有华为 CLI 模板的情况下单独完成一台设备。看清 `collectors/netconf.py` 现在怎么依赖 CLI 档案，必要时补一个只有 NETCONF 的采集方式。
 5. 提升 `topology`、`netconf-api` 的 `app.yaml` 版本号，按记忆里的"App package upgrade procedure"部署，在平台上对实验网做发现。
 
 完成标准：平台对实验网的发现全部经 NETCONF 完成；快照里有 4 条业务链路、聚合、两个 VLAN、子接口、OSPF 邻接和三张路由表；以下路径结论正确：
 - 客户端 10.1.10.10 到服务器 10.1.20.10：PC → CE-1 VLAN 10 → Eth-Trunk1 → USG Eth-Trunk1.10 → 查路由 → Eth-Trunk1.20 → Eth-Trunk1 → CE-1 VLAN 20 → 服务器；
-- 客户端到 203.0.113.1：经 USG GE0/0/0 的 OSPF 路由到 AR-1；
-- 路径经过 USG 时注明：它是按区域做策略的防火墙，策略不在孪生里计算，需要登录查看。
+- 客户端到 203.0.113.1：经 USG GE0/0/0 的 OSPF 路由到 AR-1，在 USG 出接口做源 NAT，源地址变为 10.0.12.2；回程从 AR-1 回到 10.0.12.2，在 USG 还原；
+- 服务器到 203.0.113.1：没有匹配的 NAT 规则，回程在 AR-1 没有到 10.1.20.0/24 的路由；
+- 路径经过 USG 时注明：它是按区域做安全策略的防火墙，安全策略不在孪生里计算，需要登录查看。
 
 ### D. 诊断评测集
 
@@ -122,7 +126,6 @@
   - 原因：一登记，规则治理就会对所有 VRP 设备发布这些实现，老 VRP 的输出格式会被拒收（2026-11-11 实测，`test_topology_generic_parsers.py` 有 6 个用例因此失败）。
   - 以后登记时，要把实现限定在 YunShan 上（用型号或版本匹配），或者写一个 YunShan 自己的家族。
   - 采样时踩过的坑：USG 每条命令的输出前多一行时间戳；同一系统版本下 AR 的 `display arp` 表头与 USG、CE 不同；`display ip interface brief` 会把长的 VPN 实例名截断。
-- NAT 标准树（RFC 8512；编号键按设备匹配顺序推出，在 metadata 写明）。
 - 安全策略模型（IETF 对应的是 I2NSF NSF-Facing Interface 草案 -29，2022 年起卡在 RFC 编辑队列；其中没有安全区域条件，也没有入接口、出接口条件）。
 - 路径每一跳挂巡检异常和变更；快照对比。
 
@@ -138,7 +141,11 @@ GNS3 暂停使用。三台设备都是 YunShan OS 1.25.1.1，用户名 admin，�
 | PC-CLIENT-1 | — | — | 10.1.10.10/24，网关 10.1.10.1，接 CE-1 GE1/0/3 |
 | PC-SERVER-1 | — | — | 10.1.20.10/24，网关 10.1.20.1，HTTP 80，接 CE-1 GE1/0/4 |
 
-USG 上的策略（孪生不计算，这里只作背景）：安全策略 `client-to-web`、`client-to-internet`、`ospf`，缺省拒绝；NAT 策略 `client-easy-ip`。USG 不把内网网段发布进 OSPF，所以客户端上网靠 NAT。
+USG 上的安全策略（孪生不计算，只作背景）：`client-to-web`、`client-to-internet`、`ospf`，缺省拒绝。
+
+NAT 策略（孪生计算）：`client-easy-ip`，trust→untrust，源 10.1.10.0/24，easy-ip。USG 不把内网网段发布进 OSPF，所以客户端上网靠 NAT。
+
+ACL：目前三台设备都没有配。评测集要用时再加（见故障集 F8）。
 
 基线（2026-11-10 已核实）：
 - LLDP 两端都能看到 4 条业务链路；
@@ -148,7 +155,7 @@ USG 上的策略（孪生不计算，这里只作背景）：安全策略 `clien
 
 未核实：从 PC 发起的访问。USG ping 两台 PC 没有回应，但 USG 上有 ICMP 会话，疑似 PC 不回 ping。
 
-故障集（只列影响转发路径的；每次只改一处，改完恢复）：
+故障集（影响转发路径的；每次只改一处，改完恢复）：
 
 | # | 操作 | 孪生应给出的结论 |
 |---|---|---|
@@ -159,6 +166,9 @@ USG 上的策略（孪生不计算，这里只作背景）：安全策略 `clien
 | F5 | CE-1 GE1/0/4 改到 VLAN 30 | 服务器的 MAC 不在 VLAN 20，网关的 ARP 解析不到 |
 | F6 | 服务器网关配错 | 去程到达服务器；孪生看不到主机网关，结论要说明停在哪 |
 | F7 | 服务器地址改到客户端网段 | 地址与所在 VLAN 的网关网段不符 |
+| F8 | AR-1 GE0/0/0 入方向加 ACL，拒绝源 10.0.12.2 的 ICMP | 客户端 ping 203.0.113.1 在 AR-1 入接口被拒（报文已被 USG 转换成 10.0.12.2），指出 ACL 名和规则 |
+| F9 | USG 删除 NAT 策略 `client-easy-ip` | 去程到达 AR-1；回程在 AR-1 没有到 10.1.10.0/24 的路由 |
+| F10 | USG 的 `client-easy-ip` 源地址改成 10.1.30.0/24 | 客户端的报文不再被转换，结论同 F9，并指出规则存在但不匹配 |
 
 本机 `.runtime/ensp/`（不入库）：三台设备的配置文件、只读采集脚本 `ensp_read.py`、下发脚本 `ensp_config.py`、全部 CLI 实采样本 `capture/`、更早的 `实验设计.md`。
 
@@ -183,4 +193,4 @@ USG 上的策略（孪生不计算，这里只作背景）：安全策略 `clien
 
 | 日期 | 工作包 | 状态 | 孪生层 | AI 层 |
 |---|---|---|---|---|
-| 2026-11-11 | — | 方向修订；测试和夹具取回；华为 CLI 模板写好但不登记（往后放） | 未测 | 未测 |
+| 2026-11-11 | — | 方向修订（NAT、ACL 在范围内，往后放的只有安全策略和 CLI 模板）；测试和夹具取回；华为 CLI 模板写好但不登记 | 未测 | 未测 |
