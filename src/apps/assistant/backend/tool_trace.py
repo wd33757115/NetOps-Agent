@@ -1,6 +1,7 @@
 """Bounded, redacted tool operations and result previews; never model reasoning."""
 
 import json
+import os
 import re
 from pathlib import Path
 
@@ -30,6 +31,9 @@ BUSINESS_FIELDS = {
     "commands",
     "skill",
     "workflow",
+    "docset_id",
+    "page",
+    "figure",
 }
 
 
@@ -58,7 +62,8 @@ def operation(root, name, arguments):
             continue
         if key in {"path", "file_path"}:
             try:
-                resolved = (root / value).resolve()
+                # Normalize without following links: a doc set is linked into the workspace.
+                resolved = Path(os.path.abspath(root / value))
                 value = resolved.relative_to(root).as_posix()
             except (ValueError, TypeError, OSError):
                 value = "[资料范围外路径]"

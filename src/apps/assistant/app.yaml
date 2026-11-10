@@ -1,11 +1,11 @@
 manifest_version: 1
 id: assistant
 name: 知识问答
-version: 0.10.1
+version: 0.13.0
 platform_api: '>=1.0,<2.0'
 icon: document
 dependencies:
-  materials: '>=1.0,<2.0'
+  materials: '>=1.6,<2.0'
 backend:
   router: src.apps.assistant.backend.api:router
 agent:

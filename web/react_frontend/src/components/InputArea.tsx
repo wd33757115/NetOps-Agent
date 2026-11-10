@@ -1,13 +1,14 @@
 // SPDX-FileCopyrightText: 2026 wangdong <wangdong5919@163.com>
 // SPDX-License-Identifier: Apache-2.0
 
-import React, { useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { Input, message } from 'antd'
 import { ArrowUpOutlined, CloseOutlined, LoadingOutlined, PlusOutlined } from '@ant-design/icons'
 import { useChatStore } from '../store/useChatStore'
 import { api } from '../config/api'
 import { useIsMobile } from '../hooks/useBreakpoint'
 import ModelSettings from './ModelSettings'
+import DocsetPicker from './DocsetPicker'
 import AttachmentIcon from './AttachmentIcon'
 
 const { TextArea } = Input
@@ -24,7 +25,7 @@ export const formatSize = (bytes: number) =>
   bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`
 
 interface InputAreaProps {
-  onSend: (text: string, attachments: ChatAttachment[]) => void
+  onSend: (text: string, attachments: ChatAttachment[], docsets: string[]) => void
   loading: boolean
   compact?: boolean
   allowUpload?: boolean
@@ -37,12 +38,15 @@ const InputArea: React.FC<InputAreaProps> = ({ onSend, loading, compact, allowUp
   const [files, setFiles] = useState<Pending[]>([])
   const picker = useRef<HTMLInputElement>(null)
   const { currentConversationId } = useChatStore()
+  // Doc sets chosen for this conversation; kept across its questions.
+  const [docsets, setDocsets] = useState<string[]>([])
+  useEffect(() => { setDocsets([]) }, [currentConversationId])
   const uploading = files.some(file => file.status === 'uploading')
   const canSend = Boolean(text.trim()) && !uploading
 
   const handleSend = () => {
     if (loading || !canSend) return
-    onSend(text, files.flatMap(file => file.status === 'done' && file.file ? [file.file] : []))
+    onSend(text, files.flatMap(file => file.status === 'done' && file.file ? [file.file] : []), docsets)
     setText('')
     setFiles([])
   }
@@ -123,6 +127,7 @@ const InputArea: React.FC<InputAreaProps> = ({ onSend, loading, compact, allowUp
           className="grok-input-field"
         />
 
+        <DocsetPicker value={docsets} onChange={setDocsets} disabled={loading} />
         <ModelSettings conversationId={currentConversationId} disabled={loading} />
 
         <button

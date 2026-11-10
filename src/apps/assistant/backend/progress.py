@@ -11,6 +11,8 @@ LABELS = {
     "read": "阅读原文",
     "skill": "加载技能说明",
     "mcp__netops__submit_answer": "核对答案引用",
+    "mcp__netops__open_docset": "展开产品文档集",
+    "mcp__netops__view_figure": "识读手册插图",
     "mcp__netops__inspection__read_batch": "查询巡检记录",
     "mcp__netops__inspection__search_devices": "查找设备资产",
     "mcp__netops__inspection__list_runs": "查询巡检运行与质量",

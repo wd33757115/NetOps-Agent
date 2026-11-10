@@ -7,12 +7,19 @@ exports.inject = ['tools']
 exports.apply = (ctx) => {
   const root = fs.realpathSync(process.cwd())
   const allowed = new Set(JSON.parse(process.env.NETOPS_DSH_TOOLS))
+  // Read-only directories the workspace links to (product doc sets). NetOps checks before
+  // each call that the path belongs to a doc set opened for this question.
+  const readRoots = JSON.parse(process.env.NETOPS_DSH_READ_ROOTS || '[]')
+    .flatMap(dir => { try { return [fs.realpathSync(dir)] } catch { return [] } })
+  const within = (base, target) => {
+    const relative = path.relative(base, target)
+    return relative === '' || (!relative.startsWith('..' + path.sep) && relative !== '..' && !path.isAbsolute(relative))
+  }
   const inside = (value) => {
     if (typeof value !== 'string' || value.includes('\0')) return false
     try {
       const target = fs.realpathSync(path.resolve(root, value))
-      const relative = path.relative(root, target)
-      return relative === '' || (!relative.startsWith('..' + path.sep) && relative !== '..' && !path.isAbsolute(relative))
+      return within(root, target) || readRoots.some(base => within(base, target))
     } catch { return false }
   }
   ctx.tools.guard(exec => {

@@ -9,6 +9,8 @@ export interface ChatRequest {
   thread_id?: string
   /** Netdisk file ids from the assistant's attachment upload. */
   attachments?: string[]
+  /** Product doc sets the question is limited to (materials App). */
+  docsets?: string[]
 }
 
 export interface ChatResponse {

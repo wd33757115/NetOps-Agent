@@ -43,6 +43,10 @@ REASONS = {
         "evidence_unknown",
         "这些方括号不是本轮或本对话之前取得的证据编号，请改成工具返回的编号或删掉：",
     ),
+    "Answer cites an unread figure": (
+        "citation_unread",
+        "引用了本轮没有用 view_figure 识读过的插图，请先识读或移除该引用。",
+    ),
     "citation_mismatch": ("citation_changed", "引用修订或原文内容不一致，请重新读取。"),
 }
 
@@ -90,13 +94,20 @@ def submit(workspace, arguments):
         if code == "evidence_unknown":
             # Name each one: a vague refusal once cost two extra rounds over "[evidence-...]".
             message += "、".join(workspace.unknown_evidence(arguments["answer"])[:12])
+        elif code == "citation_format_invalid":
+            # "[同上:L8]" for the page cited just before failed a doc-set question twice.
+            message += "每条引用都写完整路径，不写「同上」或省略目录。格式不对的：" + "、".join(
+                workspace.malformed_references(arguments["answer"])[:12]
+            )
         return {
             "accepted": False,
             "code": code,
             "message": message,
             "read_locations": workspace.citation_guidance(),
             "submitted_locations": re.findall(
-                r"\[(?:[a-f0-9]{20}/line-\d+|attachments/[a-f0-9]{12})\.txt:L\d+(?:-L?\d+)?\]",
+                r"\[(?:(?:[a-f0-9]{20}/line-\d+|attachments/[a-f0-9]{12})\.txt"
+                r"|[a-f0-9]{20}/pages/[^\s\[\]:]+?\.md):L\d+(?:-L?\d+)?\]"
+                r"|\[[a-f0-9]{20}/figures/[0-9a-f]{64}\.(?:png|gif|jpg|bmp)\]",
                 arguments["answer"],
             )[:12],
             "next_step": "补读所缺正文、修正引用后重新提交；资料不足时用 insufficient_evidence。",

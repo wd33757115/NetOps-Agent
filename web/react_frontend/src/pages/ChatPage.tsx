@@ -78,7 +78,7 @@ export default function ChatPage() {
     }
   }, [currentMessages, progress?.steps.length, progress?.message])
 
-  async function handleSend(query: string, attachments: ChatAttachment[] = []) {
+  async function handleSend(query: string, attachments: ChatAttachment[] = [], docsets: string[] = []) {
     if (busy || !query.trim()) return
     if (!selected) { message.error('请先选择或创建一个对话'); return }
     const id = selected
@@ -92,7 +92,7 @@ export default function ChatPage() {
       references: attachments.map(file => ({ kind: 'attachment', ...file })) })
     let terminalStatus = 'running'
     try {
-      const result = await streamChatMessage({ query, thread_id: id, attachments: attachments.map(file => file.file_id) }, {
+      const result = await streamChatMessage({ query, thread_id: id, attachments: attachments.map(file => file.file_id), docsets }, {
         signal: controller.signal, onProgress: value => { terminalStatus = value.status; updateProgress(id, value) },
       })
       // Keep the answer even if a subsequent history refresh fails; bind to its original conversation.
@@ -125,7 +125,7 @@ export default function ChatPage() {
   }
 
   return <GrokShellLayout mode="chat" scrollRef={messagesScrollRef}
-    footer={<InputArea onSend={(text, attachments) => void handleSend(text, attachments)} loading={busy} />}>
+    footer={<InputArea onSend={(text, attachments, docsets) => void handleSend(text, attachments, docsets)} loading={busy} />}>
     {currentMessages.length === 0 && !busy && <div className="grok-welcome">
       <h1 className="grok-welcome-title">今天有什么可以帮你？</h1>
       <div className="grok-suggestions">{SUGGESTIONS.map(text => <button key={text} type="button" className="grok-suggestion" onClick={() => void handleSend(text)}>{text}</button>)}</div>
