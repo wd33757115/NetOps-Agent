@@ -847,8 +847,14 @@ class DshRuntime:
             env = {
                 k: v
                 for k, v in os.environ.items()
-                if k.upper() in {"SYSTEMROOT", "WINDIR", "COMSPEC", "PATH", "TEMP", "TMP"}
+                if k.upper() in {"SYSTEMROOT", "WINDIR", "COMSPEC", "PATH"}
             }
+            # DSH's scratch space (ripgrep spill directories) stays inside the run's home:
+            # endpoint protection may deny an unsigned runtime the user's %TEMP%, and
+            # grep/glob then fail to start.
+            scratch = runtime_home / "tmp"
+            scratch.mkdir(exist_ok=True)
+            env.update(TEMP=str(scratch), TMP=str(scratch), TMPDIR=str(scratch))
             env.update(
                 NETOPS_DSH_RUN_TOKEN=bridge.token,
                 NETOPS_DSH_CALLBACK=f"http://127.0.0.1:{port}",
