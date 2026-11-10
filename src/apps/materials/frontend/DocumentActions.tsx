@@ -1,9 +1,12 @@
 import React, { useState } from 'react'
 import { Alert, Button, Input, Modal, Popconfirm, Space } from 'antd'
 import { api } from '@netops/config/api'
+import ModelSuggestions from './ModelSuggestions'
 import { publicationError, type Target } from './WordImport'
 
-export interface ManagedDocument extends Target { status: 'active' | 'inactive' }
+export interface ManagedDocument extends Target { status: 'active' | 'inactive'; kind?: 'document' | 'docset' }
+const FIELDS = { vendor: '厂商', product: '产品', software_version: '软件版本', doc_type: '资料类型', category: '分类' }
+const DOCSET_FIELDS = { vendor: '厂商', product: '产品', software_version: '软件版本', models: '适用型号与别名', category: '分类' }
 
 export default function DocumentActions({ document, onChanged }: { document: ManagedDocument; onChanged: () => Promise<void> }) {
   const [editing, setEditing] = useState(false)
@@ -40,8 +43,10 @@ export default function DocumentActions({ document, onChanged }: { document: Man
         <p>保留正文与原文件，仅更新标题和元数据；已有引用保持不变。</p>
         {error && <Alert type="error" message={error} />}
         <label>资料标题<Input aria-label="编辑资料标题" value={title} maxLength={256} disabled={busy} onChange={event => setTitle(event.target.value)} /></label>
-        {Object.entries({ vendor: '厂商', product: '产品', software_version: '软件版本', doc_type: '资料类型', category: '分类' }).map(([key, label]) =>
-          <label key={key}>{label}<Input aria-label={'编辑' + label} value={metadata[key] || ''} maxLength={256} disabled={busy} onChange={event => setMetadata({ ...metadata, [key]: event.target.value })} /></label>)}
+        {Object.entries(document.kind === 'docset' ? DOCSET_FIELDS : FIELDS).map(([key, label]) =>
+          <label key={key}>{label}<Input aria-label={'编辑' + label} value={metadata[key] || ''} maxLength={key === 'models' ? 1000 : 256} disabled={busy} onChange={event => setMetadata({ ...metadata, [key]: event.target.value })} />
+            {key === 'models' && document.kind === 'docset' && editing && <ModelSuggestions url={'/apps/materials/docsets/' + document.id + '/model-suggestions'}
+              value={metadata.models || ''} disabled={busy} onChange={models => setMetadata({ ...metadata, models })} />}</label>)}
       </Space>
     </Modal>
   </Space>

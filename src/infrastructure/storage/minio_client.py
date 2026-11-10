@@ -199,6 +199,31 @@ class MinIOStorage:
             logger.warning("MinIO 生成上传预签名URL失败: %s", e)
             return None
 
+    def presigned_download_url(
+        self, object_name: str, expires: int = 300, filename: str | None = None
+    ) -> str | None:
+        """Short-lived GET for files too large to pass through an API response (e.g. 1 GB)."""
+        if not self._client:
+            return None
+        try:
+            from datetime import timedelta
+            from urllib.parse import quote
+
+            headers = None
+            if filename:
+                disposition = f"attachment; filename*=UTF-8''{quote(filename)}"
+                headers = {"response-content-disposition": disposition}
+            url = self._client.presigned_get_object(
+                bucket_name=self._bucket_name,
+                object_name=object_name,
+                expires=timedelta(seconds=expires),
+                response_headers=headers,
+            )
+            return str(url)
+        except S3Error as e:
+            logger.warning("MinIO 生成下载预签名URL失败: %s", e)
+            return None
+
     def delete_object(self, object_name: str) -> bool:
         if not self._client:
             return False
