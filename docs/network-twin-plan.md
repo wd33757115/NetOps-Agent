@@ -191,7 +191,7 @@ ACL：目前三台设备都没有配。评测集要用时再加（见故障集 F
 - OSPF 邻居 Full，USG 学到 203.0.113.1/32；
 - CE-1 在正确的 VLAN 上学到了两台 PC 的 MAC。
 
-未核实：从 PC 发起的访问。USG ping 两台 PC 没有回应，但 USG 上有 ICMP 会话，疑似 PC 不回 ping。
+已核实（2026-11-14）：PC 不回 ICMP echo（USG 和 PC 互 ping 都是请求有会话、无应答），eNSP Pro 节点的已知怪癖；另外这台 USG6306F 模拟器对"业务口进来的、发往设备自身的 ICMP"不交付控制平面——service-manage 和显式 local 域策略都无法让它应答，管理口（MEth）与环回正常。因此 PC ping 网关不可用作健康检查，转发路径（transit）不受影响。USG 安全策略补了 local-icmp 规则（local↔各域 ICMP 放行，已 save）。
 
 故障集（影响转发路径的；每次只改一处，改完恢复）：
 
