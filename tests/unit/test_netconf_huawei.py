@@ -400,3 +400,38 @@ def test_an_undeclared_prefix_or_a_parent_step_in_a_table_path_is_refused():
         standard.load({"vendor": "T", "namespace": "urn:a", "tables": {"t": {"path": "top/x:row", "fields": {"a": "a"}}}})
     with pytest.raises(standard.MappingError, match="not a leaf path"):
         standard.load({"vendor": "T", "namespace": "urn:a", "tables": {"t": {"path": "top/../row", "fields": {"a": "a"}}}})
+
+
+def test_a_static_route_maps_to_the_standard_static_protocol(mapping):
+    """CE-1's default route is static (ip route-static toward the firewall); the row
+    must convert with its protocol, not as an unmapped-code problem that would fail
+    the whole critical route table and drop the device back to the CLI."""
+    reply = """<data xmlns="urn:ietf:params:xml:ns:netconf:base:1.0"
+        xmlns:ns1="urn:huawei:yang:huawei-network-instance"
+        xmlns:ns2="urn:huawei:yang:huawei-l3vpn"
+        xmlns:ns3="urn:huawei:yang:huawei-routing">
+      <ns1:network-instance><ns1:instances><ns1:instance><ns1:name>_public_</ns1:name>
+        <ns2:afs><ns2:af><ns3:routing><ns3:routing-manage><ns3:topologys><ns3:topology>
+          <ns3:routes><ns3:ipv4-unicast-routes><ns3:ipv4-unicast-route>
+            <ns3:prefix>0.0.0.0</ns3:prefix><ns3:mask-length>0</ns3:mask-length>
+            <ns3:protocol-type>static</ns3:protocol-type>
+            <ns3:active>true</ns3:active>
+            <ns3:interface-name>Vlanif100</ns3:interface-name>
+            <ns3:preference>60</ns3:preference><ns3:cost>0</ns3:cost>
+            <ns3:nexthop>10.0.100.2</ns3:nexthop>
+          </ns3:ipv4-unicast-route></ns3:ipv4-unicast-routes></ns3:routes>
+        </ns3:topology></ns3:topologys></ns3:routing-manage></ns3:routing></ns2:af></ns2:afs>
+      </ns1:instance></ns1:instances></ns1:network-instance>
+    </data>"""
+    records, problems = standard.convert(mapping, {"route": [reply]})
+    assert problems == []
+    assert records["route"] == [
+        {
+            "network-instance": "default",
+            "destination-prefix": "0.0.0.0/0",
+            "source-protocol": "ietf-routing:static",
+            "route-preference": 60,
+            "next-hop-address": "10.0.100.2",
+            "outgoing-interface": "Vlanif100",
+        }
+    ]

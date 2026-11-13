@@ -75,8 +75,9 @@ tables:
     fields:
       network-instance: {leaf: ../../../../../../../../../name, none: [_public_], default: default}
       destination-prefix: {format: "{prefix}/{mask-length}", convert: prefix}
-      # Protocols of the lab's active routes; the CLI shows Direct and OSPF ("ospf 1").
-      source-protocol: {leaf: protocol-type, codes: {direct: ietf-routing:direct, ospf: ietf-ospf:ospfv2}}
+      # Protocols of the lab's active routes; the CLI shows Direct, OSPF ("ospf 1")
+      # and Static (ip route-static, e.g. CE-1's default toward the firewall).
+      source-protocol: {leaf: protocol-type, codes: {direct: ietf-routing:direct, ospf: ietf-ospf:ospfv2, static: ietf-routing:static}}
       route-preference: {leaf: preference, convert: integer}
       next-hop-address: {leaf: nexthop, convert: address}
       outgoing-interface: interface-name
