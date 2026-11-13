@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from src.apps.topology.backend.collectors.parse import parse
-from src.apps.topology.backend.model.builder import build_topology
+from src.apps.topology.backend.model.builder import build_topology, device_node_ids
 
 ROOT = Path(__file__).resolve().parents[1] / "fixtures/topology/h3c/vsr1000-7.1.064"
 FILES = {
@@ -226,3 +226,97 @@ def test_lag_members_decide_whether_an_aggregate_faces_a_peer():
     assert frozenset({"00-00-00-00-00-01 Port-channel1", "nic:00-00-00-00-00-77"}) in edge
     uplink = links(networks(build_topology({"sw": lag_switch(True)}, BASE)[0])["l2"])
     assert not [ends for ends in uplink if "nic:00-00-00-00-00-77" in ends]
+
+
+AR_CHASSIS, USG_CHASSIS, CE_CHASSIS = (
+    "fa:c7:f4:60:00:40",
+    "fa:c7:f4:60:00:31",
+    "fa:c7:f4:60:00:61",
+)
+
+
+def test_one_chassis_in_two_mac_spellings_is_one_device():
+    """The YunShan lab: AR reports the USG chassis as fa:c7:.., CE as fac7-.., and no
+    device reports a local chassis (YunShan sends no LLDP local table over NETCONF).
+    Both spellings must merge to one identity, and every port must keep one spelling,
+    or the USG stays an address node and each shared link appears twice."""
+    huawei = lambda **caps: records(platform="vrp", **caps)
+    usg = huawei(
+        interfaces=[
+            {"ifname": "GE0/0/0", "type": "ethernet"},
+            {"ifname": "GE0/0/1", "type": "ethernet"},
+            {"ifname": "GE0/0/2", "type": "ethernet"},
+        ],
+        ip=[
+            {
+                "ifname": "MEth0/0/0",
+                "vrf": "_management_vpn_",
+                "address": "192.168.79.12",
+                "prefix_len": 24,
+            }
+        ],
+        lldp=[
+            lldp("GE0/0/0", AR_CHASSIS, "GE0/0/0", "192.168.79.11"),
+            lldp("GE0/0/1", CE_CHASSIS, "GE1/0/1", "192.168.79.13"),
+            lldp("GE0/0/2", CE_CHASSIS, "GE1/0/2", "192.168.79.13"),
+        ],
+    )
+    ar = huawei(
+        interfaces=[{"ifname": "GE0/0/0", "type": "ethernet"}],
+        ip=[
+            {
+                "ifname": "MEth0/0/0",
+                "vrf": "_management_vpn_",
+                "address": "192.168.79.11",
+                "prefix_len": 24,
+            }
+        ],
+        lldp=[lldp("GE0/0/0", USG_CHASSIS, "GE0/0/0", "192.168.79.12")],
+    )
+    ce = huawei(
+        interfaces=[
+            {"ifname": "GE1/0/1", "type": "ethernet"},
+            {"ifname": "GE1/0/2", "type": "ethernet"},
+        ],
+        ip=[
+            {
+                "ifname": "MEth0/0/0",
+                "vrf": "_management_vpn_",
+                "address": "192.168.79.13",
+                "prefix_len": 24,
+            }
+        ],
+        # CE spells the USG chassis with dashes and Huawei's enum for the subtype.
+        lldp=[
+            {
+                "local_if": "GE1/0/1",
+                "remote_chassis_id": "fac7-f460-0031",
+                "remote_port_id": "GE0/0/1",
+                "remote_port_subtype": "INTERFACE_NAME",
+                "remote_sysname": "HUAWEI",
+                "remote_mgmt_addresses": ["192.168.79.12"],
+            },
+            {
+                "local_if": "GE1/0/2",
+                "remote_chassis_id": "fac7-f460-0031",
+                "remote_port_id": "GE0/0/2",
+                "remote_port_subtype": "INTERFACE_NAME",
+                "remote_sysname": "HUAWEI",
+                "remote_mgmt_addresses": ["192.168.79.12"],
+            },
+        ],
+    )
+    devices = {"192.168.79.11": ar, "192.168.79.12": usg, "192.168.79.13": ce}
+    assert device_node_ids(devices, BASE) == {
+        address: BASE + "device:" + chassis.replace(":", "-")
+        for address, chassis in (
+            ("192.168.79.11", AR_CHASSIS),
+            ("192.168.79.12", USG_CHASSIS),
+            ("192.168.79.13", CE_CHASSIS),
+        )
+    }
+    assert links(networks(build_topology(devices, BASE)[0])["l2"]) == {
+        frozenset({dev(USG_CHASSIS, "GE0/0/0"), dev(AR_CHASSIS, "GE0/0/0")}): "p2p",
+        frozenset({dev(USG_CHASSIS, "GE0/0/1"), dev(CE_CHASSIS, "GE1/0/1")}): "p2p",
+        frozenset({dev(USG_CHASSIS, "GE0/0/2"), dev(CE_CHASSIS, "GE1/0/2")}): "p2p",
+    }

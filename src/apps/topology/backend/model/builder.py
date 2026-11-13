@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from urllib.parse import quote
 
 from ..collectors.ifname import normalize_ifname
+from ..collectors.normalize import mac_address
 from .fabric import overlay_networks
 from .ospf import link_metric, project_ospf
 from .overlay import prepare
@@ -73,6 +74,17 @@ def _uri(value):
 
 def _dash(mac):
     return mac.replace(":", "-")
+
+
+def _chassis(value):
+    """One neighbour, one identity. The same chassis arrives in different MAC spellings
+    ("fa:c7:.." from one observer, "fac7-.." from another) and the subtype may say
+    mac-address, a Huawei enum, or nothing. Any MAC spelling merges to one identity;
+    strings that are not MACs stay verbatim."""
+    try:
+        return mac_address(value)
+    except ValueError:
+        return value
 
 
 def _vlan_ids(value):
@@ -194,7 +206,7 @@ class _Topology:
         self.l3_net = base + "l3"
         self.chassis = {}
         for key, facts in devices.items():
-            chassis = (facts.get("lldp_local") or {}).get("chassis_id")
+            chassis = _chassis((facts.get("lldp_local") or {}).get("chassis_id"))
             self.chassis[key] = chassis or _TargetChassis(key)
         # RFC 8529 network-instance names are device-local. Preserve every address
         # owner; neither a matching VRF name nor input order chooses a remote device.
@@ -263,7 +275,7 @@ class _Topology:
         for row in facts.get("lldp", []):
             if row["local_if"] not in local_ifs:
                 continue
-            peer = row["remote_chassis_id"]
+            peer = _chassis(row["remote_chassis_id"])
             port = self.remote_port(peer, row["remote_port_id"], row.get("remote_port_subtype"))
             for candidate in candidates:
                 if self.chassis[candidate[0]] == peer and candidate[1] == port:
@@ -312,7 +324,9 @@ class _Topology:
                 for address in rec.get("remote_mgmt_addresses", []):
                     keys = holders.get(address, set())
                     if len(keys) == 1 and observer not in keys:
-                        claims.setdefault(next(iter(keys)), set()).add(rec["remote_chassis_id"])
+                        claims.setdefault(next(iter(keys)), set()).add(
+                            _chassis(rec["remote_chassis_id"])
+                        )
         reported = {
             c for c in self.chassis.values() if not isinstance(c, _TargetChassis)
         } | self.conflicting_chassis
@@ -354,11 +368,18 @@ class _Topology:
 
     # L2 ------------------------------------------------------------------------
     def remote_port(self, chassis, port_id, subtype):
-        """A collected neighbour's port in its own spelling. IOS does not print the port ID
-        subtype (it sends "interface name"); an unknown subtype counts only when the name
-        is one of the neighbour platform's interface names."""
+        """A collected neighbour's port in its own spelling. The subtype's spelling varies
+        (IOS omits it; Huawei sends "INTERFACE_NAME"); an unknown subtype counts only when
+        the name is one of the neighbour platform's interface names."""
         key = self.by_chassis.get(chassis)
-        if key and (subtype is None or str(subtype).lower() == "interface name"):
+        kind = str(subtype).replace("_", " ").strip().lower() if subtype else None
+        if key and (subtype is None or kind == "interface name"):
+            # The endpoint must be spelled the way the neighbour itself reports its
+            # interfaces (YunShan inventory says GE1/0/1; the dialect's canonical form
+            # says GigabitEthernet1/0/1), or the same port becomes two TPs and every
+            # shared link duplicates.
+            if port_id in {row["ifname"] for row in self.devices[key].get("interfaces", [])}:
+                return port_id
             name = normalize_ifname(port_id, self.devices[key].get("platform", ""))
             if name.recognized or subtype is not None:
                 return name.name
@@ -401,7 +422,7 @@ class _Topology:
                 }
             advertised = {}
             for rec in facts.get("lldp", []):
-                local, peer = rec["local_if"], rec["remote_chassis_id"]
+                local, peer = rec["local_if"], _chassis(rec["remote_chassis_id"])
                 port = self.remote_port(peer, rec["remote_port_id"], rec.get("remote_port_subtype"))
                 self.l2_node(peer, rec.get("remote_sysname"))
                 self.management.setdefault(peer, set()).update(rec.get("remote_mgmt_addresses", []))
