@@ -507,6 +507,13 @@ class _Topology:
         platform = facts.get("platform", "")
         name = normalize_ifname(arp["ifname"], platform)
         if name.kind in L2_PORT_TYPES:
+            # Spell the port the way this device reports its own interfaces (the
+            # dialect's canonical form says GigabitEthernet1/0/1 where YunShan says
+            # GE1/0/1), or the same port becomes two TPs: the LLDP row's raw spelling
+            # and this one, and their shared link turns into a 4-end shared segment.
+            own = {row["ifname"] for row in facts.get("interfaces", [])}
+            if arp["ifname"] in own:
+                return arp["ifname"]
             return name.name
         vid = self.interface_vlan(facts, arp["ifname"])
         if vid is None:

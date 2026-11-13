@@ -320,3 +320,64 @@ def test_one_chassis_in_two_mac_spellings_is_one_device():
         frozenset({dev(USG_CHASSIS, "GE0/0/1"), dev(CE_CHASSIS, "GE1/0/1")}): "p2p",
         frozenset({dev(USG_CHASSIS, "GE0/0/2"), dev(CE_CHASSIS, "GE1/0/2")}): "p2p",
     }
+
+
+def test_arp_on_an_lldp_port_does_not_duplicate_the_link():
+    """Two devices see each other over LLDP and ARP on the same port, and the ARP
+    table spells the interface the device's own short way (YunShan says GE0/0/0
+    where the dialect's canonical form says GigabitEthernet0/0/0). The attachment
+    must keep the device's own spelling, or the guard 'on an LLDP port the
+    adjacency is already recorded' misses and one link becomes a 4-end shared
+    segment with both spellings as separate ports."""
+    vrp = lambda **caps: records(platform="vrp", **caps)
+    left_chassis, right_chassis = "fa:c7:f4:60:00:40", "fa:c7:f4:60:00:31"
+    left = vrp(
+        interfaces=[{"ifname": "GE0/0/0", "type": "ethernet"}],
+        ip=[
+            {
+                "ifname": "GE0/0/0",
+                "vrf": "default",
+                "address": "10.0.12.1",
+                "prefix_len": 30,
+            }
+        ],
+        lldp=[lldp("GE0/0/0", right_chassis, "GE0/0/0", "10.0.12.2")],
+        arp=[
+            {
+                "vrf": "default",
+                "ip": "10.0.12.2",
+                "mac": right_chassis,
+                "ifname": "GE0/0/0",
+            }
+        ],
+    )
+    right = vrp(
+        interfaces=[{"ifname": "GE0/0/0", "type": "ethernet"}],
+        ip=[
+            {
+                "ifname": "GE0/0/0",
+                "vrf": "default",
+                "address": "10.0.12.2",
+                "prefix_len": 30,
+            }
+        ],
+        lldp=[lldp("GE0/0/0", left_chassis, "GE0/0/0", "10.0.12.1")],
+        arp=[
+            {
+                "vrf": "default",
+                "ip": "10.0.12.1",
+                "mac": left_chassis,
+                "ifname": "GE0/0/0",
+            }
+        ],
+    )
+    tree, _ = build_topology({"192.168.79.11": left, "192.168.79.12": right}, BASE)
+    nets = networks(tree)
+    assert links(nets["l2"]) == {
+        frozenset({dev(left_chassis, "GE0/0/0"), dev(right_chassis, "GE0/0/0")}): "p2p"
+    }
+    assert not any(
+        "Gigabit" in tp["tp-id"]
+        for node in nets["l2"]["node"]
+        for tp in node.get("ietf-network:termination-point", [])
+    )
