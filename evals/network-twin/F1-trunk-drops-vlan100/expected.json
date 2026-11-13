@@ -1,36 +1,8 @@
 {
  "device": "192.168.79.13",
  "target": "192.168.79.13",
- "twin_note": "CE↔USG 三层互联断：静态默认路由的下一跳不可达，去程停在 CE-1；东西向不受影响",
+ "twin_note": "注入后任何时刻采集，南北向路径按状态表仍判 delivered——如实但不可判定",
  "checks": [
-  {
-   "kind": "path",
-   "flow": "client_to_internet",
-   "direction": "forward",
-   "end_device": "192.168.79.13",
-   "status": "no_route"
-  },
-  {
-   "kind": "path",
-   "flow": "client_to_internet",
-   "direction": "reverse",
-   "end_device": "192.168.79.13",
-   "status": "no_route"
-  },
-  {
-   "kind": "path",
-   "flow": "client_to_server",
-   "direction": "forward",
-   "end_device": "192.168.79.13",
-   "status": "delivered"
-  },
-  {
-   "kind": "path",
-   "flow": "client_to_server",
-   "direction": "reverse",
-   "end_device": "192.168.79.13",
-   "status": "delivered"
-  },
   {
    "kind": "vlan_member_absent",
    "device": "192.168.79.13",
@@ -49,5 +21,6 @@
   ]
  },
  "settle": 310,
- "timing_note": "L2 故障在注入瞬间不可判定：设备状态表（地址/RIB/ARP 被重锚定）仍声称路径可用，需等 MAC/ARP 老化后状态才反映断；注入后 sleep 310s 再采集"
+ "timing_note": "L2 故障在注入瞬间不可判定：设备状态表（地址/RIB/ARP 被重锚定）仍声称路径可用，需等 MAC/ARP 老化后状态才反映断；注入后 sleep 310s 再采集",
+ "limit_note": "状态表孪生的固有边界：数据面故障（trunk 不转发帧）在状态表里无记录——设备把地址/RIB/ARP重锚定到物理口，所有表声称可达。孪生能给出的唯一线索是 VLAN 成员表变化；结论级判定需要主动探测（产品后续项：孪生说通 + 用户说不通的矛盾触发现场验证）"
 }
