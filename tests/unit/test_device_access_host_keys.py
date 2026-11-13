@@ -129,6 +129,24 @@ def test_the_trusted_key_coming_back_clears_the_warning(store, keys):
         store.accept("alice", "10.0.0.1", 22, fingerprint(changed))
 
 
+def test_automated_collection_repins_a_changed_key_and_audits_it(store, keys):
+    """A rebooted lab device regenerates its host key: discovery must not stall on a
+    per-port confirmation nobody is shown. The change itself stays in the audit log."""
+    key, changed = keys
+    store.verify("10.0.0.1", 22, key, auto_trust=True)
+    assert (
+        store.verify("10.0.0.1", 22, changed, auto_trust=True, accept_changed=True) is True
+    )
+    row = store.get("10.0.0.1", 22)
+    assert (row["status"], row["fingerprint"]) == ("trusted", fingerprint(changed))
+    assert row["observed_fingerprint"] is None
+    with store.sessions() as session:
+        kinds = {row.action for row in session.scalars(select(AuditLogRecord))}
+    assert {"ssh.host_key_changed", "ssh.host_key_auto_accepted"} <= kinds
+    # The previous key is now the change; the terminal still has to confirm it.
+    assert code(lambda: store.verify("10.0.0.1", 22, key)) == "host_key_changed"
+
+
 def test_ports_never_share_keys(store, keys):
     key, other = keys
     store.verify("10.0.0.1", 22, key, auto_trust=True)

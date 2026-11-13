@@ -1,8 +1,11 @@
 """Host keys, SecureCRT style: confirm on first sight, warn when a key changes.
 
-The terminal asks the user before trusting a key (``auto_trust=False``).
-Topology discovery records a first-seen key itself (``auto_trust=True``).
-A changed key always stops the connection until the user confirms it.
+The terminal asks the user before trusting a key (``auto_trust=False``), and a
+changed key stops that session until the user confirms it. Automated collection
+(topology discovery, netconf-api) holds the device's credentials itself on a
+scoped, L1-only task, so it records a first-seen key (``auto_trust=True``) and
+re-pins a changed one (``accept_changed=True``); every re-pin keeps both
+fingerprints in the audit trail.
 """
 
 import ipaddress
@@ -54,7 +57,7 @@ class HostKeyStore:
             session=session,
         )
 
-    def verify(self, host, port, key, *, auto_trust=False):
+    def verify(self, host, port, key, *, auto_trust=False, accept_changed=False):
         host, observed = str(ipaddress.ip_address(host)), fingerprint(key)
         for attempt in range(2):
             code = None
@@ -80,6 +83,7 @@ class HostKeyStore:
                         if not auto_trust:
                             code = "host_key_unknown"
                     elif row.fingerprint_sha256 != observed:
+                        previous = row.fingerprint_sha256
                         if row.observed_fingerprint != observed:
                             row.observed_key_type = key.get_name()
                             row.observed_public_key = key.get_base64()
@@ -90,10 +94,27 @@ class HostKeyStore:
                                 "host_key_changed",
                                 host,
                                 port,
-                                previous_fingerprint=row.fingerprint_sha256,
+                                previous_fingerprint=previous,
                                 fingerprint=observed,
                             )
-                        code = "host_key_changed"
+                        if accept_changed:
+                            # Automated collection re-pins the key it authenticated
+                            # against; both fingerprints stay in the audit trail.
+                            row.key_type, row.public_key = key.get_name(), key.get_base64()
+                            row.fingerprint_sha256 = observed
+                            row.observed_key_type = row.observed_public_key = None
+                            row.observed_fingerprint = None
+                            row.revision += 1
+                            self._audit(
+                                session,
+                                "host_key_auto_accepted",
+                                host,
+                                port,
+                                previous_fingerprint=previous,
+                                fingerprint=observed,
+                            )
+                        else:
+                            code = "host_key_changed"
                     elif row.observed_fingerprint:
                         # The trusted key is back; forget the stale warning.
                         row.observed_key_type = row.observed_public_key = None

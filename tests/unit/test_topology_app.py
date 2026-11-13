@@ -73,8 +73,8 @@ def world(monkeypatch):
     class Trust:
         verified = []
 
-        def verify(self, host, port, key, *, auto_trust=False):
-            self.verified.append((host, auto_trust))
+        def verify(self, host, port, key, *, auto_trust=False, accept_changed=False):
+            self.verified.append((host, auto_trust, accept_changed))
             return True
 
         def known_hosts(self, host, port):
@@ -994,4 +994,4 @@ def test_discovery_records_host_keys_itself_for_both_sessions(world):
     row = service.submit("user", discovery(max_depth=0))
     service.execute_run(row["id"], lambda *args: None)
     assert world.trust_used == [(True, True)]
-    assert world.trust.verified[-1] == ("10.0.0.1", True)
+    assert world.trust.verified[-1] == ("10.0.0.1", True, True)

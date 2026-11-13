@@ -354,7 +354,7 @@ def _access(device):
     trust = HostKeyStore()
 
     def verify(target, port, key):
-        return trust.verify(target.host, port, key, auto_trust=True)
+        return trust.verify(target.host, port, key, auto_trust=True, accept_changed=True)
 
     ref = device["device_id"]
     target = Target(

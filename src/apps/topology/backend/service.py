@@ -953,7 +953,7 @@ def _access(job):
         profile_resolver=lambda _: profile,
         driver=ParamikoDriver(
             host_key_verifier=lambda target, port, key: trust.verify(
-                target.host, port, key, auto_trust=True
+                target.host, port, key, auto_trust=True, accept_changed=True
             )
         ),
     )
