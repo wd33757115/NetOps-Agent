@@ -1,0 +1,49 @@
+{
+ "device": "192.168.79.12",
+ "target": "192.168.79.12",
+ "twin_note": "OSPF 邻居断，USG 失去 203.0.113.1/32；去程停在 USG；东西向不受影响",
+ "checks": [
+  {
+   "kind": "path",
+   "flow": "client_to_internet",
+   "direction": "forward",
+   "end_device": "192.168.79.12",
+   "status": "no_route"
+  },
+  {
+   "kind": "path",
+   "flow": "client_to_internet",
+   "direction": "reverse",
+   "end_device": "192.168.79.12",
+   "status": "no_route"
+  },
+  {
+   "kind": "path",
+   "flow": "client_to_server",
+   "direction": "forward",
+   "end_device": "192.168.79.13",
+   "status": "delivered"
+  },
+  {
+   "kind": "path",
+   "flow": "client_to_server",
+   "direction": "reverse",
+   "end_device": "192.168.79.13",
+   "status": "delivered"
+  },
+  {
+   "kind": "route_absent",
+   "device": "192.168.79.12",
+   "prefix": "203.0.113.1/32"
+  }
+ ],
+ "ai": {
+  "device": "USG-1",
+  "object": "GE0/0/0 关闭，OSPF 邻居断",
+  "cause": "wan_port_down",
+  "must_not_invent": [
+   "NAT",
+   "CE 侧故障"
+  ]
+ }
+}

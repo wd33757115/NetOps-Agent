@@ -145,8 +145,9 @@ tables:
     path: ifm/interfaces/interface/trunk:trunk
     fields:
       name: ../name
-      # "mode lacp-static" (the CLI's Working Mode: Static) on both ends of the lab's trunk.
-      mode: {leaf: work-mode, codes: {static: lacp}}
+      # "mode lacp-static" (the CLI's Working Mode: Static) on both ends of the lab's trunk;
+      # manual load-balancing (no LACP) observed after the lab's re-cabling.
+      mode: {leaf: work-mode, codes: {static: lacp, manual: manual}}
       min-links: {leaf: min-up-num, convert: integer}
 
   lag-member:  # a port of an Eth-Trunk (ieee802-dot1ax aggregation-port)
@@ -154,9 +155,10 @@ tables:
     fields:
       aggregate-interface: ../../../name
       name: name
-      oper-status: {leaf: status, codes: {up: up}}
-      # LACP: the CLI's Status column, Selected on all four ports of the lab.
-      selected: {leaf: lacp:lacp/port-negotiate-parameter/status, codes: {selected: true}}
+      oper-status: {leaf: status, codes: {up: up, down: down}}
+      # LACP: the CLI's Status column, Selected on the live members; a cabled-off
+      # member reports unselected.
+      selected: {leaf: lacp:lacp/port-negotiate-parameter/status, codes: {selected: true, unselected: false}}
 
   bridge-port:  # a Layer 2 port's mode, PVID and trunk VLANs
     path: ifm/interfaces/interface/ethernet:ethernet/main-interface/l2-attribute

@@ -1,0 +1,51 @@
+{
+ "device": "192.168.79.13",
+ "target": "192.168.79.13",
+ "twin_note": "CE↔USG 三层互联断：静态默认路由的下一跳不可达，去程停在 CE-1；东西向不受影响",
+ "checks": [
+  {
+   "kind": "path",
+   "flow": "client_to_internet",
+   "direction": "forward",
+   "end_device": "192.168.79.13",
+   "status": "no_route"
+  },
+  {
+   "kind": "path",
+   "flow": "client_to_internet",
+   "direction": "reverse",
+   "end_device": "192.168.79.13",
+   "status": "no_route"
+  },
+  {
+   "kind": "path",
+   "flow": "client_to_server",
+   "direction": "forward",
+   "end_device": "192.168.79.13",
+   "status": "delivered"
+  },
+  {
+   "kind": "path",
+   "flow": "client_to_server",
+   "direction": "reverse",
+   "end_device": "192.168.79.13",
+   "status": "delivered"
+  },
+  {
+   "kind": "vlan_member_absent",
+   "device": "192.168.79.13",
+   "vlan": 100,
+   "port": "Eth-Trunk1"
+  }
+ ],
+ "ai": {
+  "device": "CE-1",
+  "object": "Eth-Trunk1 允许 VLAN 列表缺 100",
+  "cause": "vlan_not_allowed_on_trunk",
+  "must_not_invent": [
+   "NAT",
+   "OSPF",
+   "安全策略"
+  ]
+ }
+}

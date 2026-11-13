@@ -53,5 +53,6 @@
    "device": "192.168.79.12",
    "rule": "client-easy-ip"
   }
- ]
+ ],
+ "twin_note": "去程无 NAT 到达 AR，回程在 AR-1 没有到 10.1.10.0/24 的路由（CE↔USG 已无 OSPF，内网不泄漏）"
 }
