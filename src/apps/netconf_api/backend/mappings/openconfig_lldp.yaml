@@ -1,0 +1,29 @@
+# OpenConfig 0.2.x LLDP operational state. Selected only when a device announces
+# openconfig-lldp; other tables remain on the device family's best available mapping.
+vendor: OpenConfig
+platforms: [vrp]
+namespace: http://openconfig.net/yang/lldp
+tables:
+  lldp-neighbor:
+    path: lldp/interfaces/interface/neighbors/neighbor
+    fields:
+      interface: ../../name
+      remote-index: {leaf: id, convert: integer}
+      chassis-id-subtype: state/chassis-id-type
+      chassis-id:
+        - {leaf: state/chassis-id, convert: ieee-mac, when: {leaf: state/chassis-id-type, in: [mac-address]}}
+        - state/chassis-id
+      port-id-subtype: state/port-id-type
+      port-id: state/port-id
+      port-desc: state/port-description
+      system-name: state/system-name
+      system-description: state/system-description
+
+  lldp-management-address:
+    path: lldp/interfaces/interface/neighbors/neighbor
+    where: {leaf: state/management-address-type, in: [ipv4, ipv6]}
+    fields:
+      interface: ../../name
+      remote-index: {leaf: id, convert: integer}
+      address-subtype: {leaf: state/management-address-type, codes: {ipv4: "ietf-routing:ipv4", ipv6: "ietf-routing:ipv6"}}
+      address: {leaf: state/management-address, convert: address-hex}

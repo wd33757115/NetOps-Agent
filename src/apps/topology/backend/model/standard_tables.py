@@ -16,27 +16,15 @@ Only the tables the device was read for are given; the others stay with the CLI.
 
 from __future__ import annotations
 
-import ipaddress
+from collections import defaultdict
 
 from .device_state import INTERFACE_TYPES
-from .standard_trees import IF, LLDP, device_tree, lldp_section
+from .standard_trees import IF, OC_LLDP, device_tree, openconfig_lldp_section
 
 KINDS = {identity: kind for kind, identity in INTERFACE_TYPES.items()}
 SUBTYPES = {"mac-address": "MAC address", "interface-name": "Interface name"}
-FAMILIES = {"ietf-routing:ipv4": 4, "ietf-routing:ipv6": 6}
-
-
 def _mac(ieee):
     return ieee.replace("-", ":").lower()
-
-
-def _address(entry):
-    family = FAMILIES.get(entry.get("address-subtype"))
-    try:
-        raw = bytes.fromhex(entry["address"])
-        return str(ipaddress.ip_address(raw)) if family else None
-    except (KeyError, ValueError):
-        return None
 
 
 def builder_rows(records, platform):
@@ -94,28 +82,74 @@ def builder_rows(records, platform):
                                 ),
                             }
                         )
+        if leaf == "address":
+            # The RFC 8343 interface tree cannot contain interfaces without an IANA
+            # interface type (Huawei MEth is one example). Their addresses still identify
+            # the collected device and must join LLDP management-address claims to it.
+            # Keep these addresses as builder facts, but do not invent an interface in the
+            # RFC 8343 tree. Any L3 point remains unbound unless its L2 attachment is observed.
+            tree_interfaces = {entry["name"] for entry in device}
+            instances = {
+                record["name"]: record.get("network-instance", "default")
+                for record in records.get("interface", [])
+                if record.get("name")
+            }
+            seen = {
+                (row["ifname"], row["vrf"], row["address"], row["prefix_len"])
+                for row in found
+            }
+            for item in records.get("ipv4-address", []):
+                if item.get("origin") == "other":
+                    continue
+                ifname = item.get("interface")
+                if not ifname or ifname in tree_interfaces or ifname not in instances:
+                    continue
+                if "ip" not in item or "prefix-length" not in item:
+                    continue
+                row = (
+                    ifname,
+                    instances[ifname],
+                    item["ip"],
+                    item["prefix-length"],
+                )
+                if row in seen:
+                    continue
+                seen.add(row)
+                found.append(
+                    {
+                        "ifname": ifname,
+                        "vrf": row[1],
+                        "address": row[2],
+                        "prefix_len": row[3],
+                    }
+                )
         rows[key] = found
     if "lldp-neighbor" in records:
         found = []
-        tree = lldp_section(records, platform)["tree"][LLDP]
-        for port in tree.get("port", []):
-            for remote in port.get("remote-systems-data", []):
+        tree = openconfig_lldp_section(records, platform)["tree"][OC_LLDP]
+        for interface in tree.get("interfaces", {}).get("interface", []):
+            for neighbor in interface.get("neighbors", {}).get("neighbor", []):
+                remote = neighbor.get("state", {})
                 if "chassis-id" not in remote or "port-id" not in remote:
                     continue
                 chassis = remote["chassis-id"]
-                if remote.get("chassis-id-subtype") == "mac-address":
+                if remote.get("chassis-id-type") == "mac-address":
                     chassis = _mac(chassis)
-                addresses = [a for a in map(_address, remote.get("management-address", [])) if a]
+                addresses = [
+                    item["state"]["address"]
+                    for item in neighbor.get("mgmt-addresses", {}).get("mgmt-address", [])
+                    if item.get("state", {}).get("address")
+                ]
                 found.append(
                     {
-                        "local_if": port["name"],
+                        "local_if": interface["name"],
                         "remote_chassis_id": chassis,
                         "remote_chassis_subtype": SUBTYPES.get(
-                            remote.get("chassis-id-subtype"), remote.get("chassis-id-subtype")
+                            remote.get("chassis-id-type"), remote.get("chassis-id-type")
                         ),
                         "remote_port_id": remote["port-id"],
                         "remote_port_subtype": SUBTYPES.get(
-                            remote.get("port-id-subtype"), remote.get("port-id-subtype")
+                            remote.get("port-id-type"), remote.get("port-id-type")
                         ),
                         "remote_sysname": remote.get("system-name"),
                         "remote_system_description": remote.get("system-description"),
@@ -124,6 +158,170 @@ def builder_rows(records, platform):
                 )
         rows["lldp"] = found
     rows.update(policy_rows(records))
+    rows.update(layer2_rows(records, platform, rows.get("interfaces")))
+    rows.update(zone_rows(records))
+    return rows
+
+
+def _vid_range(text):
+    """The device's VLAN list ("1,10,20", "2-5") as IEEE 802.1Q vid-range text, or None."""
+    from ..collectors.rules_tables import vid_range
+
+    try:
+        return vid_range(text or "")
+    except ValueError:
+        return None
+
+
+def layer2_rows(records, platform, interfaces=None):
+    """{"lag", "trunk", "vlan", "vlan_members", "mac"} and each access port's VLAN on its
+    interface row, from standard records: the inputs of builder.py and l2_forwarding.py.
+
+    IEEE 802.1Q and 802.1AX are not yet built as trees from these records; the rows carry
+    the device's values as read (the plan's non-standard query-table part).
+    """
+    rows = {}
+    if "lag" in records:
+        members = defaultdict(list)
+        for record in records.get("lag-member", []):
+            if "aggregate-interface" in record and "name" in record:
+                members[record["aggregate-interface"]].append(record)
+        found = []
+        for record in records["lag"]:
+            if "name" not in record:
+                continue
+            ports = members.get(record["name"], [])
+            names = [m["name"] for m in ports]
+            found.append(
+                {
+                    "ifname": record["name"],
+                    "members": names,
+                    "bundled": [m["name"] for m in ports if m.get("selected") is True],
+                    "member_flags": {
+                        m["name"]: "selected" if m.get("selected") is True else "not-selected"
+                        for m in ports
+                    },
+                    **({"protocol": record["mode"]} if "mode" in record else {}),
+                }
+            )
+        rows["lag"] = found
+    if "bridge-port" in records:
+        trunks, invalid, access = [], [], {}
+        for record in records["bridge-port"]:
+            name = record.get("name")
+            if not name or record.get("problem_fields"):
+                if name:
+                    invalid.append(name)
+                continue
+            if record.get("link-type") == "trunk":
+                allowed = _vid_range(record.get("trunk-vlans"))
+                if allowed is None or "pvid" not in record:
+                    invalid.append(name)
+                    continue
+                trunks.append(
+                    {
+                        "ifname": name,
+                        "raw_name": name,
+                        "l2_mode": "trunk",
+                        "encapsulation": "dot1q",
+                        "native_vlan": record["pvid"],
+                        "trunk_vlans": allowed,
+                    }
+                )
+            elif record.get("link-type") == "access" and "pvid" in record:
+                access[name] = record["pvid"]
+        summary = {"ports": trunks}
+        if invalid:
+            summary["invalid_ports"] = sorted(invalid)
+        rows["trunk"] = summary
+        for row in interfaces or []:
+            if row["ifname"] in access:
+                row["l2_mode"] = "access"
+                row["access_vlan"] = access[row["ifname"]]
+    if "vlan" in records:
+        rows["vlan"] = [
+            {"vlan_id": r["vid"], "name": r.get("name") or str(r["vid"])}
+            for r in records["vlan"]
+            if "vid" in r
+        ]
+        ports = defaultdict(list)
+        for record in records.get("vlan-member", []):
+            if "vid" in record and "interface" in record:
+                ports[record["vid"]].append(record["interface"])
+        rows["vlan_members"] = [
+            {"vlan_id": r["vlan_id"], "ports": ports.get(r["vlan_id"], [])} for r in rows["vlan"]
+        ]
+    if "mac-entry" in records:
+        rows["mac"] = [
+            {
+                "vlan_or_bd": str(r["vid"]),
+                "mac": r["address"],
+                "port": r["interface"],
+                "type": r.get("type"),
+            }
+            for r in records["mac-entry"]
+            if {"vid", "address", "interface"} <= set(r)
+        ]
+    return rows
+
+
+# NAT policy actions this reading applies; any other (or none read) is not evaluated.
+NAT_ACTIONS = {"source-nat-easy-ip": "source", "no-nat": "none"}
+
+
+def zone_rows(records):
+    """{"security_zones", "nat_rules"}: interface zones and zone-based NAT policy rules.
+
+    RFC 8512 has no security zone: a policy rule is kept with its zones as read, marked
+    non-standard, and model/nat.py matches its zones from the interfaces' zones.
+    """
+    rows = {}
+    if "interface" in records:
+        zones = [
+            {"zone": r["security-zone"], "ifname": r["name"]}
+            for r in records["interface"]
+            if r.get("security-zone") and r.get("name")
+        ]
+        if zones or "security-zone" in records:
+            rows["security_zones"] = zones
+    if "nat-policy-rule" in records:
+        sources, destinations = defaultdict(list), defaultdict(list)
+        for record in records.get("nat-policy-source", []):
+            if "rule" in record and "prefix" in record:
+                sources[record["rule"]].append(record["prefix"])
+        for record in records.get("nat-policy-destination", []):
+            if "rule" in record and "prefix" in record:
+                destinations[record["rule"]].append(record["prefix"])
+        found = []
+        for index, record in enumerate(records["nat-policy-rule"]):
+            if "name" not in record:
+                continue
+            rule = {
+                "kind": "nat-policy",
+                "type": "policy",
+                "name": record["name"],
+                "order": index,
+                "enabled": record.get("enabled", True),
+                "source_zones": record.get("source-zone", []),
+                "destination_zones": record.get("destination-zone", []),
+                "sources": sources.get(record["name"], []),
+                "destinations": destinations.get(record["name"], []),
+                "non_standard": "zone-based NAT policy: RFC 8512 has no security zone",
+            }
+            action = NAT_ACTIONS.get(record.get("action"))
+            unsupported = _flagged(record)
+            if record.get("egress-interface"):
+                unsupported.append("egress-interface")
+            if action is None:
+                unsupported.append(f"action:{record.get('action', 'not read')}")
+            else:
+                rule["action"] = action
+            if unsupported:
+                rule["unsupported"] = unsupported
+            found.append(rule)
+        rows["nat_rules"] = found
+        # Policy rules apply by zone: there is no interface binding to observe.
+        rows["nat_bindings"] = []
     return rows
 
 

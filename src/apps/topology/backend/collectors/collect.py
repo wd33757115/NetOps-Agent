@@ -4,9 +4,10 @@ import math
 import re
 import time
 from dataclasses import dataclass, field, replace
+from uuid import uuid4
 
 from src.platform.device_access.command_policy import classify
-from src.platform.device_access.contracts import BatchRequest, Command, DeviceAccessError
+from src.platform.device_access.contracts import BatchRequest, Command, CommandResult, DeviceAccessError
 from src.platform.device_access.drivers.netmiko_driver import NetmikoDriver
 from src.platform.device_access.policy import authorize
 from src.platform.device_access.service import DeviceAccessService
@@ -434,6 +435,164 @@ class CollectionResult:
     standard: dict | None = None  # the NETCONF tables as standard records (netconf-api)
 
 
+def _netconf_first(
+    access,
+    context,
+    target_ref,
+    connection_profile_id,
+    original_profile,
+    mode,
+    profiles,
+    remaining,
+    should_continue,
+    on_result,
+):
+    """Use model capabilities and standard inventory before opening a CLI session.
+
+    Returns a complete standard-data result for a family the NETCONF mappings cover;
+    otherwise returns (None, fallback reason), allowing the established CLI path to
+    identify the device and collect unsupported capabilities.
+    """
+    if not any(
+        grant.action == "device.netconf"
+        and grant.target_ref == target_ref
+        and grant.connection_profile_id == connection_profile_id
+        for grant in context.grants
+    ):
+        return None, {"reason": "netconf_grant_unavailable", "fallback": "ssh_cli"}
+    from src.platform.device_access.netconf import NETCONF_PORT
+    from .netconf_identity import read_netconf_identity
+
+    profile = replace(original_profile, port=NETCONF_PORT, connection_attempts=1)
+    service = DeviceAccessService(
+        target_resolver=access.target_resolver,
+        profile_resolver=lambda _: profile,
+        driver=access.driver,
+        admission=access.admission,
+        netconf=access.netconf_connector,
+    )
+    try:
+        with service.netconf(
+            context, target_ref, connection_profile_id, should_continue=should_continue
+        ) as (session, guard):
+            evidence, modules = read_netconf_identity(session, guard)
+            identity = evidence.identity
+            if identity is None:
+                return None, {
+                    "reason": evidence.reason or "netconf_identity_unavailable",
+                    "identity_source": evidence.source,
+                    "vendor": evidence.vendor,
+                    "model": evidence.model,
+                    "software": evidence.software,
+                    "modules": sorted(modules),
+                    "fallback": "ssh_cli",
+                }
+            family_profile = select_profile(identity, profiles)
+            selection = nc.standard_selection(identity, evidence.model)
+            if selection is None:
+                return None, {
+                    "reason": "standard_mapping_unavailable",
+                    "identity_source": evidence.source,
+                    "vendor": identity.vendor,
+                    "model": evidence.model,
+                    "fallback": "ssh_cli",
+                }
+            standard = nc.read_standard(session, guard, selection, on_result)
+            # An empty LLDP list is valid: devices omit the empty neighbor container
+            # from NETCONF replies when no peer is currently visible. Interface and
+            # route inventories are the minimum needed to keep discovery NETCONF-only.
+            required = {"interface", "route"}
+            critical = required | {"lldp-neighbor", "lldp-management-address"}
+            missing = sorted(required - set(standard["records"]))
+            failed_critical = {
+                table: reason
+                for table, reason in standard["failed"].items()
+                if table in critical
+            }
+            problem_counts = standard.get("problem_count_by_table")
+            if problem_counts is None:
+                critical_problem_count = standard["problem_count"]
+            else:
+                critical_problem_count = sum(
+                    count for table, count in problem_counts.items() if table in critical
+                )
+            if failed_critical or critical_problem_count or missing:
+                return None, {
+                    "reason": "standard_data_incomplete",
+                    "mapping": selection.ref,
+                    "failed": failed_critical,
+                    "problem_count": critical_problem_count,
+                    "missing_tables": missing,
+                    "source_attempts": standard.get("source_attempts"),
+                    "fallback": "ssh_cli",
+                }
+            from ..model.standard_tables import builder_rows
+
+            records = standard["records"]
+            records.setdefault("lldp-neighbor", [])
+            records.setdefault("lldp-management-address", [])
+            rows = builder_rows(records, identity.os_family)
+            version_summary = {
+                key: value
+                for key, value in (
+                    ("vendor", evidence.vendor or identity.vendor),
+                    ("model", evidence.model),
+                    ("os_version", evidence.software),
+                )
+                if value
+            }
+            version_result = ParseResult(
+                status="complete" if evidence.software else "partial",
+                tier="netconf",
+                parser_ref=f"netconf-identity:{evidence.source}",
+                confidence=identity.confidence,
+                summary=version_summary,
+                warnings=[] if evidence.software else ["software_version_not_observed"],
+            )
+            result = CollectionResult(
+                identity=identity,
+                profile_id=family_profile.id,
+                mode=mode,
+                driver="netconf",
+                parsed={"version": version_result},
+                missing={
+                    capability: "not_in_standard_mapping"
+                    for capability in MODE_CAPABILITIES[mode]
+                    if capability not in {"version", "interfaces", "ip", "arp", "lldp", "routes"}
+                },
+                standard=standard,
+            )
+            for capability, key in (("interfaces", "interfaces"), ("ip", "ip"), ("arp", "arp"), ("lldp", "lldp")):
+                if key in rows:
+                    result.parsed[capability] = ParseResult(
+                        records=rows[key],
+                        status="complete",
+                        tier="netconf",
+                        parser_ref=f"netconf-standard:{key}:v1",
+                        confidence="high",
+                        netconf={"status": "used", "mapping": selection.ref},
+                    )
+            if evidence.reply and on_result:
+                on_result(
+                    CommandResult(
+                        execution_id=uuid4().hex,
+                        command_id="netconf-platform-identity",
+                        started_at=None,
+                        finished_at=nc._now(),
+                        execution_status="succeeded",
+                        output_complete=True,
+                        output=evidence.reply,
+                        driver="netconf",
+                        driver_version=evidence.source,
+                    )
+                )
+            return result, None
+    except DeviceAccessError as exc:
+        if exc.failure_code in {"cancelled", "budget_exceeded"}:
+            raise
+        return None, {"reason": f"netconf:{exc.failure_code}", "fallback": "ssh_cli"}
+
+
 def command_allowlist(profiles=None):
     """For a backend-issued exact grant; this does not grant domain/CIDR access.
 
@@ -502,15 +661,31 @@ def collect_node(
             raise DeviceAccessError("budget_exceeded", "节点总采集预算已用尽")
         return value
 
-    probe_commands = tuple(
-        Command(f"detect-{cmd.split()[0]}", cmd, read_timeout=15) for cmd in PROBES
-    )
-    authorize(context, BatchRequest(target_ref, connection_profile_id, probe_commands))
     if not callable(should_continue):
         raise DeviceAccessError("invalid_request", "节点采集需要实时授权/取消检查")
     original_profile = access.profile_resolver(connection_profile_id)
     if original_profile.platform is not None:
         raise DeviceAccessError("invalid_request", "未知节点识别前不能预设平台")
+    netconf_first_fallback = None
+    if netconf == "prefer":
+        first_result, netconf_first_fallback = _netconf_first(
+            access,
+            context,
+            target_ref,
+            connection_profile_id,
+            original_profile,
+            mode,
+            profiles,
+            remaining,
+            should_continue,
+            on_result,
+        )
+        if first_result is not None:
+            return first_result
+    probe_commands = tuple(
+        Command(f"detect-{cmd.split()[0]}", cmd, read_timeout=15) for cmd in PROBES
+    )
+    authorize(context, BatchRequest(target_ref, connection_profile_id, probe_commands))
     probes = []
     identity = Identity()
 
@@ -644,6 +819,17 @@ def collect_node(
         missing=missing,
         driver_warning=driver_warning,
     )
+    if netconf != "off" and standard is None:
+        # Keep an explicit source-selection failure with the device observation. A
+        # missing mapping must be visible to the user instead of looking like an empty
+        # NETCONF table or a successful CLI-only collection.
+        result.standard = {
+            "failed": "mapping_unavailable",
+            "reason": "no_standard_mapping_for_device_identity",
+            "fallback": "ssh_cli",
+            "precedence": ["ietf_yang", "openconfig_yang", "vendor_private_yang", "ssh_cli"],
+            **({"netconf_first": netconf_first_fallback} if netconf_first_fallback else {}),
+        }
 
     def record(item):
         for cap in readers.get(item.command_id, [item.command_id]):
@@ -791,4 +977,6 @@ def collect_node(
         # A per-VRF merge rebuilds a table; how NETCONF served it stays with it.
         if cap in result.parsed and meta and not result.parsed[cap].netconf:
             result.parsed[cap].netconf = meta
+    if netconf_first_fallback and result.standard:
+        result.standard.setdefault("netconf_first", netconf_first_fallback)
     return result

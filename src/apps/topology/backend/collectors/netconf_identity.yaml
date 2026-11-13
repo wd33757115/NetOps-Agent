@@ -1,0 +1,9 @@
+schema_version: 1
+identities:
+  - vendor: Huawei
+    model: '.*(?:AR6700|USG6306F|CE6800).*'
+    software: '^(?:(?:YunShan OS|VRP)\s+)?1\.25\.1\.1(?:\b.*)?$'
+    os_family: vrp
+    profile_id: huawei-vrp
+    command_style: display
+    module_pattern: '^huawei-(?:ifm|ip|arp|routing|l3vpn)$'

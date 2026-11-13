@@ -12,6 +12,11 @@ import pytest
 import yaml
 
 from src.apps.netconf_api.backend import standard
+from src.apps.topology.backend.collectors import netconf as nc
+from src.apps.topology.backend.collectors.identify import Identity
+from src.apps.topology.backend.model.builder import device_node_ids
+from src.apps.topology.backend.model.standard_tables import builder_rows
+from src.apps.topology.backend.model.standard_trees import OC_LLDP, openconfig_lldp_section
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = ROOT / "tests/fixtures/netconf/huawei-yunshan"
@@ -117,6 +122,175 @@ def test_nested_lists_name_their_interface(converted):
     # CE-1 advertises its management address, as IEEE 802.1AB octets.
     management = {(r["interface"], r["address"]) for r in usg["lldp-management-address"]}
     assert ("GE0/0/1", "C0A84F0D") in management  # 192.168.79.13
+
+
+@pytest.mark.parametrize("device", ["usg-1", "ar-1"])
+def test_huawei_private_lldp_projects_to_openconfig_state(converted, device):
+    records = converted[device][0]
+    section = openconfig_lldp_section(records, "vrp")
+    tree = section["tree"][OC_LLDP]
+    interfaces = tree["interfaces"]["interface"]
+    neighbors = [
+        (interface["name"], neighbor)
+        for interface in interfaces
+        for neighbor in interface["neighbors"]["neighbor"]
+    ]
+    assert neighbors
+    assert all(neighbor["id"] == neighbor["state"]["id"] for _, neighbor in neighbors)
+    assert all("port-id" in neighbor["state"] for _, neighbor in neighbors)
+    assert section["metadata"]["device_module_advertised"] is None
+    assert section["metadata"]["projection_only"] is True
+    assert section["metadata"]["source_projection"] == "standard LLDP records"
+    assert all(gap["code"] == "lldp_neighbor_interface_not_observed" for gap in section["gaps"])
+    topology_neighbors = builder_rows(records, "vrp")["lldp"]
+    assert topology_neighbors
+    assert all(row["local_if"] in {name for name, _ in neighbors} for row in topology_neighbors)
+    if device == "usg-1":
+        assert any(
+            address["state"]["address"] == "192.168.79.13"
+            for _, neighbor in neighbors
+            for address in neighbor.get("mgmt-addresses", {}).get("mgmt-address", [])
+        )
+
+
+def test_management_interface_addresses_join_lldp_peers_to_collected_devices(converted):
+    addresses = {
+        "ar-1": "192.168.79.11",
+        "usg-1": "192.168.79.12",
+        "ce-1": "192.168.79.13",
+    }
+    devices = {}
+    for name, address in addresses.items():
+        records = converted[name][0]
+        rows = builder_rows(records, "vrp")
+        assert {
+            (row["ifname"], row["vrf"], row["address"])
+            for row in rows["ip"]
+        } >= {("MEth0/0/0", "_management_vpn_", address)}
+        devices[address] = {"platform": "vrp", **rows}
+
+    assert device_node_ids(devices, "urn:test:") == {
+        "192.168.79.11": "urn:test:device:fa-c7-f4-60-00-40",
+        "192.168.79.12": "urn:test:device:fa-c7-f4-60-00-31",
+        "192.168.79.13": "urn:test:device:fa-c7-f4-60-00-61",
+    }
+
+
+def test_openconfig_lldp_yang_maps_native_neighbor_and_management_address():
+    mapping = standard.shipped()["openconfig_lldp"]
+    reply = """<data xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+      <lldp xmlns="http://openconfig.net/yang/lldp"><interfaces><interface><name>GE1/0/1</name>
+        <neighbors><neighbor><id>7</id><state>
+          <id>7</id><chassis-id>00:11:22:33:44:55</chassis-id><chassis-id-type>mac-address</chassis-id-type>
+          <port-id>GE1/0/2</port-id><port-id-type>interface-name</port-id-type>
+          <system-name>peer-1</system-name><management-address-type>ipv4</management-address-type>
+          <management-address>192.0.2.7</management-address>
+        </state></neighbor></neighbors>
+      </interface></interfaces></lldp>
+    </data>"""
+    records, problems = standard.convert(mapping, [reply])
+    assert problems == []
+    assert records["lldp-neighbor"] == [
+        {
+            "interface": "GE1/0/1",
+            "remote-index": 7,
+            "chassis-id-subtype": "mac-address",
+            "chassis-id": "00-11-22-33-44-55",
+            "port-id-subtype": "interface-name",
+            "port-id": "GE1/0/2",
+            "system-name": "peer-1",
+        }
+    ]
+    assert records["lldp-management-address"] == [
+        {
+            "interface": "GE1/0/1",
+            "remote-index": 7,
+            "address-subtype": "ietf-routing:ipv4",
+            "address": "C0000207",
+        }
+    ]
+
+
+def test_announced_openconfig_lldp_is_read_before_private_mapping():
+    selection = nc.standard_selection(Identity(vendor="Huawei", os_family="vrp"))
+    assert selection is not None
+
+    class Session:
+        capabilities = (
+            "urn:ietf:params:netconf:base:1.1",
+            "http://openconfig.net/yang/lldp?module=openconfig-lldp&revision=2018-11-21",
+        )
+
+        def __init__(self):
+            self.filters = []
+
+        def get(self, subtree):
+            self.filters.append(subtree)
+            if "openconfig.net/yang/lldp" in subtree:
+                return """<data xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+                  <lldp xmlns="http://openconfig.net/yang/lldp"><interfaces><interface><name>GE1/0/1</name>
+                    <neighbors><neighbor><id>7</id><state>
+                      <id>7</id><chassis-id>00:11:22:33:44:55</chassis-id><chassis-id-type>mac-address</chassis-id-type>
+                      <port-id>GE1/0/2</port-id><port-id-type>interface-name</port-id-type><system-name>peer-1</system-name>
+                    </state></neighbor></neighbors>
+                  </interface></interfaces></lldp>
+                </data>"""
+            return '<data xmlns="urn:ietf:params:xml:ns:netconf:base:1.0"/>'
+
+    session = Session()
+    result = nc.read_standard(session, None, selection)
+    assert "openconfig.net/yang/lldp" in session.filters[0]
+    assert not any("huawei-lldp" in item for item in session.filters)
+    assert result["records"]["lldp-neighbor"][0]["system-name"] == "peer-1"
+    assert result["source_attempts"]["lldp"][-1]["status"] == "used"
+
+
+def test_announced_openconfig_lldp_with_no_neighbors_is_a_valid_empty_observation():
+    selection = nc.standard_selection(Identity(vendor="Huawei", os_family="vrp"))
+    assert selection is not None
+
+    class Session:
+        capabilities = (
+            "http://openconfig.net/yang/lldp?module=openconfig-lldp&revision=2018-11-21",
+        )
+
+        def __init__(self):
+            self.filters = []
+
+        def get(self, subtree):
+            self.filters.append(subtree)
+            return '<data xmlns="urn:ietf:params:xml:ns:netconf:base:1.0" />'
+
+    session = Session()
+    result = nc.read_standard(session, None, selection)
+    assert "openconfig.net/yang/lldp" in session.filters[0]
+    assert not any("huawei-lldp" in item for item in session.filters)
+    assert result["records"]["lldp-neighbor"] == []
+    assert result["records"]["lldp-management-address"] == []
+    assert result["source_attempts"]["lldp"][-1]["status"] == "used"
+    assert result["source_attempts"]["lldp"][-1]["neighbor_count"] == 0
+
+
+def test_openconfig_lldp_rpc_refusal_is_reported_before_private_fallback():
+    from src.platform.device_access.contracts import DeviceAccessError
+
+    selection = nc.standard_selection(Identity(vendor="Huawei", os_family="vrp"))
+
+    class Session:
+        capabilities = (
+            "http://openconfig.net/yang/lldp?module=openconfig-lldp&revision=2018-11-21",
+        )
+
+        def get(self, subtree):
+            if "openconfig.net/yang/lldp" in subtree:
+                raise DeviceAccessError("netconf_rpc_error", "unknown element")
+            return '<data xmlns="urn:ietf:params:xml:ns:netconf:base:1.0"/>'
+
+    result = nc.read_standard(Session(), None, selection)
+    attempts = result["source_attempts"]["lldp"]
+    assert attempts[1]["status"] == "unusable"
+    assert attempts[1]["reason"] == "empty_or_incomplete_reply"
+    assert attempts[2]["source"] == "vendor_private_yang"
 
 
 def test_arp_has_neighbours_only_with_their_instance(converted):

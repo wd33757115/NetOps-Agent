@@ -48,13 +48,15 @@ def identity(text=None):
 
 def test_profiles_modes_identity_and_verification():
     profiles = load_profiles()
-    assert set(profiles) == {"h3c-comware7", "cisco-nxos", "cisco-ios"}
+    assert set(profiles) == {"h3c-comware7", "cisco-nxos", "cisco-ios", "huawei-vrp"}
     profile = select_profile(identity(), profiles)
     assert [len(profile.selected(mode)) for mode in ("fast", "standard", "full")] == [4, 13, 16]
     assert profile.verified[0].unsupported == ["inventory", "irf"]
     assert profiles["cisco-ios"].verified == [] and profiles["cisco-nxos"].verified == []
     iosxe = identify([Probe("show version", "Cisco IOS XE Software, Version 17.9")])
     assert select_profile(iosxe, profiles).id == "cisco-ios"
+    yunshan = identify([Probe("display version", "Huawei YunShan OS, Version 1.25.1.1")])
+    assert select_profile(yunshan, profiles).id == "huawei-vrp"
     with pytest.raises(DeviceAccessError, match="档案"):
         select_profile(identity("H3C Comware Software, Version 5.2"), profiles)
     with pytest.raises(DeviceAccessError):

@@ -12,6 +12,12 @@ the lookup: the order IOS and Comware both use, with the inbound ACL before and 
 outbound ACL after. A translation is exact or not made: the address a pool gives and a
 translated port are left open (None). A rule this reading cannot apply, or a match that
 depends on what the caller left open, is "undetermined" with what would settle it.
+
+A firewall's NAT policy (rules of type "policy", standard_tables.zone_rows) is matched in
+the device's order on the zones of the interface the packet came in by (``local`` for
+what the device sends itself) and the one it leaves by, and on its addresses; the first
+rule that matches decides, and none means no translation (the policy's default no-nat).
+Only source NAT to the leaving interface's address (easy-ip) and no-nat are applied.
 """
 
 from __future__ import annotations
@@ -88,9 +94,57 @@ def destination(facts, ifname, packet):
     return None
 
 
+def _zone(facts, ifname):
+    if ifname is None:
+        return "local"
+    found = {row["zone"] for row in facts.get("security_zones") or [] if row.get("ifname") == ifname}
+    return found.pop() if len(found) == 1 else None
+
+
+def _covered(address, prefixes):
+    if not prefixes:
+        return True  # no address condition
+    if address is None:
+        return None
+    return any(ipaddress.ip_address(address) in ipaddress.ip_network(p) for p in prefixes)
+
+
+def _policy(facts, in_if, out_if, packet):
+    """The NAT policy's outcome for a packet leaving by out_if, or None (no translation)."""
+    zones = (_zone(facts, in_if), _zone(facts, out_if))
+    for rule in sorted(
+        (r for r in facts.get("nat_rules") or [] if r.get("type") == "policy"),
+        key=lambda r: r.get("order", 0),
+    ):
+        if rule.get("enabled") is False:
+            continue
+        needs = []
+        for zone, allowed, name in zip(zones, (rule["source_zones"], rule["destination_zones"]), ("in", "out")):
+            if not allowed:
+                continue
+            if zone is None:
+                needs.append(f"zone_of_{name}_interface")
+            elif zone not in allowed:
+                break
+        else:
+            matched = [_covered(packet.get("src"), rule["sources"]), _covered(packet.get("dst"), rule["destinations"])]
+            if False in matched:
+                continue
+            needs += [field for field, ok in zip(("src", "dst"), matched) if ok is None]
+            if needs or rule.get("unsupported"):
+                return _undetermined(rule, needs + rule.get("unsupported", []))
+            if rule["action"] == "none":
+                return None
+            after = {**packet, "src": interface_address(facts, out_if), "src_port": None}
+            return {"packet": after, "translation": _record("source", out_if, rule, packet, after)}
+    return None
+
+
 def source(facts, in_if, out_if, packet, vrf="default"):
     """{"packet", "translation"} / {"undetermined": {...}} / None for a packet leaving
     (``vrf``: the network instance it is in, for the ACL that selects it)."""
+    if any(rule.get("type") == "policy" for rule in facts.get("nat_rules") or []):
+        return _policy(facts, in_if, out_if, packet)
     interface_roles = roles(facts)
     if "inside" in interface_roles.values() and interface_roles.get(in_if) != "inside":
         return None  # rules of no interface translate only from inside to outside
@@ -157,7 +211,7 @@ def _record(kind, ifname, rule, before, after):
         "interface": ifname,
         "rule": {
             key: rule[key]
-            for key in ("kind", "acl", "pool", "local", "global", "global_interface", "local_port", "global_port")
+            for key in ("kind", "name", "acl", "pool", "local", "global", "global_interface", "local_port", "global_port")
             if key in rule
         },
         "before": {field: before.get(field) for field in changed},

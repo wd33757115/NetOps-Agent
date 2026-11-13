@@ -203,7 +203,7 @@ def test_tables_netconf_serves_are_read_over_netconf_and_kept_as_evidence(br1):
             "used",
         ), (cap, parsed.warnings, parsed.netconf)
     assert not set(POLICY_CLI) & set(br1.commands)
-    assert br1.sessions == 1  # one NETCONF session for every table
+    assert br1.sessions == 2  # hello/identity preflight, then one data session
     evidence = {e.command_id: e for e in br1.evidence if e.driver == "netconf"}
     assert {"netconf-arp-0", "netconf-arp-1", "netconf-routes-0"} <= set(evidence)
     assert {cap for cap in POLICY_CAPS if f"netconf-{cap}-0" in evidence} == set(POLICY_CAPS)
@@ -402,9 +402,11 @@ def test_standard_tables_are_read_in_the_same_session_and_reach_the_route_table(
     from src.apps.topology.backend.service import _facts
 
     result = br1.collect()
-    assert br1.sessions == 1  # one session for the definitions and the standard tables
+    assert br1.sessions == 2  # hello/identity preflight, then definitions and standard tables
     read = result.standard
     assert read["mapping"].startswith("h3c_comware7@") and read["failed"] == {}
+    assert read["source_attempts"]["lldp"][1]["status"] == "module_not_announced"
+    assert read["source_attempts"]["lldp"][2]["status"] == "used"
     counts = {name: len(rows) for name, rows in read["records"].items()}
     expected = {"interface": 9, "ipv4-address": 7, "route": 50, "ospf-neighbor": 3}
     assert expected.items() <= counts.items() and counts["lldp-neighbor"] == 3

@@ -1,0 +1,26 @@
+schema_version: 1
+id: huawei-vrp
+vendor: Huawei
+os_family: vrp
+identity_profiles: [huawei-vrp]
+preferred_driver: paramiko
+session:
+  paging_off: [screen-length 0 temporary]
+  encoding: utf-8
+  max_output_bytes: 4194304
+budgets: {fast: 120, standard: 300, full: 600}
+# Huawei YunShan is read over NETCONF (netconf-api's huawei_yunshan mapping): its standard
+# records give the interfaces, addresses, ARP, LLDP, routes, OSPF, L2 and NAT policy.
+# The CLI only identifies the device and keeps the generic readings as evidence; rule
+# governance publishes no Huawei templates yet (owner decision 2026-11-11).
+capabilities:
+  version: {command: display version, parser: generic_version}
+  lldp: {command: display lldp neighbor, parser: generic_lldp}
+  interfaces: {command: display interface brief, parser: generic_ifbrief}
+verified:
+  - model: AR6700, USG6306F, CE6800 (eNSP Pro)
+    version: YunShan OS 1.25.1.1
+    source: lab capture 2026-11-11
+    collected: [version, lldp, interfaces]
+    unsupported: []
+    parsed: []

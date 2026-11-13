@@ -129,8 +129,18 @@ def _family(identity):
 
 
 def device(identity, model=None):
+    """{"vendor", "platform", "model"} to select implementations and NETCONF mappings by.
+
+    The vendor is rule governance's for the family; a family it publishes nothing for
+    (read over NETCONF only) takes the vendor its version signature names.
+    """
     family = _family(identity)
-    found = {"vendor": families().get(family), "platform": family}
+    vendor = families().get(family)
+    if vendor is None:
+        from .families import row
+
+        vendor = (row(family) or {}).get("vendor")
+    found = {"vendor": vendor, "platform": family}
     if model:
         found["model"] = model
     return found

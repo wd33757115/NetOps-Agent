@@ -22,9 +22,11 @@ from ..collectors.ifname import normalize_ifname
 from .device_state import INTERFACE_TYPES
 
 IF = "ietf-interfaces:interfaces"
+NI = "ietf-network-instance:"
 RT = "ietf-routing:routing"
 OSPF = "ietf-ospf:"
 LLDP = "ieee802-dot1ab-lldp:lldp"
+OC_LLDP = "openconfig-lldp:lldp"
 AF = {4: "ietf-ipv4-unicast-routing", 6: "ietf-ipv6-unicast-routing"}
 AF_NAMES = {4: "ipv4", 6: "ipv6"}
 LLDP_LEAVES = (
@@ -43,6 +45,7 @@ FAMILIES = {
     "ipv6": "ietf-ipv6-unicast-routing:ipv6-unicast",
 }
 UNSPECIFIED = {"0.0.0.0", "::"}
+NEAREST_BRIDGE = "01-80-C2-00-00-0E"  # IEEE 802.1AB nearest-bridge agent address
 
 
 def _gap(gaps, code, **fields):
@@ -83,6 +86,10 @@ def _interface_rows(records, platform, gaps):
         for leaf in ("description", "enabled", "oper-status"):
             if leaf in record:
                 entry[leaf] = record[leaf]
+        if record.get("network-instance", "default") != "default":
+            # RFC 8529: the interface is bound to that network instance (the global one
+            # has no binding, as in the CLI trees).
+            entry[NI + "bind-ni-name"] = record["network-instance"]
         for leaf in ("enabled", "oper-status"):
             if leaf not in record:
                 _gap(gaps, f"{leaf}_not_observed", interface=name, field=leaf)
@@ -165,7 +172,9 @@ def _next_hops(rows, family, interfaces):
             if name in interfaces:
                 hop["outgoing-interface"] = name
             elif "address" in hop:
-                unproven.append(name)  # kept by address; metadata names the interface
+                # Kept by address; metadata names the interface (the query table finds it
+                # by prefix and address).
+                unproven.append({"interface": name, "address": hop["address"]})
             else:
                 return None, [], "outgoing_interface_not_in_interfaces"
         if not hop:
@@ -279,9 +288,9 @@ def routing_sections(records, platform):
                 for leaf in ("metric", "tag", "route-type"):
                     if f"ospf-{leaf}" in first:
                         route[OSPF + leaf] = first[f"ospf-{leaf}"]
-            for name in unproven:
+            for item in unproven:
                 metadata.setdefault("next_hop_interfaces_unproven", []).append(
-                    {"prefix": prefix, "interface": name}
+                    {"prefix": prefix, **item}
                 )
             used.update(h["outgoing-interface"] for h in _hops(hop) if "outgoing-interface" in h)
             name = AF_NAMES[family] if scope == "default" else f"{scope}:{AF_NAMES[family]}"
@@ -329,7 +338,14 @@ def lldp_section(records, platform):
     result = _section("IEEE 802.1AB", {LLDP: {}})
     gaps = result["gaps"]
     ports = defaultdict(list)
+    derived = []
     for index, row in enumerate(records.get("lldp-neighbor", [])):
+        if "dest-mac-address" not in row and "time-mark" not in row and "interface" in row:
+            # A device that runs only the nearest-bridge agent and keeps no time mark
+            # (Huawei) names its neighbours by port and index. The agent's address is
+            # fixed by IEEE 802.1AB and the time mark set to 0; metadata says so.
+            row = {**row, "dest-mac-address": NEAREST_BRIDGE, "time-mark": 0}
+            derived.append(index)
         missing = [
             key
             for key in ("interface", "dest-mac-address", "time-mark", "remote-index")
@@ -357,8 +373,8 @@ def lldp_section(records, platform):
             for a in records.get("lldp-management-address", [])
             if (
                 a.get("interface"),
-                a.get("dest-mac-address"),
-                a.get("time-mark"),
+                a.get("dest-mac-address", NEAREST_BRIDGE if index in derived else None),
+                a.get("time-mark", 0 if index in derived else None),
                 a.get("remote-index"),
             )
             == key
@@ -368,6 +384,13 @@ def lldp_section(records, platform):
         if addresses:
             entry["management-address"] = addresses
         ports[(row["interface"], row["dest-mac-address"])].append(entry)
+    if derived:
+        result["metadata"]["derived_keys"] = {
+            "dest-mac-address": NEAREST_BRIDGE,
+            "time-mark": 0,
+            "records": derived,
+            "why": "the device names an LLDP neighbour by local port and index only",
+        }
     if ports:
         result["tree"][LLDP]["port"] = [
             {"name": name, "dest-mac-address": mac, "remote-systems-data": entries}
@@ -377,6 +400,95 @@ def lldp_section(records, platform):
             "interface": [deepcopy(interfaces[name]) for name, _ in sorted(ports)]
         }
     return result
+
+
+def openconfig_lldp_section(records, platform):
+    """Project the standard LLDP records into OpenConfig LLDP operational state.
+
+    Huawei AR/USG expose LLDP through private YANG modules, while the lab CE also
+    advertises OpenConfig LLDP. This adapter gives downstream discovery one stable
+    OpenConfig-shaped representation without claiming the AR/USG devices implement
+    that module. Values not present in the source records remain absent.
+    """
+    device = device_tree(records, platform)
+    interfaces = {row["name"] for row in device["tree"][IF]["interface"]}
+    result = _section("OpenConfig LLDP 1.2.0 projection", {OC_LLDP: {"interfaces": {"interface": []}}})
+    result["metadata"].update(
+        source_projection="standard LLDP records",
+        model_revision="1.2.0",
+        device_module_advertised=None,
+        projection_only=True,
+    )
+    gaps = result["gaps"]
+    neighbors = defaultdict(list)
+    for index, row in enumerate(records.get("lldp-neighbor", [])):
+        interface = row.get("interface")
+        if interface not in interfaces:
+            _gap(gaps, "lldp_neighbor_interface_not_observed", record_index=index, interface=interface)
+            continue
+        remote_id = row.get("remote-index")
+        if remote_id is None:
+            _gap(gaps, "lldp_neighbor_id_not_observed", record_index=index)
+            continue
+        state = {"id": str(remote_id)}
+        fields = {
+            "chassis-id": "chassis-id",
+            "chassis-id-subtype": "chassis-id-type",
+            "port-id": "port-id",
+            "port-id-subtype": "port-id-type",
+            "port-desc": "port-description",
+            "system-name": "system-name",
+            "system-description": "system-description",
+        }
+        for source, target in fields.items():
+            value = row.get(source)
+            if value is None:
+                continue
+            if isinstance(value, str) and len(value.encode("utf-8")) > 255:
+                _gap(gaps, "openconfig_lldp_value_too_long", record_index=index, field=source)
+                continue
+            state[target] = value
+        remote_key = (interface, remote_id)
+        addresses = []
+        for item in records.get("lldp-management-address", []):
+            if (item.get("interface"), item.get("remote-index")) != remote_key:
+                continue
+            address = _address_value(item.get("address"), item.get("address-subtype"))
+            if address is None:
+                continue
+            addresses.append({"address": address})
+        neighbor = {"id": str(remote_id), "state": state}
+        if addresses:
+            # OpenConfig 1.2.0 stores the address as the list key and mirrors it in state.
+            neighbor["mgmt-addresses"] = {
+                "mgmt-address": [
+                    {"address": item["address"], "state": {"address": item["address"]}}
+                    for item in addresses
+                ]
+            }
+        neighbors[interface].append(neighbor)
+    result["tree"][OC_LLDP]["interfaces"]["interface"] = [
+        {
+            "name": interface,
+            "neighbors": {"neighbor": sorted(entries, key=lambda row: row["id"])},
+        }
+        for interface, entries in sorted(neighbors.items())
+    ]
+    return result
+
+
+def _address_value(value, subtype):
+    """Decode the standard record's hex address for the OpenConfig inet union."""
+    if subtype not in {"ietf-routing:ipv4", "ietf-routing:ipv6"} or not value:
+        return None
+    try:
+        raw = bytes.fromhex(value)
+        address = ipaddress.ip_address(raw)
+    except ValueError:
+        return None
+    return str(address) if (subtype.endswith("ipv4") and address.version == 4) or (
+        subtype.endswith("ipv6") and address.version == 6
+    ) else None
 
 
 def _one_prefix(start, end):
@@ -558,6 +670,7 @@ def project(records, platform):
         "control": {
             "routing": routing_sections(records, platform),
             "lldp": lldp_section(records, platform),
+            "lldp_openconfig": openconfig_lldp_section(records, platform),
             "nat": nat_section(records, platform),
         },
     }

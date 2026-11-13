@@ -1106,7 +1106,15 @@ def topology_observation(result):
         ),
         "platform": {
             "profile_id": result.profile_id,
-            "source": "version_probe",
+            "source": (
+                "netconf_yang"
+                if any(
+                    str(item.get("source", "")).startswith("netconf")
+                    or item.get("source") in {"ietf-hardware", "openconfig-platform"}
+                    for item in result.identity.evidence
+                )
+                else "version_probe"
+            ),
             "status": "identified",
             "mode": result.mode,
             "driver": result.driver,

@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from dataclasses import replace
 from collections import Counter
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -37,6 +38,7 @@ MAX_PROBLEMS = 20  # problems kept per capability; the count is whole
 MAX_EXAMPLES = 5  # differing facts kept per comparison
 logger = logging.getLogger(__name__)
 _cache = {}
+_openconfig_lldp_mapping = None
 
 
 def reader():
@@ -69,7 +71,114 @@ def standard_selection(identity, model=None):
 def read_standard(session, guard, selection, on_result=None):
     """The device's tables as standard records (netconf-api's conversion layer), each
     reply kept as evidence; topology builds the standard trees from them."""
-    data = standard_reader().read(selection, session, guard=guard)
+    source_attempts = {
+        "lldp": [
+            {"source": "ietf_yang", "status": "no_ietf_lldp_module_announced"}
+        ]
+    }
+    modules = _announced_modules(session.capabilities)
+    projected = None
+    if "openconfig-lldp" in modules:
+        try:
+            from src.apps.netconf_api.backend import standard as standard_mapping
+
+            global _openconfig_lldp_mapping
+            if _openconfig_lldp_mapping is None:
+                _openconfig_lldp_mapping = standard_mapping.shipped()["openconfig_lldp"]
+
+            class RefusedError(Exception):
+                pass
+
+            def fetch(subtree):
+                if guard is not None:
+                    guard()
+                try:
+                    return session.get(subtree)
+                except DeviceAccessError as exc:
+                    if exc.failure_code == "netconf_rpc_error":
+                        raise RefusedError(str(exc)) from exc
+                    raise
+
+            projected = standard_mapping.read(
+                _openconfig_lldp_mapping, fetch, refused=(RefusedError,)
+            )
+            _evidence(
+                "standard",
+                [
+                    {
+                        "definition": f"openconfig-lldp@{modules['openconfig-lldp']}:{item['table']}",
+                        "reply": item["reply"],
+                    }
+                    for item in projected["replies"]
+                ],
+                on_result,
+            )
+            clean = not projected["failed"] and not projected["problems"]
+            if clean:
+                source_attempts["lldp"].append(
+                    {
+                        "source": "openconfig_yang",
+                        "status": "used",
+                        "module": "openconfig-lldp",
+                        "neighbor_count": len(projected["records"].get("lldp-neighbor", [])),
+                    }
+                )
+            else:
+                source_attempts["lldp"].append(
+                    {
+                        "source": "openconfig_yang",
+                        "status": "unusable",
+                        "reason": "empty_or_incomplete_reply",
+                        "failed": projected["failed"],
+                        "problem_count": len(projected["problems"]),
+                    }
+                )
+                source_attempts["lldp"].append(
+                    {"source": "vendor_private_yang", "status": "used", "mapping": selection.ref}
+                )
+        except (KeyError, ValueError) as exc:
+            source_attempts["lldp"].append(
+                {
+                    "source": "openconfig_yang",
+                    "status": "unusable",
+                    "reason": "mapping_or_rpc_error",
+                    "detail": str(exc)[:300],
+                }
+            )
+            source_attempts["lldp"].append(
+                {"source": "vendor_private_yang", "status": "used", "mapping": selection.ref}
+            )
+    else:
+        source_attempts["lldp"].append(
+            {"source": "openconfig_yang", "status": "module_not_announced"}
+        )
+        source_attempts["lldp"].append(
+            {"source": "vendor_private_yang", "status": "used", "mapping": selection.ref}
+        )
+    vendor_selection = selection
+    if projected is not None and not projected["failed"] and not projected["problems"]:
+        vendor_selection = replace(
+            selection,
+            mapping=replace(
+                selection.mapping,
+                tables=tuple(
+                    table
+                    for table in selection.mapping.tables
+                    if table.name not in {"lldp-neighbor", "lldp-management-address"}
+                ),
+            ),
+        )
+    data = standard_reader().read(vendor_selection, session, guard=guard)
+    records = data["records"]
+    if vendor_selection is not selection:
+        for table in ("lldp-neighbor", "lldp-management-address"):
+            records[table] = projected["records"].get(table, [])
+    elif not data["failed"] and not data["problems"]:
+        # NETCONF servers commonly omit an empty non-presence/list subtree. A successful
+        # LLDP query with no converted rows is still an observation: do not force SSH/CLI
+        # fallback just because this device currently has no LLDP neighbors.
+        records.setdefault("lldp-neighbor", [])
+        records.setdefault("lldp-management-address", [])
     _evidence(
         "standard",
         [
@@ -80,10 +189,25 @@ def read_standard(session, guard, selection, on_result=None):
     )
     return {
         "mapping": selection.ref,
-        "records": data["records"],
+        "records": records,
         "problem_count": len(data["problems"]),
+        "problem_count_by_table": {
+            table: sum(1 for problem in data["problems"] if problem.get("table") == table)
+            for table in sorted({problem.get("table") for problem in data["problems"]})
+        },
         "problems": data["problems"][:MAX_PROBLEMS],
         "failed": data["failed"],
+        "source_attempts": source_attempts,
+    }
+
+
+def _announced_modules(capabilities):
+    from urllib.parse import parse_qs
+
+    return {
+        module: parse_qs(capability.partition("?")[2]).get("revision", [None])[0]
+        for capability in capabilities
+        for module in parse_qs(capability.partition("?")[2]).get("module", [])
     }
 
 
