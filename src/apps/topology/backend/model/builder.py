@@ -271,6 +271,21 @@ class _Topology:
         }
         if not local_ifs:
             return ()
+        # The device must still be attached to the address's subnet: an LLDP link to
+        # the owner proves the cable, not the reachability (F1: when the VLAN left
+        # the trunk, the SVI went down, its address left the table, and the stale
+        # ARP entry on the trunk member must stop resolving the next hop).
+        try:
+            target = ipaddress.ip_address(ip)
+        except ValueError:
+            return ()
+        attached = any(
+            target in ipaddress.ip_interface(f"{row['address']}/{row['prefix_len']}").network
+            for row in facts.get("ip", [])
+            if row.get("vrf", "default") == vrf
+        )
+        if not attached:
+            return ()
         direct = set()
         for row in facts.get("lldp", []):
             if row["local_if"] not in local_ifs:
