@@ -1,0 +1,58 @@
+{
+ "device": "192.168.79.12",
+ "target": "192.168.79.12",
+ "ai": {
+  "device": "USG-1",
+  "object": "client-easy-ip 的源地址条件变成 10.1.30.0/24",
+  "cause": "nat_rule_not_matching",
+  "must_not_invent": [
+   "说 NAT 规则被删"
+  ]
+ },
+ "flows": {
+  "client_to_server": {
+   "src": "10.1.10.10",
+   "dst": "10.1.20.10",
+   "flow": {
+    "protocol": "tcp",
+    "dst_port": 80
+   }
+  },
+  "client_to_internet": {
+   "src": "10.1.10.10",
+   "dst": "203.0.113.1",
+   "flow": {
+    "protocol": "icmp"
+   }
+  },
+  "server_to_internet": {
+   "src": "10.1.20.10",
+   "dst": "203.0.113.1",
+   "flow": {
+    "protocol": "icmp"
+   }
+  }
+ },
+ "checks": [
+  {
+   "kind": "path",
+   "flow": "client_to_internet",
+   "direction": "forward",
+   "end_device": "192.168.79.11",
+   "status": "delivered"
+  },
+  {
+   "kind": "path",
+   "flow": "client_to_internet",
+   "direction": "reverse",
+   "end_device": "192.168.79.11",
+   "status": "no_route"
+  },
+  {
+   "kind": "nat_rule_source",
+   "device": "192.168.79.12",
+   "rule": "client-easy-ip",
+   "source": "10.1.30.0"
+  }
+ ]
+}

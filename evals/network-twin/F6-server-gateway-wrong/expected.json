@@ -1,0 +1,53 @@
+{
+ "device": null,
+ "target": null,
+ "ai": {
+  "device": "PC-SERVER-1",
+  "object": "主机网关配置 10.1.20.254",
+  "cause": "host_gateway_wrong",
+  "must_not_invent": [
+   "把孪生看不到的主机配置说成网络设备故障"
+  ]
+ },
+ "flows": {
+  "client_to_server": {
+   "src": "10.1.10.10",
+   "dst": "10.1.20.10",
+   "flow": {
+    "protocol": "tcp",
+    "dst_port": 80
+   }
+  },
+  "client_to_internet": {
+   "src": "10.1.10.10",
+   "dst": "203.0.113.1",
+   "flow": {
+    "protocol": "icmp"
+   }
+  },
+  "server_to_internet": {
+   "src": "10.1.20.10",
+   "dst": "203.0.113.1",
+   "flow": {
+    "protocol": "icmp"
+   }
+  }
+ },
+ "manual_step": "整个用例在 eNSP 的 PC-SERVER-1 上操作：把网关从 10.1.20.1 改成 10.1.20.254，复测后改回。",
+ "checks": [
+  {
+   "kind": "path",
+   "flow": "client_to_server",
+   "direction": "forward",
+   "end_device": "192.168.79.12",
+   "status": "endpoint_unresolved"
+  },
+  {
+   "kind": "path",
+   "flow": "client_to_server",
+   "direction": "reverse",
+   "end_device": "192.168.79.12",
+   "status": "endpoint_unresolved"
+  }
+ ]
+}

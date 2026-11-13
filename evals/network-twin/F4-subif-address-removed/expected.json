@@ -1,0 +1,58 @@
+{
+ "device": "192.168.79.12",
+ "target": "192.168.79.12",
+ "ai": {
+  "device": "USG-1",
+  "object": "Eth-Trunk1.20 的地址被删",
+  "cause": "gateway_address_missing",
+  "must_not_invent": [
+   "CE 二层故障",
+   "服务器故障"
+  ]
+ },
+ "flows": {
+  "client_to_server": {
+   "src": "10.1.10.10",
+   "dst": "10.1.20.10",
+   "flow": {
+    "protocol": "tcp",
+    "dst_port": 80
+   }
+  },
+  "client_to_internet": {
+   "src": "10.1.10.10",
+   "dst": "203.0.113.1",
+   "flow": {
+    "protocol": "icmp"
+   }
+  },
+  "server_to_internet": {
+   "src": "10.1.20.10",
+   "dst": "203.0.113.1",
+   "flow": {
+    "protocol": "icmp"
+   }
+  }
+ },
+ "checks": [
+  {
+   "kind": "path",
+   "flow": "client_to_server",
+   "direction": "forward",
+   "end_device": "192.168.79.12",
+   "status": "no_route"
+  },
+  {
+   "kind": "path",
+   "flow": "client_to_server",
+   "direction": "reverse",
+   "end_device": "192.168.79.12",
+   "status": "no_route"
+  },
+  {
+   "kind": "ip_absent",
+   "device": "192.168.79.12",
+   "ifname": "Eth-Trunk1.20"
+  }
+ ]
+}

@@ -1,0 +1,58 @@
+{
+ "device": "192.168.79.13",
+ "target": "192.168.79.13",
+ "ai": {
+  "device": "CE-1",
+  "object": "Eth-Trunk1 成员 GE1/0/1 关闭",
+  "cause": "lag_member_down_no_impact",
+  "must_not_invent": [
+   "把单成员聚合报成转发故障"
+  ]
+ },
+ "flows": {
+  "client_to_server": {
+   "src": "10.1.10.10",
+   "dst": "10.1.20.10",
+   "flow": {
+    "protocol": "tcp",
+    "dst_port": 80
+   }
+  },
+  "client_to_internet": {
+   "src": "10.1.10.10",
+   "dst": "203.0.113.1",
+   "flow": {
+    "protocol": "icmp"
+   }
+  },
+  "server_to_internet": {
+   "src": "10.1.20.10",
+   "dst": "203.0.113.1",
+   "flow": {
+    "protocol": "icmp"
+   }
+  }
+ },
+ "checks": [
+  {
+   "kind": "path",
+   "flow": "client_to_server",
+   "direction": "forward",
+   "end_device": "192.168.79.12",
+   "status": "endpoint_unresolved"
+  },
+  {
+   "kind": "path",
+   "flow": "client_to_server",
+   "direction": "reverse",
+   "end_device": "192.168.79.12",
+   "status": "endpoint_unresolved"
+  },
+  {
+   "kind": "lag_member_count",
+   "device": "192.168.79.13",
+   "lag": "Eth-Trunk1",
+   "count": 1
+  }
+ ]
+}

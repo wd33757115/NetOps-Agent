@@ -1,0 +1,66 @@
+{
+ "device": "192.168.79.13",
+ "target": "192.168.79.13",
+ "ai": {
+  "device": "CE-1",
+  "object": "GE1/0/4 接入 VLAN 被改成 30",
+  "cause": "access_port_wrong_vlan",
+  "must_not_invent": [
+   "网关地址故障",
+   "NAT"
+  ]
+ },
+ "flows": {
+  "client_to_server": {
+   "src": "10.1.10.10",
+   "dst": "10.1.20.10",
+   "flow": {
+    "protocol": "tcp",
+    "dst_port": 80
+   }
+  },
+  "client_to_internet": {
+   "src": "10.1.10.10",
+   "dst": "203.0.113.1",
+   "flow": {
+    "protocol": "icmp"
+   }
+  },
+  "server_to_internet": {
+   "src": "10.1.20.10",
+   "dst": "203.0.113.1",
+   "flow": {
+    "protocol": "icmp"
+   }
+  }
+ },
+ "manual_step": "注入后需在 eNSP 的 PC-SERVER-1 上触发一次流量（如重新 ping 网关），MAC/ARP 才会反映新位置。",
+ "checks": [
+  {
+   "kind": "path",
+   "flow": "client_to_server",
+   "direction": "forward",
+   "end_device": "192.168.79.12",
+   "status": "endpoint_unresolved"
+  },
+  {
+   "kind": "path",
+   "flow": "client_to_server",
+   "direction": "reverse",
+   "end_device": "192.168.79.12",
+   "status": "endpoint_unresolved"
+  },
+  {
+   "kind": "mac_absent_in_vlan",
+   "device": "192.168.79.13",
+   "vlan": 20,
+   "resolve": "server_mac_from_baseline"
+  },
+  {
+   "kind": "vlan_member_present",
+   "device": "192.168.79.13",
+   "vlan": 30,
+   "port": "GE1/0/4"
+  }
+ ]
+}

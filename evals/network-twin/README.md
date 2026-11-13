@@ -15,4 +15,8 @@
 
 评分：孪生层每例 0/1；AI 层按"设备对、原因对、证据对、没有编造"各 0/1。每次跑完把分数记进方案第 8 节。
 
-用例尚未建立（工作包 A 完成后建，并先跑出基线分数）。
+用例已建（2026-11-14，工作包 C 完成后）：F1–F10 十个目录。F6/F7 在 eNSP 的 PC 上操作（人工），F8 需先给华为映射补 acl-* 表（当时设备都没配 ACL，映射未含）。
+
+孪生层自动跑法：`.runtime/ensp/eval_run.py`（不入库）——`baseline` 采健康网存参照；`run F1 F4 …` 对每个用例注入 → 同一采集流水线采集 → 路径引擎 → 按该用例 `expected.json` 的 checks 打分（path 断言 + 记录断言）→ 恢复并确认回到基线。结果记在 `.runtime/ensp/eval-run/`，分数抄进方案第 8 节。注入与恢复都执行 `save`（2026-11-14 的教训）。
+
+expected.json 的 status 取值与路径引擎一致：`delivered`、`no_route`、`endpoint_unresolved`、`denied_in`、`denied_out` 等。基线（2026-11-14）：client→server 双向 endpoint_unresolved@USG（MAC 表空，端点归属未证明）；client→internet 去程 delivered@AR、回程 endpoint_unresolved@USG；server→internet 去程 delivered@AR、回程 no_route@AR。
