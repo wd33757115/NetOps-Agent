@@ -46,13 +46,14 @@
    "kind": "path",
    "flow": "client_to_internet",
    "direction": "reverse",
-   "end_device": "192.168.79.12",
-   "status": "endpoint_unresolved"
+   "end_device": "192.168.79.11",
+   "status": "no_route"
   },
   {
    "kind": "route_absent",
    "device": "192.168.79.12",
    "prefix": "203.0.113.1/32"
   }
- ]
+ ],
+ "calibration_note": "OSPF 断后无 NAT 会话，回程在 AR 无 10.1.10.0/24 路由（内网不泄漏）"
 }

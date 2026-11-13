@@ -1,21 +1,21 @@
 {
  "device": "192.168.79.13",
  "target": "192.168.79.13",
- "twin_note": "CE 失去 10.1.20.0/24 直连：客户端→服务器在 CE 处无路由；服务器→互联网也断",
+ "twin_note": "CE 失去 10.1.20.0/24 直连：去程与 USG 的静态回程互指形成路由黑洞（孪生判 loop）；服务器 ARP 不到网关，回程 no_gateway（包发不出主机）",
  "checks": [
   {
    "kind": "path",
    "flow": "client_to_server",
    "direction": "forward",
    "end_device": "192.168.79.13",
-   "status": "no_route"
+   "status": "loop"
   },
   {
    "kind": "path",
    "flow": "client_to_server",
    "direction": "reverse",
-   "end_device": "192.168.79.13",
-   "status": "no_route"
+   "end_device": null,
+   "status": "no_gateway"
   },
   {
    "kind": "ip_absent",

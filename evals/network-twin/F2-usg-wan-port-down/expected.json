@@ -14,7 +14,7 @@
    "kind": "path",
    "flow": "client_to_internet",
    "direction": "reverse",
-   "end_device": "192.168.79.12",
+   "end_device": "192.168.79.11",
    "status": "no_route"
   },
   {
@@ -45,5 +45,6 @@
    "NAT",
    "CE 侧故障"
   ]
- }
+ },
+ "calibration_note": "GE0/0/0 同时是 AR↔USG 的线：shutdown 后回程死在 AR 侧（链路断）；east-west 的 delivered 断言依赖近期 PC 流量（MAC 老化后 endpoint_unresolved 也是诚实结论）"
 }

@@ -34,7 +34,6 @@
    }
   }
  },
- "manual_step": "注入后需在 eNSP 的 PC-SERVER-1 上触发一次流量（如重新 ping 网关），MAC/ARP 才会反映新位置。",
  "checks": [
   {
    "kind": "path",
@@ -62,5 +61,6 @@
    "vlan": 30,
    "port": "GE1/0/4"
   }
- ]
+ ],
+ "traffic_note": "注入后需 PC-SERVER-1 有流量，MAC/ARP 才反映新位置；MAC 断言在表为空时无区分度"
 }
