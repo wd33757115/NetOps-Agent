@@ -62,6 +62,7 @@ def identity_from_platform(vendor, model, software, *, source):
         ):
             return Identity(
                 vendor=row["vendor"],
+                model=model,
                 os_family=row["os_family"],
                 profile_id=row["profile_id"],
                 command_style=row["command_style"],
@@ -89,6 +90,7 @@ def identity_from_vendor_modules(modules):
         if matches:
             return Identity(
                 vendor=row["vendor"],
+                model=model,
                 os_family=row["os_family"],
                 profile_id=row["profile_id"],
                 command_style=row["command_style"],

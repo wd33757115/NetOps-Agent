@@ -34,6 +34,8 @@ class Identity:
     status: str = "waiting_for_input"
     evidence: tuple = ()
     warnings: tuple = ()
+    # 按名称关键字构造的位置兼容：model 追加在尾部（NETCONF 身份按关键字传入）。
+    model: str | None = None
 
 
 def identify(probes=(), *, lldp_description="", ssh_banner="", prompt="", paging_style=""):
