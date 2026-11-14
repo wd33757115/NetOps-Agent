@@ -6,9 +6,7 @@ import { ICON_PNGS } from './iconPngs'
 import { ICON_SVGS, type Kind } from './icons'
 
 // 拓扑绘图 = 拓扑发现数据 → mxGraph 生成器 → 自托管 draw.io 画布。
-// 本应用不持有画布：展示和编辑都在 draw.io 里（embed 协议注入 XML，保存回传 XML）。
-
-const DRAWIO_URL = 'http://127.0.0.1:8080'
+// 本应用不持有画布：展示和编辑都在 draw.io 里（embed 协议注入 XML，autosave 回传 XML）。
 
 interface GraphNode {
   id: string
@@ -18,6 +16,7 @@ interface GraphNode {
   tps?: { id: string; name: string }[]
   address?: string
   freshness?: string
+  model_family?: string
 }
 interface GraphLink {
   id: string
@@ -61,12 +60,11 @@ const xmlEscape = (text: string) =>
   text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
 const buildDrawioXml = (graph: Graph, modelByAddress: Map<string, string>): string => {
-  // 人工位置保留：draw.io 里保存过的文件位置优先（回灌时按节点 id 记忆），自动布局只补新节点。
   const cells: string[] = []
   const tiers = new Map<number, string[]>()
   const kindByNode = new Map<string, Kind>()
   for (const node of graph.nodes) {
-    const model = node.address ? modelByAddress.get(node.address) : undefined
+    const model = node.model_family || (node.address ? modelByAddress.get(node.address) : undefined)
     const kind: Kind = node.id.includes(':host:')
       ? 'pc'
       : node.identity_status === 'collected'
@@ -83,17 +81,17 @@ const buildDrawioXml = (graph: Graph, modelByAddress: Map<string, string>): stri
   }
   for (const node of graph.nodes) {
     const kind = kindByNode.get(node.id) || 'generic'
-    const model = node.address ? modelByAddress.get(node.address) || '' : ''
+    const model = node.model_family || (node.address ? modelByAddress.get(node.address) || '' : '')
     const address = node.address || node.addresses?.[0] || ''
     const label = [node.name || node.id.split(':').pop() || node.id, model, address]
       .filter(Boolean)
       .map(xmlEscape)
       .join('&#10;')
+    const official = ICON_PNGS[kind]
     const style =
       'shape=image;verticalLabelPosition=bottom;verticalAlign=top;imageAspect=0;aspect=fixed;' +
-      (ICON_PNGS[kind]
-        ? `image=${ICON_PNGS[kind]}`
-        : `image=data:image/svg+xml,${encodeURIComponent(ICON_SVGS[kind])}`)
+      // draw.io 的 image 样式惯例：data:image/png,<base64>（不带 ;base64 标记）
+      (official ? `image=data:image/png,${official}` : `image=data:image/svg+xml,${encodeURIComponent(ICON_SVGS[kind])}`)
     const position = layout.get(node.id) || { x: 80, y: 60 }
     cells.push(
       `<mxCell id="${xmlEscape(node.id)}" value="${label}" style="${style}" vertex="1" parent="1">` +
@@ -124,11 +122,13 @@ function Page() {
   const [networkName, setNetworkName] = useState('')
   const [snapshotId, setSnapshotId] = useState('')
   const [savedXml, setSavedXml] = useState<string | null>(null)
+  const [xmlReady, setXmlReady] = useState(false)
+  const [drawioReady, setDrawioReady] = useState(false)
   const frameRef = useRef<HTMLIFrameElement>(null)
   const xmlRef = useRef<string | null>(null)
 
-  // 拓扑发现的数据 → mxGraph（每次进页面按当前快照重新生成）
-  const iframeSrc = `${DRAWIO_URL}/?embed=1&proto=json&ui=min`
+  // 同源代理（/drawio → 127.0.0.1:8080）：iframe 与宿主同源，解锁编辑器直连（视图适配）。
+  const iframeSrc = '/drawio/?embed=1&proto=json&ui=min'
 
   useEffect(() => {
     let alive = true
@@ -160,6 +160,7 @@ function Page() {
         }
         if (!alive) return
         xmlRef.current = buildDrawioXml(graph, modelByAddress)
+        setXmlReady(true)
         setLoading(false)
       } catch (exc) {
         if (!alive) return
@@ -172,12 +173,46 @@ function Page() {
     }
   }, [])
 
-  // draw.io embed 协议（对照 next-ai-draw-io 的 drawio-frame）：init → 灌 XML，
-  // configure → 回配置；autosave 持续回传编辑结果（embed 模式下 save 不触发）。
+  // 编辑器桥：同源时挂钩 draw.io 的 fileLoaded/updateActionStates，首次调用即拿到
+  // EditorUi：重置滚动条并 fit 页面（对照 next-ai-draw-io 的 editor-bridge）。
+  const attachBridge = (frame: HTMLIFrameElement) => {
+    try {
+      const win = frame.contentWindow as (Window & { EditorUi?: unknown; __drawioBridged?: boolean })
+      if (!win || !win.EditorUi || win.__drawioBridged) return
+      win.__drawioBridged = true
+      let ui: unknown = null
+      const hook = (proto: unknown, method: string) => {
+        const target = proto as Record<string, ((this: unknown, ...args: unknown[]) => void) | undefined>
+        if (!target || typeof target[method] !== 'function') return
+        const original = target[method]!
+        const wrapped = function (this: unknown, ...args: unknown[]) {
+          if (!ui) {
+            ui = this
+            const editorUi = ui as { resetScrollbars?: () => void; actions?: { get: (name: string) => { funct?: () => void } } }
+            try {
+              editorUi.resetScrollbars?.()
+            } catch { /* 老版本缺方法就跳过 */ }
+            try {
+              editorUi.actions?.get('fitWindow')?.funct?.()
+            } catch { /* 同上 */ }
+          }
+          return original.apply(this, args)
+        }
+        target[method] = wrapped
+      }
+      const proto = (win.EditorUi as { prototype: unknown }).prototype
+      hook(proto, 'updateActionStates')
+      hook(proto, 'fileLoaded')
+    } catch {
+      // 非同源时直连不可用：退回纯 postMessage 协议
+    }
+  }
+
+  // draw.io embed 协议：init → 置就绪，configure → 回配置；autosave 持续回传编辑结果。
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       if (event.source !== frameRef.current?.contentWindow) return
-      if (event.origin !== DRAWIO_URL) return
+      if (event.origin !== window.location.origin) return
       if (typeof event.data !== 'string') return
       let message: { event?: string; action?: string; xml?: string } = {}
       try {
@@ -186,14 +221,11 @@ function Page() {
         return
       }
       if (message.event === 'init') {
-        frameRef.current?.contentWindow?.postMessage(
-          JSON.stringify({ action: 'load', autosave: 1, xml: xmlRef.current ?? '' }),
-          DRAWIO_URL,
-        )
+        setDrawioReady(true)
       } else if (message.event === 'configure') {
         frameRef.current?.contentWindow?.postMessage(
           JSON.stringify({ action: 'configure', config: { defaultLibraries: 'networks' } }),
-          DRAWIO_URL,
+          window.location.origin,
         )
       } else if (message.event === 'autosave' && typeof message.xml === 'string') {
         setSavedXml(message.xml)
@@ -203,14 +235,20 @@ function Page() {
     return () => window.removeEventListener('message', onMessage)
   }, [])
 
-  const reload = () => {
-    if (xmlRef.current) {
-      frameRef.current?.contentWindow?.postMessage(
-        JSON.stringify({ action: 'load', autosave: 1, xml: xmlRef.current }),
-        DRAWIO_URL,
-      )
-    }
+  const sendLoad = () => {
+    if (!xmlRef.current) return
+    frameRef.current?.contentWindow?.postMessage(
+      JSON.stringify({ action: 'load', autosave: 1, fit: 1, xml: xmlRef.current }),
+      window.location.origin,
+    )
   }
+
+  // 双条件就绪才灌图：draw.io 的 init 与数据链生成完成，谁后到谁触发。
+  useEffect(() => {
+    if (drawioReady && xmlReady) sendLoad()
+  })
+
+  const reload = () => sendLoad()
 
   const download = (text: string, name: string) => {
     const blob = new Blob([text], { type: 'application/vnd.jgraph.mxfile' })
@@ -230,7 +268,7 @@ function Page() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Typography.Text type="secondary">
           {networkName
-            ? `${networkName} · 快照 ${snapshotId.slice(0, 8)} · 画布为自托管 draw.io，编辑后保存回传`
+            ? `${networkName} · 快照 ${snapshotId.slice(0, 8)} · 画布为自托管 draw.io，编辑经 autosave 回传`
             : '读取拓扑发现应用的当前快照'}
         </Typography.Text>
         <Space>
@@ -253,13 +291,14 @@ function Page() {
           </div>
         ) : error ? (
           <Alert type="warning" showIcon message="没有可展示的拓扑" description={error} style={{ margin: 24 }} />
-        ) : !xmlRef.current ? (
+        ) : !xmlReady ? (
           <Empty description="当前快照没有节点" style={{ paddingTop: 80 }} />
         ) : (
           <iframe
             ref={frameRef}
             title="draw.io 拓扑画布"
             src={iframeSrc}
+            onLoad={event => attachBridge(event.target as HTMLIFrameElement)}
             style={{ width: '100%', height: '100%', border: 'none' }}
           />
         )}

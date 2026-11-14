@@ -103,10 +103,10 @@ export const ICON_SVGS: Record<Kind, string> = {
 export function DeviceIcon({ kind }: { kind: Kind }) {
   const official = ICON_PNGS[kind]
   if (official) {
-    // 官方图标是位图：走 <img>；其余种类仍用内嵌 SVG。
+    // 官方图标是位图：走 <img>（标准 data URI 带 ;base64）；其余种类仍用内嵌 SVG。
     return (
       <span style={{ display: 'inline-flex' }}>
-        <img src={official} alt={kind} style={{ width: 84, height: 'auto', display: 'block' }} />
+        <img src={'data:image/png;base64,' + official} alt={kind} style={{ width: 84, height: 'auto', display: 'block' }} />
       </span>
     )
   }

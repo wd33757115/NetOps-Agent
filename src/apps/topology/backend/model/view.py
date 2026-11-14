@@ -56,7 +56,16 @@ def canvas(tree, evidence, collected, base, state=None):
             for vrf, tp in l3_tps.get(node_id, [])
             for ip in tp.get(L3T + "l3-termination-point-attributes", {}).get("ip-address", [])
         ]
-        item = {"id": node_id, "tps": tps, "addresses": addresses, "freshness": "observed"}
+        model_family = node.get(L2T + "l2-node-attributes", {}).get(
+            "http://netops.local/model-family"
+        )
+        item = {
+            "id": node_id,
+            "tps": tps,
+            "addresses": addresses,
+            "freshness": "observed",
+            **({"model_family": model_family} if model_family else {}),
+        }
         if node_id.startswith(host_node_prefix(base)):
             # ARP/FDB identify an observed interface endpoint, not a physical host.
             # Keep existing node URIs so old snapshots and evidence remain addressable.

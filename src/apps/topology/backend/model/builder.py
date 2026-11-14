@@ -225,6 +225,9 @@ class _Topology:
         self.advertised_identity()
         self.by_chassis = {c: k for k, c in self.chassis.items()}
         self.l2_nodes = {}
+        # 邻居看到的本机描述（LLDP system_description）携带型号族（USG/CE6800/AR6700）：
+        # 展示层按它选设备图标，比按 hostname 猜可靠。
+        self.advertised_models = {}
         self.management = {}  # chassis -> addresses it is managed or advertised by
         self.host_ips = {}
         scopes = {}
@@ -440,6 +443,10 @@ class _Topology:
                 local, peer = rec["local_if"], _chassis(rec["remote_chassis_id"])
                 port = self.remote_port(peer, rec["remote_port_id"], rec.get("remote_port_subtype"))
                 self.l2_node(peer, rec.get("remote_sysname"))
+                description = rec.get("remote_system_description") or ""
+                family = re.search(r"\(([A-Za-z]+\d*)", description)
+                if family:
+                    self.advertised_models.setdefault(peer, set()).add(family.group(1))
                 self.management.setdefault(peer, set()).update(rec.get("remote_mgmt_addresses", []))
                 for address in rec.get("remote_mgmt_addresses", []):
                     advertised[(local, address)] = ("port", peer, port)
@@ -572,6 +579,12 @@ class _Topology:
         node = self.l2_nodes.setdefault(node_id, {"node-id": node_id, NT + "termination-point": []})
         if name and (collected or L2T + "l2-node-attributes" not in node):
             node[L2T + "l2-node-attributes"] = {"name": name}
+        families = self.advertised_models.get(chassis)
+        if families:
+            # 展示层的图标选择依据（拓扑绘图应用读取）：邻居描述里的型号族。
+            node.setdefault(L2T + "l2-node-attributes", {})[
+                "http://netops.local/model-family"
+            ] = "+".join(sorted(families))
         return node
 
     def l2_port(self, chassis, ifname):
