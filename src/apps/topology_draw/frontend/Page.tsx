@@ -172,27 +172,30 @@ function Page() {
     }
   }, [])
 
-  // draw.io embed 协议：configure → init 时把生成的 XML 灌进去；save 回传编辑结果。
+  // draw.io embed 协议（对照 next-ai-draw-io 的 drawio-frame）：init → 灌 XML，
+  // configure → 回配置；autosave 持续回传编辑结果（embed 模式下 save 不触发）。
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
-      if (!event.origin.startsWith(DRAWIO_URL)) return
+      if (event.source !== frameRef.current?.contentWindow) return
+      if (event.origin !== DRAWIO_URL) return
+      if (typeof event.data !== 'string') return
       let message: { event?: string; action?: string; xml?: string } = {}
       try {
-        message = typeof event.data === 'string' ? JSON.parse(event.data) : event.data
+        message = JSON.parse(event.data)
       } catch {
         return
       }
-      if (message.event === 'configure') {
+      if (message.event === 'init') {
+        frameRef.current?.contentWindow?.postMessage(
+          JSON.stringify({ action: 'load', autosave: 1, xml: xmlRef.current ?? '' }),
+          DRAWIO_URL,
+        )
+      } else if (message.event === 'configure') {
         frameRef.current?.contentWindow?.postMessage(
           JSON.stringify({ action: 'configure', config: { defaultLibraries: 'networks' } }),
           DRAWIO_URL,
         )
-      } else if (message.event === 'init' && xmlRef.current) {
-        frameRef.current?.contentWindow?.postMessage(
-          JSON.stringify({ action: 'load', autosave: 1, xml: xmlRef.current }),
-          DRAWIO_URL,
-        )
-      } else if (message.event === 'save' && typeof message.xml === 'string') {
+      } else if (message.event === 'autosave' && typeof message.xml === 'string') {
         setSavedXml(message.xml)
       }
     }

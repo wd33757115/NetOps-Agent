@@ -81,7 +81,7 @@ def identity_from_platform(vendor, model, software, *, source):
     return None
 
 
-def identity_from_vendor_modules(modules):
+def identity_from_vendor_modules(modules, model=None):
     """Match a vendor-private YANG family only after generic platform models fail."""
     raw = yaml.safe_load(Path(__file__).with_name("netconf_identity.yaml").read_text("utf-8"))
     for row in raw.get("identities", []):
@@ -162,6 +162,6 @@ def read_netconf_identity(session, guard=None):
         )
         if identity:
             return last, modules
-    if identity := identity_from_vendor_modules(modules):
+    if identity := identity_from_vendor_modules(modules, model=last.model if last else None):
         return PlatformEvidence(identity, last.vendor, last.model, last.software, "vendor_private_yang", reply=last.reply), modules
     return last, modules

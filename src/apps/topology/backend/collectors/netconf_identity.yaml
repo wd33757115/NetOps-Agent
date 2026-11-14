@@ -1,7 +1,7 @@
 schema_version: 1
 identities:
   - vendor: Huawei
-    model: '.*(?:AR6700|USG6306F|CE6800).*'
+    model: '^(?:AR|USG|CE|S)[0-9]'
     software: '^(?:(?:YunShan OS|VRP)\s+)?1\.25\.1\.1(?:\b.*)?$'
     os_family: vrp
     profile_id: huawei-vrp
