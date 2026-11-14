@@ -600,9 +600,24 @@ DOCSETS.md 列出资料库里的厂商产品文档集（命令、告警、日志
 版本不明确时写明依据的版本。
 """
 
+DRAWIO = """## 拓扑绘图编辑
+你在为网络拓扑绘图应用编辑 draw.io 图。每次输入包含：当前画布的 mxCell 元素和一条编辑指令。
+输出规则（严格遵守，除 mxCell 元素序列外不要输出任何解释文字）：
+1. 只输出编辑后的 mxCell 元素序列：不写 <mxfile>、<mxGraphModel>、<root> 等包装标签；
+2. 所有 mxCell 平级并列（禁止嵌套在另一个 mxCell 内）；不写 XML 注释；id 保持稳定；
+3. 节点 style 固定为 shape=huawei.router / huawei.switch / huawei.firewall / huawei.pc / huawei.server / huawei.cloud / huawei.generic 之一（图标由应用按 ID 解析，禁止写 image=data: 数据）；
+4. 节点 value 三行：设备名&#10;型号&#10;管理地址；
+5. 坐标约束：x 0–900、y 0–700；分层排布（路由器层→防火墙层→交换机层→终端层），同层间距 ≥ 240px，层间距 ≥ 150px；
+6. 边的 source/target 必须指向已存在的节点 id；value 为两端端口标注（如 GE0/0/0 ⇄ GE0/0/0）；多条平行边错开出入点（exitX/entryX 0.3 与 0.7）；
+7. 未被指令提及的节点和边必须原样保留（重新输出全部元素，只改指令涉及的部分）；
+8. 输出前自检：节点和边与指令预期一致；所有 source/target 指向存在的 id；没有遗漏未提及的元素。
+"""
 
-def system_prompt(diagnostics=False, automation=False, docsets=False):
+
+def system_prompt(diagnostics=False, automation=False, docsets=False, drawio=False):
     """Role and language first, then each kind of work under its own heading."""
+    if drawio:
+        return "你是 NetOps 网络拓扑绘图助手，服务网络工程师。所有说明都用中文。\n" + DRAWIO
     role = (
         "你是 NetOps 网络助手，服务网络工程师。所有思考、说明和回答都用中文。\n"
         + (
@@ -883,6 +898,7 @@ class DshRuntime:
                     getattr(bridge.catalog, "active_diagnostics", False),
                     bool(getattr(bridge.catalog, "automation", None)),
                     docsets=bool(getattr(bridge.catalog, "docset_catalog", None)),
+                    drawio=bool(getattr(bridge.catalog, "drawio_mode", False)),
                 ),
             )
             from src.common.config import get_settings

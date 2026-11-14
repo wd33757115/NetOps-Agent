@@ -1,12 +1,15 @@
-import React, { useEffect, useRef, useState } from 'react'
-import { Alert, Button, Empty, Space, Spin, Typography } from 'antd'
-import { ReloadOutlined, DownloadOutlined } from '@ant-design/icons'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Alert, Button, Empty, Input, Space, Spin, Typography } from 'antd'
+import { ReloadOutlined, DownloadOutlined, SendOutlined, UndoOutlined } from '@ant-design/icons'
+import { Background, Controls, Handle, Position, ReactFlow, ReactFlowProvider, type Edge, type Node, type NodeChange } from '@xyflow/react'
+import '@xyflow/react/dist/style.css'
 import { api } from '@netops/config/api'
 import { ICON_PNGS } from './iconPngs'
 import { ICON_SVGS, type Kind } from './icons'
 
-// 拓扑绘图 = 拓扑发现数据 → mxGraph 生成器 → 自托管 draw.io 画布。
-// 本应用不持有画布：展示和编辑都在 draw.io 里（embed 协议注入 XML，autosave 回传 XML）。
+// 拓扑绘图 = 拓扑发现数据 → mxGraph（短 ID）→ 自托管 draw.io 画布 + AI 对话编辑。
+// 状态约定：sourceXml（短 ID 形式）是唯一权威状态；draw.io 的 autosave 经逆向解析
+// 回流为短 ID；AI 编辑也产出短 ID。内嵌解析只在灌进 draw.io 的那一刻发生。
 
 interface GraphNode {
   id: string
@@ -59,6 +62,50 @@ const TIER_HEIGHT = 180
 const xmlEscape = (text: string) =>
   text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
+const resolveHuaweiStyles = (xml: string): string => {
+  let resolved = xml
+  for (const [kind, png] of Object.entries(ICON_PNGS)) {
+    resolved = resolved.replace(
+      new RegExp(`shape=huawei\\.${kind}(?=[;" ])`, 'g'),
+      `shape=image;verticalLabelPosition=bottom;verticalAlign=top;imageAspect=0;aspect=fixed;image=data:image/png,${png}`,
+    )
+  }
+  for (const [kind, svg] of Object.entries(ICON_SVGS)) {
+    if (!ICON_PNGS[kind]) {
+      resolved = resolved.replace(
+        new RegExp(`shape=huawei\\.${kind}(?=[;" ])`, 'g'),
+        `shape=image;verticalLabelPosition=bottom;verticalAlign=top;imageAspect=0;aspect=fixed;image=data:image/svg+xml,${encodeURIComponent(svg)}`,
+      )
+    }
+  }
+  return resolved
+}
+
+const unresolveHuaweiStyles = (xml: string): string => {
+  let out = xml
+  for (const [kind, png] of Object.entries(ICON_PNGS)) {
+    out = out.replace(
+      new RegExp(
+        `shape=image;verticalLabelPosition=bottom;verticalAlign=top;imageAspect=0;aspect=fixed;image=data:image/png,${png}`,
+        'g',
+      ),
+      `shape=huawei.${kind}`,
+    )
+  }
+  for (const [kind, svg] of Object.entries(ICON_SVGS)) {
+    if (!ICON_PNGS[kind]) {
+      out = out.replace(
+        new RegExp(
+          `shape=image;verticalLabelPosition=bottom;verticalAlign=top;imageAspect=0;aspect=fixed;image=data:image/svg\\+xml,${svg.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`,
+          'g',
+        ),
+        `shape=huawei.${kind}`,
+      )
+    }
+  }
+  return out
+}
+
 const buildDrawioXml = (graph: Graph, modelByAddress: Map<string, string>): string => {
   const cells: string[] = []
   const tiers = new Map<number, string[]>()
@@ -87,7 +134,6 @@ const buildDrawioXml = (graph: Graph, modelByAddress: Map<string, string>): stri
       .filter(Boolean)
       .map(xmlEscape)
       .join('&#10;')
-    // 模板库 + ID：节点只写形状 ID（huawei.<kind>），宿主灌进 draw.io 前解析成内嵌图标。
     const style = `shape=huawei.${kind};verticalLabelPosition=bottom;verticalAlign=top;`
     const position = layout.get(node.id) || { x: 80, y: 60 }
     cells.push(
@@ -113,22 +159,58 @@ const buildDrawioXml = (graph: Graph, modelByAddress: Map<string, string>): stri
   )
 }
 
+const DeviceNodeView = ({ data }: { data: { kind: Kind; name: string; model: string; address?: string } }) => {
+  const official = ICON_PNGS[data.kind]
+  return (
+    <div style={{ width: 150, textAlign: 'center' }}>
+      <div style={{ display: 'flex', justifyContent: 'center' }}>
+        {official ? (
+          <img src={`data:image/png;base64,${official}`} alt={data.kind} style={{ width: 84, height: 'auto', display: 'block' }} />
+        ) : (
+          <span style={{ display: 'inline-flex' }} dangerouslySetInnerHTML={{ __html: ICON_SVGS[data.kind] }} />
+        )}
+      </div>
+      <div style={{ fontWeight: 600, fontSize: 14, color: '#1f2d3d', marginTop: 4 }}>{data.name}</div>
+      {data.model && <div style={{ fontSize: 11, color: '#7a8ba6' }}>{data.model}</div>}
+      {data.address && <div style={{ fontSize: 11, color: '#7a8ba6' }}>{data.address}</div>}
+      <Handle type="target" position={Position.Top} style={{ visibility: 'hidden' }} />
+      <Handle type="source" position={Position.Bottom} style={{ visibility: 'hidden' }} />
+      <Handle type="target" position={Position.Left} style={{ visibility: 'hidden' }} />
+      <Handle type="source" position={Position.Right} style={{ visibility: 'hidden' }} />
+    </div>
+  )
+}
+const nodeTypes = { device: DeviceNodeView }
+
+interface ChatEntry {
+  role: 'user' | 'ai' | 'error'
+  text: string
+}
+
 function Page() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [networkName, setNetworkName] = useState('')
+  const [networkId, setNetworkId] = useState('')
   const [snapshotId, setSnapshotId] = useState('')
-  const [savedXml, setSavedXml] = useState<string | null>(null)
-  const [xmlReady, setXmlReady] = useState(false)
-  const [drawioReady, setDrawioReady] = useState(false)
+  const [nodes, setNodes] = useState<Node[]>([])
+  const [edges, setEdges] = useState<Edge[]>([])
+  const [chat, setChat] = useState<ChatEntry[]>([])
+  const [chatInput, setChatInput] = useState('')
+  const [aiLoading, setAiLoading] = useState(false)
+  const [versions, setVersions] = useState<{ xml: string; label: string; time: string }[]>([])
   const frameRef = useRef<HTMLIFrameElement>(null)
-  const xmlRef = useRef<string | null>(null)
+  const sourceXmlRef = useRef<string | null>(null)
 
-  // 同源代理（/drawio → 127.0.0.1:8080）：iframe 与宿主同源，解锁编辑器直连（视图适配）。
-  // p=huawei：自托管容器里的图标模板插件（mxgraph.huawei.* 形状）。
-  // URL 参数集照 next-ai-draw-io 的 drawio-config（configure=1 必须有：draw.io 会先等配置）。
-  const iframeSrc =
-    '/drawio/?embed=1&proto=json&configure=1&ui=simple&spin=0&libraries=0&noSaveBtn=1&noExitBtn=1&saveAndExit=0&dark=0&p=huawei'
+  const iframeSrc = '/drawio/?embed=1&proto=json&configure=1&ui=simple&spin=0&libraries=0&noSaveBtn=1&noExitBtn=1&saveAndExit=0&dark=0&p=huawei'
+
+  const sendLoad = useCallback(() => {
+    if (!sourceXmlRef.current) return
+    frameRef.current?.contentWindow?.postMessage(
+      JSON.stringify({ action: 'load', autosave: 1, fit: 1, xml: resolveHuaweiStyles(sourceXmlRef.current) }),
+      window.location.origin,
+    )
+  }, [])
 
   useEffect(() => {
     let alive = true
@@ -143,6 +225,7 @@ function Page() {
           return
         }
         setNetworkName(network.name)
+        setNetworkId(network.id)
         setSnapshotId(network.current_snapshot)
 
         const { data: graph } = await api.get<Graph>(`/apps/topology/snapshots/${network.current_snapshot}`)
@@ -159,8 +242,8 @@ function Page() {
           }
         }
         if (!alive) return
-        xmlRef.current = buildDrawioXml(graph, modelByAddress)
-        setXmlReady(true)
+        sourceXmlRef.current = buildDrawioXml(graph, modelByAddress)
+        setVersions([{ xml: sourceXmlRef.current, label: '发现基线', time: new Date().toLocaleTimeString() }])
         setLoading(false)
       } catch (exc) {
         if (!alive) return
@@ -173,42 +256,8 @@ function Page() {
     }
   }, [])
 
-  // 编辑器桥：同源时挂钩 draw.io 的 fileLoaded/updateActionStates，首次调用即拿到
-  // EditorUi：重置滚动条并 fit 页面（对照 next-ai-draw-io 的 editor-bridge）。
-  const attachBridge = (frame: HTMLIFrameElement) => {
-    try {
-      const win = frame.contentWindow as (Window & { EditorUi?: unknown; __drawioBridged?: boolean })
-      if (!win || !win.EditorUi || win.__drawioBridged) return
-      win.__drawioBridged = true
-      let ui: unknown = null
-      const hook = (proto: unknown, method: string) => {
-        const target = proto as Record<string, ((this: unknown, ...args: unknown[]) => void) | undefined>
-        if (!target || typeof target[method] !== 'function') return
-        const original = target[method]!
-        const wrapped = function (this: unknown, ...args: unknown[]) {
-          if (!ui) {
-            ui = this
-            const editorUi = ui as { resetScrollbars?: () => void; actions?: { get: (name: string) => { funct?: () => void } } }
-            try {
-              editorUi.resetScrollbars?.()
-            } catch { /* 老版本缺方法就跳过 */ }
-            try {
-              editorUi.actions?.get('fitWindow')?.funct?.()
-            } catch { /* 同上 */ }
-          }
-          return original.apply(this, args)
-        }
-        target[method] = wrapped
-      }
-      const proto = (win.EditorUi as { prototype: unknown }).prototype
-      hook(proto, 'updateActionStates')
-      hook(proto, 'fileLoaded')
-    } catch {
-      // 非同源时直连不可用：退回纯 postMessage 协议
-    }
-  }
-
-  // draw.io embed 协议：init → 置就绪，configure → 回配置；autosave 持续回传编辑结果。
+  // draw.io embed 协议：init 置就绪（谁后到谁触发灌图），configure 回配置，
+  // autosave 持续回传手工编辑（逆向解析为短 ID 权威形式）。
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       if (event.source !== frameRef.current?.contentWindow) return
@@ -221,7 +270,7 @@ function Page() {
         return
       }
       if (message.event === 'init') {
-        setDrawioReady(true)
+        sendLoad()
       } else if (message.event === 'configure') {
         frameRef.current?.contentWindow?.postMessage(
           JSON.stringify({
@@ -231,58 +280,81 @@ function Page() {
           window.location.origin,
         )
       } else if (message.event === 'autosave' && typeof message.xml === 'string') {
-        setSavedXml(message.xml)
+        sourceXmlRef.current = unresolveHuaweiStyles(message.xml)
       }
     }
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
+  }, [sendLoad])
+
+  const onNodesChange = useCallback((changes: NodeChange[]) => {
+    setNodes(current =>
+      current.map(node => {
+        const move = changes.find(change => change.id === node.id && change.type === 'position')
+        return move && 'position' in move && move.position ? { ...node, position: move.position } : node
+      }),
+    )
   }, [])
 
-  // 模板库解析：模型/生成器输出的 huawei.<kind> 短 ID → 官方图标内嵌样式。
-  // draw.io 的 mxStencil 不支持 <image> 元素，所以解析在宿主完成，draw.io 只见内嵌位图。
-  const resolveHuaweiStyles = (xml: string): string => {
-    let resolved = xml
-    for (const [kind, png] of Object.entries(ICON_PNGS)) {
-      resolved = resolved.replace(
-        new RegExp(`shape=huawei\\.${kind}(?=[;" ])`, 'g'),
-        `shape=image;verticalLabelPosition=bottom;verticalAlign=top;imageAspect=0;aspect=fixed;image=data:image/png,${png}`,
-      )
-    }
-    for (const [kind, svg] of Object.entries(ICON_SVGS)) {
-      if (!ICON_PNGS[kind]) {
-        resolved = resolved.replace(
-          new RegExp(`shape=huawei\\.${kind}(?=[;" ])`, 'g'),
-          `shape=image;verticalLabelPosition=bottom;verticalAlign=top;imageAspect=0;aspect=fixed;image=data:image/svg+xml,${encodeURIComponent(svg)}`,
-        )
-      }
-    }
-    return resolved
+  const applyXml = (xml: string, label: string) => {
+    sourceXmlRef.current = xml
+    sendLoad()
+    setVersions(current => [...current, { xml, label, time: new Date().toLocaleTimeString() }])
   }
 
-  const sendLoad = () => {
-    if (!xmlRef.current) return
-    frameRef.current?.contentWindow?.postMessage(
-      JSON.stringify({ action: 'load', autosave: 1, fit: 1, xml: resolveHuaweiStyles(xmlRef.current) }),
-      window.location.origin,
-    )
+  const sendChat = async () => {
+    const instruction = chatInput.trim()
+    if (!instruction || aiLoading || !sourceXmlRef.current) return
+    setChat(current => [...current, { role: 'user', text: instruction }])
+    setChatInput('')
+    setAiLoading(true)
+    try {
+      const { data } = await api.post<{ xml: string }>('/apps/topology-draw/ai-edit', {
+        instruction,
+        xml: sourceXmlRef.current,
+        network_id: networkId,
+      })
+      applyXml(data.xml, `AI: ${instruction.slice(0, 24)}`)
+      setChat(current => [...current, { role: 'ai', text: '已更新拓扑图，可在画布查看。' }])
+    } catch (exc) {
+      const detail = exc instanceof Error ? exc.message : String(exc)
+      setChat(current => [...current, { role: 'error', text: `编辑失败：${detail}` }])
+    } finally {
+      setAiLoading(false)
+    }
   }
 
-  // 双条件就绪才灌图：draw.io 的 init 与数据链生成完成，谁后到谁触发。
-  useEffect(() => {
-    if (drawioReady && xmlReady) sendLoad()
-  })
-
-  const reload = () => sendLoad()
-
-  const download = (text: string, name: string) => {
-    const blob = new Blob([text], { type: 'application/vnd.jgraph.mxfile' })
+  const exportDrawio = () => {
+    const resolved = resolveHuaweiStyles(sourceXmlRef.current || '')
+    const blob = new Blob([resolved], { type: 'application/vnd.jgraph.mxfile' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = name
+    link.download = `${networkName || '拓扑'}.drawio`
     link.click()
     URL.revokeObjectURL(url)
   }
+
+  const body = useMemo(
+    () => (
+      <ReactFlowProvider>
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
+          nodesConnectable={false}
+          minZoom={0.2}
+          maxZoom={2}
+          fitView
+        >
+          <Background gap={24} />
+          <Controls showInteractive={false} />
+        </ReactFlow>
+      </ReactFlowProvider>
+    ),
+    [nodes, edges, onNodesChange],
+  )
 
   return (
     <div style={{ height: 'calc(100vh - 96px)', display: 'flex', flexDirection: 'column' }}>
@@ -292,40 +364,99 @@ function Page() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Typography.Text type="secondary">
           {networkName
-            ? `${networkName} · 快照 ${snapshotId.slice(0, 8)} · 画布为自托管 draw.io，编辑经 autosave 回传`
+            ? `${networkName} · 快照 ${snapshotId.slice(0, 8)} · AI 对话编辑 + 手工拖拽`
             : '读取拓扑发现应用的当前快照'}
         </Typography.Text>
         <Space>
-          <Button icon={<ReloadOutlined aria-hidden="true" />} onClick={reload}>
+          {versions.length > 1 && (
+            <Button
+              icon={<UndoOutlined aria-hidden="true" />}
+              onClick={() => {
+                const previous = versions[versions.length - 2]
+                if (previous) applyXml(previous.xml, `回退到 ${previous.label}`)
+              }}
+            >
+              撤销上一次 AI 修改
+            </Button>
+          )}
+          <Button icon={<ReloadOutlined aria-hidden="true" />} onClick={() => sendLoad()}>
             按当前快照重灌
           </Button>
-          <Button
-            icon={<DownloadOutlined aria-hidden="true" />}
-            disabled={!savedXml && !xmlRef.current}
-            onClick={() => download(savedXml || xmlRef.current || '', `${networkName || '拓扑'}.drawio`)}
-          >
-            下载 .drawio
+          <Button icon={<DownloadOutlined aria-hidden="true" />} onClick={exportDrawio}>
+            导出 .drawio
           </Button>
         </Space>
       </div>
-      <div style={{ flex: 1, minHeight: 0, marginTop: 8, border: '1px solid #e5e9f0', borderRadius: 8, overflow: 'hidden' }}>
-        {loading ? (
-          <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 80 }}>
-            <Spin tip="正在生成拓扑图" />
+      <div style={{ flex: 1, minHeight: 0, marginTop: 8, display: 'flex', gap: 8 }}>
+        <div style={{ flex: 1, minWidth: 0, border: '1px solid #e5e9f0', borderRadius: 8, overflow: 'hidden' }}>
+          {loading ? (
+            <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 80 }}>
+              <Spin tip="正在生成拓扑图" />
+            </div>
+          ) : error ? (
+            <Alert type="warning" showIcon message="没有可展示的拓扑" description={error} style={{ margin: 24 }} />
+          ) : nodes.length ? (
+            body
+          ) : (
+            <Empty description="当前快照没有节点" style={{ paddingTop: 80 }} />
+          )}
+        </div>
+        <div
+          style={{
+            width: 320,
+            flexShrink: 0,
+            border: '1px solid #e5e9f0',
+            borderRadius: 8,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+          }}
+        >
+          <div style={{ padding: '8px 12px', borderBottom: '1px solid #e5e9f0', fontWeight: 600 }}>AI 编辑</div>
+          <div style={{ flex: 1, overflow: 'auto', padding: '8px 12px' }}>
+            {chat.length === 0 && (
+              <Typography.Text type="secondary">
+                用自然语言改拓扑图，例如：把 USG-1 标成红色、加一台核心交换机。
+              </Typography.Text>
+            )}
+            {chat.map((entry, index) => (
+              <div
+                key={index}
+                style={{
+                  margin: '6px 0',
+                  padding: '6px 8px',
+                  borderRadius: 6,
+                  background: entry.role === 'user' ? '#e6f4ff' : entry.role === 'error' ? '#fff1f0' : '#f6ffed',
+                  whiteSpace: 'pre-wrap',
+                  fontSize: 13,
+                }}
+              >
+                {entry.text}
+              </div>
+            ))}
+            {aiLoading && <Spin size="small" />}
           </div>
-        ) : error ? (
-          <Alert type="warning" showIcon message="没有可展示的拓扑" description={error} style={{ margin: 24 }} />
-        ) : !xmlReady ? (
-          <Empty description="当前快照没有节点" style={{ paddingTop: 80 }} />
-        ) : (
-          <iframe
-            ref={frameRef}
-            title="draw.io 拓扑画布"
-            src={iframeSrc}
-            onLoad={event => attachBridge(event.target as HTMLIFrameElement)}
-            style={{ width: '100%', height: '100%', border: 'none' }}
-          />
-        )}
+          <div style={{ borderTop: '1px solid #e5e9f0' }}>
+            <Input.TextArea
+              rows={2}
+              value={chatInput}
+              placeholder="描述要怎么改拓扑图…"
+              onChange={event => setChatInput(event.target.value)}
+              onPressEnter={event => {
+                if (!event.shiftKey) {
+                  event.preventDefault()
+                  void sendChat()
+                }
+              }}
+              style={{ border: 'none' }}
+            />
+            <div style={{ padding: '4px 8px 8px', textAlign: 'right' }}>
+              <Button type="primary" loading={aiLoading} onClick={() => void sendChat()}>
+                发送
+              </Button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   )
