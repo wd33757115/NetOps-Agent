@@ -14,7 +14,24 @@ from src.platform.agent_runtime.dsh import DshRuntime
 
 from .catalog import DrawCatalog
 
-KINDS = ("router", "switch", "firewall", "pc", "server", "cloud", "generic")
+KINDS = (
+    "router",
+    "switch",
+    "firewall",
+    "pc",
+    "laptop",
+    "server",
+    "cloud",
+    "generic",
+    "ce12800",
+    "ac",
+    "ap",
+    "lb",
+    "stacked",
+    "stacked_ce",
+    "access",
+    "aggregate",
+)
 MAX_XML_BYTES = 200_000
 
 

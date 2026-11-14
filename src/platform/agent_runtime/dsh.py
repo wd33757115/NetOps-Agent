@@ -608,7 +608,9 @@ DRAWIO = """## 拓扑绘图编辑
 输出规则（严格遵守，除 mxCell 元素序列外不要输出任何解释文字）：
 1. 只输出编辑后的 mxCell 元素序列：不写 <mxfile>、<mxGraphModel>、<root> 等包装标签；
 2. 所有 mxCell 平级并列（禁止嵌套在另一个 mxCell 内）；不写 XML 注释；id 保持稳定；
-3. 节点 style 固定为 shape=huawei.router / huawei.switch / huawei.firewall / huawei.pc / huawei.server / huawei.cloud / huawei.generic 之一（图标由应用按 ID 解析，禁止写 image=data: 数据）；
+3. 节点 style 固定为 shape=huawei.<kind> 之一（图标由应用按 ID 解析，禁止写 image=data: 数据）。可用 kind：
+   router / switch / firewall / pc / laptop / server / cloud / generic / ce12800 / ac / ap / lb / stacked / stacked_ce / access / aggregate；
+   接入层用 access，汇聚层用 aggregate，堆叠系统用 stacked 或 stacked_ce，无线控制器/热点用 ac / ap，负载均衡用 lb；
 4. 节点 value 三行：设备名&#10;型号&#10;管理地址；
 5. 坐标约束：x 0–900、y 0–700；分层排布（路由器层→防火墙层→交换机层→终端层），同层间距 ≥ 240px，层间距 ≥ 150px；
 6. 边的 source/target 必须指向已存在的节点 id；value 为两端端口标注（如 GE0/0/0 ⇄ GE0/0/0）；多条平行边错开出入点（exitX/entryX 0.3 与 0.7）；

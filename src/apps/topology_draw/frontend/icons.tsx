@@ -2,7 +2,24 @@ import React from 'react'
 
 // 华为产品图标风格：浅色器件底、华为红描边、白色器件符号。
 // SVG 以字符串为唯一来源：React 节点渲染和 .drawio 导出共用同一份，避免双份漂移。
-export type Kind = 'router' | 'switch' | 'firewall' | 'server' | 'pc' | 'cloud' | 'generic'
+export type Kind =
+  | 'router'
+  | 'switch'
+  | 'firewall'
+  | 'server'
+  | 'pc'
+  | 'cloud'
+  | 'generic'
+  // 官方图标库扩展种类（无 SVG 兜底时退到 generic）
+  | 'ce12800'
+  | 'ac'
+  | 'ap'
+  | 'lb'
+  | 'stacked'
+  | 'stacked_ce'
+  | 'access'
+  | 'aggregate'
+  | 'laptop'
 
 const BODY = '#f7f8fa'
 const LINE = '#c7000b'
@@ -90,7 +107,7 @@ const genericSvg = frame(
 
 import { ICON_PNGS } from './iconPngs'
 
-export const ICON_SVGS: Record<Kind, string> = {
+export const ICON_SVGS: Partial<Record<Kind, string>> = {
   router: routerSvg,
   switch: switchSvg,
   firewall: firewallSvg,
@@ -110,5 +127,6 @@ export function DeviceIcon({ kind }: { kind: Kind }) {
       </span>
     )
   }
-  return <span style={{ display: 'inline-flex' }} dangerouslySetInnerHTML={{ __html: ICON_SVGS[kind] }} />
+  const svg = ICON_SVGS[kind] ?? ICON_SVGS.generic!
+  return <span style={{ display: 'inline-flex' }} dangerouslySetInnerHTML={{ __html: svg }} />
 }

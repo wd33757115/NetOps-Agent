@@ -49,12 +49,33 @@ interface NetworkRow {
 const kindOfModel = (model?: string): Kind => {
   const text = (model || '').toUpperCase()
   if (text.includes('USG') || text.includes('FIREWALL')) return 'firewall'
+  if (text.includes('CE12800')) return 'ce12800'
   if (/AR\d/.test(text) || text.includes('ROUTER')) return 'router'
+  if (/\bAC\d/.test(text)) return 'ac'
+  if (/\bAP\d/.test(text)) return 'ap'
   if (/CE\d/.test(text) || /S\d{3,4}/.test(text) || text.includes('SWITCH')) return 'switch'
+  if (text.includes('ELB') || text.includes('LOADBALANCE') || text.includes('LOAD BALANCE')) return 'lb'
   return 'generic'
 }
 
-const TIER: Record<Kind, number> = { cloud: 0, router: 1, firewall: 2, switch: 3, server: 4, pc: 4, generic: 3 }
+const TIER: Record<Kind, number> = {
+  cloud: 0,
+  router: 1,
+  firewall: 2,
+  ce12800: 3,
+  switch: 3,
+  access: 3,
+  aggregate: 3,
+  stacked: 3,
+  stacked_ce: 3,
+  ac: 3,
+  ap: 3,
+  lb: 3,
+  server: 4,
+  pc: 4,
+  laptop: 4,
+  generic: 3,
+}
 const TIER_HEIGHT = 180
 
 const xmlEscape = (text: string) =>
