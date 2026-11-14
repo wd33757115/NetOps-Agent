@@ -49,6 +49,16 @@ export default defineConfig(({ mode }) => {
           return html.replace(/\s+crossorigin/g, '')
         },
       },
+      {
+        // 每次构建给 index.html 注入随机长度的注释：vite preview 的 sirv 按启动时
+        // 的快照算 ETag，两次构建的壳尺寸相同（常见）时浏览器重验证得 304、永远用
+        // 旧壳——注入后尺寸必然变化，ETag 必变，重验证必得 200 新壳。
+        name: 'deploy-stamp',
+        transformIndexHtml(html) {
+          const pad = Math.random().toString(36).slice(2, 8 + Math.floor(Math.random() * 6))
+          return html.replace('</body>', `<!-- ${pad} --></body>`)
+        },
+      },
     ],
     resolve: {
       dedupe: hostDependencies,

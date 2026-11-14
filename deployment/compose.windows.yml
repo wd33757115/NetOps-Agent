@@ -106,13 +106,14 @@ services:
   drawio:
     # Self-hosted draw.io: the editing surface for the topology drawing deliverables
     # (the topology-draw app exports .drawio files; open them here or drop into the editor).
-    # huawei.js registers the product icons as named stencils (mxgraph.huawei.*).
+    # huawei.js adds the official icon palette (shape=image entries, draggable).
     image: jgraph/drawio:24.7.17
     container_name: netops-drawio
     ports:
     - 127.0.0.1:8080:8080
     volumes:
-    - ./drawio/plugins/huawei.js:/usr/local/tomcat/webapps/draw/plugins/huawei.js:ro
+    - ./drawio/plugins/huawei.js:/usr/local/tomcat/webapps/draw/plugins/hw.js:ro
+    - ./drawio/plugins/postconfig.js:/usr/local/tomcat/webapps/draw/js/PostConfig.js:ro
     environment:
       TZ: Asia/Shanghai
     restart: unless-stopped

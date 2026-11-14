@@ -183,6 +183,26 @@ interface ChatEntry {
   text: string
 }
 
+// 形状面板条目的中文名（kind → 标签）。
+const PALETTE_LABELS: Record<string, string> = {
+  router: '路由器',
+  switch: '交换机',
+  firewall: '防火墙',
+  pc: 'PC',
+  laptop: '笔记本',
+  server: '服务器',
+  cloud: '云',
+  generic: '通用',
+  ce12800: 'CE12800',
+  ac: '无线控制器',
+  ap: '无线AP',
+  lb: '负载均衡',
+  stacked: '堆叠交换机',
+  stacked_ce: '堆叠CE',
+  access: '接入交换机',
+  aggregate: '汇聚交换机',
+}
+
 // 画布桥需要的最小 draw.io 接口面（same-origin 直连，缺方法就跳过）。
 interface DrawSelectionModel {
   cells: { value?: string }[]
@@ -194,8 +214,13 @@ interface DrawGraph {
   setSelectionCells?: (cells: unknown[]) => void
   scrollCellToVisible?: (cell: unknown) => void
 }
+interface DrawSidebar {
+  addPalette?: (id: string, title: string, expanded: boolean, onInit: unknown, build: (content: HTMLElement) => void) => void
+  createVertexTemplate?: (style: string, width: number, height: number, value: string, allowEdges: boolean) => HTMLElement
+}
 interface DrawEditorUi {
   editor?: { graph?: DrawGraph }
+  sidebar?: DrawSidebar
   resetScrollbars?: () => void
   actions?: { get: (name: string) => { funct?: () => void } }
 }
@@ -244,7 +269,20 @@ function Page() {
     }
   }, [])
 
-  const iframeSrc = '/drawio/?embed=1&proto=json&configure=1&ui=simple&spin=0&libraries=0&noSaveBtn=1&noExitBtn=1&saveAndExit=0&dark=0&p=huawei'
+  // 面板不走插件路线（见 attachBridge 注释）：清掉此前试错写进 draw.io 批准
+  // 列表的残留条目，避免哪天 ALLOW_CUSTOM_PLUGINS 打开后重复挂两份面板。
+  try {
+    const key = '.drawio-config'
+    const config = JSON.parse(localStorage.getItem(key) || '{}')
+    if (Array.isArray(config.plugins) && config.plugins.length) {
+      const cleaned = config.plugins.filter((name: string) => name !== 'hw' && name !== 'plugins/hw.js')
+      if (cleaned.length !== config.plugins.length) {
+        localStorage.setItem(key, JSON.stringify({ ...config, plugins: cleaned }))
+      }
+    }
+  } catch { /* 存储不可用就跳过 */ }
+
+  const iframeSrc = '/drawio/?embed=1&proto=json&configure=1&ui=simple&spin=0&libraries=0&noSaveBtn=1&noExitBtn=1&saveAndExit=0&dark=0'
 
   const sendLoad = () => {
     if (!sourceXmlRef.current) return
@@ -318,6 +356,40 @@ function Page() {
                 })
               }
             } catch { /* 同上 */ }
+            // 华为设备形状面板：宿主直连注入（draw.io 插件机制有 registry 白名单、
+            // 批准状态、脚本缓存三道坎，同源直连一并绕开）。条目样式与灌图路径同款，
+            // 拖入画布后 autosave 回流能被 unresolveHuaweiStyles 还原成短 ID。
+            try {
+              const sidebar = editorUi.sidebar
+              const paletteWin = win as unknown as { __huaweiPalette?: boolean }
+              if (sidebar?.addPalette && sidebar.createVertexTemplate && !paletteWin.__huaweiPalette) {
+                paletteWin.__huaweiPalette = true
+                sidebar.addPalette('netopsHuawei', '华为设备', true, null, content => {
+                  content.style.padding = '4px'
+                  for (const [kind, label] of Object.entries(PALETTE_LABELS)) {
+                    const png = ICON_PNGS[kind]
+                    if (!png) continue
+                    const style =
+                      'shape=image;verticalLabelPosition=bottom;verticalAlign=top;imageAspect=0;aspect=fixed;' +
+                      `image=data:image/png,${png}`
+                    content.appendChild(sidebar.createVertexTemplate!(style, 96, 72, label, true))
+                  }
+                })
+                // 默认形状库有几百项：把华为面板挪到列表顶部，否则埋在最后没法用。
+                try {
+                  const doc = win.document
+                  const title = [...doc.querySelectorAll('.geTitle')].find(
+                    el => el.textContent?.trim() === '华为设备',
+                  )
+                  const list = title?.parentElement
+                  if (title && list && list.firstChild !== title) {
+                    const content = title.nextElementSibling
+                    list.insertBefore(title, list.firstChild)
+                    if (content) list.insertBefore(content, title.nextSibling)
+                  }
+                } catch { /* 位置调整失败不影响面板本身 */ }
+              }
+            } catch { /* sidebar 接口缺席就跳过 */ }
           }
           const result = original.apply(this, args)
           return result
