@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { Alert, Button, Empty, Space, Spin, Typography } from 'antd'
 import { ReloadOutlined, DownloadOutlined } from '@ant-design/icons'
 import { api } from '@netops/config/api'
+import { ICON_PNGS } from './iconPngs'
 import { ICON_SVGS, type Kind } from './icons'
 
 // 拓扑绘图 = 拓扑发现数据 → mxGraph 生成器 → 自托管 draw.io 画布。
@@ -90,7 +91,9 @@ const buildDrawioXml = (graph: Graph, modelByAddress: Map<string, string>): stri
       .join('&#10;')
     const style =
       'shape=image;verticalLabelPosition=bottom;verticalAlign=top;imageAspect=0;aspect=fixed;' +
-      `image=data:image/svg+xml,${encodeURIComponent(ICON_SVGS[kind])}`
+      (ICON_PNGS[kind]
+        ? `image=${ICON_PNGS[kind]}`
+        : `image=data:image/svg+xml,${encodeURIComponent(ICON_SVGS[kind])}`)
     const position = layout.get(node.id) || { x: 80, y: 60 }
     cells.push(
       `<mxCell id="${xmlEscape(node.id)}" value="${label}" style="${style}" vertex="1" parent="1">` +

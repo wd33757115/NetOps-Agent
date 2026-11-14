@@ -88,6 +88,8 @@ const genericSvg = frame(
       .join(''),
 )
 
+import { ICON_PNGS } from './iconPngs'
+
 export const ICON_SVGS: Record<Kind, string> = {
   router: routerSvg,
   switch: switchSvg,
@@ -99,5 +101,14 @@ export const ICON_SVGS: Record<Kind, string> = {
 }
 
 export function DeviceIcon({ kind }: { kind: Kind }) {
+  const official = ICON_PNGS[kind]
+  if (official) {
+    // 官方图标是位图：走 <img>；其余种类仍用内嵌 SVG。
+    return (
+      <span style={{ display: 'inline-flex' }}>
+        <img src={official} alt={kind} style={{ width: 84, height: 'auto', display: 'block' }} />
+      </span>
+    )
+  }
   return <span style={{ display: 'inline-flex' }} dangerouslySetInnerHTML={{ __html: ICON_SVGS[kind] }} />
 }
