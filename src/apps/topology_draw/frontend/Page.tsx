@@ -1,8 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { Alert, Button, Empty, Input, Space, Spin, Typography } from 'antd'
 import { ReloadOutlined, DownloadOutlined, SendOutlined, UndoOutlined } from '@ant-design/icons'
-import { Background, Controls, Handle, Position, ReactFlow, ReactFlowProvider, type Edge, type Node, type NodeChange } from '@xyflow/react'
-import '@xyflow/react/dist/style.css'
 import { api } from '@netops/config/api'
 import { ICON_PNGS } from './iconPngs'
 import { ICON_SVGS, type Kind } from './icons'
@@ -159,29 +157,6 @@ const buildDrawioXml = (graph: Graph, modelByAddress: Map<string, string>): stri
   )
 }
 
-const DeviceNodeView = ({ data }: { data: { kind: Kind; name: string; model: string; address?: string } }) => {
-  const official = ICON_PNGS[data.kind]
-  return (
-    <div style={{ width: 150, textAlign: 'center' }}>
-      <div style={{ display: 'flex', justifyContent: 'center' }}>
-        {official ? (
-          <img src={`data:image/png;base64,${official}`} alt={data.kind} style={{ width: 84, height: 'auto', display: 'block' }} />
-        ) : (
-          <span style={{ display: 'inline-flex' }} dangerouslySetInnerHTML={{ __html: ICON_SVGS[data.kind] }} />
-        )}
-      </div>
-      <div style={{ fontWeight: 600, fontSize: 14, color: '#1f2d3d', marginTop: 4 }}>{data.name}</div>
-      {data.model && <div style={{ fontSize: 11, color: '#7a8ba6' }}>{data.model}</div>}
-      {data.address && <div style={{ fontSize: 11, color: '#7a8ba6' }}>{data.address}</div>}
-      <Handle type="target" position={Position.Top} style={{ visibility: 'hidden' }} />
-      <Handle type="source" position={Position.Bottom} style={{ visibility: 'hidden' }} />
-      <Handle type="target" position={Position.Left} style={{ visibility: 'hidden' }} />
-      <Handle type="source" position={Position.Right} style={{ visibility: 'hidden' }} />
-    </div>
-  )
-}
-const nodeTypes = { device: DeviceNodeView }
-
 interface ChatEntry {
   role: 'user' | 'ai' | 'error'
   text: string
@@ -193,8 +168,6 @@ function Page() {
   const [networkName, setNetworkName] = useState('')
   const [networkId, setNetworkId] = useState('')
   const [snapshotId, setSnapshotId] = useState('')
-  const [nodes, setNodes] = useState<Node[]>([])
-  const [edges, setEdges] = useState<Edge[]>([])
   const [chat, setChat] = useState<ChatEntry[]>([])
   const [chatInput, setChatInput] = useState('')
   const [aiLoading, setAiLoading] = useState(false)
@@ -204,13 +177,48 @@ function Page() {
 
   const iframeSrc = '/drawio/?embed=1&proto=json&configure=1&ui=simple&spin=0&libraries=0&noSaveBtn=1&noExitBtn=1&saveAndExit=0&dark=0&p=huawei'
 
-  const sendLoad = useCallback(() => {
+  const sendLoad = () => {
     if (!sourceXmlRef.current) return
     frameRef.current?.contentWindow?.postMessage(
       JSON.stringify({ action: 'load', autosave: 1, fit: 1, xml: resolveHuaweiStyles(sourceXmlRef.current) }),
       window.location.origin,
     )
-  }, [])
+  }
+
+  // 编辑器桥：iframe 同源（/drawio 代理），挂钩 draw.io 的 fileLoaded/updateActionStates，
+  // 首次调用即拿到 EditorUi：重置滚动条并 fit 页面（对照 next-ai-draw-io 的 editor-bridge）。
+  const attachBridge = (frame: HTMLIFrameElement) => {
+    try {
+      const win = frame.contentWindow as (Window & { EditorUi?: unknown; __drawioBridged?: boolean })
+      if (!win || !win.EditorUi || win.__drawioBridged) return
+      win.__drawioBridged = true
+      let ui: unknown = null
+      const hook = (proto: unknown, method: string) => {
+        const target = proto as Record<string, ((this: unknown, ...args: unknown[]) => void) | undefined>
+        if (!target || typeof target[method] !== 'function') return
+        const original = target[method]!
+        const wrapped = function (this: unknown, ...args: unknown[]) {
+          if (!ui) {
+            ui = this
+            const editorUi = ui as { resetScrollbars?: () => void; actions?: { get: (name: string) => { funct?: () => void } } }
+            try {
+              editorUi.resetScrollbars?.()
+            } catch { /* 老版本缺方法就跳过 */ }
+            try {
+              editorUi.actions?.get('fitWindow')?.funct?.()
+            } catch { /* 同上 */ }
+          }
+          return original.apply(this, args)
+        }
+        target[method] = wrapped
+      }
+      const proto = (win.EditorUi as { prototype: unknown }).prototype
+      hook(proto, 'updateActionStates')
+      hook(proto, 'fileLoaded')
+    } catch {
+      // 非同源时直连不可用：退回纯 postMessage 协议
+    }
+  }
 
   useEffect(() => {
     let alive = true
@@ -287,15 +295,6 @@ function Page() {
     return () => window.removeEventListener('message', onMessage)
   }, [sendLoad])
 
-  const onNodesChange = useCallback((changes: NodeChange[]) => {
-    setNodes(current =>
-      current.map(node => {
-        const move = changes.find(change => change.id === node.id && change.type === 'position')
-        return move && 'position' in move && move.position ? { ...node, position: move.position } : node
-      }),
-    )
-  }, [])
-
   const applyXml = (xml: string, label: string) => {
     sourceXmlRef.current = xml
     sendLoad()
@@ -334,27 +333,6 @@ function Page() {
     link.click()
     URL.revokeObjectURL(url)
   }
-
-  const body = useMemo(
-    () => (
-      <ReactFlowProvider>
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          nodeTypes={nodeTypes}
-          onNodesChange={onNodesChange}
-          nodesConnectable={false}
-          minZoom={0.2}
-          maxZoom={2}
-          fitView
-        >
-          <Background gap={24} />
-          <Controls showInteractive={false} />
-        </ReactFlow>
-      </ReactFlowProvider>
-    ),
-    [nodes, edges, onNodesChange],
-  )
 
   return (
     <div style={{ height: 'calc(100vh - 96px)', display: 'flex', flexDirection: 'column' }}>
@@ -395,10 +373,16 @@ function Page() {
             </div>
           ) : error ? (
             <Alert type="warning" showIcon message="没有可展示的拓扑" description={error} style={{ margin: 24 }} />
-          ) : nodes.length ? (
-            body
+          ) : xmlReady ? (
+            <iframe
+              ref={frameRef}
+              title="draw.io 拓扑画布"
+              src={iframeSrc}
+              onLoad={event => attachBridge(event.target as HTMLIFrameElement)}
+              style={{ width: '100%', height: '100%', border: 'none' }}
+            />
           ) : (
-            <Empty description="当前快照没有节点" style={{ paddingTop: 80 }} />
+            <Empty description="正在等待画布就绪" style={{ paddingTop: 80 }} />
           )}
         </div>
         <div
