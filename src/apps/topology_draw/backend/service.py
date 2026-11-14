@@ -91,12 +91,8 @@ def _instruction(cells: str, instruction: str) -> str:
     )
 
 
-async def ai_edit(actor_id: str, instruction: str, current_xml: str, network_id: str) -> dict:
-    """一轮 AI 编辑：指令 + 当前画布 → DSH（drawio 模式）→ 新画布 XML。"""
-    if len(current_xml.encode()) > MAX_XML_BYTES:
-        raise ValueError("当前画布 XML 超过 200 KB，先精简再编辑")
-    cells = inner_cells(current_xml)
-    catalog = DrawCatalog(actor_id, session_id=f"draw-{network_id}")
+async def _run_turn(catalog: DrawCatalog, actor_id: str, prompt: str) -> str:
+    """跑一轮 DSH（drawio 模式），返回最终答案文本。"""
     context = RunContext(
         run_id=uuid4().hex,
         actor_id=actor_id,
@@ -107,10 +103,9 @@ async def ai_edit(actor_id: str, instruction: str, current_xml: str, network_id:
         model=None,  # 部署配置的模型
         reasoning_effort="off",
     )
-    messages = [{"role": "user", "content": _instruction(cells, instruction)}]
-    runtime = DshRuntime()
+    messages = [{"role": "user", "content": prompt}]
     answer = None
-    async for event in runtime.start(context, messages, catalog):
+    async for event in DshRuntime().start(context, messages, catalog):
         if event.kind == "failed":
             raise RuntimeError(str(event.data))
         if event.kind == "text_delta":
@@ -121,6 +116,34 @@ async def ai_edit(actor_id: str, instruction: str, current_xml: str, network_id:
             break
     if not answer:
         raise RuntimeError("模型没有返回编辑结果")
-    cells = extract_cells(answer)
-    validate_cells(cells)
-    return {"xml": wrap_cells(cells), "cells": cells}
+    return answer
+
+
+async def ai_edit(actor_id: str, instruction: str, current_xml: str, network_id: str) -> dict:
+    """一轮 AI 编辑：指令 + 当前画布 → DSH（drawio 模式）→ 新画布 XML。
+
+    输出未过校验时带反馈重试一次（同一会话续跑，模型能看到自己上一轮的输出）。
+    """
+    if len(current_xml.encode()) > MAX_XML_BYTES:
+        raise ValueError("当前画布 XML 超过 200 KB，先精简再编辑")
+    cells = inner_cells(current_xml)
+    catalog = DrawCatalog(actor_id, session_id=f"draw-{network_id}")
+    prompt = _instruction(cells, instruction)
+    feedback = ""
+    edited: str | None = None
+    for attempt in range(2):
+        answer = await _run_turn(catalog, actor_id, prompt + feedback)
+        try:
+            edited = extract_cells(answer)
+            validate_cells(edited)
+            break
+        except ValueError as exc:
+            if attempt:
+                raise
+            feedback = (
+                f"\n\n注意：你上一次的输出未通过校验（{exc}）。"
+                "请重新输出编辑后的全部 mxCell 元素：节点 style 必须含 shape=huawei.<kind>，"
+                "边的 source/target 必须指向输出里存在的 id。"
+            )
+    assert edited is not None
+    return {"xml": wrap_cells(edited), "cells": edited}

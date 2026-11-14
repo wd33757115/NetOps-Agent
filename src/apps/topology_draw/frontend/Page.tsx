@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Alert, Button, Input, Space, Spin, Typography } from 'antd'
+import { Alert, Button, Input, Select, Space, Spin, Typography } from 'antd'
 import { ReloadOutlined, DownloadOutlined, SendOutlined, UndoOutlined } from '@ant-design/icons'
 import { api } from '@netops/config/api'
 import { ICON_PNGS } from './iconPngs'
@@ -162,6 +162,43 @@ interface ChatEntry {
   text: string
 }
 
+// 画布桥需要的最小 draw.io 接口面（same-origin 直连，缺方法就跳过）。
+interface DrawSelectionModel {
+  cells: { value?: string }[]
+  addListener: (event: unknown, fn: () => void) => void
+}
+interface DrawGraph {
+  model?: { getCell?: (id: string) => unknown }
+  getSelectionModel?: () => DrawSelectionModel
+  setSelectionCells?: (cells: unknown[]) => void
+  scrollCellToVisible?: (cell: unknown) => void
+}
+interface DrawEditorUi {
+  editor?: { graph?: DrawGraph }
+  resetScrollbars?: () => void
+  actions?: { get: (name: string) => { funct?: () => void } }
+}
+
+// 按单元格 id 切分 XML（保留几何等子元素），供两次画布状态对比。
+const cellMap = (xml: string): Map<string, string> => {
+  const map = new Map<string, string>()
+  for (const chunk of xml.split(/(?=<mxCell)/)) {
+    const id = chunk.match(/^<mxCell[^>]*\bid="([^"]+)"/)?.[1]
+    if (id) map.set(id, chunk.replace(/^<mxCell[^>]*\bid="[^"]+"/, ''))
+  }
+  return map
+}
+
+// 改动高亮：新增或被修改（value/style/端点/位置变化）的单元格 id。
+const diffCellIds = (before: string, after: string): string[] => {
+  const prev = cellMap(before)
+  const changed: string[] = []
+  for (const [id, body] of cellMap(after)) {
+    if (prev.get(id) !== body) changed.push(id)
+  }
+  return changed
+}
+
 function Page() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -172,8 +209,19 @@ function Page() {
   const [chatInput, setChatInput] = useState('')
   const [aiLoading, setAiLoading] = useState(false)
   const [versions, setVersions] = useState<{ xml: string; label: string; time: string }[]>([])
+  const [selection, setSelection] = useState<string[]>([])
   const frameRef = useRef<HTMLIFrameElement>(null)
   const sourceXmlRef = useRef<string | null>(null)
+  const highlightRef = useRef<string[]>([])
+
+  // 画布 → 宿主的钩子：选中感知（attachBridge 在 iframe 里回调）。
+  useEffect(() => {
+    const host = window as unknown as Record<string, unknown>
+    host.__onDrawSelection = (labels: string[]) => setSelection(labels)
+    return () => {
+      delete host.__onDrawSelection
+    }
+  }, [])
 
   const iframeSrc = '/drawio/?embed=1&proto=json&configure=1&ui=simple&spin=0&libraries=0&noSaveBtn=1&noExitBtn=1&saveAndExit=0&dark=0&p=huawei'
 
@@ -183,16 +231,42 @@ function Page() {
       JSON.stringify({ action: 'load', autosave: 1, fit: 1, xml: resolveHuaweiStyles(sourceXmlRef.current) }),
       window.location.origin,
     )
+    // 灌图是异步的（embed load 不触发 fileLoaded）：轮询到画布装好新图后执行挂起的高亮。
+    const ids = highlightRef.current
+    if (!ids.length) return
+    highlightRef.current = []
+    const started = Date.now()
+    const timer = window.setInterval(() => {
+      const graph = (frameRef.current?.contentWindow as (Window & { __drawioUi?: DrawEditorUi }) | undefined)
+        ?.__drawioUi?.editor?.graph
+      const first = graph?.model?.getCell?.(ids[0])
+      if (first) {
+        window.clearInterval(timer)
+        const cells = ids.map(id => graph.model.getCell(id)).filter(Boolean)
+        if (cells.length) {
+          graph.setSelectionCells?.(cells)
+          graph.scrollCellToVisible?.(cells[0])
+        }
+      } else if (Date.now() - started > 10000) {
+        // 画布接口缺席（非同源）或灌图失败：放弃本次高亮。
+        window.clearInterval(timer)
+      }
+    }, 200)
   }
 
   // 编辑器桥：iframe 同源（/drawio 代理），挂钩 draw.io 的 fileLoaded/updateActionStates，
   // 首次调用即拿到 EditorUi：重置滚动条并 fit 页面（对照 next-ai-draw-io 的 editor-bridge）。
+  // 选中感知通过宿主钩子 __onDrawSelection 回传（embed 的 load 路径不触发 fileLoaded，
+  // 所以改动高亮放在 sendLoad 的轮询里做）。
   const attachBridge = (frame: HTMLIFrameElement) => {
     try {
-      const win = frame.contentWindow as (Window & { EditorUi?: unknown; __drawioBridged?: boolean })
+      const win = frame.contentWindow as (Window & { EditorUi?: unknown; mxEvent?: { CHANGE?: unknown }; __drawioBridged?: boolean })
       if (!win || !win.EditorUi || win.__drawioBridged) return
       win.__drawioBridged = true
       let ui: unknown = null
+      const parent = win.parent as unknown as {
+        __onDrawSelection?: (labels: string[]) => void
+      }
       const hook = (proto: unknown, method: string) => {
         const target = proto as Record<string, ((this: unknown, ...args: unknown[]) => void) | undefined>
         if (!target || typeof target[method] !== 'function') return
@@ -200,15 +274,32 @@ function Page() {
         const wrapped = function (this: unknown, ...args: unknown[]) {
           if (!ui) {
             ui = this
-            const editorUi = ui as { resetScrollbars?: () => void; actions?: { get: (name: string) => { funct?: () => void } } }
+            const editorUi = ui as DrawEditorUi
+            try {
+              ;(win as unknown as { __drawioUi?: DrawEditorUi }).__drawioUi = editorUi
+            } catch { /* 只读环境就跳过 */ }
             try {
               editorUi.resetScrollbars?.()
             } catch { /* 老版本缺方法就跳过 */ }
             try {
               editorUi.actions?.get('fitWindow')?.funct?.()
             } catch { /* 同上 */ }
+            // 选中感知：画布选中的单元格标签回传宿主（AI 编辑可以对着选中项说话）。
+            try {
+              const graph = editorUi.editor?.graph
+              const selection = graph?.getSelectionModel?.()
+              if (selection && win.mxEvent?.CHANGE) {
+                selection.addListener(win.mxEvent.CHANGE, () => {
+                  const labels = (selection.cells || [])
+                    .map(cell => String(cell.value || '').split('\n').filter(Boolean).join(' · '))
+                    .filter(Boolean)
+                  parent.__onDrawSelection?.(labels)
+                })
+              }
+            } catch { /* 同上 */ }
           }
-          return original.apply(this, args)
+          const result = original.apply(this, args)
+          return result
         }
         target[method] = wrapped
       }
@@ -298,7 +389,7 @@ function Page() {
   const applyXml = (xml: string, label: string) => {
     sourceXmlRef.current = xml
     sendLoad()
-    setVersions(current => [...current, { xml, label, time: new Date().toLocaleTimeString() }])
+    setVersions(current => [...current.slice(-19), { xml, label, time: new Date().toLocaleTimeString() }])
   }
 
   const sendChat = async () => {
@@ -307,12 +398,16 @@ function Page() {
     setChat(current => [...current, { role: 'user', text: instruction }])
     setChatInput('')
     setAiLoading(true)
+    // 选中感知：指令附带画布当前选中，模型可以对着选中项说话。
+    const scoped = selection.length ? `${instruction}\n（画布当前选中：${selection.join('；')}）` : instruction
     try {
       const { data } = await api.post<{ xml: string }>('/apps/topology-draw/ai-edit', {
-        instruction,
+        instruction: scoped,
         xml: sourceXmlRef.current,
         network_id: networkId,
       })
+      // 改动高亮：对比编辑前后的单元格，灌图完成后选中展示。
+      highlightRef.current = diffCellIds(sourceXmlRef.current, data.xml)
       applyXml(data.xml, `AI: ${instruction.slice(0, 24)}`)
       setChat(current => [...current, { role: 'ai', text: '已更新拓扑图，可在画布查看。' }])
     } catch (exc) {
@@ -356,6 +451,20 @@ function Page() {
             >
               撤销上一次 AI 修改
             </Button>
+          )}
+          {versions.length > 1 && (
+            <Select
+              value={versions.length - 1}
+              style={{ minWidth: 200, maxWidth: 280 }}
+              options={versions.map((version, index) => ({
+                value: index,
+                label: `${version.label.slice(0, 18)} ${version.time}`,
+              }))}
+              onChange={(index: number) => {
+                const version = versions[index]
+                if (version) applyXml(version.xml, `回退到 ${version.label}`)
+              }}
+            />
           )}
           <Button icon={<ReloadOutlined aria-hidden="true" />} onClick={() => sendLoad()}>
             按当前快照重灌
@@ -419,6 +528,11 @@ function Page() {
             {aiLoading && <Spin size="small" />}
           </div>
           <div style={{ borderTop: '1px solid #e5e9f0' }}>
+            {selection.length > 0 && (
+              <div style={{ padding: '4px 12px', fontSize: 12, color: '#1677ff', background: '#f0f7ff' }}>
+                已选中：{selection.join('；')}
+              </div>
+            )}
             <Input.TextArea
               rows={2}
               value={chatInput}
