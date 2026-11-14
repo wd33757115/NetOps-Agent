@@ -84,6 +84,12 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           ws: true
         },
+        '/drawio': {
+          // 自托管 draw.io 同源代理：embed iframe 与宿主同源，解锁编辑器直连（视图适配等）
+          target: 'http://127.0.0.1:8080',
+          changeOrigin: true,
+          rewrite: path => path.replace(/^\/drawio/, '')
+        },
         '/object-storage': objectStorage
       }
     },
@@ -100,6 +106,12 @@ export default defineConfig(({ mode }) => {
           target: djangoTarget,
           changeOrigin: true,
           ws: true
+        },
+        '/drawio': {
+          // 自托管 draw.io 同源代理：embed iframe 与宿主同源，解锁编辑器直连（视图适配等）
+          target: 'http://127.0.0.1:8080',
+          changeOrigin: true,
+          rewrite: path => path.replace(/^\/drawio/, '')
         },
         '/object-storage': objectStorage
       }
