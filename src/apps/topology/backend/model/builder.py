@@ -690,6 +690,13 @@ class _Topology:
                     }
                 ],
             }
+        # 统一附加型号族：观测循环里收集顺序不定，收尾一遍最稳。
+        for chassis, families in self.advertised_models.items():
+            node = self.l2_nodes.get(self.device_node(chassis))
+            if not node:
+                continue
+            attrs = node.setdefault(L2T + "l2-node-attributes", {})
+            attrs["http://netops.local/model-family"] = "+".join(sorted(families))
         evidence, l2_links, link_of = {}, [], {}
         self.link_vlans = {}
         for members, why, vid in sorted(segments, key=lambda s: sorted(map(str, s[0]))):
