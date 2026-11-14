@@ -12,6 +12,7 @@ import frontend9 from "../../../../src/apps/netconf_api/frontend/index"
 import frontend10 from "../../../../src/apps/official_documents/frontend/index"
 import frontend11 from "../../../../src/apps/resource_ledger/frontend/index"
 import frontend12 from "../../../../src/apps/topology/frontend/index"
+import frontend13 from "../../../../src/apps/topology_draw/frontend/index"
 export const packagedApps = [{ ...{"id": "materials", "name": "资料管理", "version": "1.6.0", "icon": "document", "digest": "5431d071ab39a80e47a79d4ff37a99dc5b0ea8553038a8b57748d2266f07120c", "route": "/apps/materials", "aliases": []}, enabled: true, frontend: frontend0 },
 { ...{"id": "assistant", "name": "知识问答", "version": "0.13.0", "icon": "document", "digest": "c1da711f176cdfb92232818403bbec46e76c685233598cbcc799ee6ba0dbd1e1", "route": "/apps/assistant", "aliases": []}, enabled: true, frontend: frontend1 },
 { ...{"id": "delivery-probe", "name": "能力包接入验证", "version": "1.1.0", "icon": "document", "digest": "b3acdcb213d4d3176c041883adc284b76222d31c6ebd81fc0928e96e27ddbc4c", "route": "/apps/delivery-probe", "aliases": []}, enabled: true, frontend: frontend2 },
@@ -24,4 +25,5 @@ export const packagedApps = [{ ...{"id": "materials", "name": "资料管理", "v
 { ...{"id": "netconf-api", "name": "NETCONF 接口", "version": "0.14.0", "icon": "network", "digest": "a38f6c63bcb4f735a4414f34f8ebfdcca01f292be053ad3b6a2a6b96873ba316", "route": "/apps/netconf-api", "aliases": []}, enabled: true, frontend: frontend9 },
 { ...{"id": "official-documents", "name": "公文写作", "version": "1.1.0", "icon": "document", "digest": "d150c98b6ac2e79037a53dceddaad0bc3c159064015693ac86256071b10009f9", "route": "/apps/official-documents", "aliases": ["official-document"]}, enabled: import.meta.env.VITE_OFFICIAL_DOCUMENTS_ENABLED !== "false", frontend: frontend10 },
 { ...{"id": "resource-ledger", "name": "资源台账", "version": "0.4.0", "icon": "server", "digest": "946c4cc8c9bab3a7dcaae3c5f81df4a7c981532d4c35d421d13c250b01c0a347", "route": "/apps/resource-ledger", "aliases": []}, enabled: true, frontend: frontend11 },
-{ ...{"id": "topology", "name": "网络拓扑", "version": "0.24.0", "icon": "network", "digest": "49a6cd82e7813661e0b2ce176ca481c4c755065bf1e3f1d4a11be62dd1e23de6", "route": "/apps/topology", "aliases": []}, enabled: true, frontend: frontend12 }]
+{ ...{"id": "topology", "name": "网络拓扑", "version": "0.24.0", "icon": "network", "digest": "49a6cd82e7813661e0b2ce176ca481c4c755065bf1e3f1d4a11be62dd1e23de6", "route": "/apps/topology", "aliases": []}, enabled: true, frontend: frontend12 },
+{ ...{"id": "topology-draw", "name": "拓扑绘图", "version": "0.1.0", "icon": "network", "digest": "f0971898c1dd3a9c16820578a29facb307ffb8952ed4da3f952bde663b917ff4", "route": "/apps/topology-draw", "aliases": []}, enabled: true, frontend: frontend13 }]

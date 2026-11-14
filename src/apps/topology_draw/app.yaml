@@ -1,0 +1,12 @@
+manifest_version: 1
+id: topology-draw
+name: 拓扑绘图
+version: 0.1.0
+platform_api: '>=1.0,<2.0'
+icon: network
+dependencies:
+  topology: '>=0.24.0,<1.0.0'
+backend:
+  router: src.apps.topology_draw.backend.api:router
+frontend:
+  entry: frontend/index.tsx
