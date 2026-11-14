@@ -32,7 +32,8 @@ tables:
       name: name
       if-index: {leaf: index, convert: integer}
       description: description
-      enabled: {leaf: admin-status, codes: {up: true}}  # all 44 interfaces of the lab "up"
+      # "down" appears when a fault injection shuts the port (F2): admin-status down.
+      enabled: {leaf: admin-status, codes: {up: true, down: false}}
       oper-status: {leaf: dynamic/oper-status, codes: {up: up, down: down}}
       phys-address: {leaf: dynamic/mac-address, convert: mac}
       # RFC 8529 bind-ni-name. "_public_" is the global instance (the CLI's VPN "--").
