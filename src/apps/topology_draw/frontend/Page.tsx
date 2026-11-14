@@ -1,12 +1,13 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Empty, Spin, Typography } from 'antd'
-import { Background, Controls, Handle, Position, ReactFlow, ReactFlowProvider, type Edge, type Node, type NodeChange } from '@xyflow/react'
-import '@xyflow/react/dist/style.css'
+import React, { useEffect, useRef, useState } from 'react'
+import { Alert, Button, Empty, Space, Spin, Typography } from 'antd'
+import { ReloadOutlined, DownloadOutlined } from '@ant-design/icons'
 import { api } from '@netops/config/api'
-import { DeviceIcon, type Kind } from './icons'
+import { ICON_SVGS, type Kind } from './icons'
 
-// 展示型画布：读拓扑发现应用的公开接口（活跃网络的当前快照），按设备身份的
-// model 字段映射华为图标。手工拖拽的位置存 localStorage（按网络 id），刷新不丢。
+// 拓扑绘图 = 拓扑发现数据 → mxGraph 生成器 → 自托管 draw.io 画布。
+// 本应用不持有画布：展示和编辑都在 draw.io 里（embed 协议注入 XML，保存回传 XML）。
+
+const DRAWIO_URL = 'http://127.0.0.1:8080'
 
 interface GraphNode {
   id: string
@@ -27,7 +28,6 @@ interface GraphLink {
 interface Graph {
   nodes: GraphNode[]
   links: GraphLink[]
-  network_id?: string
 }
 interface RunTarget {
   address: string
@@ -45,61 +45,87 @@ interface NetworkRow {
   active: boolean
 }
 
-type ModelKind = Kind
-
-const kindOfModel = (model?: string): ModelKind => {
+const kindOfModel = (model?: string): Kind => {
   const text = (model || '').toUpperCase()
   if (text.includes('USG') || text.includes('FIREWALL')) return 'firewall'
   if (/AR\d/.test(text) || text.includes('ROUTER')) return 'router'
   if (/CE\d/.test(text) || /S\d{3,4}/.test(text) || text.includes('SWITCH')) return 'switch'
-  if (text.includes('SERVER')) return 'server'
   return 'generic'
 }
 
-const TIER: Record<ModelKind, number> = {
-  cloud: 0,
-  router: 1,
-  firewall: 2,
-  switch: 3,
-  server: 4,
-  pc: 4,
-  generic: 3,
-}
+const TIER: Record<Kind, number> = { cloud: 0, router: 1, firewall: 2, switch: 3, server: 4, pc: 4, generic: 3 }
 const TIER_HEIGHT = 180
 
-const positionsKey = (networkId: string) => `topology-draw:layout:${networkId}`
-const loadPositions = (networkId: string): Record<string, { x: number; y: number }> => {
-  try {
-    return JSON.parse(localStorage.getItem(positionsKey(networkId)) || '{}')
-  } catch {
-    return {}
-  }
-}
+const xmlEscape = (text: string) =>
+  text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
-const DeviceNodeView = ({ data }: { data: { kind: ModelKind; name: string; model: string; address?: string } }) => (
-  <div style={{ width: 150, textAlign: 'center', background: 'transparent' }}>
-    <div style={{ display: 'flex', justifyContent: 'center' }}>
-      <DeviceIcon kind={data.kind} />
-    </div>
-    <div style={{ fontWeight: 600, fontSize: 14, color: '#1f2d3d', marginTop: 4 }}>{data.name}</div>
-    {data.model && <div style={{ fontSize: 11, color: '#7a8ba6' }}>{data.model}</div>}
-    {data.address && <div style={{ fontSize: 11, color: '#7a8ba6' }}>{data.address}</div>}
-    <Handle type="target" position={Position.Top} style={{ visibility: 'hidden' }} />
-    <Handle type="source" position={Position.Bottom} style={{ visibility: 'hidden' }} />
-    <Handle type="target" position={Position.Left} style={{ visibility: 'hidden' }} />
-    <Handle type="source" position={Position.Right} style={{ visibility: 'hidden' }} />
-  </div>
-)
-const nodeTypes = { device: DeviceNodeView }
+const buildDrawioXml = (graph: Graph, modelByAddress: Map<string, string>): string => {
+  // 人工位置保留：draw.io 里保存过的文件位置优先（回灌时按节点 id 记忆），自动布局只补新节点。
+  const cells: string[] = []
+  const tiers = new Map<number, string[]>()
+  const kindByNode = new Map<string, Kind>()
+  for (const node of graph.nodes) {
+    const model = node.address ? modelByAddress.get(node.address) : undefined
+    const kind: Kind = node.id.includes(':host:')
+      ? 'pc'
+      : node.identity_status === 'collected'
+        ? kindOfModel(model || node.name)
+        : 'generic'
+    kindByNode.set(node.id, kind)
+    const tier = TIER[kind]
+    tiers.set(tier, [...(tiers.get(tier) || []), node.id])
+  }
+  const layout = new Map<string, { x: number; y: number }>()
+  for (const [tier, ids] of [...tiers.entries()].sort((a, b) => a[0] - b[0])) {
+    ids.sort((a, b) => a.localeCompare(b))
+    ids.forEach((id, index) => layout.set(id, { x: 80 + index * 240, y: 60 + tier * TIER_HEIGHT }))
+  }
+  for (const node of graph.nodes) {
+    const kind = kindByNode.get(node.id) || 'generic'
+    const model = node.address ? modelByAddress.get(node.address) || '' : ''
+    const address = node.address || node.addresses?.[0] || ''
+    const label = [node.name || node.id.split(':').pop() || node.id, model, address]
+      .filter(Boolean)
+      .map(xmlEscape)
+      .join('&#10;')
+    const style =
+      'shape=image;verticalLabelPosition=bottom;verticalAlign=top;imageAspect=0;aspect=fixed;' +
+      `image=data:image/svg+xml,${encodeURIComponent(ICON_SVGS[kind])}`
+    const position = layout.get(node.id) || { x: 80, y: 60 }
+    cells.push(
+      `<mxCell id="${xmlEscape(node.id)}" value="${label}" style="${style}" vertex="1" parent="1">` +
+        `<mxGeometry x="${Math.round(position.x)}" y="${Math.round(position.y)}" width="96" height="72" as="geometry"/></mxCell>`,
+    )
+  }
+  for (const link of graph.links) {
+    const label = link.label || ''
+    cells.push(
+      `<mxCell id="${xmlEscape(link.id)}" value="${xmlEscape(label)}" ` +
+        'style="endArrow=open;html=1;rounded=0;strokeColor=#7a8ba6;" ' +
+        `edge="1" parent="1" source="${xmlEscape(link.source)}" target="${xmlEscape(link.target)}">` +
+        '<mxGeometry relative="1" as="geometry"/></mxCell>',
+    )
+  }
+  return (
+    '<mxfile host="netops-topology-draw"><diagram id="topology" name="拓扑">' +
+    '<mxGraphModel dx="800" dy="600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" ' +
+    'page="1" pageScale="1" pageWidth="1169" pageHeight="826">' +
+    `<root><mxCell id="0"/><mxCell id="1" parent="0"/>${cells.join('')}</root>` +
+    '</mxGraphModel></diagram></mxfile>'
+  )
+}
 
 function Page() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [networkName, setNetworkName] = useState('')
-  const [networkId, setNetworkId] = useState('')
-  const [nodes, setNodes] = useState<Node[]>([])
-  const [edges, setEdges] = useState<Edge[]>([])
   const [snapshotId, setSnapshotId] = useState('')
+  const [savedXml, setSavedXml] = useState<string | null>(null)
+  const frameRef = useRef<HTMLIFrameElement>(null)
+  const xmlRef = useRef<string | null>(null)
+
+  // 拓扑发现的数据 → mxGraph（每次进页面按当前快照重新生成）
+  const iframeSrc = `${DRAWIO_URL}/?embed=1&proto=json&ui=min`
 
   useEffect(() => {
     let alive = true
@@ -114,7 +140,6 @@ function Page() {
           return
         }
         setNetworkName(network.name)
-        setNetworkId(network.id)
         setSnapshotId(network.current_snapshot)
 
         const { data: graph } = await api.get<Graph>(`/apps/topology/snapshots/${network.current_snapshot}`)
@@ -130,59 +155,8 @@ function Page() {
             if (target.address && model) modelByAddress.set(target.address, model)
           }
         }
-
-        const saved = loadPositions(network.id)
-        const kindByNode = new Map<string, ModelKind>()
-        for (const node of graph.nodes) {
-          const host = node.id.includes(':host:')
-          const model = node.address ? modelByAddress.get(node.address) : undefined
-          const kind: ModelKind = host
-            ? 'pc'
-            : node.identity_status === 'collected'
-              ? kindOfModel(model || node.name)
-              : 'generic'
-          kindByNode.set(node.id, kind)
-        }
-
-        // 分层布局：按类型排层级，层内按名称横向铺开；人工拖过的位置优先。
-        const tiers = new Map<number, string[]>()
-        for (const node of graph.nodes) {
-          const tier = TIER[kindByNode.get(node.id) || 'generic']
-          tiers.set(tier, [...(tiers.get(tier) || []), node.id])
-        }
-        const layout = new Map<string, { x: number; y: number }>()
-        for (const [tier, ids] of [...tiers.entries()].sort((a, b) => a[0] - b[0])) {
-          ids.sort((a, b) => a.localeCompare(b))
-          ids.forEach((id, index) => layout.set(id, { x: 80 + index * 230, y: 60 + tier * TIER_HEIGHT }))
-        }
-
-        const flowNodes: Node[] = graph.nodes.map(node => {
-          const kind = kindByNode.get(node.id) || 'generic'
-          const position = saved[node.id] || layout.get(node.id) || { x: 80, y: 60 }
-          const address = node.address || node.addresses?.[0]
-          return {
-            id: node.id,
-            type: 'device',
-            position,
-            data: {
-              kind,
-              name: node.name || node.id.split(':').pop() || node.id,
-              model: node.address ? modelByAddress.get(node.address) || '' : '',
-              address: node.identity_status === 'endpoint' ? node.name : address,
-            },
-          }
-        })
-        const flowEdges: Edge[] = graph.links.map(link => ({
-          id: link.id,
-          source: link.source,
-          target: link.target,
-          label: link.label || undefined,
-          type: 'smoothstep',
-          style: { stroke: link.link_type === 'p2p' ? '#7a8ba6' : '#c7000b', strokeWidth: 2 },
-        }))
         if (!alive) return
-        setNodes(flowNodes)
-        setEdges(flowEdges)
+        xmlRef.current = buildDrawioXml(graph, modelByAddress)
         setLoading(false)
       } catch (exc) {
         if (!alive) return
@@ -195,67 +169,93 @@ function Page() {
     }
   }, [])
 
-  const onNodesChange = useCallback(
-    (changes: NodeChange[]) => {
-      setNodes(current => {
-        const next = current.map(node => {
-          const move = changes.find(change => change.id === node.id && change.type === 'position')
-          return move && 'position' in move && move.position ? { ...node, position: move.position } : node
-        })
-        if (networkId) {
-          const positions = Object.fromEntries(next.map(node => [node.id, node.position]))
-          try {
-            localStorage.setItem(positionsKey(networkId), JSON.stringify(positions))
-          } catch {
-            // 私有模式下的持久化失败不阻塞展示。
-          }
-        }
-        return next
-      })
-    },
-    [networkId],
-  )
+  // draw.io embed 协议：configure → init 时把生成的 XML 灌进去；save 回传编辑结果。
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      if (!event.origin.startsWith(DRAWIO_URL)) return
+      let message: { event?: string; action?: string; xml?: string } = {}
+      try {
+        message = typeof event.data === 'string' ? JSON.parse(event.data) : event.data
+      } catch {
+        return
+      }
+      if (message.event === 'configure') {
+        frameRef.current?.contentWindow?.postMessage(
+          JSON.stringify({ action: 'configure', config: { defaultLibraries: 'networks' } }),
+          DRAWIO_URL,
+        )
+      } else if (message.event === 'init' && xmlRef.current) {
+        frameRef.current?.contentWindow?.postMessage(
+          JSON.stringify({ action: 'load', autosave: 1, xml: xmlRef.current }),
+          DRAWIO_URL,
+        )
+      } else if (message.event === 'save' && typeof message.xml === 'string') {
+        setSavedXml(message.xml)
+      }
+    }
+    window.addEventListener('message', onMessage)
+    return () => window.removeEventListener('message', onMessage)
+  }, [])
 
-  const body = useMemo(
-    () => (
-      <ReactFlowProvider>
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          nodeTypes={nodeTypes}
-          onNodesChange={onNodesChange}
-          nodesConnectable={false}
-          minZoom={0.2}
-          maxZoom={2}
-          fitView
-        >
-          <Background gap={24} />
-          <Controls showInteractive={false} />
-        </ReactFlow>
-      </ReactFlowProvider>
-    ),
-    [nodes, edges, onNodesChange],
-  )
+  const reload = () => {
+    if (xmlRef.current) {
+      frameRef.current?.contentWindow?.postMessage(
+        JSON.stringify({ action: 'load', autosave: 1, xml: xmlRef.current }),
+        DRAWIO_URL,
+      )
+    }
+  }
+
+  const download = (text: string, name: string) => {
+    const blob = new Blob([text], { type: 'application/vnd.jgraph.mxfile' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = name
+    link.click()
+    URL.revokeObjectURL(url)
+  }
 
   return (
     <div style={{ height: 'calc(100vh - 96px)', display: 'flex', flexDirection: 'column' }}>
       <Typography.Title level={3} style={{ margin: '8px 0 4px' }}>
         拓扑绘图
       </Typography.Title>
-      <Typography.Text type="secondary">
-        {networkName ? `${networkName} · 快照 ${snapshotId.slice(0, 8)} · 拖拽后的位置自动保存` : '读取拓扑发现应用的当前快照'}
-      </Typography.Text>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Typography.Text type="secondary">
+          {networkName
+            ? `${networkName} · 快照 ${snapshotId.slice(0, 8)} · 画布为自托管 draw.io，编辑后保存回传`
+            : '读取拓扑发现应用的当前快照'}
+        </Typography.Text>
+        <Space>
+          <Button icon={<ReloadOutlined aria-hidden="true" />} onClick={reload}>
+            按当前快照重灌
+          </Button>
+          <Button
+            icon={<DownloadOutlined aria-hidden="true" />}
+            disabled={!savedXml && !xmlRef.current}
+            onClick={() => download(savedXml || xmlRef.current || '', `${networkName || '拓扑'}.drawio`)}
+          >
+            下载 .drawio
+          </Button>
+        </Space>
+      </div>
       <div style={{ flex: 1, minHeight: 0, marginTop: 8, border: '1px solid #e5e9f0', borderRadius: 8, overflow: 'hidden' }}>
         {loading ? (
           <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 80 }}>
-            <Spin tip="正在读取当前快照" />
+            <Spin tip="正在生成拓扑图" />
           </div>
         ) : error ? (
           <Alert type="warning" showIcon message="没有可展示的拓扑" description={error} style={{ margin: 24 }} />
-        ) : nodes.length ? (
-          body
-        ) : (
+        ) : !xmlRef.current ? (
           <Empty description="当前快照没有节点" style={{ paddingTop: 80 }} />
+        ) : (
+          <iframe
+            ref={frameRef}
+            title="draw.io 拓扑画布"
+            src={iframeSrc}
+            style={{ width: '100%', height: '100%', border: 'none' }}
+          />
         )}
       </div>
     </div>
