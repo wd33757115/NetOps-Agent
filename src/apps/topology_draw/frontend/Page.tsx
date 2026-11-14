@@ -87,11 +87,8 @@ const buildDrawioXml = (graph: Graph, modelByAddress: Map<string, string>): stri
       .filter(Boolean)
       .map(xmlEscape)
       .join('&#10;')
-    const official = ICON_PNGS[kind]
-    const style =
-      'shape=image;verticalLabelPosition=bottom;verticalAlign=top;imageAspect=0;aspect=fixed;' +
-      // draw.io 的 image 样式惯例：data:image/png,<base64>（不带 ;base64 标记）
-      (official ? `image=data:image/png,${official}` : `image=data:image/svg+xml,${encodeURIComponent(ICON_SVGS[kind])}`)
+    // 模板库 + ID：节点只写形状 ID（huawei.<kind>），宿主灌进 draw.io 前解析成内嵌图标。
+    const style = `shape=huawei.${kind};verticalLabelPosition=bottom;verticalAlign=top;`
     const position = layout.get(node.id) || { x: 80, y: 60 }
     cells.push(
       `<mxCell id="${xmlEscape(node.id)}" value="${label}" style="${style}" vertex="1" parent="1">` +
@@ -128,7 +125,10 @@ function Page() {
   const xmlRef = useRef<string | null>(null)
 
   // 同源代理（/drawio → 127.0.0.1:8080）：iframe 与宿主同源，解锁编辑器直连（视图适配）。
-  const iframeSrc = '/drawio/?embed=1&proto=json&ui=min'
+  // p=huawei：自托管容器里的图标模板插件（mxgraph.huawei.* 形状）。
+  // URL 参数集照 next-ai-draw-io 的 drawio-config（configure=1 必须有：draw.io 会先等配置）。
+  const iframeSrc =
+    '/drawio/?embed=1&proto=json&configure=1&ui=simple&spin=0&libraries=0&noSaveBtn=1&noExitBtn=1&saveAndExit=0&dark=0&p=huawei'
 
   useEffect(() => {
     let alive = true
@@ -224,7 +224,10 @@ function Page() {
         setDrawioReady(true)
       } else if (message.event === 'configure') {
         frameRef.current?.contentWindow?.postMessage(
-          JSON.stringify({ action: 'configure', config: { defaultLibraries: 'networks' } }),
+          JSON.stringify({
+            action: 'configure',
+            config: { defaultPageVisible: true, defaultGridEnabled: true, noAutoFocus: true },
+          }),
           window.location.origin,
         )
       } else if (message.event === 'autosave' && typeof message.xml === 'string') {
@@ -235,10 +238,31 @@ function Page() {
     return () => window.removeEventListener('message', onMessage)
   }, [])
 
+  // 模板库解析：模型/生成器输出的 huawei.<kind> 短 ID → 官方图标内嵌样式。
+  // draw.io 的 mxStencil 不支持 <image> 元素，所以解析在宿主完成，draw.io 只见内嵌位图。
+  const resolveHuaweiStyles = (xml: string): string => {
+    let resolved = xml
+    for (const [kind, png] of Object.entries(ICON_PNGS)) {
+      resolved = resolved.replace(
+        new RegExp(`shape=huawei\\.${kind}(?=[;" ])`, 'g'),
+        `shape=image;verticalLabelPosition=bottom;verticalAlign=top;imageAspect=0;aspect=fixed;image=data:image/png,${png}`,
+      )
+    }
+    for (const [kind, svg] of Object.entries(ICON_SVGS)) {
+      if (!ICON_PNGS[kind]) {
+        resolved = resolved.replace(
+          new RegExp(`shape=huawei\\.${kind}(?=[;" ])`, 'g'),
+          `shape=image;verticalLabelPosition=bottom;verticalAlign=top;imageAspect=0;aspect=fixed;image=data:image/svg+xml,${encodeURIComponent(svg)}`,
+        )
+      }
+    }
+    return resolved
+  }
+
   const sendLoad = () => {
     if (!xmlRef.current) return
     frameRef.current?.contentWindow?.postMessage(
-      JSON.stringify({ action: 'load', autosave: 1, fit: 1, xml: xmlRef.current }),
+      JSON.stringify({ action: 'load', autosave: 1, fit: 1, xml: resolveHuaweiStyles(xmlRef.current) }),
       window.location.origin,
     )
   }
