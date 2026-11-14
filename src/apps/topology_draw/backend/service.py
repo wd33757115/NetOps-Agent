@@ -103,7 +103,7 @@ async def ai_edit(actor_id: str, instruction: str, current_xml: str, network_id:
         session_id=catalog.session_id,
         timeout_seconds=240,
         max_tool_calls=None,
-        max_model_rounds=2,
+        max_model_rounds=4,
         model=None,  # 部署配置的模型
         reasoning_effort="off",
     )
@@ -113,8 +113,11 @@ async def ai_edit(actor_id: str, instruction: str, current_xml: str, network_id:
     async for event in runtime.start(context, messages, catalog):
         if event.kind == "failed":
             raise RuntimeError(str(event.data))
+        if event.kind == "text_delta":
+            # 模型直接回文本（没调 submit_answer）时，DSH 以 text_delta 发布答案。
+            answer = event.data.get("text") or answer
         if event.kind == "completed":
-            answer = catalog.answer or ""
+            answer = catalog.answer or answer or ""
             break
     if not answer:
         raise RuntimeError("模型没有返回编辑结果")

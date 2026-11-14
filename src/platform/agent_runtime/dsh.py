@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import hmac
 import json
+import logging
 import os
 import secrets
 import signal
@@ -33,6 +34,8 @@ from .base import AgentEvent
 from .usage import Usage
 from .session_store import session_home, scope_key, key, native_logs
 from .timeline import requests_path
+
+logger = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parents[3]
 # Real characters per model request (the model window is 1M tokens). Thinking keeps
@@ -799,6 +802,7 @@ class DshRuntime:
             yield AgentEvent(context.run_id, "metrics", bridge.statistics())
             yield AgentEvent(context.run_id, "failed", {"code": "deadline_exceeded"})
         except Exception:
+            logger.exception("DSH run %s failed", context.run_id)
             yield AgentEvent(context.run_id, "metrics", bridge.statistics())
             yield AgentEvent(
                 context.run_id, "failed", {"code": bridge.failure_code or "dsh_run_failed"}
@@ -936,7 +940,7 @@ class DshRuntime:
                 str(Path(__file__).with_name("dsh_worker.py")),
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
                 env=env,
                 cwd=workspace,
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
@@ -944,8 +948,21 @@ class DshRuntime:
             )
             bridge.measured("setup", setup_started)
             async with httpx.AsyncClient(timeout=35, trust_env=False) as bridge.client:
-                output, _ = await proc.communicate((json.dumps(config) + "\n").encode())
-            result = json.loads(output)
+                output, errors = await proc.communicate((json.dumps(config) + "\n").encode())
+            try:
+                result = json.loads(output)
+            except ValueError:
+                logger.error(
+                    "DSH worker %s produced no JSON: returncode=%s stderr=%s stdout=%s",
+                    context.run_id, proc.returncode, errors[-800:].decode(errors="replace"), output[-400:].decode(errors="replace"),
+                )
+                raise
+            if result.get("finish_reason") != "completed" or proc.returncode != 0:
+                logger.error(
+                    "DSH worker %s: returncode=%s result=%s stderr=%s",
+                    context.run_id, proc.returncode, str(result)[:600],
+                    errors[-600:].decode(errors="replace"),
+                )
             reason = result.get("finish_reason")
             bridge.sdk_finish_reason = (
                 reason

@@ -3,6 +3,7 @@
 import json
 import sys
 import threading
+import traceback
 from contextlib import nullcontext
 
 from deepseek_harness import DeepSeekHarness
@@ -36,7 +37,11 @@ def main():
             flush=True,
         )
     except Exception:
-        print(json.dumps({"finish_reason": "error", "text": ""}), flush=True)
+        traceback.print_exc(file=sys.stderr)
+        print(
+            json.dumps({"finish_reason": "error", "text": "", "error": traceback.format_exc()[-1500:]}),
+            flush=True,
+        )
     finally:
         timer.cancel()
         harness.close()

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Alert, Button, Empty, Input, Space, Spin, Typography } from 'antd'
+import { Alert, Button, Input, Space, Spin, Typography } from 'antd'
 import { ReloadOutlined, DownloadOutlined, SendOutlined, UndoOutlined } from '@ant-design/icons'
 import { api } from '@netops/config/api'
 import { ICON_PNGS } from './iconPngs'
@@ -373,7 +373,7 @@ function Page() {
             </div>
           ) : error ? (
             <Alert type="warning" showIcon message="没有可展示的拓扑" description={error} style={{ margin: 24 }} />
-          ) : xmlReady ? (
+          ) : (
             <iframe
               ref={frameRef}
               title="draw.io 拓扑画布"
@@ -381,8 +381,6 @@ function Page() {
               onLoad={event => attachBridge(event.target as HTMLIFrameElement)}
               style={{ width: '100%', height: '100%', border: 'none' }}
             />
-          ) : (
-            <Empty description="正在等待画布就绪" style={{ paddingTop: 80 }} />
           )}
         </div>
         <div
