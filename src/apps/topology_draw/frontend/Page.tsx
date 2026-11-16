@@ -215,7 +215,7 @@ interface DrawGraph {
   scrollCellToVisible?: (cell: unknown) => void
 }
 interface DrawSidebar {
-  addPalette?: (id: string, title: string, expanded: boolean, onInit: unknown, build: (content: HTMLElement) => void) => void
+  addPalette?: (id: string, title: string, expanded: boolean, build: (content: HTMLElement) => void) => void
   createVertexTemplate?: (style: string, width: number, height: number, value: string, allowEdges: boolean) => HTMLElement
 }
 interface DrawEditorUi {
@@ -364,7 +364,9 @@ function Page() {
               const paletteWin = win as unknown as { __huaweiPalette?: boolean }
               if (sidebar?.addPalette && sidebar.createVertexTemplate && !paletteWin.__huaweiPalette) {
                 paletteWin.__huaweiPalette = true
-                sidebar.addPalette('netopsHuawei', '华为设备', true, null, content => {
+                // 本版签名是 4 参（id, title, expanded, callback），无 onInit——
+                // 多传 null 会占掉回调位，标题建出来后内容构建直接抛错。
+                sidebar.addPalette('netopsHuawei', '华为设备', true, content => {
                   content.style.padding = '4px'
                   for (const [kind, label] of Object.entries(PALETTE_LABELS)) {
                     const png = ICON_PNGS[kind]
@@ -375,18 +377,37 @@ function Page() {
                     content.appendChild(sidebar.createVertexTemplate!(style, 96, 72, label, true))
                   }
                 })
-                // 默认形状库有几百项：把华为面板挪到列表顶部，否则埋在最后没法用。
+                // 默认形状库有几百项且异步装载（addPalette 的标题节点延迟创建，
+                // 同步查找会扑空）：轮询把华为面板顶到便笺本之前（列表前部还有
+                // 搜索容器，不能插到 index 0），稳定 3 次后停止。
                 try {
-                  const doc = win.document
-                  const title = [...doc.querySelectorAll('.geTitle')].find(
-                    el => el.textContent?.trim() === '华为设备',
-                  )
-                  const list = title?.parentElement
-                  if (title && list && list.firstChild !== title) {
-                    const content = title.nextElementSibling
-                    list.insertBefore(title, list.firstChild)
-                    if (content) list.insertBefore(content, title.nextSibling)
-                  }
+                  const deadline = Date.now() + 15000
+                  let settled = 0
+                  const timer = window.setInterval(() => {
+                    try {
+                      if (Date.now() > deadline) {
+                        window.clearInterval(timer)
+                        return
+                      }
+                      const doc = win.document
+                      const title = [...doc.querySelectorAll('.geTitle')].find(
+                        el => el.textContent?.trim() === '华为设备',
+                      )
+                      const list = title?.parentElement
+                      if (!title || !list) return
+                      const anchor = list.children[2]
+                      if (anchor && anchor !== title && [...list.children].indexOf(title) > 2) {
+                        const content = title.nextElementSibling
+                        list.insertBefore(title, anchor)
+                        if (content) list.insertBefore(content, title.nextSibling)
+                        settled = 0
+                      } else if (++settled >= 3) {
+                        window.clearInterval(timer)
+                      }
+                    } catch {
+                      window.clearInterval(timer)
+                    }
+                  }, 300)
                 } catch { /* 位置调整失败不影响面板本身 */ }
               }
             } catch { /* sidebar 接口缺席就跳过 */ }
