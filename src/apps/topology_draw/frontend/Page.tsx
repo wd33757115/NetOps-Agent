@@ -515,7 +515,7 @@ function Page() {
     // 选中感知：指令附带画布当前选中，模型可以对着选中项说话。
     const scoped = selection.length ? `${instruction}\n（画布当前选中：${selection.join('；')}）` : instruction
     try {
-      const { data } = await api.post<{ xml: string; process?: string[] }>(
+      const { data } = await api.post<{ xml: string; process?: string[]; explanation?: string }>(
         '/apps/topology-draw/ai-edit',
         {
           instruction: scoped,
@@ -532,7 +532,10 @@ function Page() {
       // 改动高亮：对比编辑前后的单元格，灌图完成后选中展示。
       highlightRef.current = diffCellIds(sourceXmlRef.current, data.xml)
       applyXml(data.xml, `AI: ${instruction.slice(0, 24)}`)
-      setChat(current => [...current, { role: 'ai', text: '已更新拓扑图，可在画布查看。' }])
+      setChat(current => [
+        ...current,
+        { role: 'ai', text: data.explanation?.trim() || '已更新拓扑图，可在画布查看。' },
+      ])
     } catch (exc) {
       const detail = exc instanceof Error ? exc.message : String(exc)
       setChat(current => [...current, { role: 'error', text: `编辑失败：${detail}` }])

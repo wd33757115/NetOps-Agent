@@ -57,18 +57,21 @@ def inner_cells(xml: str) -> str:
     return body.strip()
 
 
-def extract_cells(answer: str) -> str:
-    """从模型回答里提取 mxCell 序列（剥掉可能的代码围栏与解释）。"""
+def extract_cells(answer: str) -> tuple[str, str]:
+    """从模型回答里提取 mxCell 序列与中文说明，返回 (cells, explanation)。
+
+    说明 = 第一个 <mxCell 之前与最后一个 </mxCell> 之后的文字（剥代码围栏标记）。
+    """
     text = answer.strip()
-    fence = re.search(r"```(?:xml)?\s*(.*?)```", text, re.S)
-    if fence:
-        text = fence.group(1).strip()
     start = text.find("<mxCell")
     if start < 0:
         raise ValueError("模型回答里没有 mxCell 元素")
     end = text.rfind("</mxCell>")
     end = end + len("</mxCell>") if end > start else len(text)
-    return text[start:end]
+    before = text[:start].replace("```xml", "").replace("```", "").strip()
+    after = text[end:].replace("```", "").strip()
+    explanation = (before + "\n" + after).strip()
+    return text[start:end], explanation
 
 
 def wrap_cells(cells: str) -> str:
@@ -206,6 +209,7 @@ async def ai_edit(actor_id: str, instruction: str, current_xml: str, network_id:
     prompt = _instruction(cells, instruction)
     feedback = ""
     document: str | None = None
+    explanation = ""
     process: list[str] = []
     started = time.monotonic()
     try:
@@ -220,7 +224,8 @@ async def ai_edit(actor_id: str, instruction: str, current_xml: str, network_id:
             if reasoning.strip():
                 process.append(reasoning.strip())
             try:
-                document, _ = parse_cells(extract_cells(answer))
+                cells_out, explanation = extract_cells(answer)
+                document, _ = parse_cells(cells_out)
                 break
             except ValueError as exc:
                 if attempt:
@@ -235,4 +240,4 @@ async def ai_edit(actor_id: str, instruction: str, current_xml: str, network_id:
         if watcher is not None:
             watcher.cancel()
     assert document is not None
-    return {"xml": document, "cells": inner_cells(document), "process": process}
+    return {"xml": document, "cells": inner_cells(document), "process": process, "explanation": explanation}

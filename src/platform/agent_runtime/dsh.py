@@ -623,8 +623,9 @@ DOCSETS.md 列出资料库里的厂商产品文档集（命令、告警、日志
 
 DRAWIO = """## 拓扑绘图编辑
 你在为网络拓扑绘图应用编辑 draw.io 图。每次输入包含：当前画布的 mxCell 元素和一条编辑指令。
-输出规则（严格遵守，除 mxCell 元素序列外不要输出任何解释文字）：
-1. 只输出编辑后的 mxCell 元素序列：不写 <mxfile>、<mxGraphModel>、<root> 等包装标签；
+输出规则（严格遵守）：
+1. 先输出编辑后的 mxCell 元素序列（不写 <mxfile>、<mxGraphModel>、<root> 等包装标签），
+   再用一两句中文说明本次修改了什么；不要输出 XML 以外的代码或长篇解释；
 2. 所有 mxCell 平级并列（禁止嵌套在另一个 mxCell 内）；不写 XML 注释；id 保持稳定；
 3. 节点 style 固定为 shape=huawei.<kind> 之一（图标由应用按 ID 解析，禁止写 image=data: 数据）。可用 kind：
    router / switch / firewall / pc / laptop / server / cloud / generic / ce12800 / ac / ap / lb / stacked / stacked_ce / access / aggregate；
@@ -640,7 +641,7 @@ DRAWIO = """## 拓扑绘图编辑
 def system_prompt(diagnostics=False, automation=False, docsets=False, drawio=False):
     """Role and language first, then each kind of work under its own heading."""
     if drawio:
-        return "你是 NetOps 网络拓扑绘图助手，服务网络工程师。所有说明都用中文。\n" + DRAWIO
+        return "你是 NetOps 网络拓扑绘图助手，服务网络工程师。所有回答都用中文。\n" + DRAWIO
     role = (
         "你是 NetOps 网络助手，服务网络工程师。所有思考、说明和回答都用中文。\n"
         + (
