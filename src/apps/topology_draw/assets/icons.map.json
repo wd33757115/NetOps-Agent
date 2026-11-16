@@ -1,0 +1,17 @@
+{
+  "_说明": "文件名(去扩展名) → kind/中文标签 的映射。中文文件名必须映射；英文小写文件名可省略。kind 只允许小写字母/数字/下划线。",
+  "通用路由器": { "kind": "router", "label": "路由器" },
+  "通用交换机": { "kind": "switch", "label": "交换机" },
+  "防火墙": { "kind": "firewall", "label": "防火墙" },
+  "PC": { "kind": "pc", "label": "PC" },
+  "PC笔记本电脑": { "kind": "laptop", "label": "笔记本" },
+  "网络云": { "kind": "cloud", "label": "云" },
+  "CE12800交换机": { "kind": "ce12800", "label": "CE12800" },
+  "AC": { "kind": "ac", "label": "无线控制器" },
+  "AP": { "kind": "ap", "label": "无线AP" },
+  "负载均衡器": { "kind": "lb", "label": "负载均衡" },
+  "堆叠交换机": { "kind": "stacked", "label": "堆叠交换机" },
+  "堆叠CE交换机": { "kind": "stacked_ce", "label": "堆叠CE" },
+  "接入交换机": { "kind": "access", "label": "接入交换机" },
+  "汇聚交换机": { "kind": "aggregate", "label": "汇聚交换机" }
+}
