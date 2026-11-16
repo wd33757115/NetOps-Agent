@@ -757,11 +757,16 @@ def patch_file(home, port, *, active_diagnostics=False, durable=False, thinking=
 
 
 class DshRuntime:
-    def __init__(self, *, transport=None, sessions_root=None):
+    def __init__(self, *, transport=None, sessions_root=None, durable=None):
         self.transport = transport
-        self.sessions_root = sessions_root if sessions_root is not None else (
-            ROOT / ".runtime/assistant-sessions" if transport is None else None
-        )
+        # durable=False 强制走临时运行目录（按次隔离、跑完自动清理，不落会话
+        # 历史）；不传或传 True 保持原判定，既有调用方行为不变。
+        if durable is False:
+            self.sessions_root = None
+        else:
+            self.sessions_root = sessions_root if sessions_root is not None else (
+                ROOT / ".runtime/assistant-sessions" if transport is None else None
+            )
         self.active = {}
 
     async def cancel(self, run_id, *, actor_id):

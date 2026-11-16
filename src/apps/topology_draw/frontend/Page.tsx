@@ -515,11 +515,16 @@ function Page() {
     // 选中感知：指令附带画布当前选中，模型可以对着选中项说话。
     const scoped = selection.length ? `${instruction}\n（画布当前选中：${selection.join('；')}）` : instruction
     try {
-      const { data } = await api.post<{ xml: string }>('/apps/topology-draw/ai-edit', {
-        instruction: scoped,
-        xml: sourceXmlRef.current,
-        network_id: networkId,
-      })
+      const { data } = await api.post<{ xml: string }>(
+        '/apps/topology-draw/ai-edit',
+        {
+          instruction: scoped,
+          xml: sourceXmlRef.current,
+          network_id: networkId,
+        },
+        // AI 编辑是长任务：后端总预算 220s + 网关 300s，这里单独放宽默认 120s。
+        { timeout: 240000 },
+      )
       // 改动高亮：对比编辑前后的单元格，灌图完成后选中展示。
       highlightRef.current = diffCellIds(sourceXmlRef.current, data.xml)
       applyXml(data.xml, `AI: ${instruction.slice(0, 24)}`)

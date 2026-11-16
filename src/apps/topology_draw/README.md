@@ -8,7 +8,9 @@
 - 布局：按类型分层自动排布；人工拖拽的位置存浏览器 localStorage（按网络 id），
   刷新与重开不丢。
 - 不读拓扑发现的内部代码：应用边界是它的公开 API。
-- 后端仅存根（清单要求 router）；无数据库（`database.mode: none`）。
+- 后端是薄路由层：`/ai-edit` 走平台助手 DSH 的 drawio 模式（进程内调用），
+  无独立数据库（`database.mode: none`）；画布 XML 的权威状态在前端，
+  模型输出经 XML 真解析校验（id 唯一/形状白名单/端点与 parent 存在性）后规范化。
 
 已知边界：设备重锚定后的数据面故障（如 trunk 撤放行）在状态表里不可见，
 详见 `docs/network-twin-plan.md` 第 5/8 节 F1 的定论。

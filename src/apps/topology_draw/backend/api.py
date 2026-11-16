@@ -5,7 +5,7 @@
 - /health：存根。
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.auth.models import CurrentUser
@@ -28,11 +28,13 @@ class AiEdit(BaseModel):
 
 
 @router.post("/ai-edit")
-async def ai_edit(body: AiEdit, user: CurrentUser = Depends(actor)):
+async def ai_edit(body: AiEdit, request: Request, user: CurrentUser = Depends(actor)):
     from . import service
 
     try:
-        return await service.ai_edit(user.user_id, body.instruction, body.xml, body.network_id)
+        return await service.ai_edit(
+            user.user_id, body.instruction, body.xml, body.network_id, request=request
+        )
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except RuntimeError as exc:
