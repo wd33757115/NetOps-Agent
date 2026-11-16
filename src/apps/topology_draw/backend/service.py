@@ -6,10 +6,10 @@
 - 小改输出全部元素（元素少，全量最稳）；宿主解析后灌回画布。
 
 运行时姿势（对照评审结论）：
-- 每次编辑一个独立 DSH 运行（临时目录，跑完清理）——不积累会话历史，
-  也不落 2.6MB+/份的 durable 会话目录；失败重试在同一运行内带反馈再来一轮；
+- 每次编辑一个独立 DSH 运行（临时目录，跑完自动清理）——不积累会话历史；
+- SSE 流式：思考增量实时转发给前端，客户端断开即取消运行；
 - 单轮 120s、总预算 220s，与前端 240s、网关 300s 的超时阶梯对齐；
-- 客户端断开即取消运行，不白占全局并发槽位。
+- 成功后自动保存为新版本（diagram 资产，见 repository）。
 """
 
 import asyncio
@@ -19,9 +19,12 @@ import time
 import xml.etree.ElementTree as ET
 from uuid import uuid4
 
+from fastapi import HTTPException
+
 from src.platform.agent_runtime.base import RunContext
 from src.platform.agent_runtime.dsh import DshRuntime
 
+from . import repository
 from .catalog import DrawCatalog
 
 KINDS = (
@@ -144,89 +147,73 @@ def _instruction(cells: str, instruction: str) -> str:
     )
 
 
-async def _run_turn(runtime: DshRuntime, catalog: DrawCatalog, actor_id: str, prompt: str,
-                    current_run: dict, *, seconds: float) -> tuple[str, str]:
-    """跑一轮 DSH（drawio 模式），返回 (答案文本, 思考过程)。"""
-    context = RunContext(
-        run_id=uuid4().hex,
-        actor_id=actor_id,
-        session_id=catalog.session_id,
-        timeout_seconds=seconds,
-        max_tool_calls=None,
-        max_model_rounds=4,
-        model=None,  # 部署配置的模型
-        reasoning_effort="low",  # 开思考：前端展示过程，输出也更稳
-    )
-    current_run["id"] = context.run_id
-    messages = [{"role": "user", "content": prompt}]
-    answer = None
-    reasoning: list[str] = []
-    async for event in runtime.start(context, messages, catalog):
-        if event.kind == "failed":
-            raise RuntimeError(str(event.data))
-        if event.kind == "reasoning_delta":
-            reasoning.append(event.data.get("text") or "")
-        if event.kind == "text_delta":
-            # 模型直接回文本（没调 submit_answer）时，DSH 以 text_delta 发布答案。
-            answer = event.data.get("text") or answer
-        if event.kind == "completed":
-            answer = catalog.answer or answer or ""
-            break
-    if not answer:
-        raise RuntimeError("模型没有返回编辑结果")
-    return answer, "".join(reasoning)
+async def ai_edit_stream(actor_id: str, instruction: str, current_xml: str, network_id: str):
+    """AI 编辑的 SSE 事件流。
 
-
-async def ai_edit(actor_id: str, instruction: str, current_xml: str, network_id: str,
-                  request=None) -> dict:
-    """一轮 AI 编辑：指令 + 当前画布 → DSH（drawio 模式）→ 新画布 XML。
-
-    输出未过校验时带反馈重试一次（同一请求内）；客户端断开即取消运行。
+    事件：started → reasoning*（思考增量，实时）→ stage*（validate/save）→
+    done（xml/cells/process/explanation/versionId）｜error。
+    客户端断开时 StreamingResponse 关闭生成器，finally 里取消 DSH 运行，
+    不白占全局并发槽位。
     """
     if len(current_xml.encode()) > MAX_XML_BYTES:
-        raise ValueError("当前画布 XML 超过 200 KB，先精简再编辑")
+        yield {"type": "error", "message": "当前画布 XML 超过 200 KB，先精简再编辑"}
+        return
     cells = inner_cells(current_xml)
     # 每次请求独立运行目录：不积累历史上下文，也避开 durable 会话的磁盘成本
-    # 与跨请求锁。重试在同一 catalog/运行内，模型仍能看到自己上一轮的输出。
+    # 与跨请求锁。失败重试在同一请求内带反馈再来一轮（模型仍能看到自己
+    # 上一轮的输出——DSH 把轮次历史保存在运行内）。
     catalog = DrawCatalog(actor_id, session_id=f"draw-{uuid4().hex[:8]}")
     runtime = DshRuntime(durable=False)
-    current_run: dict = {"id": None}
-
-    async def watch_disconnect() -> None:
-        while True:
-            await asyncio.sleep(1.0)
-            try:
-                if await request.is_disconnected():
-                    run_id = current_run["id"]
-                    if run_id:
-                        with contextlib.suppress(Exception):
-                            await runtime.cancel(run_id, actor_id=actor_id)
-                    return
-            except Exception:
-                return
-
-    watcher = asyncio.create_task(watch_disconnect()) if request is not None else None
-    prompt = _instruction(cells, instruction)
-    feedback = ""
-    document: str | None = None
-    explanation = ""
+    run_id_holder: dict = {"id": None}
     process: list[str] = []
+    explanation = ""
+    document: str | None = None
     started = time.monotonic()
+
     try:
+        yield {"type": "started"}
+        prompt = _instruction(cells, instruction)
+        feedback = ""
         for attempt in range(2):
             budget = TOTAL_BUDGET_SECONDS - (time.monotonic() - started)
             if budget < 15:
                 raise RuntimeError("编辑预算耗尽（超过 220s），请重试")
-            answer, reasoning = await _run_turn(
-                runtime, catalog, actor_id, prompt + feedback, current_run,
-                seconds=min(ATTEMPT_SECONDS, budget),
+            context = RunContext(
+                run_id=uuid4().hex,
+                actor_id=actor_id,
+                session_id=catalog.session_id,
+                timeout_seconds=min(ATTEMPT_SECONDS, int(budget)),
+                max_tool_calls=None,
+                max_model_rounds=4,
+                model=None,  # 部署配置的模型
+                reasoning_effort="low",  # 开思考：过程展示 + 输出更稳
             )
-            if reasoning.strip():
-                process.append(reasoning.strip())
+            run_id_holder["id"] = context.run_id
+            answer = None
+            reasoning_buf: list[str] = []
+            async for event in runtime.start(context, [{"role": "user", "content": prompt + feedback}], catalog):
+                if event.kind == "failed":
+                    raise RuntimeError(str(event.data))
+                if event.kind == "reasoning_delta":
+                    piece = event.data.get("text") or ""
+                    reasoning_buf.append(piece)
+                    # 思考增量实时转发；事件密集但体量小（每轮几 KB）。
+                    if piece.strip():
+                        yield {"type": "reasoning", "text": piece}
+                if event.kind == "text_delta":
+                    # 模型直接回文本（没调 submit_answer）时，DSH 以 text_delta 发布答案。
+                    answer = event.data.get("text") or answer
+                if event.kind == "completed":
+                    answer = catalog.answer or answer or ""
+                    break
+            if not answer:
+                raise RuntimeError("模型没有返回编辑结果")
+            if "".join(reasoning_buf).strip():
+                process.append("".join(reasoning_buf).strip())
+            yield {"type": "stage", "name": "validate"}
             try:
                 cells_out, explanation = extract_cells(answer)
                 document, _ = parse_cells(cells_out)
-                break
             except ValueError as exc:
                 if attempt:
                     raise
@@ -236,8 +223,48 @@ async def ai_edit(actor_id: str, instruction: str, current_xml: str, network_id:
                     "shape=huawei.<kind>，边的 source/target 必须指向输出里存在的 id，"
                     "value 里的特殊字符用 XML 实体转义。"
                 )
+                continue
+            break
+    except ValueError as exc:
+        yield {"type": "error", "message": str(exc)}
+        return
+    except RuntimeError as exc:
+        yield {"type": "error", "message": str(exc)}
+        return
+    except HTTPException as exc:
+        yield {"type": "error", "message": str(exc.detail)}
+        return
     finally:
-        if watcher is not None:
-            watcher.cancel()
+        # 正常完成 / 出错 / 客户端断开（GeneratorExit）都走到这里：
+        # 取消可能仍在跑的 DSH 运行，释放全局并发槽位。
+        run_id = run_id_holder["id"]
+        if run_id:
+            with contextlib.suppress(Exception):
+                await runtime.cancel(run_id, actor_id=actor_id)
+
     assert document is not None
-    return {"xml": document, "cells": inner_cells(document), "process": process, "explanation": explanation}
+    yield {"type": "stage", "name": "save"}
+    label = f"AI: {instruction.strip().splitlines()[0][:28]}" if instruction.strip() else "AI 编辑"
+    try:
+        version_id = await asyncio.to_thread(
+            repository.save_version, actor_id, network_id, document, label, "ai"
+        )
+    except HTTPException as exc:
+        yield {"type": "error", "message": f"保存版本失败：{exc.detail}"}
+        return
+    yield {
+        "type": "done",
+        "xml": document,
+        "cells": inner_cells(document),
+        "process": process,
+        "explanation": explanation,
+        "versionId": version_id,
+        "label": label,
+    }
+
+
+async def cancel_edit(runtime_holder: dict, actor_id: str) -> None:
+    """兼容入口：按 holder 里的 run_id 取消（预留，当前由生成器 finally 自理）。"""
+    run_id = runtime_holder.get("id")
+    if run_id:
+        await DshRuntime(durable=False).cancel(run_id, actor_id=actor_id)

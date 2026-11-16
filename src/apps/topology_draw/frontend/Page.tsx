@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { Alert, Button, Input, Select, Space, Spin, Typography } from 'antd'
 import { ReloadOutlined, DownloadOutlined, SendOutlined, UndoOutlined } from '@ant-design/icons'
-import { api } from '@netops/config/api'
+import { api, getAccessToken } from '@netops/config/api'
 import { ICON_PNGS } from './iconPngs'
 import { ICON_SVGS, type Kind } from './icons'
 
@@ -254,7 +254,7 @@ function Page() {
   const [chat, setChat] = useState<ChatEntry[]>([])
   const [chatInput, setChatInput] = useState('')
   const [aiLoading, setAiLoading] = useState(false)
-  const [versions, setVersions] = useState<{ xml: string; label: string; time: string }[]>([])
+  const [versions, setVersions] = useState<{ id: string; label: string; source: string; createdAt: string | null }[]>([])
   const [selection, setSelection] = useState<string[]>([])
   const frameRef = useRef<HTMLIFrameElement>(null)
   const sourceXmlRef = useRef<string | null>(null)
@@ -425,6 +425,41 @@ function Page() {
     }
   }
 
+  // 生成基线（从发现快照重建）并落库；重灌按钮与首载共用。
+  const buildBaseline = async (network: { id: string; current_snapshot: string }) => {
+    const { data: graph } = await api.get<Graph>(`/apps/topology/snapshots/${network.current_snapshot}`)
+    const { data: runs } = await api.get<{ id: string; snapshot_id: string | null }[]>(
+      `/apps/topology/networks/${network.id}/runs`,
+    )
+    const run = runs.find(r => r.snapshot_id === network.current_snapshot)
+    const modelByAddress = new Map<string, string>()
+    if (run) {
+      const { data: runRead } = await api.get<RunRead>(`/apps/topology/runs/${run.id}`)
+      for (const target of runRead.targets) {
+        const model = target.platform?.identity?.model
+        if (target.address && model) modelByAddress.set(target.address, model)
+      }
+    }
+    const xml = buildDrawioXml(graph, modelByAddress)
+    sourceXmlRef.current = xml
+    await api.post('/apps/topology-draw/diagram/save', {
+      network_id: network.id,
+      xml,
+      label: '发现基线',
+      source: 'baseline',
+    })
+  }
+
+  const refreshVersions = async (id: string) => {
+    const { data } = await api.get<{
+      xml: string | null
+      currentVersionId: string | null
+      versions: { id: string; label: string; source: string; createdAt: string | null }[]
+    }>(`/apps/topology-draw/diagram?network_id=${encodeURIComponent(id)}`)
+    setVersions(data.versions ?? [])
+    return data
+  }
+
   useEffect(() => {
     let alive = true
     ;(async () => {
@@ -441,22 +476,23 @@ function Page() {
         setNetworkId(network.id)
         setSnapshotId(network.current_snapshot)
 
-        const { data: graph } = await api.get<Graph>(`/apps/topology/snapshots/${network.current_snapshot}`)
-        const { data: runs } = await api.get<{ id: string; snapshot_id: string | null }[]>(
-          `/apps/topology/networks/${network.id}/runs`,
-        )
-        const run = runs.find(r => r.snapshot_id === network.current_snapshot)
-        const modelByAddress = new Map<string, string>()
-        if (run) {
-          const { data: runRead } = await api.get<RunRead>(`/apps/topology/runs/${run.id}`)
-          for (const target of runRead.targets) {
-            const model = target.platform?.identity?.model
-            if (target.address && model) modelByAddress.set(target.address, model)
-          }
+        // 图资产优先：服务端有当前图就用它（跨浏览器/刷新不丢），
+        // 没有才从发现快照生成基线并落库。
+        const { data: diagram } = await api.get<{
+          xml: string | null
+          versions: { id: string; label: string; source: string; createdAt: string | null }[]
+        }>(`/apps/topology-draw/diagram?network_id=${encodeURIComponent(network.id)}`)
+        if (!alive) return
+        if (diagram.xml) {
+          sourceXmlRef.current = diagram.xml
+          setVersions(diagram.versions ?? [])
+        } else {
+          await buildBaseline(network)
+          const { data: saved } = await refreshVersions(network.id)
+          sourceXmlRef.current = saved.xml
+          setVersions(saved.versions ?? [])
         }
         if (!alive) return
-        sourceXmlRef.current = buildDrawioXml(graph, modelByAddress)
-        setVersions([{ xml: sourceXmlRef.current, label: '发现基线', time: new Date().toLocaleTimeString() }])
         setLoading(false)
       } catch (exc) {
         if (!alive) return
@@ -494,16 +530,64 @@ function Page() {
         )
       } else if (message.event === 'autosave' && typeof message.xml === 'string') {
         sourceXmlRef.current = unresolveHuaweiStyles(message.xml)
+        // 程序化灌图后的首次回流不是手工编辑：抑制一次。
+        if (suppressManualSave.current) {
+          suppressManualSave.current = false
+          return
+        }
+        // 手工拖拽成果落库（防抖 3s，拖拽的 autosave 很密集）。
+        if (sourceXmlRef.current) scheduleManualSave(sourceXmlRef.current)
       }
     }
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
   }, [sendLoad])
 
-  const applyXml = (xml: string, label: string) => {
+  // 程序化灌图（AI/回退/基线）后的首次 autosave 是灌图内容的回流，不是手工
+  // 编辑：抑制一次，避免同内容被重复存成 manual 版本。
+  const suppressManualSave = useRef(false)
+  const loadIntoCanvas = (xml: string) => {
     sourceXmlRef.current = xml
+    suppressManualSave.current = true
     sendLoad()
-    setVersions(current => [...current.slice(-19), { xml, label, time: new Date().toLocaleTimeString() }])
+  }
+
+  // 落库一个新版本（AI 成功/手工拖拽/重灌），并刷新服务端版本列表。
+  const saveVersion = async (xml: string, label: string, source: 'ai' | 'manual' | 'baseline' | 'import') => {
+    const { data } = await api.post<{ versionId: string }>('/apps/topology-draw/diagram/save', {
+      network_id: networkId,
+      xml,
+      label,
+      source,
+    })
+    const { data: diagram } = await api.get<{
+      xml: string | null
+      versions: { id: string; label: string; source: string; createdAt: string | null }[]
+    }>(`/apps/topology-draw/diagram?network_id=${encodeURIComponent(networkId)}`)
+    setVersions(diagram.versions ?? [])
+    return data.versionId
+  }
+
+  // 恢复历史版本：服务端复制成新版本（历史不可变），前端灌回画布。
+  const restoreVersion = async (versionId: string) => {
+    const { data } = await api.post<{ versionId: string; xml: string }>('/apps/topology-draw/diagram/restore', {
+      network_id: networkId,
+      version_id: versionId,
+    })
+    loadIntoCanvas(data.xml)
+    const { data: diagram } = await api.get<{
+      versions: { id: string; label: string; source: string; createdAt: string | null }[]
+    }>(`/apps/topology-draw/diagram?network_id=${encodeURIComponent(networkId)}`)
+    setVersions(diagram.versions ?? [])
+  }
+
+  // 手工拖拽防抖落库：3s 无新 autosave 才存一次（拖拽的 autosave 很密集）。
+  const manualSaveTimer = useRef<number | null>(null)
+  const scheduleManualSave = (xml: string) => {
+    if (manualSaveTimer.current) window.clearTimeout(manualSaveTimer.current)
+    manualSaveTimer.current = window.setTimeout(() => {
+      void saveVersion(xml, `手工拖拽 ${new Date().toLocaleTimeString()}`, 'manual').catch(() => undefined)
+    }, 3000)
   }
 
   const sendChat = async () => {
@@ -514,28 +598,86 @@ function Page() {
     setAiLoading(true)
     // 选中感知：指令附带画布当前选中，模型可以对着选中项说话。
     const scoped = selection.length ? `${instruction}\n（画布当前选中：${selection.join('；')}）` : instruction
+    const token = getAccessToken()
+    let finished = false
     try {
-      const { data } = await api.post<{ xml: string; process?: string[]; explanation?: string }>(
-        '/apps/topology-draw/ai-edit',
-        {
-          instruction: scoped,
-          xml: sourceXmlRef.current,
-          network_id: networkId,
-        },
-        // AI 编辑是长任务：后端总预算 220s + 网关 300s，这里单独放宽默认 120s。
-        { timeout: 240000 },
-      )
-      // 思考过程：每轮模型的 reasoning 汇总成一条可折叠条目。
-      for (const piece of data.process ?? []) {
-        setChat(current => [...current, { role: 'process', text: piece }])
+      // SSE 流式：思考增量实时追加到"思考过程"条目，完成后灌图+落库提示。
+      const response = await fetch('/api/apps/topology-draw/ai-edit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ instruction: scoped, xml: sourceXmlRef.current, network_id: networkId }),
+      })
+      if (!response.ok || !response.body) {
+        const detail = await response.json().catch(() => null)
+        throw new Error(detail?.detail || `编辑服务不可用（${response.status}）`)
       }
-      // 改动高亮：对比编辑前后的单元格，灌图完成后选中展示。
-      highlightRef.current = diffCellIds(sourceXmlRef.current, data.xml)
-      applyXml(data.xml, `AI: ${instruction.slice(0, 24)}`)
-      setChat(current => [
-        ...current,
-        { role: 'ai', text: data.explanation?.trim() || '已更新拓扑图，可在画布查看。' },
-      ])
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let reasoningLive = ''
+      let explanation = ''
+      const consume = (block: string) => {
+        let event = 'message'
+        const lines: string[] = []
+        for (const line of block.split(/\r?\n/)) {
+          if (line.startsWith('event:')) event = line.slice(6).trim()
+          else if (line.startsWith('data:')) lines.push(line.slice(5).trimStart())
+        }
+        if (!lines.length) return
+        const data = JSON.parse(lines.join('\n')) as {
+          type: string
+          text?: string
+          message?: string
+          xml?: string
+          explanation?: string
+        }
+        if (data.type === 'reasoning' && data.text) {
+          // 思考增量：实时追加到最后一条"思考过程"条目里。
+          reasoningLive += data.text
+          setChat(current => {
+            const next = [...current]
+            const last = next[next.length - 1]
+            if (last && last.role === 'process') next[next.length - 1] = { ...last, text: reasoningLive }
+            else next.push({ role: 'process', text: reasoningLive })
+            return next
+          })
+        } else if (data.type === 'done' && data.xml) {
+          finished = true
+          explanation = data.explanation?.trim() || ''
+          // 改动高亮：对比编辑前后的单元格，灌图完成后选中展示。
+          highlightRef.current = diffCellIds(sourceXmlRef.current || '', data.xml)
+          loadIntoCanvas(data.xml)
+          // 成功即落库为 ai 版本（后端已存，这里只刷新版本列表）。
+          void api
+            .get<{ versions: { id: string; label: string; source: string; createdAt: string | null }[] }>(
+              `/apps/topology-draw/diagram?network_id=${encodeURIComponent(networkId)}`,
+            )
+            .then(({ data: diagram }) => setVersions(diagram.versions ?? []))
+            .catch(() => undefined)
+          setChat(current => [
+            ...current,
+            { role: 'ai', text: explanation || '已更新拓扑图，可在画布查看。' },
+          ])
+        } else if (data.type === 'error') {
+          throw new Error(data.message || '本次编辑未完成')
+        }
+      }
+      let done = false
+      while (!done) {
+        const { done: eof, value } = await reader.read()
+        done = eof
+        buffer += decoder.decode(value, { stream: !done })
+        const parts = buffer.split(/\r?\n\r?\n/)
+        buffer = parts.pop() || ''
+        parts.forEach(consume)
+        if (done) {
+          if (buffer.trim()) consume(buffer)
+          break
+        }
+      }
+      await reader.cancel().catch(() => undefined)
+      reader.releaseLock()
+      if (!finished) throw new Error('连接已中断，本轮编辑未完成；请重试。')
     } catch (exc) {
       const detail = exc instanceof Error ? exc.message : String(exc)
       setChat(current => [...current, { role: 'error', text: `编辑失败：${detail}` }])
@@ -571,8 +713,9 @@ function Page() {
             <Button
               icon={<UndoOutlined aria-hidden="true" />}
               onClick={() => {
-                const previous = versions[versions.length - 2]
-                if (previous) applyXml(previous.xml, `回退到 ${previous.label}`)
+                // 服务端版本列表按时间倒序：[0]=当前，[1]=上一个。
+                const previous = versions[1]
+                if (previous) void restoreVersion(previous.id)
               }}
             >
               撤销上一次 AI 修改
@@ -580,19 +723,31 @@ function Page() {
           )}
           {versions.length > 1 && (
             <Select
-              value={versions.length - 1}
+              value={versions[0]?.id}
               style={{ minWidth: 200, maxWidth: 280 }}
-              options={versions.map((version, index) => ({
-                value: index,
-                label: `${version.label.slice(0, 18)} ${version.time}`,
+              options={versions.map(version => ({
+                value: version.id,
+                label: `${version.label.slice(0, 18)} ${version.createdAt ? new Date(version.createdAt).toLocaleTimeString() : ''}`,
               }))}
-              onChange={(index: number) => {
-                const version = versions[index]
-                if (version) applyXml(version.xml, `回退到 ${version.label}`)
+              onChange={(versionId: string) => {
+                if (versionId !== versions[0]?.id) void restoreVersion(versionId)
               }}
             />
           )}
-          <Button icon={<ReloadOutlined aria-hidden="true" />} onClick={() => sendLoad()}>
+          <Button
+            icon={<ReloadOutlined aria-hidden="true" />}
+            onClick={() => {
+              void (async () => {
+                await buildBaseline({ id: networkId, current_snapshot: snapshotId })
+                const { data: diagram } = await api.get<{
+                  xml: string | null
+                  versions: { id: string; label: string; source: string; createdAt: string | null }[]
+                }>(`/apps/topology-draw/diagram?network_id=${encodeURIComponent(networkId)}`)
+                setVersions(diagram.versions ?? [])
+                if (diagram.xml) loadIntoCanvas(diagram.xml)
+              })()
+            }}
+          >
             按当前快照重灌
           </Button>
           <Button icon={<DownloadOutlined aria-hidden="true" />} onClick={exportDrawio}>

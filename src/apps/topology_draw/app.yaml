@@ -8,5 +8,10 @@ dependencies:
   topology: '>=0.24.0,<1.0.0'
 backend:
   router: src.apps.topology_draw.backend.api:router
+database:
+  mode: package
+  migrations: migrations
+  head: topology_draw_0001
+  tables: [app_topology_draw_diagrams, app_topology_draw_versions]
 frontend:
   entry: frontend/index.tsx
