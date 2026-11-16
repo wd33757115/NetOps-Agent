@@ -172,10 +172,28 @@ class Bridge:
             async for chunk in chunks:
                 if self.closed:
                     raise PermissionError("Run closed")
-                usage.feed(chunk.encode("utf-8") if isinstance(chunk, str) else chunk)
+                data = chunk.encode("utf-8") if isinstance(chunk, str) else chunk
+                usage.feed(data)
                 # Mark this before the SDK consumes an incomplete tool-call JSON response.
                 if usage.finish_reason == "length":
                     self.failure_code = "model_output_truncated"
+                # Thinking models stream reasoning in delta.reasoning_content; tee it
+                # as events for hosts that show the process (the chat path filters
+                # event kinds, so this stays invisible there).
+                text = data.decode("utf-8", "replace")
+                if "reasoning_content" in text:
+                    for line in text.split("\n"):
+                        if line.startswith("data:") and len(line) < 128000:
+                            try:
+                                payload = json.loads(line[5:])
+                                for choice in payload.get("choices") or []:
+                                    piece = (choice.get("delta") or {}).get("reasoning_content")
+                                    if piece:
+                                        self.events.put_nowait(
+                                            ("reasoning_delta", {"text": str(piece)})
+                                        )
+                            except (ValueError, TypeError, AttributeError):
+                                pass
                 yield chunk
         except httpx.TimeoutException:
             self.failure_code = "provider_timeout"

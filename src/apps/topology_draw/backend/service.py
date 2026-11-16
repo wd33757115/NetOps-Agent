@@ -142,8 +142,8 @@ def _instruction(cells: str, instruction: str) -> str:
 
 
 async def _run_turn(runtime: DshRuntime, catalog: DrawCatalog, actor_id: str, prompt: str,
-                    current_run: dict, *, seconds: float) -> str:
-    """跑一轮 DSH（drawio 模式），返回最终答案文本。"""
+                    current_run: dict, *, seconds: float) -> tuple[str, str]:
+    """跑一轮 DSH（drawio 模式），返回 (答案文本, 思考过程)。"""
     context = RunContext(
         run_id=uuid4().hex,
         actor_id=actor_id,
@@ -152,14 +152,17 @@ async def _run_turn(runtime: DshRuntime, catalog: DrawCatalog, actor_id: str, pr
         max_tool_calls=None,
         max_model_rounds=4,
         model=None,  # 部署配置的模型
-        reasoning_effort="off",
+        reasoning_effort="low",  # 开思考：前端展示过程，输出也更稳
     )
     current_run["id"] = context.run_id
     messages = [{"role": "user", "content": prompt}]
     answer = None
+    reasoning: list[str] = []
     async for event in runtime.start(context, messages, catalog):
         if event.kind == "failed":
             raise RuntimeError(str(event.data))
+        if event.kind == "reasoning_delta":
+            reasoning.append(event.data.get("text") or "")
         if event.kind == "text_delta":
             # 模型直接回文本（没调 submit_answer）时，DSH 以 text_delta 发布答案。
             answer = event.data.get("text") or answer
@@ -168,7 +171,7 @@ async def _run_turn(runtime: DshRuntime, catalog: DrawCatalog, actor_id: str, pr
             break
     if not answer:
         raise RuntimeError("模型没有返回编辑结果")
-    return answer
+    return answer, "".join(reasoning)
 
 
 async def ai_edit(actor_id: str, instruction: str, current_xml: str, network_id: str,
@@ -203,16 +206,19 @@ async def ai_edit(actor_id: str, instruction: str, current_xml: str, network_id:
     prompt = _instruction(cells, instruction)
     feedback = ""
     document: str | None = None
+    process: list[str] = []
     started = time.monotonic()
     try:
         for attempt in range(2):
             budget = TOTAL_BUDGET_SECONDS - (time.monotonic() - started)
             if budget < 15:
                 raise RuntimeError("编辑预算耗尽（超过 220s），请重试")
-            answer = await _run_turn(
+            answer, reasoning = await _run_turn(
                 runtime, catalog, actor_id, prompt + feedback, current_run,
                 seconds=min(ATTEMPT_SECONDS, budget),
             )
+            if reasoning.strip():
+                process.append(reasoning.strip())
             try:
                 document, _ = parse_cells(extract_cells(answer))
                 break
@@ -229,4 +235,4 @@ async def ai_edit(actor_id: str, instruction: str, current_xml: str, network_id:
         if watcher is not None:
             watcher.cancel()
     assert document is not None
-    return {"xml": document, "cells": inner_cells(document)}
+    return {"xml": document, "cells": inner_cells(document), "process": process}

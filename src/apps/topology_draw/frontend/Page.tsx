@@ -179,7 +179,7 @@ const buildDrawioXml = (graph: Graph, modelByAddress: Map<string, string>): stri
 }
 
 interface ChatEntry {
-  role: 'user' | 'ai' | 'error'
+  role: 'user' | 'ai' | 'error' | 'process'
   text: string
 }
 
@@ -515,7 +515,7 @@ function Page() {
     // 选中感知：指令附带画布当前选中，模型可以对着选中项说话。
     const scoped = selection.length ? `${instruction}\n（画布当前选中：${selection.join('；')}）` : instruction
     try {
-      const { data } = await api.post<{ xml: string }>(
+      const { data } = await api.post<{ xml: string; process?: string[] }>(
         '/apps/topology-draw/ai-edit',
         {
           instruction: scoped,
@@ -525,6 +525,10 @@ function Page() {
         // AI 编辑是长任务：后端总预算 220s + 网关 300s，这里单独放宽默认 120s。
         { timeout: 240000 },
       )
+      // 思考过程：每轮模型的 reasoning 汇总成一条可折叠条目。
+      for (const piece of data.process ?? []) {
+        setChat(current => [...current, { role: 'process', text: piece }])
+      }
       // 改动高亮：对比编辑前后的单元格，灌图完成后选中展示。
       highlightRef.current = diffCellIds(sourceXmlRef.current, data.xml)
       applyXml(data.xml, `AI: ${instruction.slice(0, 24)}`)
@@ -629,21 +633,41 @@ function Page() {
                 用自然语言改拓扑图，例如：把 USG-1 标成红色、加一台核心交换机。
               </Typography.Text>
             )}
-            {chat.map((entry, index) => (
-              <div
-                key={index}
-                style={{
-                  margin: '6px 0',
-                  padding: '6px 8px',
-                  borderRadius: 6,
-                  background: entry.role === 'user' ? '#e6f4ff' : entry.role === 'error' ? '#fff1f0' : '#f6ffed',
-                  whiteSpace: 'pre-wrap',
-                  fontSize: 13,
-                }}
-              >
-                {entry.text}
-              </div>
-            ))}
+            {chat.map((entry, index) =>
+              entry.role === 'process' ? (
+                <details key={index} style={{ margin: '6px 0', fontSize: 12, color: '#5b6b85' }}>
+                  <summary style={{ cursor: 'pointer', userSelect: 'none' }}>🧠 思考过程</summary>
+                  <div
+                    style={{
+                      marginTop: 4,
+                      padding: '6px 8px',
+                      borderRadius: 6,
+                      background: '#f4f6fa',
+                      whiteSpace: 'pre-wrap',
+                      maxHeight: 220,
+                      overflow: 'auto',
+                    }}
+                  >
+                    {entry.text}
+                  </div>
+                </details>
+              ) : (
+                <div
+                  key={index}
+                  style={{
+                    margin: '6px 0',
+                    padding: '6px 8px',
+                    borderRadius: 6,
+                    background:
+                      entry.role === 'user' ? '#e6f4ff' : entry.role === 'error' ? '#fff1f0' : '#f6ffed',
+                    whiteSpace: 'pre-wrap',
+                    fontSize: 13,
+                  }}
+                >
+                  {entry.text}
+                </div>
+              ),
+            )}
             {aiLoading && <Spin size="small" />}
           </div>
           <div style={{ borderTop: '1px solid #e5e9f0' }}>
