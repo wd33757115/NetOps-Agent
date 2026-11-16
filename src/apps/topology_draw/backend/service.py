@@ -49,6 +49,20 @@ MAX_XML_BYTES = 200_000
 MAX_CELLS = 800
 ATTEMPT_SECONDS = 120
 TOTAL_BUDGET_SECONDS = 220
+# 布局数学（与前端 buildDrawioXml 的基线公式保持同一套，见提示词 0 条约定）：
+# 模型只输出 layout=r{层}c{序号}，宿主换算坐标 —— LLM 不做坐标数学。
+LAYOUT_COL_STEP = 240
+LAYOUT_ROW_STEP = 180
+LAYOUT_ORIGIN_X = 80
+LAYOUT_ORIGIN_Y = 60
+
+
+def _layout_geometry(style: str) -> tuple[int, int] | None:
+    """从 style 的 layout=rXcY 键取 (row, col)；无该键返回 None（保留原坐标）。"""
+    match = re.search(r"(?:^|;)layout=r(\d+)c(\d+)(?:;|$)", style)
+    if not match:
+        return None
+    return int(match.group(1)), int(match.group(2))
 
 
 def inner_cells(xml: str) -> str:
@@ -102,6 +116,7 @@ def parse_cells(cells: str) -> tuple[str, str]:
         raise ValueError("输出里没有图形模型")
     ids: set[str] = set()
     count = 0
+    layout_requests: list[tuple[ET.Element, int, int]] = []
     for cell in root:
         if cell.tag != "mxCell":
             raise ValueError(f"root 里混入了非 mxCell 元素: {cell.tag}")
@@ -119,6 +134,9 @@ def parse_cells(cells: str) -> tuple[str, str]:
                 raise ValueError("存在没有 huawei.* 形状的节点")
             if shape.group(1) not in KINDS:
                 raise ValueError(f"未知图标种类: {shape.group(1)}")
+            layout = _layout_geometry(style)
+            if layout is not None:
+                layout_requests.append((cell, layout[0], layout[1]))
         elif cell.get("edge") == "1":
             for end in ("source", "target"):
                 ref = cell.get(end)
@@ -130,6 +148,23 @@ def parse_cells(cells: str) -> tuple[str, str]:
         parent = cell.get("parent")
         if parent and parent not in ids and parent not in ("0", "1"):
             raise ValueError(f"parent 指向不存在的元素: {parent[:40]}")
+    # 布局落位：模型给的 col 同层冲突时顺序顺延（模型不该管坐标数学，这里兜底）。
+    by_row: dict[int, set[int]] = {}
+    for cell, row, col in layout_requests:
+        used = by_row.setdefault(row, set())
+        while col in used:
+            col += 1
+        used.add(col)
+        geo = cell.find("mxGeometry")
+        if geo is None:
+            geo = ET.SubElement(cell, "mxGeometry")
+            geo.set("as", "geometry")
+        geo.set("x", str(LAYOUT_ORIGIN_X + col * LAYOUT_COL_STEP))
+        geo.set("y", str(LAYOUT_ORIGIN_Y + row * LAYOUT_ROW_STEP))
+        # 冲突顺延后的最终位置写回 style 的 layout 键，前端/后续解析所见一致。
+        style = re.sub(r";?layout=r\d+c\d+", "", cell.get("style") or "")
+        style = re.sub(r";{2,}", ";", style.strip().rstrip(";"))
+        cell.set("style", f"{style};layout=r{row}c{col}")
     # 根单元格（id 0/1）由 wrap_cells 统一补回，规范化输出里跳过它们，
     # 否则灌进 draw.io 就是 "Duplicate ID: 0"。
     normalized = "".join(

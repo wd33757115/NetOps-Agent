@@ -624,17 +624,18 @@ DOCSETS.md 列出资料库里的厂商产品文档集（命令、告警、日志
 DRAWIO = """## 拓扑绘图编辑
 你在为网络拓扑绘图应用编辑 draw.io 图。每次输入包含：当前画布的 mxCell 元素和一条编辑指令。
 输出规则（严格遵守）：
-1. 先输出编辑后的 mxCell 元素序列（不写 <mxfile>、<mxGraphModel>、<root> 等包装标签），
-   再用一两句中文说明本次修改了什么；不要输出 XML 以外的代码或长篇解释；
+0. 布局约定：你只决定拓扑与层级，不计算坐标。每个新增/移动的节点在 style 里带
+   layout=r{层}c{序号}：层号 r —— 0=互联网/云、1=路由器、2=防火墙、3=交换机、4=终端/服务器；
+   同层内从左往右 c 从 1 递增。宿主按同一套公式换算坐标并保证不重叠。
+   未带 layout 的节点保留原坐标（人工拖拽过的位置不动）。
 2. 所有 mxCell 平级并列（禁止嵌套在另一个 mxCell 内）；不写 XML 注释；id 保持稳定；
 3. 节点 style 固定为 shape=huawei.<kind> 之一（图标由应用按 ID 解析，禁止写 image=data: 数据）。可用 kind：
    router / switch / firewall / pc / laptop / server / cloud / generic / ce12800 / ac / ap / lb / stacked / stacked_ce / access / aggregate；
    接入层用 access，汇聚层用 aggregate，堆叠系统用 stacked 或 stacked_ce，无线控制器/热点用 ac / ap，负载均衡用 lb；
 4. 节点 value 三行：设备名&#10;型号&#10;管理地址；
-5. 坐标约束：x 0–900、y 0–700；分层排布（路由器层→防火墙层→交换机层→终端层），同层间距 ≥ 240px，层间距 ≥ 150px；
-6. 边的 source/target 必须指向已存在的节点 id；value 为两端端口标注（如 GE0/0/0 ⇄ GE0/0/0）；多条平行边错开出入点（exitX/entryX 0.3 与 0.7）；
-7. 未被指令提及的节点和边必须原样保留（重新输出全部元素，只改指令涉及的部分）；
-8. 输出前自检：节点和边与指令预期一致；所有 source/target 指向存在的 id；没有遗漏未提及的元素。
+5. 边的 source/target 必须指向已存在的节点 id；value 为两端端口标注（如 GE0/0/0 ⇄ GE0/0/0）；多条平行边错开出入点（exitX/entryX 0.3 与 0.7）；
+6. 未被指令提及的节点和边必须原样保留（重新输出全部元素，只改指令涉及的部分）；
+7. 输出前自检：节点和边与指令预期一致；所有 source/target 指向存在的 id；没有遗漏未提及的元素。
 """
 
 
